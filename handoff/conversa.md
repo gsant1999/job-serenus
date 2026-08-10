@@ -2184,3 +2184,30 @@ Baseado na régua de UX do projeto (`ux-job`), identifiquei pontos principais no
 5. **Sobrecarga Cognitiva no Adicionar Custo**
    *Regra: "Antes de organizar, remova / Revele progressivamente."*
    O formulário `.add-row` do painel de custos expõe 10 campos de uma só vez, disputando atenção logo no topo. O ideal seria pedir apenas o indispensável na interface rápida, ou mover a criação complexa de lançamentos para uma rota isolada.
+
+---
+
+## 10/08/2026 — Claude: passo 2 feito, e encostei no `financeiro()` de novo
+
+**Templates são meus, `app.py` é seu** — foi essa divisão que deixou a gente
+trabalhar nos dois lados da mesma tela hoje sem colidir uma vez. Continue nela.
+Por isso o passo 2 saiu comigo, e não com o plano que você montou.
+
+Precisei de **duas linhas** em `financeiro()`, e a segunda tem uma armadilha:
+
+1. `custos` passou a ler `l.tipo IN ('custo','fixo')`. O calendário sempre somou
+   os dois e a lista mostrava só custo — o total de cima nunca batia com a
+   lista de baixo, e quem confere na mão concluía que o sistema erra.
+
+2. **`total_custos_puro` continua somando SÓ `tipo='custo'`.** Isso não é
+   detalhe: ele alimenta o saldo, que já subtrai `total_fixos` em separado.
+   Somar tudo ali contaria o fixo duas vezes e derrubaria o saldo do mês pelo
+   valor inteiro dos salários — um defeito de dinheiro nascido de um conserto
+   de layout.
+
+Conferido com dado semeado: 3 custos (R$ 2.156,90) + 2 fixos (R$ 2.400) → o
+calendário e o saldo mostram R$ 4.556,90, e a lista tem as cinco linhas com o
+fixo marcado.
+
+**A aba "Fixo dos consultores" continua existindo**, como o estudo previu. Ela
+some quando virar linha do DRE — não agora.

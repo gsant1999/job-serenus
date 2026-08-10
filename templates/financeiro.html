@@ -66,6 +66,33 @@
 .badge-pago { background:var(--verde-soft); color:var(--verde); }
 .socio-row { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid var(--borda); }
 .socio-row:last-child { border-bottom:none; }
+/* Marca discreta: diz a origem sem competir com a descrição. */
+.chip-fixo { display:inline-block; margin-left:7px; padding:1px 7px; border-radius:20px;
+             font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+             background:rgba(139,92,246,.15); color:var(--roxo); vertical-align:middle; }
+/* ── Novo lançamento: existe, mas não ocupa o topo ────────────────────── */
+.lanc { border:1px solid var(--borda); border-radius:12px; background:var(--panel-2);
+        margin-bottom:14px; overflow:hidden; }
+.lanc > summary { display:flex; align-items:center; gap:12px; padding:13px 16px;
+                  cursor:pointer; list-style:none; user-select:none;
+                  transition:background .12s ease; }
+.lanc > summary::-webkit-details-marker { display:none; }
+.lanc > summary:hover { background:var(--panel-3); }
+.lanc > summary:focus-visible { outline:2px solid var(--teal); outline-offset:-2px; }
+.lanc .txt { font-size:13.5px; font-weight:650; color:var(--texto); }
+.lanc .sub { font-size:11.5px; color:var(--cinza-2); }
+/* O "+" vira "−" quando abre: o mesmo controle diz os dois estados, em vez de
+   uma seta que não explica o que vai acontecer. */
+.lanc .mais { position:relative; width:19px; height:19px; flex:none; border-radius:6px;
+              background:var(--verde-soft); border:1px solid rgba(31,216,164,.35); }
+.lanc .mais::before, .lanc .mais::after { content:''; position:absolute; background:var(--verde);
+  left:50%; top:50%; transform:translate(-50%,-50%); border-radius:1px; }
+.lanc .mais::before { width:9px; height:1.6px; }
+.lanc .mais::after  { width:1.6px; height:9px; transition:transform .16s ease; }
+.lanc[open] .mais::after { transform:translate(-50%,-50%) scaleY(0); }
+.lanc[open] > summary { border-bottom:1px solid var(--borda); }
+.lanc .add-row { border:none; background:transparent; border-radius:0; margin-bottom:0; }
+@media (prefers-reduced-motion:reduce) { .lanc > summary, .lanc .mais::after { transition:none; } }
 /* ── Calendário: cada dia é um alvo de clique, não um enfeite ─────────── */
 .cal-grade { display:flex; align-items:flex-end; gap:2px; height:78px; }
 .cal-dia { flex:1; min-width:0; height:100%; padding:0; border:none; background:transparent;
@@ -206,6 +233,18 @@
 
   <!-- CUSTOS -->
   <div class="fin-pane" id="pane-custos">
+    {# LANCAR E CONSULTAR SAO TAREFAS DIFERENTES, e consultar acontece dez vezes
+       mais. A aba abria com onze campos de cadastro na frente de quem so queria
+       ver o que ia pagar — duas tarefas disputando o mesmo topo.
+       Nenhum campo saiu: eles moram atras de um botao. Aberto uma vez, fica
+       aberto (o navegador lembra), entao quem passa o dia lancando nao paga
+       pedagio nenhum. #}
+    <details class="lanc" id="lanc-novo">
+      <summary>
+        <span class="mais" aria-hidden="true"></span>
+        <span class="txt">Novo lançamento</span>
+        <span class="sub">Custo, recorrente ou parcelado</span>
+      </summary>
     <div class="add-row" style="grid-template-columns:1.6fr 1fr 1fr 1fr .8fr 1fr 1fr 1fr 1fr auto;">
       <div class="campo"><label>Descrição do custo</label><input type="text" id="c-desc" placeholder="Ex: Aluguel, software, marketing..."></div>
       <div class="campo"><label>Categoria</label>
@@ -258,7 +297,8 @@
           {% for s in status_lancamento %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
         </select></div>
     </div>
-    <div style="font-size:11px; color:var(--cinza-2); margin:-6px 0 14px;">A competência do lançamento é sempre a do mês de <b>emissão</b> — não do mês que você está vendo agora. Parcelado em N vezes gera N lançamentos, um por mês a partir da emissão.</div>
+    <div style="font-size:11px; color:var(--cinza-2); margin:-6px 0 4px;">A competência do lançamento é sempre a do mês de <b>emissão</b> — não do mês que você está vendo agora. Parcelado em N vezes gera N lançamentos, um por mês a partir da emissão.</div>
+    </details>
 
     {# ── Calendário de vencimentos (PRD 5) ──────────────────────────────────
        Uma barra por dia: onde os pagamentos se concentram e qual dia aperta.
@@ -415,7 +455,13 @@
         <tbody id="tbody-custos">
           {% for c in custos %}
           <tr data-id="{{ c.id }}">
-            <td class="td-descricao">{{ c.descricao }}</td>
+            {# FIXO NA MESMA LISTA, MAS DITO. Ele entra aqui porque sai do
+               mesmo caixa e o calendario sempre o somou — sem ele o total de
+               cima nunca batia com a lista de baixo. Mas conta de fornecedor e
+               salario de consultora nao sao a mesma coisa, e quem le precisa
+               distinguir sem abrir nada. #}
+            <td class="td-descricao">{{ c.descricao }}{% if c.tipo == 'fixo' %}
+              <span class="chip-fixo">fixo</span>{% endif %}</td>
             <td class="td-centro" style="font-size:12px;">{{ c.centro_custo or '—' }}{% if c.canal_midia %} <span style="color:var(--cinza-2);">· {{ c.canal_midia }}</span>{% endif %}</td>
             <td class="td-categoria">{% if c.categoria == 'fixo' %}Fixo{% elif c.categoria == 'recorrente' %}Recorrente{% elif c.categoria == 'parcela_unica' %}Parcela única{% else %}{{ c.categoria or '—' }}{% endif %}</td>
             <td class="td-emissao">{{ (c.data_emissao|data_br) if c.data_emissao else (c.data_lancamento|data_br or '—') }}</td>
@@ -450,7 +496,7 @@
               <button class="btn-ghost" style="color:var(--rosa);" onclick="excluir({{ c.id }})">×</button>
             </td>
           </tr>
-          {% else %}<tr><td colspan="11" style="color:var(--cinza-2);">Nenhum custo lançado neste mês.</td></tr>{% endfor %}
+          {% else %}<tr><td colspan="12" style="color:var(--cinza-2);">Nenhum custo ou fixo neste período.</td></tr>{% endfor %}
         </tbody>
       </table>
       </div>

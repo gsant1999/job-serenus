@@ -13797,7 +13797,7 @@ def financeiro():
             mp.titular AS meio_titular, mp.final_cartao AS meio_final_cartao,
             mp.dia_vencimento_fatura AS meio_dia_vencimento
         FROM lancamentos l LEFT JOIN meios_pagamento mp ON mp.id = l.meio_pagamento_id
-        WHERE l.tipo='custo' AND (? = '' OR l.data_competencia=?)""" + _w + " ORDER BY l.id DESC",
+        WHERE l.tipo IN ('custo','fixo') AND (? = '' OR l.data_competencia=?)""" + _w + " ORDER BY l.id DESC",
         [('x' if _cal_livre else ''), mes] + _p).fetchall()
     custos = [dict(c) for c in custos]
     for c in custos:
@@ -13823,7 +13823,14 @@ def financeiro():
         WHERE p.competencia=? AND p.status NOT IN ('Pago ao corretor', 'Cancelada / Estornada')
           AND COALESCE(pr.estornada, 0) = 0
           AND COALESCE(pr.status, '') <> 'Excluída'""", (mes,)).fetchone()['v']
-    total_custos_puro = sum(c['valor'] for c in custos)
+    # A LISTA PASSOU A MOSTRAR CUSTO E FIXO, o total NAO pode somar os dois.
+    #
+    # O calendario sempre somou custo+fixo e a lista mostrava so custo — quem
+    # conferia na mao nunca chegava no mesmo numero. Agora a lista mostra os
+    # dois, como o calendario. Mas `total_custos_puro` alimenta o saldo, que
+    # ja subtrai `total_fixos` em separado: somar tudo aqui contaria fixo duas
+    # vezes e derrubaria o saldo do mes pela metade do salario.
+    total_custos_puro = sum(c['valor'] for c in custos if (c.get('tipo') or '') == 'custo')
     total_fixos = sum(f['valor'] for f in fixos)
     total_custos = total_custos_puro + total_fixos
     total_aportes = sum(a['valor'] for a in aportes)
