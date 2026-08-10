@@ -376,10 +376,17 @@
     s.appendChild(im);
   });
   function fit(){
-    const p=0.94, s=Math.min(innerWidth*p/1280, innerHeight*p/720);
+    const p=location.search.includes('full')?1:0.94, s=Math.min(innerWidth*p/1280, innerHeight*p/720);
     document.getElementById('deck').style.transform='scale('+s+')';
   }
-  addEventListener('resize',fit); fit(); render();
+  function fromHash(){
+    const n=parseInt(location.hash.replace('#',''),10);
+    if(n>=1&&n<=slides.length){i=n-1}
+    if(location.search.includes('full')){hint.style.display='none';document.body.style.background='#0c0d10'}
+    render();
+  }
+  addEventListener('hashchange',fromHash);
+  addEventListener('resize',fit); fit(); fromHash();
 </script>
 </body>
 </html>
