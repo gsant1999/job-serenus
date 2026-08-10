@@ -78,9 +78,34 @@ def conectar():
             print('        /usr/local/bin/python scripts/auditoria_financeiro.py')
             print('        python -m pip show psycopg2-binary')
             sys.exit(2)
-        if url.startswith('postgres://'):
-            url = url.replace('postgres://', 'postgresql://', 1)
-        return conectar_pg(url), '%s', 'PostgreSQL (produção)'
+        # DE FORA DA RAILWAY, O ENDERECO INTERNO NAO EXISTE.
+        #
+        # `DATABASE_URL` aponta pra `postgres.railway.internal`, que so resolve
+        # dentro da rede deles. Rodando pela CLI (`railway run`), o processo
+        # esta na maquina de casa e aquele nome nao vira endereco nenhum.
+        # `DATABASE_PUBLIC_URL` e o mesmo banco pelo proxy publico. Tenta o
+        # interno primeiro — quando ele funciona e mais rapido e nao passa por
+        # proxy — e cai no publico so quando o nome nao resolve.
+        publica = (os.environ.get('DATABASE_PUBLIC_URL') or '').strip()
+        tentativas = [(url, 'PostgreSQL (produção)')]
+        if publica and publica != url:
+            tentativas.append((publica, 'PostgreSQL (produção, endereço público)'))
+        erro = None
+        for u, nome in tentativas:
+            if u.startswith('postgres://'):
+                u = u.replace('postgres://', 'postgresql://', 1)
+            try:
+                return conectar_pg(u), '%s', nome
+            except Exception as e:
+                erro = e
+                continue
+        print('ERRO: não consegui conectar no Postgres.')
+        print('      %s' % str(erro).strip().splitlines()[0])
+        if not publica:
+            print('      Não há DATABASE_PUBLIC_URL neste ambiente — rodando de fora')
+            print('      da Railway, o endereço interno não resolve. Use:')
+            print('        railway run --service Postgres -- python scripts/auditoria_financeiro.py')
+        sys.exit(2)
     import sqlite3
     caminho = os.path.join(os.environ.get('JOB_DATA_DIR', '/tmp'), 'job.db')
     if not os.path.exists(caminho):
@@ -142,22 +167,26 @@ def auditar(mes):
                 WHERE competencia=? AND status NOT IN ('Pago ao corretor')""", (mes,))
     certo = q("SELECT COALESCE(SUM(p.valor_corretora),0) FROM parcelas p" + LIMPO +
               " AND p.status NOT IN ('Pago ao corretor')", (mes,))
-    total += linha('A receber (operadoras)', hoje, certo)
+    linha('A receber (operadoras)', hoje, certo)
 
     # 2 · A PAGAR — mesmo defeito, outro campo.
     hoje = q("""SELECT COALESCE(SUM(valor),0) FROM parcelas
                 WHERE competencia=? AND status NOT IN ('Pago ao corretor')""", (mes,))
     certo = q("SELECT COALESCE(SUM(p.valor),0) FROM parcelas p" + LIMPO +
               " AND p.status NOT IN ('Pago ao corretor')", (mes,))
-    total += linha('A pagar (consultores)', hoje, certo)
+    linha('A pagar (consultores)', hoje, certo)
 
     # 3 · DRE — aqui não há filtro de status NENHUM. É o que mais infla.
     hoje_c = q("SELECT COALESCE(SUM(valor),0) FROM parcelas WHERE competencia=?", (mes,))
     hoje_k = q("SELECT COALESCE(SUM(valor_corretora),0) FROM parcelas WHERE competencia=?", (mes,))
     certo_c = q("SELECT COALESCE(SUM(p.valor),0) FROM parcelas p" + LIMPO, (mes,))
     certo_k = q("SELECT COALESCE(SUM(p.valor_corretora),0) FROM parcelas p" + LIMPO, (mes,))
+    # SO A RECEITA BRUTA ENTRA NO TOTAL, e por uma razao aritmetica: ela JA E
+    # a soma das duas linhas de cima (parte da corretora + parte do consultor).
+    # Somar as quatro contava o mesmo dinheiro duas vezes e inflava o proprio
+    # relatorio de inflacao — que seria uma ironia cara.
     total += linha('DRE · receita bruta', hoje_c + hoje_k, certo_c + certo_k)
-    total += linha('DRE · repasse aos consultores', hoje_c, certo_c)
+    linha('DRE · repasse aos consultores', hoje_c, certo_c)
 
     # 4 · DE ONDE VEM A DIFERENÇA, separada por causa — sem isto "está inflado"
     #     não vira conserto, vira suspeita.
@@ -193,7 +222,8 @@ def main():
     for m in meses:
         soma += auditar(m)
     print('\n' + '-' * 104)
-    print('DIFERENÇA SOMADA NOS %d MÊS(ES) EXAMINADO(S): %s' % (len(meses), moeda(soma)))
+    print('COMISSÃO INFLADA NOS %d MÊS(ES) EXAMINADO(S): %s' % (len(meses), moeda(soma)))
+    print('(soma da receita bruta — corretora + consultor — sem contar duas vezes)')
     print('Positivo = a tela mostra MAIS dinheiro do que existe.')
 
 
