@@ -2965,6 +2965,9 @@
         'aria-haspopup="menu" aria-expanded="false" title="Ações do JOB nesta conversa">' +
         logoJobHTML() + '</button>';
     pe.insertBefore(box, pe.firstChild);
+    // Barra nova (troca de conversa recria o #main): repinta o pino do que ja
+    // se sabe, sem ir na rede de novo.
+    try { _bcSinalPintar(); } catch (e) {}
 
     // ══ O TEMA QUEM DIZ É O PIXEL, NÃO A CLASSE ═══════════════════════
     //
@@ -3107,7 +3110,7 @@
     }
 
     if (!m.isConnected) return;
-    m.innerHTML = itens.map((i) =>
+    m.innerHTML = _bcStatusHTML() + itens.map((i) =>
       '<button type="button" class="job-bc-item' + (i.destaque ? ' destaque' : '') + '" ' +
         'role="menuitem" data-ac="' + i.ac + '">' +
         '<span class="job-bc-item-ico">' + i.ico + '</span>' +
@@ -3481,6 +3484,87 @@
     return out;
   }
 
+  // ── SAUDE E SINO, NA BARRA DA CONVERSA ────────────────────────────────────
+  //
+  // "Coloque um validador se esta tudo certo — igual na aba de cotacao do site.
+  //  Pode ser algo mais discreto, o usuario nao precisa saber da gambiarra."
+  //
+  // Entao o repouso e SILENCIO. Etiqueta verde permanente dizendo "tudo certo"
+  // e ruido: ninguem le, e quando aparece a vermelha ninguem percebe a
+  // diferenca. So aparece bolinha quando ha o que dizer — e o "esta tudo certo"
+  // fica dentro do menu, pra quando ele quiser conferir.
+  //
+  // Nenhum rotulo conta COMO funciona. "Fora do ar" e o que interessa; que o
+  // preco vem de uma aba, de uma fila ou de um Dell e problema nosso.
+  const _SAUDE = new Map();
+  let _sinoNaoLidas = 0;
+
+  function _saudePor(chave, ok, texto) {
+    const antes = _SAUDE.get(chave);
+    if (antes && antes.ok === ok && antes.texto === texto) return;
+    _SAUDE.set(chave, { ok: !!ok, texto: texto || '' });
+    _bcSinalPintar();
+  }
+  function _saudeRuins() {
+    const r = [];
+    _SAUDE.forEach((v) => { if (!v.ok && v.texto) r.push(v.texto); });
+    return r;
+  }
+
+  // A bolinha vive no proprio botao do JOB — nao ha espaco pra um segundo
+  // botao ao lado do campo de digitar, e um sino solto seria mais um icone
+  // mudo que ele ja disse que nao quer.
+  function _bcSinalPintar() {
+    document.querySelectorAll('.job-bc-menu-bt').forEach((bt) => {
+      let p = bt.querySelector('.job-bc-pino');
+      const ruins = _saudeRuins().length;
+      const n = _sinoNaoLidas;
+      if (!ruins && !n) { if (p) p.remove(); return; }
+      if (!p) {
+        p = document.createElement('span');
+        p.className = 'job-bc-pino';
+        bt.appendChild(p);
+      }
+      // Defeito vence aviso: se as duas coisas existem, a que precisa de acao
+      // e a que quebrou.
+      p.className = 'job-bc-pino' + (ruins ? ' alerta' : ' aviso');
+      p.textContent = ruins ? '' : (n > 9 ? '9+' : String(n));
+      bt.title = ruins ? _saudeRuins()[0]
+                       : (n + (n === 1 ? ' aviso novo do JOB' : ' avisos novos do JOB'));
+    });
+  }
+
+  async function _sinoBuscar() {
+    let r = null;
+    try { r = await _safeSendMessage({ type: 'notificacoes' }); } catch (e) { r = null; }
+    // Rota ainda fechada pra credencial da extensao: nao inventa numero.
+    if (!r || !r.ok) { _sinoNaoLidas = 0; _sinoItens = []; _bcSinalPintar(); return; }
+    _sinoNaoLidas = r.nao_lidas || 0;
+    _sinoItens = (r.itens || []).slice(0, 6);
+    _bcSinalPintar();
+  }
+  let _sinoItens = [];
+
+  // O bloco de status que abre junto do menu. Uma linha quando esta tudo bem —
+  // e a resposta pra "esta funcionando?" sem ele precisar testar cotando.
+  function _bcStatusHTML() {
+    const ruins = _saudeRuins();
+    let h = '<div class="job-bc-status' + (ruins.length ? ' ruim' : '') + '">' +
+      '<span class="job-bc-status-p"></span><span>' +
+      (ruins.length ? esc(ruins[0]) : 'Tudo certo por aqui') + '</span></div>';
+    if (_sinoItens.length) {
+      h += '<div class="job-bc-sino">' +
+        _sinoItens.map((i) =>
+          '<div class="job-bc-sino-i' + (i.lida ? '' : ' nova') + '">' +
+            '<b>' + esc(i.titulo || '') + '</b>' +
+            (i.descricao ? '<span>' + esc(i.descricao) + '</span>' : '') +
+            (i.quando ? '<i>' + esc(i.quando) + '</i>' : '') +
+          '</div>').join('') +
+        '</div>';
+    }
+    return h;
+  }
+
   // ELE NAO PODE SER O DETECTOR DE DEFEITO.
   //
   // "Voce precisa saber quando algo nao esta funcionando, sem eu precisar te
@@ -3530,6 +3614,7 @@
                   (sAud ? 'todos' : 'nenhum') + '. O defeito é meu, não seu.';
       }
     } catch (e) { return; }               // sem a wa-js nao da pra julgar: cala
+    _saudePor('blocos', !quebrou, quebrou || '');
     if (!quebrou) return;
     _docAvisoQuebra(quebrou);
     // E avisa o JOB junto, pra aparecer em Configuracoes sem ele reclamar.
@@ -3695,6 +3780,12 @@
         }
       }, 4000);
       try { canarioIniciar(); } catch (e) { /* canario nao pode derrubar a extensao */ }
+      // O SINO. Dois minutos e o intervalo do sino do site — mesma fonte,
+      // mesmo ritmo, pra nao existir "o site ja avisou e a extensao nao".
+      try {
+        _sinoBuscar();
+        _registrarLoop(setInterval(() => { _sinoBuscar(); }, 2 * 60 * 1000));
+      } catch (e) { /* sem sino a extensao segue igual */ }
     }, 6000);
   }
 

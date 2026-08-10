@@ -179,5 +179,28 @@ const qb='<div id="job-painel-doc" style="position:static;margin-top:18px"><div 
  'e não consegui pôr o botão de ler em nenhum. O defeito é meu, não seu.</span>'+
  '<button class="job-bc-quebra-b">Tentar de novo</button></div>'+
  '</div></div></div></div>';
-A.innerHTML=html+ops+cots+p4+pe+cmp+qb;B.innerHTML=html+ops+cots+p4+pe+cmp+qb;
+// Oitava tela: o status dentro do menu do JOB, nos dois estados.
+const st=(ruim,txt)=>'<div class="job-bc-status'+(ruim?' ruim':'')+'">'+
+ '<span class="job-bc-status-p"></span><span>'+txt+'</span></div>';
+const sino='<div id="job-painel-doc" style="position:static;margin-top:18px">'+
+ '<div class="job-painel-doc-corpo"><div class="job-cot-wrap">'+
+ '<div class="job-bc-menu" style="position:static;opacity:1;transform:none">'+
+ st(0,'Tudo certo por aqui')+
+ '<div class="job-bc-sino">'+
+ '<div class="job-bc-sino-i nova"><b>Cotação aberta pelo cliente</b>'+
+ '<span>Milena abriu a cotação de Campinas</span><i>há 4 min</i></div>'+
+ '<div class="job-bc-sino-i"><b>Lead novo atribuído</b>'+
+ '<span>Vera Cruz · formulário completo</span><i>há 1 h</i></div></div>'+
+ '<button class="job-bc-item"><span class="job-bc-item-txt">'+
+ '<span class="rot">Analisar esta conversa</span>'+
+ '<span class="dica">Lê o que já foi dito e monta a ficha do lead.</span>'+
+ '</span></button></div>'+
+ '<div style="height:14px"></div>'+
+ '<div class="job-bc-menu" style="position:static;opacity:1;transform:none">'+
+ st(1,'A busca de preços está fora do ar. O Guilherme já foi avisado.')+
+ '<button class="job-bc-item"><span class="job-bc-item-txt">'+
+ '<span class="rot">Cotar pelas tabelas do JOB</span>'+
+ '<span class="dica">Não depende da busca ao vivo.</span></span></button></div>'+
+ '</div></div></div>';
+A.innerHTML=html+ops+cots+p4+pe+cmp+qb+sino;B.innerHTML=html+ops+cots+p4+pe+cmp+qb+sino;
 </script>

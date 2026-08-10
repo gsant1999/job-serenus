@@ -677,6 +677,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   // O canario: a extensao contando o que ainda funciona nela.
+  // O SINO DENTRO DO WHATSAPP.
+  //
+  // Mesma fonte do sino do site — nao existe segunda lista de aviso, senao uma
+  // fica velha. Se a rota recusar (ela ainda e login_required no app.py, e o
+  // Antigravity vai abrir pra credencial da extensao), volta vazio e o sino
+  // simplesmente nao aparece. Nada quebra enquanto isso.
+  if (msg && msg.type === 'notificacoes') {
+    chamarJob('/api/notificacoes', 'GET', null, 9000).then((r) => {
+      if (!r || !r.ok) { sendResponse({ ok: false, nao_lidas: 0, itens: [] }); return; }
+      sendResponse({ ok: true, nao_lidas: r.nao_lidas || 0, itens: r.itens || [] });
+    }).catch(() => sendResponse({ ok: false, nao_lidas: 0, itens: [] }));
+    return true;
+  }
+  if (msg && msg.type === 'notificacoes_lidas') {
+    chamarJob('/api/notificacoes/marcar-lidas', 'POST', {}, 9000)
+      .then(sendResponse).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
   if (msg && msg.type === 'canario') {
     chamarJob('/api/whatsapp/canario', 'POST',
       { versao: msg.versao || '', checagens: msg.checagens || [] }, 12000).then(sendResponse);

@@ -1142,6 +1142,39 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
    que e igual em todos nao ajuda a escolher e viraria ruido em toda linha.
    Alinhado a esquerda com o nome, e nao no meio: o olho desce pela primeira
    letra de cada linha comparando, e centralizar quebra essa coluna. */
+/* O PINO NO BOTAO DO JOB.
+   Em repouso nao existe: etiqueta verde permanente dizendo "tudo certo" e
+   ruido, e quando a vermelha aparece ninguem percebe a diferenca. So nasce
+   quando ha o que dizer — ambar sem numero pra defeito, acento com numero
+   pra aviso novo. */
+.job-bc-menu-bt { position: relative; }
+.job-bc-pino { position: absolute; top: -2px; right: -2px; min-width: 15px; height: 15px;
+  padding: 0 4px; border-radius: 99px; display: flex; align-items: center;
+  justify-content: center; font-family: var(--job-ui); font-size: 9.5px;
+  font-weight: 800; line-height: 1; color: #0b141a;
+  border: 2px solid var(--job-bg1, #111b21); box-sizing: content-box; }
+.job-bc-pino.alerta { background: var(--job-aviso, #e8b339); }
+.job-bc-pino.aviso  { background: var(--job-acento); }
+
+/* O status dentro do menu: a resposta pra "esta funcionando?" sem ele ter que
+   testar cotando. Uma linha, no topo, antes das acoes. */
+.job-bc-status { display: flex; align-items: center; gap: 8px; padding: 9px 12px 10px;
+  font-family: var(--job-ui); font-size: 11.5px; font-weight: 650;
+  color: var(--job-txt-fraco); border-bottom: 1px solid var(--job-borda); }
+.job-bc-status-p { width: 7px; height: 7px; border-radius: 50%; flex: none;
+  background: var(--job-acento); }
+.job-bc-status.ruim { color: var(--job-txt); }
+.job-bc-status.ruim .job-bc-status-p { background: var(--job-aviso, #e8b339); }
+
+.job-bc-sino { max-height: 168px; overflow-y: auto; border-bottom: 1px solid var(--job-borda); }
+.job-bc-sino-i { padding: 8px 12px; font-family: var(--job-ui); line-height: 1.4;
+  border-left: 2px solid transparent; }
+.job-bc-sino-i.nova { border-left-color: var(--job-acento); }
+.job-bc-sino-i b { display: block; font-size: 11.5px; font-weight: 700; color: var(--job-txt); }
+.job-bc-sino-i span { display: block; font-size: 11px; color: var(--job-txt-fraco); }
+.job-bc-sino-i i { display: block; font-size: 10px; font-style: normal;
+  color: var(--job-txt-fraco); opacity: .75; margin-top: 2px; }
+
 /* A EXTENSAO ADMITINDO QUE QUEBROU, no lugar onde quebrou.
    Vermelho seria alarme de sistema fora do ar — nao e o caso: o resto da
    conversa funciona. Ambar, discreto, e com saida do lado. */

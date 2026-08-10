@@ -925,8 +925,16 @@
   function mostrarSinal(classe, rotulo, ajuda) {
     var s = el('sinal');
     s.className = 'cv-sinal ' + (classe || '');
-    s.querySelector('span').textContent = rotulo +
-      (extensaoPresente ? ' · ext ' + (extensaoVersao || '?') : ' · sem extensão');
+    // O ROTULO E PRA QUEM COTA, NAO PRA QUEM MANTEM.
+    //
+    // Ele dizia "Base do JOB (cache local) · ext 4.45.0" e "Painel conectado":
+    // tres informacoes de bastidor numa etiqueta que a consultora le no meio
+    // do atendimento. De onde o preco vem e problema nosso; o que ela precisa
+    // saber e se da pra cotar agora. A versao continua existindo, no title,
+    // que e onde o suporte procura.
+    s.querySelector('span').textContent = rotulo;
+    s.title = extensaoPresente ? ('JOB · extensão ' + (extensaoVersao || '?'))
+                               : 'JOB · extensão não detectada nesta aba';
     var a = el('aviso');
     if (ajuda) { a.innerHTML = ajuda; a.className = 'cv-aviso ver'; }
     else { a.className = 'cv-aviso'; a.innerHTML = ''; }
@@ -1406,7 +1414,7 @@
       urlDaPergunta = '';
       el('mainSub').innerHTML = 'Quem atende <b>' + esc(cidadeEscolhida) + '</b> · ' +
         esc(nomeCompleto(tipoAtivo() || '')) + ' · <b>' + esc(resumoVidas()) + '</b> · ' +
-        operadoras.length + ' operadoras via <b>base do JOB</b> (sem dependência do Painel ao vivo)';
+        operadoras.length + ' operadoras';
       voltarPara('operadoras');
       return;
     }
@@ -1434,7 +1442,7 @@
       var est = await pedir('cotador_estado', {}, 8000);
       if (est.ok && !(est.faltando && est.faltando.length)) {
         pronto = true;
-        mostrarSinal('on', 'Painel conectado', '');
+        mostrarSinal('on', 'Pronto pra cotar', '');
       } else {
         tratarFalha(est.ok ? 'precisa_aprender' : est.motivo, est);
       }
@@ -2278,7 +2286,7 @@
     el('andando').className = 'cv-andando';
     el('btCotar').disabled = false;
     if (erro) { tratarFalha(erro, { detalhe: detalheErro }); return; }
-    mostrarSinal('on', 'Painel conectado', '');
+    mostrarSinal('on', 'Pronto pra cotar', '');
     todos.sort(function (a, b2) {
       return (a.total == null) - (b2.total == null) || (a.total - b2.total);
     });
@@ -2429,7 +2437,7 @@
 
     if (doJob && doJob.ok && (doJob.planos || []).length > 0) {
       pronto = true;
-      mostrarSinal('on', 'Base do JOB (cache local)', '');
+      mostrarSinal('on', 'Pronto pra cotar', '');
       atualizarBotao();
       if (cidadeEscolhida && (modalidadeAtiva() != null || tipoAtivo() != null)) carregarOperadoras();
       return;
@@ -2446,7 +2454,7 @@
       pronto = false; tratarFalha('precisa_aprender', r); atualizarBotao(); return;
     }
     pronto = true;
-    mostrarSinal('on', 'Painel conectado', '');
+    mostrarSinal('on', 'Pronto pra cotar', '');
     atualizarBotao();
     if (cidadeEscolhida && (modalidadeAtiva() != null || tipoAtivo() != null)) carregarOperadoras();
   }
