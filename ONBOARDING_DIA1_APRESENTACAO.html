@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dia 1 — Aline | Serenus</title>
+<style>
+  :root{
+    --bg:#faf9f6; --ink:#14171d; --mut:#6b7280; --line:#e2e0da;
+    --green:#0f9d76; --indigo:#3d55d6; --amber:#c2740a; --red:#c0392b; --violet:#7c3aed;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;background:#0c0d10;overflow:hidden;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  #stage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  #deck{width:1280px;height:720px;position:relative;transform-origin:center center;
+    background:var(--bg);color:var(--ink);border-radius:6px;overflow:hidden;
+    box-shadow:0 30px 90px rgba(0,0,0,.55)}
+  .s{position:absolute;inset:0;padding:66px 76px;opacity:0;pointer-events:none;
+    display:flex;flex-direction:column;justify-content:center}
+  .s.on{opacity:1;pointer-events:auto}
+  .tag{font-size:14px;font-weight:700;letter-spacing:2.4px;text-transform:uppercase;
+    color:var(--green);margin-bottom:20px}
+  h1{font-size:74px;line-height:1.02;letter-spacing:-2.6px;font-weight:800}
+  h2{font-size:50px;line-height:1.1;letter-spacing:-1.6px;font-weight:750;margin-bottom:26px}
+  h2 em{font-style:normal;color:var(--green)}
+  .lead{font-size:27px;line-height:1.45;color:#3a4049;max-width:1010px;font-weight:400}
+  .lead b{font-weight:700;color:var(--ink)}
+  .big{font-size:44px;line-height:1.25;letter-spacing:-1.1px;font-weight:700;max-width:1050px}
+  .sub{font-size:22px;color:var(--mut);margin-top:24px;line-height:1.5;max-width:920px}
+
+  .grid{display:grid;gap:16px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .card{background:#fff;border:1px solid var(--line);border-radius:11px;padding:22px 24px}
+  .card h3{font-size:23px;letter-spacing:-.5px;margin-bottom:8px;font-weight:700}
+  .card p{font-size:17px;line-height:1.5;color:#565d68}
+  .card .role{font-size:12.5px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;
+    color:var(--indigo);margin-bottom:6px}
+
+  .rows{display:flex;flex-direction:column;gap:9px}
+  .row{display:grid;grid-template-columns:290px 1fr;gap:22px;align-items:center;
+    background:#fff;border:1px solid var(--line);border-left:5px solid var(--green);
+    border-radius:9px;padding:13px 20px}
+  .row .k{font-size:21px;font-weight:700;letter-spacing:-.4px}
+  .row .v{font-size:18.5px;color:#565d68;line-height:1.4}
+
+  .funnel{display:flex;flex-direction:column;gap:7px}
+  .fr{display:grid;grid-template-columns:34px 300px 1fr;align-items:center;gap:16px;
+    background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px 16px}
+  .dot{width:13px;height:13px;border-radius:50%}
+  .fr .n{font-size:20px;font-weight:700;letter-spacing:-.3px}
+  .fr .d{font-size:17px;color:#565d68}
+
+  .quote{font-size:46px;line-height:1.25;letter-spacing:-1.2px;font-weight:700;
+    border-left:7px solid var(--amber);padding-left:32px;max-width:1000px}
+  .quote small{display:block;font-size:22px;font-weight:400;color:var(--mut);
+    margin-top:22px;letter-spacing:0}
+
+  .ladder{display:flex;flex-direction:column;gap:12px;margin-top:6px}
+  .step{display:grid;grid-template-columns:62px 1fr;align-items:center;gap:20px;
+    background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 22px}
+  .step .num{width:44px;height:44px;border-radius:50%;background:var(--indigo);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:21px;font-weight:700}
+  .step .t{font-size:23px;font-weight:700;letter-spacing:-.4px}
+  .step .t span{font-weight:400;color:var(--mut);font-size:19px}
+
+  table{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;
+    border:1px solid var(--line)}
+  th{background:#f2f1ec;font-size:15px;letter-spacing:1.2px;text-transform:uppercase;
+    color:var(--mut);text-align:left;padding:14px 22px;font-weight:700}
+  td{padding:15px 22px;font-size:21px;border-top:1px solid var(--line)}
+  td.n{font-weight:700;color:var(--green);text-align:right;white-space:nowrap}
+
+  .money{display:flex;align-items:baseline;gap:16px;margin:10px 0 4px}
+  .money .v{font-size:82px;font-weight:800;letter-spacing:-3px;color:var(--green)}
+  .money .l{font-size:24px;color:var(--mut)}
+  .calc{background:#fff;border:1px solid var(--line);border-radius:11px;padding:24px 28px;
+    font-size:25px;line-height:1.6;margin-top:22px}
+  .calc b{color:var(--green)}
+
+  .chips{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px}
+  .chip{background:#fff;border:1px solid var(--line);border-radius:999px;padding:12px 22px;
+    font-size:21px;font-weight:600}
+
+  .cover{background:var(--ink);color:#fff}
+  .cover h1{font-size:96px;letter-spacing:-3.6px}
+  .cover .tag{color:#5fe3b6}
+  .cover .lead{color:#a8b0bd}
+  .final{background:var(--green);color:#04241b}
+  .final h1{font-size:82px;letter-spacing:-3px}
+  .final .lead{color:#0a3d2f;margin-top:26px}
+
+  #bar{position:absolute;left:0;bottom:0;height:5px;background:var(--green);
+    transition:width .28s ease}
+  #num{position:absolute;right:26px;bottom:20px;font-size:14px;color:#9aa0ab;letter-spacing:1px}
+  #foot{position:absolute;left:32px;bottom:18px;font-size:13.5px;color:#b3b8c2;letter-spacing:1.5px;
+    text-transform:uppercase;font-weight:600}
+  .cover #foot,.cover #num{color:#5a6472}
+  #hint{position:fixed;bottom:14px;left:0;right:0;text-align:center;color:#4a4f59;font-size:12.5px;
+    letter-spacing:1.4px;text-transform:uppercase;transition:opacity .5s ease;pointer-events:none}
+  #hint.off{opacity:0}
+</style>
+</head>
+<body>
+<div id="stage"><div id="deck">
+
+  <section class="s on cover">
+    <div class="tag">Serenus Corretora de Saúde</div>
+    <h1>Bem-vinda,<br>Aline.</h1>
+    <p class="lead" style="margin-top:30px">Segunda-feira, 10 de agosto. Seu primeiro dia.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Como vai ser o dia</div>
+    <h2>Hoje você não vai aprender<br>plano de saúde.</h2>
+    <p class="lead">Hoje você vai entender <b>em que mercado entrou</b>, pegar seus <b>acessos</b>, aprender o <b>sistema</b> e ver <b>venda de verdade acontecendo</b>.</p>
+    <div class="grid g4" style="margin-top:34px">
+      <div class="card"><div class="role">Manhã · Bianca</div><h3>A corretora</h3><p>Mercado, ANS e o funil</p></div>
+      <div class="card"><div class="role">Tarde · Danilo</div><h3>Ferramentas</h3><p>Acessos, JOB e extensão</p></div>
+      <div class="card"><div class="role">16h · Juliana</div><h3>Escuta</h3><p>Atendimento real</p></div>
+      <div class="card" style="border-color:var(--green);background:#eefaf5"><div class="role" style="color:var(--green)">Quarta</div><h3>Você atende</h3><p>Lead real na sua mão</p></div>
+    </div>
+  </section>
+
+  <section class="s">
+    <div class="tag">O negócio</div>
+    <h2>O que a Serenus faz</h2>
+    <p class="lead">A pessoa chega até nós porque <b>preencheu um formulário ou pediu informação</b> — quase nunca porque já sabe o que quer.</p>
+    <p class="lead" style="margin-top:22px">Nosso trabalho é <b>entender a situação dela</b>, mostrar a opção que faz sentido e <b>conduzir até a contratação</b>.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Importante</div>
+    <p class="big">Aqui ninguém liga para lista fria.</p>
+    <p class="sub">Todo lead que chega para você é uma pessoa que <b style="color:var(--ink)">pediu contato</b>. Ela levantou a mão. Isso muda tudo na forma de abordar.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">A equipe</div>
+    <h2>Quem é quem</h2>
+    <div class="grid g3" style="gap:14px">
+      <div class="card"><div class="role">Sócio</div><h3>Guilherme</h3><p>Produto, regra de operadora, caso complexo, negociação</p></div>
+      <div class="card"><div class="role">Sócio</div><h3>Danilo</h3><p>Ferramentas, acessos e apoio à operação</p></div>
+      <div class="card"><div class="role">Sócio</div><h3>Gabriel</h3><p>Marketing e campanhas: é de onde vêm os seus leads</p></div>
+      <div class="card"><div class="role">Marketing</div><h3>Karen</h3><p>Materiais e comunicação</p></div>
+      <div class="card" style="border-color:var(--indigo);background:#f2f4fe"><div class="role">Gestora comercial</div><h3>Bianca</h3><p>Sua chefe direta. Processo, acompanhamento e o dia a dia</p></div>
+      <div class="card" style="border-color:var(--green);background:#eefaf5"><div class="role" style="color:var(--green)">Consultora</div><h3>Juliana</h3><p>A referência prática: como se atende de verdade</p></div>
+    </div>
+  </section>
+
+  <section class="s">
+    <div class="tag">O mercado</div>
+    <h2>Operadora <em>×</em> corretora</h2>
+    <div class="grid g2">
+      <div class="card"><h3>Operadora</h3><p style="font-size:19px">Quem vende e opera o plano. Amil, SulAmérica, Bradesco e por aí. É quem cobre o atendimento médico.</p></div>
+      <div class="card" style="border-color:var(--green)"><h3>Corretora — a Serenus</h3><p style="font-size:19px">Representa o cliente na escolha. É remunerada pela operadora, não pelo cliente.</p></div>
+    </div>
+    <p class="big" style="font-size:36px;margin-top:34px">O cliente <span style="color:var(--green)">não paga mais caro</span> por comprar com a gente.</p>
+    <p class="sub" style="margin-top:14px">Diga isso com todas as letras. É objeção que você vai ouvir na primeira semana.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">O cliente</div>
+    <h2>Por que as pessoas compram</h2>
+    <p class="lead" style="margin-bottom:26px">Quase nunca é preço. É quase sempre <b>medo de precisar e não ter</b>.</p>
+    <div class="chips">
+      <div class="chip">Filho pequeno</div>
+      <div class="chip">Diagnóstico na família</div>
+      <div class="chip">Saiu do plano da empresa</div>
+      <div class="chip">A empresa exigiu</div>
+      <div class="chip">Fila do SUS para um exame</div>
+      <div class="chip">Engravidou</div>
+      <div class="chip">Ficou mais velho e se assustou</div>
+    </div>
+    <p class="sub">Sua primeira tarefa em qualquer conversa é descobrir <b style="color:var(--ink)">qual desses é o motivo dela</b>.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Como se contrata</div>
+    <h2>Três caminhos</h2>
+    <div class="grid g3">
+      <div class="card"><div class="role">PF</div><h3>Pessoa física</h3><p>Uma pessoa ou uma família contrata direto</p></div>
+      <div class="card"><div class="role">PME</div><h3>Empresa</h3><p>Contratado por CNPJ, em geral a partir de 2 vidas</p></div>
+      <div class="card"><div class="role">Adesão</div><h3>Entidade de classe</h3><p>Por profissão ou sindicato</p></div>
+    </div>
+    <p class="sub">O preço muda <b style="color:var(--ink)">muito</b> entre eles para a mesma pessoa. Por que muda, você vê na terça com o Guilherme. Hoje basta saber que existem três caminhos.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Regulação</div>
+    <h2>ANS — quem manda nas regras</h2>
+    <p class="lead" style="margin-bottom:24px">Agência Nacional de Saúde Suplementar. É o órgão do governo que regula os planos de saúde.</p>
+    <div class="rows">
+      <div class="row"><div class="k">Registro</div><div class="v">Operadora sem registro na ANS não é plano de saúde</div></div>
+      <div class="row"><div class="k">Rol de procedimentos</div><div class="v">Lista mínima que todo plano é obrigado a cobrir</div></div>
+      <div class="row"><div class="k">Carência</div><div class="v">A operadora pode exigir espera — mas dentro de um teto</div></div>
+      <div class="row"><div class="k">Reajuste</div><div class="v">Regulado nos planos individuais e familiares</div></div>
+      <div class="row"><div class="k">Portabilidade</div><div class="v">Em certas condições, troca de plano levando a carência já cumprida</div></div>
+    </div>
+  </section>
+
+  <section class="s">
+    <div class="tag">Carência</div>
+    <h2>Existe um teto. E ele é lei.</h2>
+    <table>
+      <tr><th>Situação</th><th style="text-align:right">Espera máxima</th></tr>
+      <tr><td>Urgência e emergência</td><td class="n">24 horas</td></tr>
+      <tr><td>Geral — consultas, exames, internação</td><td class="n">180 dias</td></tr>
+      <tr><td>Parto</td><td class="n">300 dias</td></tr>
+      <tr><td>Doença que a pessoa já tinha ao entrar</td><td class="n">24 meses</td></tr>
+    </table>
+    <p class="sub">A operadora pode exigir menos. <b style="color:var(--ink)">Nunca mais.</b></p>
+  </section>
+
+  <section class="s">
+    <p class="big">As regras não são invenção da operadora<br>nem da Serenus.</p>
+    <p class="sub" style="font-size:25px">Boa parte do "não pode" que você vai ter que dizer ao cliente vem da ANS. Isso é um <b style="color:var(--ink)">argumento</b> — não uma desculpa.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">O processo</div>
+    <h2 style="margin-bottom:18px">O funil da Serenus</h2>
+    <div class="funnel">
+      <div class="fr"><span class="dot" style="background:#6366f1"></span><div class="n">Novo Lead</div><div class="d">Caiu no sistema, ninguém falou com a pessoa</div></div>
+      <div class="fr"><span class="dot" style="background:#3b82f6"></span><div class="n">Primeiro Contato</div><div class="d">Você já mandou mensagem ou ligou</div></div>
+      <div class="fr"><span class="dot" style="background:#8b5cf6"></span><div class="n">Qualificação</div><div class="d">A pessoa respondeu e está conversando</div></div>
+      <div class="fr" style="border-color:var(--amber);background:#fffaf0"><span class="dot" style="background:#f59e0b"></span><div class="n">Cotação Enviada</div><div class="d">Já mandou opção e preço</div></div>
+      <div class="fr"><span class="dot" style="background:#1fd8a4"></span><div class="n">Venda Fechada</div><div class="d">O cliente disse sim</div></div>
+      <div class="fr"><span class="dot" style="background:#22d3ee"></span><div class="n">Emissão de Proposta</div><div class="d">Preencher e anexar documentos</div></div>
+      <div class="fr"><span class="dot" style="background:#0ea5e9"></span><div class="n">Status da Proposta</div><div class="d">A operadora está analisando</div></div>
+      <div class="fr"><span class="dot" style="background:#ef4444"></span><div class="n">Negociação Perdida</div><div class="d">Registrar o motivo</div></div>
+      <div class="fr"><span class="dot" style="background:#a3a3a3"></span><div class="n">Nutrição</div><div class="d">Tem interesse, mas não agora</div></div>
+    </div>
+  </section>
+
+  <section class="s">
+    <div class="tag">O que separa quem vende de quem não vende</div>
+    <p class="big">Quase ninguém compra<br>na primeira conversa.</p>
+    <p class="sub" style="font-size:26px">A venda mora no <b style="color:var(--ink)">follow-up</b>: voltar na pessoa que sumiu, no dia certo, com assunto novo.</p>
+    <div class="card" style="margin-top:26px;border-color:var(--amber);background:#fffaf0">
+      <p style="font-size:23px;color:#7a4a06"><b>Card parado em Cotação Enviada sem tarefa marcada é lead perdido em câmara lenta.</b> É exatamente isso que a Bianca vai olhar.</p>
+    </div>
+  </section>
+
+  <section class="s">
+    <div class="tag">Quando o lead trava</div>
+    <h2>Marque o motivo. Sempre.</h2>
+    <div class="grid g4">
+      <div class="card"><h3>Achou Caro</h3><p>O valor foi o obstáculo</p></div>
+      <div class="card"><h3>Silêncio</h3><p>Sumiu, não responde</p></div>
+      <div class="card"><h3>Não é o Momento</h3><p>Quer, mas não agora</p></div>
+      <div class="card"><h3>Aguardando resposta</h3><p>Vai falar com alguém e volta</p></div>
+    </div>
+    <p class="sub">O motivo não é para julgar você. É o que diz <b style="color:var(--ink)">qual conversa ter da próxima vez</b>.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Sua remuneração</div>
+    <h2 style="margin-bottom:10px">Como você ganha</h2>
+    <div class="money"><div class="v">R$ 1.000</div><div class="l">de ajuda de custo, todo mês</div></div>
+    <div class="money" style="margin-top:-4px"><div class="v">+ 50%</div><div class="l">da mensalidade do primeiro mês de cada venda</div></div>
+    <div class="calc">
+      Plano de <b>R$ 800</b> por mês fechado &nbsp;→&nbsp; <b>R$ 400</b> para você.<br>
+      Três vendas assim no mês &nbsp;→&nbsp; <b>R$ 1.200</b> em cima da ajuda de custo.
+    </div>
+  </section>
+
+  <section class="s">
+    <div class="tag">Mentalidade</div>
+    <p class="quote">Você não está aqui para estudar plano de saúde. Você está aqui para aprender a vender plano de saúde.
+      <small>O estudo existe para melhorar a venda.</small></p>
+  </section>
+
+  <section class="s">
+    <div class="tag">As duas primeiras semanas</div>
+    <h2>Sua nota não é venda.<br>É <em>atividade</em>.</h2>
+    <p class="lead" style="margin-bottom:24px">Venda é consequência e pode levar algumas semanas. Normal. O que se mede agora:</p>
+    <div class="chips">
+      <div class="chip">Leads atendidos</div>
+      <div class="chip">Conversas de verdade</div>
+      <div class="chip">Cotações enviadas</div>
+      <div class="chip">Follow-ups feitos</div>
+      <div class="chip">Tudo registrado no JOB</div>
+    </div>
+    <p class="sub">Semana 1: aprender e começar. <b style="color:var(--ink)">Quarta você já atende lead real.</b> Semana 2: carteira própria, com a Bianca junto.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Regra 1</div>
+    <p class="quote" style="border-color:var(--red)">"Vou confirmar essa informação para você e já te retorno."
+      <small>É o que se diz quando não se sabe. Sempre.</small></p>
+    <p class="sub" style="font-size:24px;margin-top:32px">Cliente aceita não saber. Cliente <b style="color:var(--ink)">não perdoa informação errada</b> — e informação errada sobre carência ou cobertura vira problema real depois, na hora em que a pessoa precisa usar o plano.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Regra 2</div>
+    <h2 style="margin-bottom:18px">A quem perguntar</h2>
+    <div class="ladder">
+      <div class="step"><div class="num" style="background:#9aa0ab">1</div><div class="t">Você mesma <span>— o material, como você fez da última vez</span></div></div>
+      <div class="step"><div class="num">2</div><div class="t">Bianca <span>— processo, sistema, como conduzir, prioridade</span></div></div>
+      <div class="step"><div class="num" style="background:var(--green)">3</div><div class="t">Juliana <span>— "como você faria nessa conversa?"</span></div></div>
+      <div class="step"><div class="num" style="background:var(--violet)">4</div><div class="t">Guilherme <span>— produto, regra, exceção, negociação difícil (pela Bianca)</span></div></div>
+    </div>
+    <p class="sub">Perguntar não é problema. Perguntar a mesma coisa cinco vezes <b style="color:var(--ink)">sem anotar</b> é.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">E uma última</div>
+    <p class="big">Se não está no JOB,<br>não aconteceu.</p>
+    <p class="sub" style="font-size:25px">Nada de caderno nem bloco de notas do celular. O que está fora do sistema ninguém consegue ajudar, cobrar nem defender — inclusive a comissão que é sua.</p>
+  </section>
+
+  <section class="s final">
+    <div class="tag" style="color:#04241b">Quarta-feira</div>
+    <h1>Você atende<br>lead real.</h1>
+    <p class="lead">Hoje à tarde: seus acessos, o JOB e a extensão, com o Danilo. Às 16h você senta do lado da Juliana e vê como se faz.</p>
+  </section>
+
+  <div id="foot">Serenus · Dia 1</div>
+  <div id="num"></div>
+  <div id="bar"></div>
+</div></div>
+<div id="hint">setas ou clique para navegar · F para tela cheia</div>
+
+<script>
+  const slides=[...document.querySelectorAll('.s')];
+  const bar=document.getElementById('bar'), num=document.getElementById('num');
+  let i=0;
+  function render(){
+    slides.forEach((s,k)=>s.classList.toggle('on',k===i));
+    bar.style.width=((i+1)/slides.length*100)+'%';
+    num.textContent=(i+1)+' / '+slides.length;
+  }
+  const hint=document.getElementById('hint');
+  const hideHint=()=>hint.classList.add('off');
+  setTimeout(hideHint,7000);
+  function go(d){ hideHint(); i=Math.min(slides.length-1,Math.max(0,i+d)); render(); }
+  document.addEventListener('keydown',e=>{
+    if(['ArrowRight','ArrowDown',' ','PageDown','Enter'].includes(e.key)){e.preventDefault();go(1)}
+    else if(['ArrowLeft','ArrowUp','PageUp','Backspace'].includes(e.key)){e.preventDefault();go(-1)}
+    else if(e.key==='Home'){i=0;render()}
+    else if(e.key==='End'){i=slides.length-1;render()}
+    else if(e.key==='f'||e.key==='F'){document.documentElement.requestFullscreen?.()}
+  });
+  document.getElementById('stage').addEventListener('click',e=>go(e.clientX<innerWidth*0.25?-1:1));
+  function fit(){
+    const p=0.94, s=Math.min(innerWidth*p/1280, innerHeight*p/720);
+    document.getElementById('deck').style.transform='scale('+s+')';
+  }
+  addEventListener('resize',fit); fit(); render();
+</script>
+</body>
+</html>
