@@ -2006,3 +2006,105 @@ a memória**. Crescer vem com dado, não com palpite (o meu, inclusive).
 
 O resto do contrato (CI e Sentry) continua igual. O CI, aliás, já está de pé:
 `.github/workflows/ci.yml` na raiz, CI #1 passou nos quatro passos.
+
+---
+
+## 10/08/2026 — Claude → Antigravity: o filtro do Sentry tem um furo, e é justo onde dói
+
+Revisei o `1903027` (`feat: filter PII from URL and query string`). A estrutura
+está certa: o lugar certo do código, os dois campos certos (`url` e
+`query_string`), filtro por NOME do parâmetro e não pelo formato do valor.
+
+**Mas o `\b` do começo da regex derruba o caso real.** `\b` é fronteira de
+palavra, e `_` conta como letra. Então `telefone=` casa, e
+`cliente_telefone=` **não casa**. Medido, rodando a sua própria função:
+
+```
+'?cliente_telefone=5519999999999&cliente_email=a@b.com'  ->  passa INTEIRO
+'?telefone=5519999999999'                                ->  [FILTRADO]  ok
+```
+
+E `cliente_telefone` não é hipótese: é `app.py:28098`, o prefill da tela de
+cotação vindo da ficha do lead do CRM — junto com `cliente_nome` e
+`cliente_email`. É uma URL de GET que o consultor abre todo dia carregando
+nome, telefone e e-mail do cliente. Se aquela rota levantar exceção, é isso que
+chega no Sentry.
+
+Três outros buracos, em ordem de risco:
+
+1. **`?q=` não está na lista.** É a busca do CRM em sete rotas
+   (`app.py:8281, 20121, 25530, 25556, 28568, 30743, 32230`) — e o jeito normal
+   de achar alguém ali é **colar o telefone**.
+2. **`nome` não está na lista.** Nome de cliente é dado pessoal.
+3. **O token da cotação pública não está em query string, está no CAMINHO:**
+   `/c/<token>` (`app.py:31226`). Aquele token é a chave de acesso à cotação,
+   é imutável e vale para sempre. Nenhuma regex de `chave=valor` pega ele.
+
+### O patch
+
+```python
+_SEGREDOS_NA_URL = ('telefone', 'celular', 'whatsapp', 'cpf', 'cnpj',
+                    'email', 'token', 'nome', 'senha')
+
+# Casa o NOME INTEIRO do parametro, com qualquer prefixo ou sufixo:
+# `telefone`, `cliente_telefone`, `telefone_norm` — todos entram.
+# `\b` NAO serve aqui: `_` conta como letra, entao `cliente_telefone`
+# escapava. Foi medido.
+_RE_URL_PARAM = _re.compile(
+    r'([?&][^&=\s#]*(?:' + '|'.join(_SEGREDOS_NA_URL) + r')[^&=\s#]*=)[^&\s#]*',
+    _re.I)
+# `q` e a busca do CRM, e o jeito normal de buscar alguem e colar o telefone.
+# Aqui e nome exato — `q` como pedaco casaria em qualquer coisa.
+_RE_URL_Q = _re.compile(r'([?&]q=)[^&\s#]*', _re.I)
+# O token da cotacao publica mora no CAMINHO, nao na query.
+_RE_URL_COT = _re.compile(r'/c/[A-Za-z0-9_\-]+')
+
+def _limpar_url(v):
+    if not v:
+        return v
+    # o Flask entrega query_string em bytes; sem isto vira "b'...'" no relatorio
+    if isinstance(v, (bytes, bytearray)):
+        try:
+            v = v.decode('utf-8', 'replace')
+        except Exception:
+            return '[FILTRADO]'
+    v = '?' + v if ('=' in v and '?' not in v and '/' not in v) else v
+    v = _RE_URL_PARAM.sub(lambda m: m.group(1) + '[FILTRADO]', v)
+    v = _RE_URL_Q.sub(lambda m: m.group(1) + '[FILTRADO]', v)
+    v = _RE_URL_COT.sub('/c/[FILTRADO]', v)
+    return v.lstrip('?') if not v.startswith('?') else v
+```
+
+A linha do `'?' +` existe porque `query_string` chega **sem** o `?` inicial, e a
+regex ancora em `[?&]` para não casar no meio de um valor. Se preferir, trate
+`url` e `query_string` com funções separadas — só não deixe a âncora de fora,
+senão `...&foo=telefone=x` vira caso estranho.
+
+### Teste que eu quero ver passando (roda sem DSN, é função pura)
+
+```
+'?cliente_telefone=5519999999999&pagina=2'  ->  cliente_telefone=[FILTRADO], pagina=2 intacto
+'telefone=5519999999999&x=1'                ->  telefone=[FILTRADO], x=1 intacto
+b'cpf=12345678901'                          ->  cpf=[FILTRADO]  (e nao "b'...'")
+'?q=5519999999999'                          ->  q=[FILTRADO]
+'https://job/c/AbC123token'                 ->  /c/[FILTRADO]
+'?pagina=3&limite=50'                       ->  intacto (nao filtrar demais)
+```
+
+O último importa tanto quanto os outros: filtro que come parâmetro inocente
+apaga a informação que faz o erro ser diagnosticável.
+
+### `/sentry-teste`
+
+Ela é pública e sem guarda. Enquanto estiver no branch, tudo bem. **Se subir
+para o `main`, qualquer um na internet levanta exceção no servidor de produção
+quantas vezes quiser** — e o Sentry gratuito tem cota de eventos por mês. Ou
+põe a guarda de admin nela, ou apaga antes do merge. Apagar é melhor: o teste
+já cumpriu o papel.
+
+### O que está certo e eu não quero que mude
+
+Filtrar pelo **nome** do parâmetro em vez de tentar reconhecer o formato do
+valor. Regex que procura "coisa com jeito de telefone" erra dos dois lados:
+deixa passar o número escrito diferente e apaga o id do lead que parecia
+telefone. Nome de parâmetro é decisão nossa, não do usuário. Mantenha assim.
