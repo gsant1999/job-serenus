@@ -101,6 +101,58 @@
     } catch (e) { /* sem nuvem, continua funcionando como antes */ }
   }
 
+  // PERGUNTAR A NUVEM DE NOVO, NA HORA DA FALHA.
+  //
+  // Antes isto rodava UMA vez, quando a aba do Painel carregava. Parece
+  // suficiente e nao e: o hash e publicado por quem cotou primeiro, e nao ha
+  // nenhuma razao pra isso acontecer ANTES de a aba dos outros abrir. Quem
+  // deixou a aba aberta de manha ficava com o que a nuvem tinha as 8h — e
+  // quando o cotador falhava, mandava a pessoa ensinar de novo uma coisa que
+  // ja estava guardada no servidor havia dez minutos.
+  //
+  // `preferirNuvem`: quando o cotador falhou porque o hash guardado nao vale
+  // mais (deploy da Trindade), o local esta ERRADO e a nuvem e a fonte boa.
+  // Na carga da pagina e o contrario: o local ja foi provado nesta maquina.
+  function lerNuvem(preferirNuvem, aoTerminar) {
+    const pronto = typeof aoTerminar === 'function' ? aoTerminar : function () {};
+    let respondeu = false;
+    const terminar = (v) => { if (!respondeu) { respondeu = true; pronto(v); } };
+    try {
+      chrome.storage.local.get([CHAVE], (r) => {
+        const d = (r && r[CHAVE]) || null;
+        try {
+          chrome.runtime.sendMessage(
+            { type: 'cotador_nuvem_ler', origem: location.origin },
+            (resp) => {
+              void chrome.runtime.lastError;
+              const nuvem = (resp && resp.ok && resp.papeis) || null;
+              if (!nuvem) { terminar(false); return; }
+              const novos = {};
+              Object.keys(nuvem).forEach((k) => {
+                if (typeof nuvem[k] !== 'string') return;
+                const local = d && d[k] && d[k].hash;
+                if (!local || (preferirNuvem && local !== nuvem[k])) {
+                  novos[k] = { hash: nuvem[k], arvore: null };
+                }
+              });
+              if (!Object.keys(novos).length) { terminar(false); return; }
+              window.postMessage({ source: 'JOB_COTADOR_BRIDGE', tipo: 'restaurar',
+                                   dados: novos }, '*');
+              // Guarda o palpite: se funcionar, na proxima abertura ja vale
+              // como local e a nuvem nem precisa ser consultada.
+              try {
+                chrome.storage.local.set({ [CHAVE]: { ...(d || {}), ...novos } });
+              } catch (e2) {}
+              terminar(true);
+            });
+        } catch (e2) { terminar(false); }
+      });
+    } catch (e) { terminar(false); }
+    // Sem resposta em 4s, quem esta esperando segue a vida. Melhor uma
+    // tentativa que falha rapido que uma tela parada.
+    setTimeout(() => terminar(false), 4000);
+  }
+
   // Devolve o que foi aprendido em sessões anteriores assim que a página carrega.
   try {
     chrome.storage.local.get([CHAVE, CHAVE_MOD], (r) => {
@@ -114,29 +166,7 @@
         if (d[k] && d[k].hash) ultimoPublicado[k] = d[k].hash;
       });
       // Depois do local, pergunta à nuvem — e só usa o que falta aqui.
-      try {
-        chrome.runtime.sendMessage(
-          { type: 'cotador_nuvem_ler', origem: location.origin },
-          (resp) => {
-            void chrome.runtime.lastError;
-            const nuvem = (resp && resp.ok && resp.papeis) || null;
-            if (!nuvem) return;
-            const novos = {};
-            Object.keys(nuvem).forEach((k) => {
-              if (!(d && d[k] && d[k].hash) && typeof nuvem[k] === 'string') {
-                novos[k] = { hash: nuvem[k], arvore: null };
-              }
-            });
-            if (!Object.keys(novos).length) return;
-            window.postMessage({ source: 'JOB_COTADOR_BRIDGE', tipo: 'restaurar',
-                                 dados: novos }, '*');
-            // Guarda o palpite também: se ele funcionar, na próxima abertura
-            // já vale como local e a nuvem nem precisa ser consultada.
-            try {
-              chrome.storage.local.set({ [CHAVE]: { ...(d || {}), ...novos } });
-            } catch (e2) {}
-          });
-      } catch (e2) { /* sem nuvem, é o comportamento de antes */ }
+      lerNuvem(false);
     });
   } catch (e) { /* sem armazenamento a extensão aprende de novo, só isso */ }
 
@@ -144,6 +174,16 @@
     if (ev.source !== window) return;
     const d = ev.data;
     if (!d || d.source !== 'JOB_COTADOR') return;
+
+    // O cotador travou por falta de hash (ou com hash vencido) e esta pedindo
+    // pra consultar a nuvem AGORA, antes de mandar alguem ensinar de novo.
+    if (d.tipo === 'nuvem_agora') {
+      lerNuvem(!!d.preferirNuvem, (achou) => {
+        window.postMessage({ source: 'JOB_COTADOR_BRIDGE', tipo: 'nuvem_respondeu',
+                             reqId: d.reqId, achou: !!achou }, '*');
+      });
+      return;
+    }
 
     if (d.tipo === 'aprendeu' && d.dados) {
       try { chrome.storage.local.set({ [CHAVE]: d.dados }); } catch (e) { /* idem */ }

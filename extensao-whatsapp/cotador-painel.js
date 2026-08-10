@@ -304,8 +304,57 @@
     return arv.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, cotacaoId);
   }
 
-  async function acao(papel, caminho, corpo, cotacaoId) {
-    const aprendido = APRENDIDO[papel];
+  // PEDIR A NUVEM ANTES DE MANDAR ALGUEM ENSINAR.
+  //
+  // O `next-action` do Painel e o MESMO pros oito consultores — quem aprende
+  // um aprende todos, e a rota /api/whatsapp/cotador/hashes existe pra isso
+  // desde 07/08. O buraco era QUANDO a nuvem era consultada: uma vez so, na
+  // carga da aba. Quem deixou o Painel aberto de manha ficava com o que a
+  // nuvem tinha as 8h. Ai a Trindade publicava, o Guilherme reaprendia as 10h,
+  // a nuvem ficava certa — e a tela do Danilo continuava mandando ele "fazer
+  // uma cotacao na mao ate ver o preco". Ensinar de novo o que ja estava
+  // guardado no servidor havia dez minutos.
+  //
+  // Agora, quando falta hash (ou o que tinha venceu), o cotador PERGUNTA. Uma
+  // vez por papel por carga de pagina — sem esse limite, um papel que a nuvem
+  // tambem nao tem viraria uma consulta por chamada.
+  const _NUVEM_JA_PEDI = {};
+  let _nuvemReq = 0;
+  function pedirNuvem(papel, preferirNuvem) {
+    const chave = papel + (preferirNuvem ? ':vencido' : '');
+    if (_NUVEM_JA_PEDI[chave]) return Promise.resolve(false);
+    _NUVEM_JA_PEDI[chave] = true;
+    return new Promise((ok) => {
+      const reqId = 'nuvem-' + (++_nuvemReq);
+      let fim = false;
+      const acabar = (v) => {
+        if (fim) return;
+        fim = true;
+        window.removeEventListener('message', ouvir);
+        ok(v);
+      };
+      function ouvir(ev) {
+        if (ev.source !== window || !ev.data) return;
+        if (ev.data.source !== 'JOB_COTADOR_BRIDGE') return;
+        if (ev.data.tipo !== 'nuvem_respondeu' || ev.data.reqId !== reqId) return;
+        acabar(!!ev.data.achou);
+      }
+      window.addEventListener('message', ouvir);
+      window.postMessage({ source: 'JOB_COTADOR', tipo: 'nuvem_agora',
+                          reqId: reqId, preferirNuvem: !!preferirNuvem }, ORIGEM);
+      // A ponte tem os 4s dela; 5 aqui e a rede de seguranca de quem espera.
+      setTimeout(() => acabar(false), 5000);
+    });
+  }
+
+  async function acao(papel, caminho, corpo, cotacaoId, reTentou) {
+    let aprendido = APRENDIDO[papel];
+    if (!aprendido || !aprendido.hash) {
+      // A ponte responde escrevendo em APRENDIDO por 'restaurar' — por isso a
+      // releitura vem DEPOIS do await, e nao do valor de cima.
+      await pedirNuvem(papel, false);
+      aprendido = APRENDIDO[papel];
+    }
     if (!aprendido || !aprendido.hash) throw new Error('nao_aprendeu:' + papel);
     const cab = { 'accept': 'text/x-component', 'content-type': 'text/plain;charset=UTF-8',
                   'next-action': aprendido.hash };
@@ -341,11 +390,32 @@
       // a próxima cotação FEITA NA MÃO no Painel é observada e o hash volta
       // sozinho, sem ninguém mexer em código.
       if (resp.status === 404) {
+        const hashMorto = aprendido.hash;
         APRENDIDO[papel] = null;
         try {
           window.postMessage({ source: 'JOB_COTADOR', tipo: 'aprendeu',
                                dados: { ...APRENDIDO } }, ORIGEM);
         } catch (e) {}
+        // ANTES DE MANDAR ELE ENSINAR: alguem ja pode ter ensinado.
+        //
+        // Um deploy da Trindade mata o hash dos oito ao mesmo tempo. O
+        // primeiro que cotar na mao reaprende e publica; os outros sete nao
+        // tem por que repetir isso. Aqui a nuvem tem prioridade sobre o local
+        // — o local acabou de ser provado errado.
+        //
+        // A comparacao com `hashMorto` nao e detalhe: a publicacao da morte e
+        // a leitura acontecem no mesmo instante, e sem ela a nuvem devolveria
+        // o proprio hash morto de volta e a gente tentaria a mesma coisa duas
+        // vezes.
+        if (!reTentou) {
+          try {
+            await pedirNuvem(papel, true);
+            const novo = APRENDIDO[papel];
+            if (novo && novo.hash && novo.hash !== hashMorto) {
+              return await acao(papel, caminho, corpo, cotacaoId, true);
+            }
+          } catch (e) { /* sem nuvem, cai na mensagem de ensinar, como antes */ }
+        }
         const morto = new Error('hash_expirado:' + papel);
         morto.enviei = JSON.stringify(corpo).slice(0, 200);
         morto.responderam = pista;
