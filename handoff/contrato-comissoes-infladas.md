@@ -96,3 +96,51 @@ números não batem entre as telas — porque não batem mesmo.
 
 **Na frente de tudo.** Enquanto isto não subir, ele está decidindo em cima de
 número inflado — e decisão errada custa mais caro que qualquer tela feia.
+
+---
+
+## Revisão do diff — 10/08/2026
+
+As quatro consultas estão certas. **Faltou uma quinta, e ela quebra a conta na
+tela.**
+
+`repasse_pago`, logo abaixo do `tot_mes`, continuou sem filtro:
+
+```sql
+SELECT COALESCE(SUM(valor),0) v FROM parcelas
+WHERE competencia=? AND status='Pago ao corretor'
+```
+
+O DRE faz `repasse_a_pagar = tot_mes['consultor'] - repasse_pago`. Agora
+`tot_mes` **exclui** as parcelas de proposta estornada e `repasse_pago` **não**
+— então uma parcela já paga de uma proposta que foi estornada depois entra só
+de um lado da subtração. O "a pagar" encolhe, e com volume suficiente **fica
+negativo**. A linha do DRE passa a mostrar `(R$ X pago · R$ -Y a pagar)`, que
+não existe.
+
+Filtrar um lado e esquecer o outro é pior que não filtrar nenhum: antes os dois
+estavam inflados na mesma proporção e a subtração ainda fechava.
+
+**Aplique o mesmo `JOIN` + filtro nele.** É o único que falta.
+
+### Um detalhe menor, não bloqueia
+
+Nas três primeiras consultas ficaram as duas condições:
+
+```sql
+AND p.status NOT IN ('Pago ao corretor')
+AND p.status <> 'Cancelada / Estornada'
+```
+
+Funciona. Se quiser deixar mais legível, vira
+`AND p.status NOT IN ('Pago ao corretor', 'Cancelada / Estornada')`. Não é
+defeito — só ruído.
+
+### O que eu confirmei que NÃO tem o mesmo problema
+
+O painel (`m['fc_*']`, `m['a_receber']`, `m['pago_total']`) já faz `JOIN
+propostas` com `status_operacional = 'Emitida/Ativa'`. É outra guarda, mas
+segura. **Fica um resíduo pra depois:** proposta estornada pode continuar
+marcada como Emitida/Ativa, e aí o painel conta o que o Financeiro passou a
+excluir. Não é urgente — o número do painel é saldo, não competência — mas é a
+próxima coisa a conferir quando este assunto fechar.
