@@ -3846,6 +3846,20 @@
         linha('Conversa aberta', (ponte && ponte.chat_id) ? ponte.chat_id : 'nenhuma', !(ponte && ponte.chat_id)) +
         linha('Áudios na conversa', String((ponte && ponte.audios && ponte.audios.length) || 0)) +
         linha('Transcrições em memória', String(TR.cache.size)) +
+        // MEMORIA DA ABA. "Codigo de erro 5" no Chrome e o renderizador
+        // morrendo, e a causa mais comum e memoria. Sem numero, "foi a
+        // extensao?" e opiniao — a minha inclusive. O teto que o Chrome da a
+        // uma aba costuma ficar perto de 4 GB; chegando la, ela morre com essa
+        // tela e sem log nenhum.
+        (function () {
+          const m = (window.performance && window.performance.memory) || null;
+          if (!m) return '';
+          const mb = (v) => Math.round((v || 0) / 1048576) + ' MB';
+          const uso = m.usedJSHeapSize || 0, teto = m.jsHeapSizeLimit || 0;
+          const perto = teto && uso > teto * 0.75;
+          return linha('Memória desta aba', mb(uso) + ' de ' + mb(teto) +
+                       (perto ? ' — perto do teto, dê F5' : ''), !!perto);
+        })() +
         linha('Botões injetados', String(document.querySelectorAll('.job-tr-slot').length)) +
         // Mais de 1 cópia = a página acumulou biblioteca e o envio fica lento.
         // Marcado como ruim de propósito: é acionável (F5 resolve).
