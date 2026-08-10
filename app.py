@@ -64,6 +64,33 @@ except ImportError:
     HAS_BOTO3 = False
 
 # ─── CONFIGURAÇÃO DO SENTRY (REDE DE SEGURANÇA) ───────────────────────────
+import re as _re
+_SEGREDOS_NA_URL = ('telefone', 'celular', 'whatsapp', 'cpf', 'cnpj',
+                    'email', 'token', 'nome', 'senha')
+
+_RE_URL_PARAM = _re.compile(
+    r'([?&][^&=\s#]*(?:' + '|'.join(_SEGREDOS_NA_URL) + r')[^&=\s#]*=)[^&\s#]*',
+    _re.I)
+_RE_URL_Q = _re.compile(r'([?&]q=)[^&\s#]*', _re.I)
+_RE_URL_COT = _re.compile(r'/c/[A-Za-z0-9_\-]+')
+
+def _limpar_url(v):
+    if not v:
+        return v
+    added_q = False
+    if isinstance(v, (bytes, bytearray)):
+        try: v = v.decode('utf-8', 'replace')
+        except Exception: return '[FILTRADO]'
+    else:
+        v = str(v)
+    if '=' in v and '?' not in v and '/' not in v:
+        v = '?' + v
+        added_q = True
+    v = _RE_URL_PARAM.sub(lambda m: m.group(1) + '[FILTRADO]', v)
+    v = _RE_URL_Q.sub(lambda m: m.group(1) + '[FILTRADO]', v)
+    v = _RE_URL_COT.sub('/c/[FILTRADO]', v)
+    return v.lstrip('?') if added_q else v
+
 def _sentry_before_send(event, hint):
     """Filtra PII e credenciais antes de enviar o erro para o Sentry."""
     if 'request' in event:
@@ -76,6 +103,11 @@ def _sentry_before_send(event, hint):
             for k in list(headers.keys()):
                 if k.lower() in ('authorization', 'x-api-key', 'x-extension-key'):
                     headers[k] = '[FILTRADO]'
+                    
+        # 3. Limpar segredos na URL
+        ev_req = event['request']
+        ev_req['query_string'] = _limpar_url(ev_req.get('query_string'))
+        ev_req['url'] = _limpar_url(ev_req.get('url'))
     return event
 
 _sentry_dsn = os.environ.get('SENTRY_DSN')
@@ -39539,6 +39571,7 @@ def crm_lead_e_lead(lid):
         return jsonify({"ok": False, "erro": "erro_interno"}), 500
 
     return jsonify({"ok": True})
+
 
 
 if __name__ == '__main__':
