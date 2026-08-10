@@ -11,6 +11,70 @@
 
 ---
 
+## ⚠️ PARE — o item 1 mudou. Leia antes de tocar no `startCommand`
+
+**Escrito em 09/08/2026, depois que as métricas do Railway chegaram.**
+Se você já subiu o gunicorn, reverta para `python3 -u app.py` e leia isto.
+
+Eu mandei `gunicorn -w 3`, depois corrigi para `-w 2`. **Com o dado na mão, os
+dois estão errados por enquanto.**
+
+O que o painel do Railway mostra, medido em 30 dias:
+
+| | |
+|---|---|
+| CPU da aplicação | praticamente **zero** o mês inteiro |
+| Memória | oscila de **0,3 a 2 GB**, com **picos de 4 a 5 GB** |
+| Custo | RAM é US$ 3,75 de US$ 4,93 — **CPU é US$ 0,26** |
+
+**Cada worker carrega o app inteiro.** Com um processo, um pico de 5 GB já é o
+limite do que a máquina aguenta. Com dois, dois picos simultâneos derrubam o
+serviço por falta de memória — e aí o remédio causou a doença, em produção,
+com o Guilherme vendendo.
+
+E o motivo original de querer workers **não se sustenta nos números**: eu disse
+que "uma requisição pesada trava todo mundo". Trava por CPU? Não — a CPU está
+em zero. O que existe aqui é **pressão de memória**, e mais processos pioram
+isso.
+
+### O que fazer no lugar, nesta ordem
+
+**1. Descobrir de onde vem o pico. Isto primeiro, e é diagnóstico, não conserto.**
+
+O suspeito tem nome e endereço: `api_whatsapp_analisar` aceita, na mesma
+chamada, PDF de até 20 MB em base64 (`_CLAUDE_MAX_DOCUMENTOS`), imagem de
+7,5 MB (`_CLAUDE_MAX_IMAGENS`) e 60 áudios. Tudo em memória ao mesmo tempo —
+e base64 ocupa ~33% a mais que o arquivo. Uma análise com anexo pesado explica
+um pico de gigabytes sozinha.
+
+Como confirmar sem adivinhar: registre no log o `len(request.data)` e a memória
+do processo (`resource.getrusage(resource.RUSAGE_SELF).ru_maxrss`) na entrada e
+na saída dessa rota. Uma semana de log responde se o pico é ela.
+
+**2. Se for pico de requisição — e não vazamento — recicle o worker.**
+
+`--max-requests 200 --max-requests-jitter 50` faz o gunicorn trocar o processo
+de tempos em tempos e devolver a memória ao sistema. **Isso resolve mais que
+aumentar worker**, e é o padrão para aplicação Python que segura memória.
+
+**3. Só então `-w 2`**, com a memória sob observação por uma semana.
+
+### O que continua valendo do item original
+
+Sair do `app.run()` **continua certo** — é servidor de desenvolvimento e não
+deve rodar em produção. O que mudou é o **número de workers** e a **ordem**:
+diagnóstico antes de multiplicar processo.
+
+Quando subir, suba com `-w 1 --max-requests 200 --max-requests-jitter 50`
+primeiro. Um worker do gunicorn já é melhor que o `app.run()` (reinício
+gracioso, timeout, gestão de processo) e **não aumenta a memória**. Depois a
+gente cresce com dado.
+
+A armadilha dos três workers (seção abaixo) continua valendo integralmente para
+qualquer número maior que 1.
+
+---
+
 ## 1. Produção sai do servidor de desenvolvimento
 
 ### O que fazer

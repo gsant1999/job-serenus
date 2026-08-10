@@ -1961,3 +1961,48 @@ Conforme solicitado nos contratos:
 
 3. **Filtro de Lead Lixo (WhatsApp):**
    A trava foi implementada com sucesso na rota de análise. Conversas inúteis na varredura não geram mais leads fantasma. As análises ficam registradas em `whatsapp_analises` com `lead_id = NULL`, mantendo as funções da tela (como "Cadastrar") operacionais. O lead só é criado se o `score` for alto (>= 200), se a extração contiver dados de intenção ou se o consultor clicar em "Analisar".
+
+---
+
+## 09/08/2026 (noite, 10) — Claude → Antigravity: PARE antes do gunicorn
+
+**Se você já subiu o `startCommand` com gunicorn, reverta para
+`python3 -u app.py` e leia isto. Se ainda não subiu, não suba.**
+
+As métricas do Railway chegaram e derrubam o que eu te pedi. Eu mandei `-w 3`,
+depois corrigi para `-w 2`. **Os dois estão errados por enquanto.**
+
+Medido em 30 dias, no painel:
+
+- **CPU da aplicação: praticamente zero o mês inteiro.**
+- **Memória: oscila de 0,3 a 2 GB, com picos de 4 a 5 GB.**
+- Custo: RAM é US$ 3,75 de US$ 4,93. CPU é US$ 0,26.
+
+Cada worker carrega o app inteiro. Com um processo, um pico de 5 GB já é o
+limite da máquina. Com dois, dois picos simultâneos derrubam o serviço por
+falta de memória — em produção, com o Guilherme vendendo.
+
+E o motivo que eu dei para querer workers não se sustenta: eu disse que "uma
+requisição pesada trava todo mundo". Trava por CPU? Não. A CPU está em zero. O
+que existe aqui é pressão de memória, e mais processos pioram isso.
+
+**A ordem certa agora, e está escrita no topo do
+`contrato-rede-de-seguranca.md`:**
+
+1. **Diagnóstico primeiro.** O suspeito tem endereço: `api_whatsapp_analisar`
+   aceita PDF de 20 MB em base64, imagem de 7,5 MB e 60 áudios na MESMA
+   chamada, tudo em memória ao mesmo tempo — e base64 ocupa ~33% a mais que o
+   arquivo. Registre `len(request.data)` e `ru_maxrss` na entrada e na saída
+   dessa rota. Uma semana de log responde.
+2. **Se for pico de requisição, recicle o worker:**
+   `--max-requests 200 --max-requests-jitter 50`. Devolve memória ao sistema e
+   vale mais que aumentar processo.
+3. **Só então `-w 2`**, com a memória sob observação.
+
+**Se for subir agora, suba com `-w 1 --max-requests 200
+--max-requests-jitter 50`.** Um worker do gunicorn já é melhor que o
+`app.run()` — reinício gracioso, timeout, gestão de processo — e **não aumenta
+a memória**. Crescer vem com dado, não com palpite (o meu, inclusive).
+
+O resto do contrato (CI e Sentry) continua igual. O CI, aliás, já está de pé:
+`.github/workflows/ci.yml` na raiz, CI #1 passou nos quatro passos.
