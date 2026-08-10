@@ -3864,6 +3864,7 @@
           '<button class="job-cnpj-btn" id="dev-transcrever">Transcrever esta conversa agora</button>' +
           '<button class="job-cnpj-btn" id="dev-varrer">Rodar a varredura agora</button>' +
           '<button class="job-cnpj-btn" id="dev-repintar">Repintar etiquetas</button>' +
+          '<button class="job-cnpj-btn" id="dev-bruto">Copiar dados brutos dos planos</button>' +
         '</div>' +
         '<div class="job-dev-saida" id="dev-saida"></div>' +
       '</div>');
@@ -3890,6 +3891,40 @@
     });
     btn('dev-repintar', 'repintar', async () => {
       trInjetar(); return 'slots=' + document.querySelectorAll('.job-tr-slot').length;
+    });
+    // OS DADOS CRUS, DO JEITO QUE O PAINEL MANDOU.
+    //
+    // Hoje eu descubro que um campo existe do pior jeito: alguem repara que a
+    // tela do Painel mostra "73 Hospitais" e a nossa nao, e ai eu adivinho o
+    // nome do campo. Adivinhei duas vezes e errei as duas — "Ambulatorial"
+    // virou "Apartamento" e a coparticipacao virou palavra minha.
+    //
+    // Isto acaba com o chute: copia a resposta INTEIRA de um plano, sem
+    // recorte nenhum, do jeito que a resposta deles chegou. O que aparece aqui
+    // e o que existe. O que nao aparece, nao existe — e ai a conversa e com a
+    // Trindade, nao comigo.
+    //
+    // Nao vai preco nem nome de cliente: sao os planos da tela de escolha,
+    // antes de qualquer cotacao. Mesmo assim a saida e o texto cru, entao ela
+    // fica no diagnostico e nao num botao que qualquer um encosta.
+    btn('dev-bruto', 'bruto', async () => {
+      const pls = (_cot && _cot.planos) || [];
+      if (!pls.length) {
+        return 'Nenhum plano carregado. Abra Cotar agora, escolha cidade e ' +
+               'operadora ate a lista de planos aparecer, e clique aqui de novo.';
+      }
+      const txt = JSON.stringify({
+        operadora: (_cot.operadoraAtual || {}).nome || '',
+        cidade: _cot.cidade || '', modalidade: _cot.modalidade || '',
+        quantos: pls.length, planos: pls,
+      }, null, 2);
+      try { await navigator.clipboard.writeText(txt); } catch (e) {
+        return 'Nao consegui copiar (' + ((e && e.message) || e) + '). ' +
+               'Tamanho: ' + txt.length + ' caracteres.';
+      }
+      return 'Copiado: ' + pls.length + ' plano(s) da ' +
+             ((_cot.operadoraAtual || {}).nome || 'operadora') +
+             ', ' + txt.length + ' caracteres. Cole aqui na conversa.';
     });
 
     // TEMPO DAS IDAS AO JOB. Mediana e PIOR caso, nunca média: dez chamadas de
