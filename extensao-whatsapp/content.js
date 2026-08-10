@@ -2617,10 +2617,36 @@
         continue;
       }
       if (!_trLinhaEhAudio(row)) {
-        // Nao e audio e o documento ja esta resolvido: nao ha mais nada pra
-        // fazer nesta linha enquanto ela for esta mensagem. E o caso da imensa
-        // maioria das linhas de uma conversa — texto puro.
-        if (!pendente) row._jobPronta = id;
+        // ERA AQUI QUE O "LER DOCUMENTO" SUMIA.
+        //
+        // Linha que nao e audio e nao tem bloco de documento era dada por
+        // PRONTA na primeira passada — e linha pronta nunca mais e reavaliada
+        // (essa marca existe por desempenho, e o desempenho depende dela).
+        //
+        // So que a bolha de PDF do WhatsApp nao nasce pronta: a miniatura, o
+        // canvas e o icone chegam depois, assincronos. Quando o varredor passa
+        // no instante em que a linha aparece, `_docAncora` nao acha nada,
+        // porque ainda nao HA nada — e a linha e carimbada como texto puro pra
+        // sempre. O botao nunca aparece, sem erro nenhum no console.
+        //
+        // Isso tambem explica por que parecia intermitente ("antes tinha"):
+        // dependia de a passada cair antes ou depois da miniatura pintar.
+        //
+        // Agora a linha sem documento ganha algumas passadas de tolerancia
+        // antes de virar definitiva. Se em ~6 rodadas nao apareceu arquivo
+        // nenhum, e texto mesmo e a marca vale — o custo extra fica so nos
+        // primeiros segundos de vida de cada linha, nao na conversa inteira.
+        if (!pendente) {
+          const jaTemDoc = !!row.querySelector('.job-doc-slot');
+          if (jaTemDoc) {
+            row._jobPronta = id;
+          } else {
+            row._jobDocTent = (row._jobDocTent === undefined || row._jobIdTent !== id)
+              ? 1 : row._jobDocTent + 1;
+            row._jobIdTent = id;
+            if (row._jobDocTent > 6) row._jobPronta = id;
+          }
+        }
         continue;
       }
       const bolha = _trBolha(row);
