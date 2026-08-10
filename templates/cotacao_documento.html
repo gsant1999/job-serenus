@@ -35,6 +35,22 @@
 
   table.doc { border-collapse:collapse; width:100%; }
   table.doc td { padding:9px 12px; font-size:12.5px; border-bottom:1px solid #eef0f3; white-space:nowrap; }
+  /* A TABELA CABE O CONTEUDO, em vez de esticar ate a borda da folha.
+     Com `width:100%` e ninguem dizendo quem estica, as colunas de plano
+     dividiam o espaco vago em partes iguais: a moldura do destaque saia larga
+     e quase vazia, com o texto perdido no meio dela. Moldura serve pra abracar
+     conteudo.
+     `width:auto` + `margin:auto` deixa cada coluna do tamanho do que ela tem e
+     centraliza o conjunto. Estrutura, formato e ordem das linhas: identicos.
+     Percentual pequeno na celula (`width:1%`) NAO serve aqui — em tabela de
+     layout automatico ele resolve contra a largura da propria tabela, que
+     depende das celulas, e o navegador estourava pra 15.000px. Medido. */
+  table.doc { width:auto; margin-left:auto; margin-right:auto; max-width:100%;
+              min-width:min(100%, 620px); }
+  table.doc td.val, table.doc td.op-name { min-width:150px; }
+  /* O piso de 620px existe pra tabela de dois planos nao ficar orfa no meio de
+     uma folha larga: hugging demais vira ilha. Com muitos planos o `auto`
+     manda e ela cresce sozinha. */
   table.doc td.lbl { color:#3a3a44; text-align:left; }
   table.doc td.val { text-align:center; color:#2b2b33; font-variant-numeric:tabular-nums; }
 
@@ -86,7 +102,6 @@
      desalinha a tabela inteira quando o destaque liga. */
   #documento.destacar tr.head td.val {
     outline:2px solid var(--c); outline-offset:-3px; border-radius:8px;
-    background:color-mix(in srgb, var(--c) 8%, transparent);
   }
   /* O RETANGULO E A COLUNA INTEIRA, de Modalidade ate Total — nao uma caixinha
      por celula. E assim que o olho compara: ele desce a coluna do plano, e a
@@ -105,8 +120,7 @@
   /* No cartao vertical a coluna e o cartao inteiro: a moldura fecha nele. */
   #documento.destacar .vcard { border:3px solid var(--c); }
   #documento.destacar .vcard .vtit {
-    outline:2px solid var(--c); outline-offset:-3px; border-radius:8px;
-    background:color-mix(in srgb, var(--c) 8%, transparent); padding:6px 8px;
+    outline:2px solid var(--c); outline-offset:-3px; border-radius:8px; padding:6px 8px;
   }
   #documento.destacar .vcard .vpn { color:var(--c); }
   #documento.destacar .vcard .vtot { color:var(--c); }
@@ -311,11 +325,42 @@ async function enviarFeedbackCotacao(tipo, btn) {
 function copiarLink() {
   var url = window.location.origin + '/c/{{ cot.token }}';
   if (navigator.clipboard) {
-    navigator.clipboard.writeText(url).then(function(){ alert('Link copiado:\n' + url); },
+    navigator.clipboard.writeText(url).then(function(){ _aviso('Link copiado. Cole na conversa do cliente.'); },
       function(){ window.prompt('Copie o link da cotação:', url); });
   } else { window.prompt('Copie o link da cotação:', url); }
 }
 function _fmtBR(n){ return (n||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+// AVISO NA TELA, NAO CAIXA DO NAVEGADOR.
+//
+// A regra de UX do JOB e explicita: nada de `alert`. E aqui ela tem um motivo
+// pratico alem do estetico — a caixa do navegador ANUNCIA O ENDERECO
+// ("job-serenus-production.up.railway.app diz"), num documento que o corretor
+// abre na frente do cliente. Ela cobre a tela, exige um clique pra sumir e
+// interrompe o que ele estava fazendo.
+//
+// Isto aparece embaixo, some sozinho, e nao rouba o foco de nada.
+function _aviso(txt, ruim) {
+  var t = document.getElementById('doc-toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'doc-toast';
+    t.style.cssText = 'position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(10px);' +
+      'z-index:9999;max-width:min(520px,92vw);padding:12px 18px;border-radius:12px;' +
+      'font:600 13px/1.45 Inter,system-ui,sans-serif;color:#f0f0f4;background:#1c1c24;' +
+      'border:1px solid rgba(255,255,255,.14);box-shadow:0 12px 40px rgba(0,0,0,.45);' +
+      'opacity:0;transition:opacity .16s ease,transform .16s ease;pointer-events:none;';
+    document.body.appendChild(t);
+  }
+  t.textContent = txt;
+  t.style.borderColor = ruim ? 'rgba(244,63,124,.5)' : 'rgba(31,216,164,.45)';
+  requestAnimationFrame(function () {
+    t.style.opacity = '1'; t.style.transform = 'translateX(-50%) translateY(0)';
+  });
+  clearTimeout(t._t);
+  t._t = setTimeout(function () {
+    t.style.opacity = '0'; t.style.transform = 'translateX(-50%) translateY(10px)';
+  }, ruim ? 6000 : 3200);
+}
 function toggleEditar() {
   var doc = document.getElementById('documento');
   var on = doc.classList.toggle('editando');
@@ -337,12 +382,12 @@ function salvarAjustes(cid) {
     ajustes[p][f] = _numBR(c.textContent);
   });
   fetch('/cotacao/'+cid+'/ajustar', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ajustes:ajustes})})
-    .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); else alert('Erro: '+(d.erro||'')); })
-    .catch(()=>alert('Erro de conexão.'));
+    .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); else _aviso('Não consegui corrigir: '+(d.erro||'motivo desconhecido'), true); })
+    .catch(()=>_aviso('Sem conexão com o JOB. Tente de novo.', true));
 }
 function copiarLegenda() {
   var t = document.getElementById('legenda-txt');
-  if (navigator.clipboard) navigator.clipboard.writeText(t.value).then(function(){ alert('Legenda copiada! Cole no WhatsApp.'); }, function(){ t.style.left='10px'; t.select(); });
+  if (navigator.clipboard) navigator.clipboard.writeText(t.value).then(function(){ _aviso('Legenda copiada. Cole no WhatsApp.'); }, function(){ t.style.left='10px'; t.select(); });
   else { t.style.left='10px'; t.select(); document.execCommand('copy'); }
 }
 
@@ -417,7 +462,7 @@ document.getElementById('sel-legenda').addEventListener('change', function() {
 function copiarLegendaEditavel() {
   var txt = document.getElementById('legenda-editavel').value;
   if (navigator.clipboard) {
-    navigator.clipboard.writeText(txt).then(function(){ alert('Legenda copiada!'); }).catch(function(){ _copiarFallback(txt); });
+    navigator.clipboard.writeText(txt).then(function(){ _aviso('Legenda copiada.'); }).catch(function(){ _copiarFallback(txt); });
   } else { _copiarFallback(txt); }
 }
 function _copiarFallback(txt) {
@@ -431,13 +476,13 @@ async function copiarImagem() {
     canvas.toBlob(async function(blob) {
       try {
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-        alert('Imagem copiada! Agora é só colar (Ctrl/Cmd+V) no WhatsApp.');
+        _aviso('Imagem copiada. Cole com Ctrl/Cmd+V no WhatsApp.');
       } catch (e) {
         var a = document.createElement('a'); a.download = 'cotacao.png'; a.href = canvas.toDataURL('image/png'); a.click();
-        alert('Seu navegador não permite copiar imagem direto; baixei o arquivo.');
+        _aviso('Seu navegador não copia imagem direto — baixei o arquivo.');
       }
     });
-  } catch (e) { alert('Não foi possível gerar a imagem: ' + e); }
+  } catch (e) { _aviso('Não consegui gerar a imagem. Use Baixar ou PDF.', true); }
 }
 function togglePlanoUnico() {
   var p = document.getElementById('painel-plano-unico');
@@ -460,13 +505,13 @@ async function copiarImagemPlano(idx) {
     canvas.toBlob(async function(blob) {
       try {
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-        alert('Imagem do plano copiada! Agora é só colar (Ctrl/Cmd+V) no WhatsApp.');
+        _aviso('Imagem do plano copiada. Cole com Ctrl/Cmd+V no WhatsApp.');
       } catch (e) {
         var a = document.createElement('a'); a.download = 'cotacao-plano.png'; a.href = canvas.toDataURL('image/png'); a.click();
-        alert('Seu navegador não permite copiar imagem direto; baixei o arquivo.');
+        _aviso('Seu navegador não copia imagem direto — baixei o arquivo.');
       }
     });
-  } catch (e) { alert('Não foi possível gerar a imagem: ' + e); }
+  } catch (e) { _aviso('Não consegui gerar a imagem. Use Baixar ou PDF.', true); }
   finally { escondidos.forEach(function(par){ par[0].style.display = par[1]; }); }
 }
 function baixarImagem() {
@@ -476,7 +521,7 @@ function baixarImagem() {
     link.download = 'cotacao-{{ (cot.cliente_nome or cot.titulo or "serenus")|replace(" ", "_") }}.png';
     link.href = canvas.toDataURL('image/png');
     link.click();
-  }).catch(function(e) { alert('Não foi possível gerar a imagem: ' + e); });
+  }).catch(function(e) { _aviso('Não consegui gerar a imagem. Use Baixar ou PDF.', true); });
 }
 
 {% if publico %}
