@@ -5700,6 +5700,26 @@
     if (prod) et.push({ k: 'produto', t: prod, c: '' });
     const ent = _texto(p && p.entidade);
     if (ent) et.push({ k: 'entidade', t: ent, c: '' });
+    // O QUE O PAINEL MANDAVA E A GENTE ENGOLIA.
+    //
+    // A resposta deles traz `tabela.nome` e `administradora` em toda linha, e
+    // `planosDaOperadora` devolve o array cru — ou seja, os dois SEMPRE
+    // estiveram aqui dentro. So que `_cotEtiquetas` nunca leu nenhum dos dois,
+    // entao morriam no caminho entre o Painel e a tela.
+    //
+    // Foi isso que produziu a gaveta da Hapvida com quatro linhas escritas
+    // "Smart UP": os quatro tem o mesmo nome de plano e tabelas diferentes, e a
+    // tabela era justamente o campo que nao aparecia. O nome do plano nao e a
+    // unica identidade dele — e nas operadoras que reaproveitam nome, nao e nem
+    // a principal.
+    //
+    // Entram no fim de proposito: sao desempate, nao manchete. Quando as quatro
+    // linhas tem a mesma tabela, o filtro de "so o que muda" tira isso da tela
+    // sozinho e nada disso aparece.
+    const tab = _texto(p && p.tabela) || ((p && p.tabela) || {}).nome;
+    if (tab) et.push({ k: 'tabela', t: tab, c: '' });
+    const adm = _texto(p && p.administradora);
+    if (adm) et.push({ k: 'administradora', t: adm, c: '' });
     return et;
   }
 
@@ -7092,13 +7112,10 @@
     const mudam = _cotDiferencas(lista);
     return lista.map((p) => {
       let dif = mudam ? _cotEtiquetas(p).filter((e) => mudam[e.k]) : [];
-      // Nada difere nas etiquetas e mesmo assim os precos sao outros: a
-      // diferenca existe e esta num lugar que a gente nao mostra. O nome da
-      // tabela e o que sobra — pior que uma etiqueta boa, muito melhor que
-      // quatro linhas identicas.
+      // Se ainda assim nada difere, a diferenca existe e esta num campo que
+      // nem o Painel manda. Dizer isso e melhor que quatro linhas identicas.
       if (mudam && !dif.length) {
-        const tn = ((p && p.tabela) || {}).nome || (p && p.tabelaNome) || '';
-        if (tn) dif = [{ k: 'tabela', t: tn, c: '' }];
+        dif = [{ k: 'x', t: 'condições diferentes', c: '' }];
       }
       return '<div class="job-cot-res' + (p.total == null ? ' sem' : '') + '">' +
         '<div class="job-cot-res-n">' + esc(_cotNomePlano(p)) +
