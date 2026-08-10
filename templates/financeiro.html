@@ -4,7 +4,13 @@
 {% block head %}
 <style>
 .fin-tabs { display:flex; gap:8px; margin-bottom:20px; flex-wrap:wrap; }
-.fin-tab { padding:9px 18px; border-radius:10px; background:var(--panel-2); border:1px solid var(--borda); color:var(--cinza); cursor:pointer; font-size:13px; font-weight:500; }
+.fin-tab { padding:9px 18px; border-radius:10px; background:var(--panel-2); border:1px solid var(--borda);
+            color:var(--cinza); cursor:pointer; font-size:13px; font-weight:500;
+            font-family:inherit; transition:background .14s ease, border-color .14s ease, color .14s ease; }
+.fin-tab:hover { color:var(--texto); border-color:var(--borda-2); }
+/* Aba e botao, entao ganha foco pelo teclado — e foco tem que aparecer. */
+.fin-tab:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+@media (prefers-reduced-motion:reduce) { .fin-tab { transition:none; } }
 .fin-tab.active { background:rgba(31,216,164,.12); border-color:rgba(31,216,164,.4); color:var(--teal); }
 .fin-pane { display:none; }
 .fin-pane.active { display:block; }
@@ -12,9 +18,36 @@
 .kpi { background:var(--panel-2); border:1px solid var(--borda); border-radius:12px; padding:16px 18px; }
 .kpi .lbl { font-size:10.5px; color:var(--cinza-2); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; }
 .kpi .val { font-family:'Sora',sans-serif; font-size:20px; font-weight:700; }
+/* ── O topo: um numero manda, cinco apoiam ─────────────────────────────── */
+.fin-topo { display:grid; grid-template-columns:minmax(240px,320px) 1fr; gap:14px; margin-bottom:20px; align-items:stretch; }
+@media (max-width:820px) { .fin-topo { grid-template-columns:1fr; } }
+.fin-saldo { border-radius:14px; padding:18px 20px; border:1px solid var(--borda);
+             background:var(--panel-2); display:flex; flex-direction:column; justify-content:center; }
+.fin-saldo.ok   { border-color:rgba(31,216,164,.30); }
+.fin-saldo.ruim { border-color:rgba(244,63,124,.30); }
+.fin-saldo .lbl { font-size:10.5px; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
+                  color:var(--cinza-2); }
+.fin-saldo .num { font-family:'Sora',sans-serif; font-size:34px; font-weight:700; line-height:1.12;
+                  letter-spacing:-.025em; font-variant-numeric:tabular-nums; margin-top:4px; }
+.fin-saldo.ok .num   { color:var(--verde); }
+.fin-saldo.ruim .num { color:var(--rosa); }
+.fin-saldo .pe { font-size:11.5px; color:var(--cinza-2); margin-top:6px; line-height:1.4; }
+.fin-mini { border:1px solid var(--borda); border-radius:14px; background:var(--panel-2);
+            padding:6px 16px; display:flex; flex-direction:column; justify-content:center; }
+.fin-mini .m { display:flex; align-items:baseline; justify-content:space-between; gap:14px;
+               padding:8px 0; border-top:1px solid var(--borda); }
+.fin-mini .m:first-child { border-top:none; }
+.fin-mini .m span { font-size:12px; color:var(--cinza); }
+.fin-mini .m b { font-size:13.5px; font-weight:650; font-variant-numeric:tabular-nums; }
 .tbl { width:100%; border-collapse:collapse; }
 .tbl th { text-align:left; font-size:10.5px; color:var(--cinza-2); text-transform:uppercase; letter-spacing:.4px; padding:10px 12px; border-bottom:1px solid var(--borda-2); white-space:nowrap; }
 .tbl td { padding:11px 12px; border-bottom:1px solid var(--borda); font-size:13px; }
+/* DINHEIRO EM COLUNA. Alinhado a direita e com digito de largura fixa: sem
+   isso a virgula dança de linha pra linha e comparar dois valores vira
+   leitura algarismo por algarismo. */
+.tbl td.td-valor, .tbl td.pos, .tbl td.neg { font-variant-numeric:tabular-nums; }
+.tbl td.td-valor { text-align:right; }
+.tbl th.th-valor { text-align:right; }
 .tbl tr:last-child td { border-bottom:none; }
 /* A tabela de custos tem muitas colunas (com botões que não podem quebrar
    linha) — sem isso ela empurrava a PÁGINA INTEIRA pro lado (sidebar junto),
@@ -72,22 +105,35 @@
 
 <div class="page" style="max-width:1080px;">
 
-  <div class="kpi-row">
-    <div class="kpi"><div class="lbl">A receber (operadoras)</div><div class="val pos">{{ receber_mes|moeda  }}</div></div>
-    <div class="kpi"><div class="lbl">A pagar (consultores)</div><div class="val neg">{{ pagar_consultor|moeda  }}</div></div>
-    <div class="kpi"><div class="lbl">Custos</div><div class="val neg">{{ total_custos_puro|moeda  }}</div></div>
-    <div class="kpi"><div class="lbl">Fixos</div><div class="val neg">{{ total_fixos|moeda  }}</div></div>
-    <div class="kpi"><div class="lbl">Aportes</div><div class="val pos">{{ total_aportes|moeda  }}</div></div>
-    <div class="kpi"><div class="lbl">Saldo do mês</div><div class="val {{ 'pos' if saldo>=0 else 'neg' }}">{{ saldo|moeda  }}</div></div>
+  {# SEIS NUMEROS DO MESMO TAMANHO NAO SAO SEIS RESPOSTAS — sao seis perguntas.
+     Todos em 20px, todos coloridos, cada um puxando o olho pro seu lado: a
+     tela abria e nao dizia por onde comecar.
+     O saldo e a resposta; os outros cinco sao a conta que leva ate ele. Entao o
+     saldo sai da fileira e vira o numero da tela, e os cinco viram uma linha de
+     apoio, menores e em cinza. Sem inventar dado novo: e o mesmo conteudo, com
+     peso diferente. #}
+  <div class="fin-topo">
+    <div class="fin-saldo {{ 'ok' if saldo>=0 else 'ruim' }}">
+      <div class="lbl">Saldo do mês</div>
+      <div class="num">{{ saldo|moeda }}</div>
+      <div class="pe">{{ 'Sobra depois de tudo que entra e sai.' if saldo>=0 else 'Falta este valor para fechar o mês.' }}</div>
+    </div>
+    <div class="fin-mini">
+      <div class="m"><span>A receber (operadoras)</span><b class="pos">{{ receber_mes|moeda }}</b></div>
+      <div class="m"><span>A pagar (consultores)</span><b class="neg">{{ pagar_consultor|moeda }}</b></div>
+      <div class="m"><span>Custos</span><b class="neg">{{ total_custos_puro|moeda }}</b></div>
+      <div class="m"><span>Fixos</span><b class="neg">{{ total_fixos|moeda }}</b></div>
+      <div class="m"><span>Aportes</span><b class="pos">{{ total_aportes|moeda }}</b></div>
+    </div>
   </div>
 
   <div class="fin-tabs">
-    <div class="fin-tab active" data-pane="futuras" onclick="aba('futuras')">Comissões futuras</div>
-    <div class="fin-tab" data-pane="custos" onclick="aba('custos')">Custos</div>
-    <div class="fin-tab" data-pane="aporte" onclick="aba('aporte')">Aporte / Reembolso de sócios</div>
-    <div class="fin-tab" data-pane="fixo" onclick="aba('fixo')">Fixo dos consultores</div>
-    <div class="fin-tab" data-pane="meios" onclick="aba('meios')">Meios de pagamento</div>
-    <div class="fin-tab" data-pane="dre" onclick="aba('dre')">DRE</div>
+    <button type="button" class="fin-tab active" data-pane="futuras" onclick="aba('futuras')">Comissões futuras</button>
+    <button type="button" class="fin-tab" data-pane="custos" onclick="aba('custos')">Custos</button>
+    <button type="button" class="fin-tab" data-pane="aporte" onclick="aba('aporte')">Aporte / Reembolso de sócios</button>
+    <button type="button" class="fin-tab" data-pane="fixo" onclick="aba('fixo')">Fixo dos consultores</button>
+    <button type="button" class="fin-tab" data-pane="meios" onclick="aba('meios')">Meios de pagamento</button>
+    <button type="button" class="fin-tab" data-pane="dre" onclick="aba('dre')">DRE</button>
   </div>
 
   <!-- DRE -->
@@ -330,7 +376,7 @@
     <div class="card">
       <div class="tbl-wrap">
       <table class="tbl">
-        <thead><tr><th>Descrição</th><th>Centro de custo</th><th>Categoria</th><th>Emissão</th><th>Vencimento</th><th>Valor</th><th>Pago por</th><th>Fonte</th><th>Forma</th><th>Status</th><th>Comprovante</th><th></th></tr></thead>
+        <thead><tr><th>Descrição</th><th>Centro de custo</th><th>Categoria</th><th>Emissão</th><th>Vencimento</th><th class="th-valor">Valor</th><th>Pago por</th><th>Fonte</th><th>Forma</th><th>Status</th><th>Comprovante</th><th></th></tr></thead>
         <tbody id="tbody-custos">
           {% for c in custos %}
           <tr data-id="{{ c.id }}">
@@ -450,7 +496,7 @@
     <div class="card">
       <div class="tbl-wrap">
       <table class="tbl">
-        <thead><tr><th>Tipo</th><th>Sócio</th><th>Descrição</th><th>Valor</th><th></th></tr></thead>
+        <thead><tr><th>Tipo</th><th>Sócio</th><th>Descrição</th><th class="th-valor">Valor</th><th></th></tr></thead>
         <tbody>
           {% for a in aportes %}
           <tr><td><span class="pos">Aporte</span></td><td><strong>{{ a.socio }}</strong></td><td>{{ a.descricao }}</td><td class="pos">{{ a.valor|moeda  }}</td>
@@ -478,7 +524,7 @@
     <div class="card">
       <div class="tbl-wrap">
       <table class="tbl">
-        <thead><tr><th>Consultor</th><th>Parcela</th><th>Data</th><th>Valor</th><th>Status</th></tr></thead>
+        <thead><tr><th>Consultor</th><th>Parcela</th><th>Data</th><th class="th-valor">Valor</th><th>Status</th></tr></thead>
         <tbody>
           {% for f in fixos %}
           <tr><td>{{ f.consultor_nome }}</td><td>{{ f.descricao }}</td><td>{{ f.data_lancamento|data_br }}</td>
@@ -608,8 +654,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     return;
   }
+  // ABRE EM "CUSTOS", nao em "Comissoes futuras".
+  //
+  // Quem entra em Financeiro quer saber O QUE VAI SAIR — e era justamente a
+  // aba onde nada acontece que abria primeiro. Comissao futura e consulta
+  // ocasional; conta a pagar e o motivo de a tela existir.
   const salva = localStorage.getItem('fin_tab_ativa');
-  if (salva && document.getElementById('pane-'+salva)) aba(salva);
+  aba(salva && document.getElementById('pane-' + salva) ? salva : 'custos');
 });
 
 /* ── Forma de pagamento: o <select> unificado usa valor "meio:<id>" quando é
