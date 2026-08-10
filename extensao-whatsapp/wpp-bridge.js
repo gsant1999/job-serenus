@@ -577,12 +577,31 @@
   }
 
   async function _blobDoModelo(msg) {
-    if (!msg.mediaData) throw new Error('mensagem sem mídia');
-    // 1) JA ESTA AQUI? Mesma ordem da wa-js: cache por filehash primeiro (e onde
-    //    o audio decifrado realmente fica), depois os campos do modelo. Audio ja
-    //    ouvido responde aqui, sem rede — o caminho instantaneo.
-    let b = await _blobPorFilehash(msg.mediaData);
-    if (b) return b;
+    // `mediaData` E PISTA, NAO PORTEIRO.
+    //
+    // Aqui havia `if (!msg.mediaData) throw new Error('mensagem sem midia')`, e
+    // esse throw desistia ANTES do caminho 2 — o downloadMedia com o id do
+    // store, que e exatamente o que existe pra quando o modelo nao tem o blob
+    // em maos. Numa conversa com 107 audios, os 107 falharam com essa mesma
+    // frase: mensagem encontrada (senao o erro seria "nao achei a mensagem"),
+    // audio tocando na tela, e o codigo desistindo sem tentar baixar.
+    //
+    // A causa provavel do `mediaData` sumir e a de sempre: o WhatsApp atualiza
+    // e a wa-js velha deixa de enxergar o campo (ver a receita em
+    // wa-js-dependencia-critica). Mas seja qual for a causa, desistir por causa
+    // de UMA pista, tendo outras tres, esta errado.
+    //
+    // Agora so falha depois de tentar tudo — e o erro diz o TIPO da mensagem,
+    // que e o que separa "wa-js desatualizada" (tipo ptt, sem mediaData) de
+    // "achei a mensagem errada" (tipo chat).
+    let b = null;
+    if (msg.mediaData) {
+      // 1) JA ESTA AQUI? Mesma ordem da wa-js: cache por filehash primeiro (e
+      //    onde o audio decifrado realmente fica). Audio ja ouvido responde
+      //    aqui, sem rede — o caminho instantaneo.
+      b = await _blobPorFilehash(msg.mediaData);
+      if (b) return b;
+    }
     b = _blobDeQualquerLugar(msg);
     if (b) return b;
     // 2) Caminho oficial da wa-js, mas com O ID DO STORE, nao o do DOM. O do
@@ -596,6 +615,13 @@
         if (m) return m;
       }
     } catch (e) { /* cai pro proximo */ }
+    // Sem `mediaData` os passos abaixo dependem dele: se chegou aqui sem, o que
+    // havia pra tentar ja foi tentado. Falha dizendo O TIPO, pra proxima vez
+    // este erro apontar a causa em vez de repetir a mesma frase 107 vezes.
+    if (!msg.mediaData) {
+      throw new Error('sem mediaData (tipo: ' + (msg.type || '?') + ') — ' +
+                      'wa-js pode estar desatualizada');
+    }
     // 3) Baixa pelo proprio modelo e reprocura EM TODOS os lugares — inclusive
     //    o cache por filehash, que e pra onde o download escreve de verdade.
     if (typeof msg.downloadMedia === 'function') {
