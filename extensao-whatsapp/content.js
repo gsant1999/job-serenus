@@ -7357,15 +7357,28 @@
       '</div>' +
       '<div id="job-cot-preview"></div>' +
       '<div id="job-cot-legendas"></div>' +
-      // O LINK PRA APRESENTACAO SAIU.
+      // O LINK PRA APRESENTACAO VOLTOU, COM O NOME DO QUE TEM ATRAS DELE.
       //
-      // Ele existia porque a imagem so nascia la. Agora ela nasce sozinha e
-      // aparece aqui — e o link virou a unica coisa nesta tela que ainda
-      // tirava o consultor do WhatsApp. Foi nele que o Guilherme clicou
-      // achando que era o "Ver imagem". O que so existe la (PDF e destaque de
-      // plano) continua a um clique em "Nova cotacao"/pelo JOB, mas nao no
-      // caminho de quem so quer mandar a cotacao pro cliente.
-      ''+
+      // Ele saiu quando a imagem passou a nascer aqui: era a unica coisa nesta
+      // tela que ainda tirava o consultor do WhatsApp, e foi nele que o
+      // Guilherme clicou achando que era o "Ver imagem". Eu escrevi na epoca
+      // que o que so existe la continuava "a um clique pelo JOB". Estava
+      // errado: tirei o unico clique que havia. Ele perguntou "cade o botao de
+      // editar o valor, de destacar, de recomendacao" — e a resposta era que
+      // eu tinha fechado a porta.
+      //
+      // Volta DEPOIS do preview e da legenda, com o rotulo dizendo o que tem
+      // do outro lado. O erro antigo era um link generico no meio do caminho
+      // de quem so quer mandar a cotacao; um link nomeado, no fim, e outra
+      // coisa — ninguem clica nele por engano.
+      '<a class="job-cot-nova" href="' +
+        esc(_SITE_BASE_URL_EXT + '/cotacao/documento/' + r.id) + '" ' +
+        'target="_blank" rel="noopener" ' +
+        'title="Abre esta mesma cotação no JOB, numa aba nova. O link do cliente não muda.">' +
+        'Ajustar esta cotação no JOB</a>' +
+      '<div class="job-cot-prev-dica" style="margin-top:5px">Corrigir valor sem trocar ' +
+        'o link do cliente, destacar plano, copiar um plano só, gerar PDF. Abre numa aba ' +
+        'do JOB — o WhatsApp continua aqui.</div>' +
       // NOVA COTAÇÃO É LINK NOVO, e a frase precisa deixar isso claro: o
       // cliente que já recebeu o link antigo continua vendo o antigo. Quem
       // quer CORRIGIR um valor sem trocar o link usa "Corrigir valor" lá

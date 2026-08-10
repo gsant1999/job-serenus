@@ -137,5 +137,20 @@ const p4='<div id="job-painel-doc" style="position:static;margin-top:18px"><div 
  '<span class="job-cot-porque">Não aceita MEI</span></span></label>'+
  '<button class="job-cot-bt-mandar" style="width:100%;margin-top:14px">Buscar operadoras</button>'+
  '</div></div></div>';
-A.innerHTML=html+ops+cots+p4;B.innerHTML=html+ops+cots+p4;
+// Quinta tela: o pe da cotacao pronta — as tres acoes da imagem e o caminho
+// pro que so existe no JOB. O rotulo tem que dizer o que tem do outro lado:
+// um link generico aqui ja foi clicado por engano no lugar de "Ver imagem".
+const pe='<div id="job-painel-doc" style="position:static;margin-top:18px"><div class="job-painel-doc-corpo">'+
+ '<div class="job-cot-wrap">'+
+ '<div class="job-cot-prev-acoes">'+
+ '<button class="job-cot-bt-mandar" style="flex:2">Mandar na conversa</button>'+
+ '<button class="job-cot-bt-copiar" style="flex:1">Copiar</button>'+
+ '<button class="job-cot-bt-copiar" style="flex:1">Baixar</button></div>'+
+ '<a class="job-cot-nova">Ajustar esta cotação no JOB</a>'+
+ '<div class="job-cot-prev-dica" style="margin-top:5px">Corrigir valor sem trocar o link do '+
+ 'cliente, destacar plano, copiar um plano só, gerar PDF. Abre numa aba do JOB — o WhatsApp '+
+ 'continua aqui.</div>'+
+ '<a class="job-cot-nova">Nova cotação (link novo)</a>'+
+ '</div></div></div>';
+A.innerHTML=html+ops+cots+p4+pe;B.innerHTML=html+ops+cots+p4+pe;
 </script>
