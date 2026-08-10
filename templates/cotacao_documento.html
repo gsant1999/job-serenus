@@ -45,27 +45,11 @@
      Percentual pequeno na celula (`width:1%`) NAO serve aqui — em tabela de
      layout automatico ele resolve contra a largura da propria tabela, que
      depende das celulas, e o navegador estourava pra 15.000px. Medido. */
-  /* A TABELA CONTINUA OCUPANDO A FOLHA INTEIRA. O que encolhe e a COLUNA DE
-     VALOR — e, com ela, o retangulo do destaque, que era o gigante.
-     Eu tinha encolhido a tabela toda: consertou o retangulo e estragou o
-     resto. Aqui as colunas de plano ganham largura propria e a coluna de
-     rotulo fica com toda a sobra, entao o retangulo cabe o texto sem a tabela
-     sair do lugar. Estrutura, formato e ordem: identicos. */
-  /* `table-layout:fixed` NAO serve aqui, e a razao esta duas regras acima:
-     `.folha` e `width:max-content`. Tabela de largura fixa dentro de pai que
-     se mede pelo conteudo vira referencia circular — o navegador estourou pra
-     500.000px. Medido.
-     O que funciona sem circularidade: dar largura a coluna de ROTULO. Em
-     layout automatico ela vira o piso daquela coluna, sobra pouco pras colunas
-     de plano, e elas encolhem ate caber o texto. A tabela continua ocupando a
-     folha; so o retangulo do destaque encolhe, que era o pedido. */
-  /* O BLOCO INTEIRO CENTRALIZADO, como era antes. Com a coluna de rotulo
-     comendo 720px, as colunas de plano iam parar na borda direita da folha.
-     Rotulo com largura suficiente pra ler, tabela `auto` e centralizada: o
-     comparativo volta pro meio e o retangulo continua cabendo o texto. */
-  table.doc { width:auto; margin-left:auto; margin-right:auto; max-width:100%; }
-  table.doc td.lbl { width:300px; }
-  table.doc td.val, table.doc td.op-name { min-width:172px; }
+  /* A TABELA NAO SE MEXE.
+     Passei o dia mexendo na largura dela pra fazer o retangulo caber — e o
+     pedido nunca foi esse. A tabela fica do tamanho e da forma que sempre
+     esteve; quem tem que encolher e SO a moldura do destaque, que agora e
+     desenhada por cima e nao e mais feita das bordas das celulas. */
   table.doc td.lbl { color:#3a3a44; text-align:left; }
   table.doc td.val { text-align:center; color:#2b2b33; font-variant-numeric:tabular-nums; }
 
@@ -109,24 +93,18 @@
   table.vtab .q { color:#3b82f6; font-weight:600; margin-left:6px; }
 
   /* Destaque opcional por plano (cores automáticas) */
-  /* TUDO NA MESMA GRADE. As molduras de cima usavam `outline` com recuo de 3px
-     e a de baixo usava BORDA, que assenta na linha da celula — as duas nunca
-     iam bater, e a coluna saia torta em relacao ao cabecalho dela.
-     Agora e borda em todas: com `border-collapse` ligado, as bordas vizinhas
-     viram uma linha so e as bordas laterais caem exatamente na mesma coluna,
-     do logo ate o Total. Sem cantos arredondados de proposito — `border-radius`
-     nao pinta em tabela colapsada, e fingir que pinta seria outra desalinhada. */
-  #documento.destacar tr.op td.op-name { border:3px solid var(--c); }
-  #documento.destacar tr.head td.val  { border:3px solid var(--c); }
-  #documento.destacar tr:not(.op):not(.head) td.val {
-    border-left:3px solid var(--c); border-right:3px solid var(--c);
-  }
-  #documento.destacar tr.total td.val { border-bottom:3px solid var(--c); }
+  /* A MOLDURA E DESENHADA POR CIMA, nao feita de borda de celula.
+     Borda em celula tem a largura da COLUNA — e coluna de tabela e larga por
+     natureza, entao a moldura saia gigante. Tentei encolher a coluna: mexeu na
+     tabela inteira, que e justamente o que ele nao queria.
+     Agora sao retangulos posicionados sobre a tabela, com a largura do
+     conteudo e centrados na coluna. A tabela nao sabe que eles existem: nao
+     muda largura, nem altura, nem alinhamento de nada. */
+  .doc-moldura { position:absolute; border:3px solid var(--c); border-radius:10px;
+                 pointer-events:none; box-sizing:border-box; }
   #documento.destacar tr.head td.val .pn { color:var(--c); }
   #documento.destacar tr.total td.val { color:var(--c); }
-  /* No cartao vertical a coluna e o cartao inteiro: a moldura fecha nele. */
   #documento.destacar .vcard { border:3px solid var(--c); }
-  #documento.destacar .vcard .vtit { border:2px solid var(--c); border-radius:8px; padding:6px 8px; }
   #documento.destacar .vcard .vpn { color:var(--c); }
   #documento.destacar .vcard .vtot { color:var(--c); }
 
@@ -141,7 +119,7 @@
 <div class="toolbar">
   <a class="btn-voltar" href="/cotacao/salvas">Voltar</a>
   <a class="btn-voltar" href="/cotacao/{{ cot.id }}/reabrir" style="border-color:rgba(250,204,21,.6);color:#fde047;font-weight:700;" title="Cria uma cotação nova com link próprio. Esta cotação atual não é alterada.">+ Nova cotação (link novo)</a>
-  <button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="document.getElementById('documento').classList.toggle('destacar')">Destacar planos</button>
+  <button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="alternarDestaque()">Destacar planos</button>
   <div style="position:relative;display:inline-block;">
     <button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="toggleLegendas()">Legenda</button>
     <div id="painel-legendas" style="display:none;position:absolute;top:calc(100% + 8px);right:0;width:360px;background:#2a2a34;border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:14px;z-index:999;box-shadow:0 8px 32px rgba(0,0,0,.5);">
@@ -335,6 +313,81 @@ function copiarLink() {
   } else { window.prompt('Copie o link da cotação:', url); }
 }
 function _fmtBR(n){ return (n||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+// A MOLDURA DO DESTAQUE E DESENHADA POR CIMA DA TABELA.
+//
+// Feita de borda de celula, ela tinha a largura da COLUNA — e coluna de tabela
+// e larga por natureza, entao saia um retangulo enorme com o texto perdido
+// dentro. Encolher a coluna consertava a moldura e mexia na tabela toda, que
+// era exatamente o que nao podia acontecer.
+//
+// Entao ela deixa de ser borda e vira um retangulo posicionado ACIMA: largura
+// do conteudo mais folga, centrado na coluna, indo do logo ate o total. A
+// tabela nao sabe que ele existe — nao muda largura, altura nem alinhamento de
+// nada.
+//
+// Medir o texto em vez de chutar uma largura: com nome de plano curto a
+// moldura fica justa, com nome longo ela acompanha. Chutar 190px daria certo
+// no caso de hoje e apertado no proximo.
+function _larguraDoConteudo(cels) {
+  var cv = _larguraDoConteudo._cv || (_larguraDoConteudo._cv = document.createElement('canvas'));
+  var ctx = cv.getContext('2d');
+  var largura = 0;
+  cels.forEach(function (c) {
+    var cs = getComputedStyle(c);
+    // Logo e imagem: vale a largura pintada, nao o texto do alt.
+    var img = c.querySelector('img');
+    if (img && img.getBoundingClientRect().width) {
+      largura = Math.max(largura, img.getBoundingClientRect().width);
+    }
+    c.querySelectorAll('div, span').forEach(function (el) {
+      if (el.children.length) return;
+      var e = getComputedStyle(el);
+      ctx.font = e.fontWeight + ' ' + e.fontSize + ' ' + e.fontFamily;
+      largura = Math.max(largura, ctx.measureText(el.textContent.trim()).width);
+    });
+    if (!c.children.length) {
+      ctx.font = cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+      largura = Math.max(largura, ctx.measureText(c.textContent.trim()).width);
+    }
+  });
+  return largura;
+}
+function _desenharMolduras() {
+  var doc = document.getElementById('documento');
+  var tab = doc.querySelector('table.doc');
+  doc.querySelectorAll('.doc-moldura').forEach(function (m) { m.remove(); });
+  if (!tab || !doc.classList.contains('destacar')) return;
+  // O ancoradouro e a folha: `position:relative` nela, e as molduras se medem
+  // contra ela. Sem isso elas iriam parar no canto da pagina.
+  if (getComputedStyle(doc).position === 'static') doc.style.position = 'relative';
+  var base = doc.getBoundingClientRect();
+  var topoTr = tab.querySelector('tr.op');
+  var fimTr = tab.querySelector('tr.total');
+  if (!topoTr || !fimTr) return;
+  var nPlanos = topoTr.querySelectorAll('td.op-name').length;
+  for (var i = 0; i < nPlanos; i++) {
+    var cels = Array.prototype.slice.call(
+      tab.querySelectorAll('td.op-name[data-p="' + i + '"], td.val[data-p="' + i + '"]'));
+    if (!cels.length) continue;
+    var r0 = cels[0].getBoundingClientRect();
+    var rN = cels[cels.length - 1].getBoundingClientRect();
+    var w = Math.min(r0.width, Math.max(96, _larguraDoConteudo(cels) + 34));
+    var m = document.createElement('div');
+    m.className = 'doc-moldura';
+    m.style.setProperty('--c', getComputedStyle(cels[0]).getPropertyValue('--c').trim() || '#1fb88a');
+    m.style.left = Math.round(r0.left - base.left + (r0.width - w) / 2) + 'px';
+    m.style.top = Math.round(r0.top - base.top) + 'px';
+    m.style.width = Math.round(w) + 'px';
+    m.style.height = Math.round(rN.bottom - r0.top) + 'px';
+    doc.appendChild(m);
+  }
+}
+function alternarDestaque() {
+  document.getElementById('documento').classList.toggle('destacar');
+  _desenharMolduras();
+}
+// A folha muda de largura com a janela; a moldura tem que acompanhar.
+window.addEventListener('resize', function () { _desenharMolduras(); });
 // AVISO NA TELA, NAO CAIXA DO NAVEGADOR.
 //
 // A regra de UX do JOB e explicita: nada de `alert`. E aqui ela tem um motivo
