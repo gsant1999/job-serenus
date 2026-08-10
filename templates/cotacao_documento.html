@@ -45,12 +45,21 @@
      Percentual pequeno na celula (`width:1%`) NAO serve aqui — em tabela de
      layout automatico ele resolve contra a largura da propria tabela, que
      depende das celulas, e o navegador estourava pra 15.000px. Medido. */
-  table.doc { width:auto; margin-left:auto; margin-right:auto; max-width:100%;
-              min-width:min(100%, 620px); }
-  table.doc td.val, table.doc td.op-name { min-width:150px; }
-  /* O piso de 620px existe pra tabela de dois planos nao ficar orfa no meio de
-     uma folha larga: hugging demais vira ilha. Com muitos planos o `auto`
-     manda e ela cresce sozinha. */
+  /* A TABELA CONTINUA OCUPANDO A FOLHA INTEIRA. O que encolhe e a COLUNA DE
+     VALOR — e, com ela, o retangulo do destaque, que era o gigante.
+     Eu tinha encolhido a tabela toda: consertou o retangulo e estragou o
+     resto. Aqui as colunas de plano ganham largura propria e a coluna de
+     rotulo fica com toda a sobra, entao o retangulo cabe o texto sem a tabela
+     sair do lugar. Estrutura, formato e ordem: identicos. */
+  /* `table-layout:fixed` NAO serve aqui, e a razao esta duas regras acima:
+     `.folha` e `width:max-content`. Tabela de largura fixa dentro de pai que
+     se mede pelo conteudo vira referencia circular — o navegador estourou pra
+     500.000px. Medido.
+     O que funciona sem circularidade: dar largura a coluna de ROTULO. Em
+     layout automatico ela vira o piso daquela coluna, sobra pouco pras colunas
+     de plano, e elas encolhem ate caber o texto. A tabela continua ocupando a
+     folha; so o retangulo do destaque encolhe, que era o pedido. */
+  table.doc td.lbl { width:720px; }
   table.doc td.lbl { color:#3a3a44; text-align:left; }
   table.doc td.val { text-align:center; color:#2b2b33; font-variant-numeric:tabular-nums; }
 
@@ -94,34 +103,24 @@
   table.vtab .q { color:#3b82f6; font-weight:600; margin-left:6px; }
 
   /* Destaque opcional por plano (cores automáticas) */
-  #documento.destacar tr.op td.op-name { outline:2px solid var(--c); outline-offset:-4px; border-radius:8px; }
-  /* O DESTAQUE E UM RETANGULO SOBRE A COLUNA DO PRODUTO, nao so a letra
-     colorida. Pedido dele. Texto colorido some quando o cliente imprime em
-     preto e branco ou olha de longe no celular; a moldura sobrevive aos dois.
-     `outline` e nao `border` de proposito: border muda a largura da celula e
-     desalinha a tabela inteira quando o destaque liga. */
-  #documento.destacar tr.head td.val {
-    outline:2px solid var(--c); outline-offset:-3px; border-radius:8px;
-  }
-  /* O RETANGULO E A COLUNA INTEIRA, de Modalidade ate Total — nao uma caixinha
-     por celula. E assim que o olho compara: ele desce a coluna do plano, e a
-     moldura diz onde ela comeca e termina.
-     Feito com BORDA nas celulas e nao com `outline` na coluna, porque coluna
-     de tabela nao aceita moldura: o que existe e <td>. Com `border-collapse`
-     ligado (ja estava), as bordas vizinhas viram uma linha so e o resultado e
-     um retangulo continuo em vez de tres empilhados. */
+  /* TUDO NA MESMA GRADE. As molduras de cima usavam `outline` com recuo de 3px
+     e a de baixo usava BORDA, que assenta na linha da celula — as duas nunca
+     iam bater, e a coluna saia torta em relacao ao cabecalho dela.
+     Agora e borda em todas: com `border-collapse` ligado, as bordas vizinhas
+     viram uma linha so e as bordas laterais caem exatamente na mesma coluna,
+     do logo ate o Total. Sem cantos arredondados de proposito — `border-radius`
+     nao pinta em tabela colapsada, e fingir que pinta seria outra desalinhada. */
+  #documento.destacar tr.op td.op-name { border:3px solid var(--c); }
+  #documento.destacar tr.head td.val  { border:3px solid var(--c); }
   #documento.destacar tr:not(.op):not(.head) td.val {
     border-left:3px solid var(--c); border-right:3px solid var(--c);
   }
-  #documento.destacar tr.head + tr td.val { border-top:3px solid var(--c); }
   #documento.destacar tr.total td.val { border-bottom:3px solid var(--c); }
   #documento.destacar tr.head td.val .pn { color:var(--c); }
   #documento.destacar tr.total td.val { color:var(--c); }
   /* No cartao vertical a coluna e o cartao inteiro: a moldura fecha nele. */
   #documento.destacar .vcard { border:3px solid var(--c); }
-  #documento.destacar .vcard .vtit {
-    outline:2px solid var(--c); outline-offset:-3px; border-radius:8px; padding:6px 8px;
-  }
+  #documento.destacar .vcard .vtit { border:2px solid var(--c); border-radius:8px; padding:6px 8px; }
   #documento.destacar .vcard .vpn { color:var(--c); }
   #documento.destacar .vcard .vtot { color:var(--c); }
 
