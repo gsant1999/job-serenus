@@ -88,9 +88,22 @@
     outline:2px solid var(--c); outline-offset:-3px; border-radius:8px;
     background:color-mix(in srgb, var(--c) 8%, transparent);
   }
+  /* O RETANGULO E A COLUNA INTEIRA, de Modalidade ate Total — nao uma caixinha
+     por celula. E assim que o olho compara: ele desce a coluna do plano, e a
+     moldura diz onde ela comeca e termina.
+     Feito com BORDA nas celulas e nao com `outline` na coluna, porque coluna
+     de tabela nao aceita moldura: o que existe e <td>. Com `border-collapse`
+     ligado (ja estava), as bordas vizinhas viram uma linha so e o resultado e
+     um retangulo continuo em vez de tres empilhados. */
+  #documento.destacar tr:not(.op):not(.head) td.val {
+    border-left:3px solid var(--c); border-right:3px solid var(--c);
+  }
+  #documento.destacar tr.head + tr td.val { border-top:3px solid var(--c); }
+  #documento.destacar tr.total td.val { border-bottom:3px solid var(--c); }
   #documento.destacar tr.head td.val .pn { color:var(--c); }
   #documento.destacar tr.total td.val { color:var(--c); }
-  #documento.destacar .vcard { border-left:6px solid var(--c); }
+  /* No cartao vertical a coluna e o cartao inteiro: a moldura fecha nele. */
+  #documento.destacar .vcard { border:3px solid var(--c); }
   #documento.destacar .vcard .vtit {
     outline:2px solid var(--c); outline-offset:-3px; border-radius:8px;
     background:color-mix(in srgb, var(--c) 8%, transparent); padding:6px 8px;
@@ -215,13 +228,13 @@
       <td class="lbl"></td>
       {% for p in cot.planos %}<td class="val" data-p="{{ loop.index0 }}" style="--c:{{ p.cor }}">{% if p.recomendacao %}<div style="font-size:9px;font-weight:700;letter-spacing:.3px;padding:2px 7px;border-radius:20px;display:inline-block;margin-bottom:3px;background:{% if p.recomendacao=='1ª opção' %}#1fb88a{% elif p.recomendacao=='2ª opção' %}#3b82f6{% else %}#8b5cf6{% endif %};color:#fff;">{{ p.recomendacao }}</div>{% endif %}<div class="pn">{{ p.plano }}</div><div class="po">{{ p.operadora }}</div></td>{% endfor %}
     </tr>
-    <tr><td class="lbl">Modalidade</td>{% for p in cot.planos %}<td class="val" data-p="{{ loop.index0 }}">{{ p.modalidade }}</td>{% endfor %}</tr>
-    <tr><td class="lbl">Acomodação</td>{% for p in cot.planos %}<td class="val" data-p="{{ loop.index0 }}">{{ p.acomodacao }}</td>{% endfor %}</tr>
-    <tr><td class="lbl">Coparticipação</td>{% for p in cot.planos %}<td class="val" data-p="{{ loop.index0 }}">{{ p.coparticipacao }}</td>{% endfor %}</tr>
+    <tr><td class="lbl">Modalidade</td>{% for p in cot.planos %}<td class="val" data-p="{{ loop.index0 }}" style="--c:{{ p.cor }}">{{ p.modalidade }}</td>{% endfor %}</tr>
+    <tr><td class="lbl">Acomodação</td>{% for p in cot.planos %}<td class="val" data-p="{{ loop.index0 }}" style="--c:{{ p.cor }}">{{ p.acomodacao }}</td>{% endfor %}</tr>
+    <tr><td class="lbl">Coparticipação</td>{% for p in cot.planos %}<td class="val" data-p="{{ loop.index0 }}" style="--c:{{ p.cor }}">{{ p.coparticipacao }}</td>{% endfor %}</tr>
     {% for f in cot.faixas_usadas %}
     <tr class="faixa">
       <td class="lbl">{{ f.label }}<span class="q">{{ f.qtd }}x</span></td>
-      {% for p in cot.planos %}<td class="val preco-cell" data-p="{{ loop.index0 }}" data-f="{{ f.faixa }}" data-qtd="{{ f.qtd }}" data-preco-unit="{{ p.precos_unit[f.faixa] }}">{{ p.precos_unit[f.faixa]|moeda_doc }}</td>{% endfor %}
+      {% for p in cot.planos %}<td class="val preco-cell" data-p="{{ loop.index0 }}" data-f="{{ f.faixa }}" data-qtd="{{ f.qtd }}" data-preco-unit="{{ p.precos_unit[f.faixa] }}" style="--c:{{ p.cor }}">{{ p.precos_unit[f.faixa]|moeda_doc }}</td>{% endfor %}
     </tr>
     {% endfor %}
     <tr class="total">
