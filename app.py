@@ -63,6 +63,37 @@ try:
 except ImportError:
     HAS_BOTO3 = False
 
+# ─── CONFIGURAÇÃO DO SENTRY (REDE DE SEGURANÇA) ───────────────────────────
+def _sentry_before_send(event, hint):
+    """Filtra PII e credenciais antes de enviar o erro para o Sentry."""
+    if 'request' in event:
+        # 1. Remover conteúdo (conversas, base64, JSON)
+        event['request'].pop('data', None)
+        
+        # 2. Limpar cabeçalhos de autenticação
+        if 'headers' in event['request']:
+            headers = event['request']['headers']
+            for k in list(headers.keys()):
+                if k.lower() in ('authorization', 'x-api-key', 'x-extension-key'):
+                    headers[k] = '[FILTRADO]'
+    return event
+
+_sentry_dsn = os.environ.get('SENTRY_DSN')
+if _sentry_dsn:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.flask import FlaskIntegration
+        sentry_sdk.init(
+            dsn=_sentry_dsn,
+            integrations=[FlaskIntegration()],
+            traces_sample_rate=0.05,
+            send_default_pii=False,
+            before_send=_sentry_before_send,
+            release=os.environ.get('RAILWAY_GIT_COMMIT_SHA')
+        )
+    except ImportError:
+        pass
+
 app = Flask(__name__)
 # ─── CHAVE SECRETA FIXA PARA SESSÕES PERSISTENTES ───────────────────────
 # Se usar secrets.token_hex(32) toda vez, a session cai após restart!
