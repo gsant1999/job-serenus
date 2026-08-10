@@ -2,30 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "Flask API Server (JOB Serenus)",
+      "name": "bancada",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["app.py"],
-      "port": 8080
-    },
-    {
-      "name": "JOB local (banco de teste)",
-      "runtimeExecutable": ".venv/bin/python",
-      "runtimeArgs": ["app.py"],
-      "port": 8080,
-      "env": {
-        "JOB_DATA_DIR": "/tmp/jobtela",
-        "SECRET_KEY": "dev-local-so-pra-ver-a-tela"
-      }
-    },
-    {
-      "name": "Proposta Saude Beneficencia",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": ["propostas-saude-beneficencia/app.py"],
-      "autoPort": true,
-      "env": {
-        "DEV_LOCAL": "1",
-        "DADOS_DIR": "/tmp/bene-dev"
-      }
+      "runtimeArgs": ["-m", "http.server", "8791"],
+      "port": 8791
     }
   ]
 }
