@@ -24,7 +24,12 @@
   .corretor .k { width:70px; color:#3a3a44; font-weight:700; }
   .corretor .v { color:#2b2b33; }
   .marca { display:flex; align-items:center; gap:10px; flex-shrink:0; }
-  .marca img { width:44px; height:44px; object-fit:contain; }
+  /* SEM `object-fit`. Ele nao existe pro html2canvas — e a imagem exportada,
+     que e o que o cliente recebe, e feita por ele. Com 44x44 fixo o wordmark
+     da corretora (que e largo) era ESPREMIDO num quadrado, e o logo redondo da
+     operadora virava um borrao vermelho. Sem `object-fit`, mandando so a
+     altura, a largura sai por proporcao — no navegador e no export. */
+  .marca img { height:40px; width:auto; max-width:190px; }
   .marca .nome { font-size:23px; font-weight:800; color:#1c1c24; line-height:1; }
   .marca .sub { font-size:9px; letter-spacing:3px; color:#8a8a96; text-transform:uppercase; margin-top:3px; }
 
@@ -59,7 +64,7 @@
   .vert { display:flex; flex-direction:column; gap:16px; }
   .vcard { border:1px solid #e3e3ea; border-radius:12px; overflow:hidden; }
   .vhead { display:flex; align-items:center; gap:14px; padding:14px 16px; background:#f7f8fa; border-bottom:1px solid #eef0f3; }
-  .vhead .vlogo { max-height:36px; max-width:120px; object-fit:contain; }
+  .vhead .vlogo { height:32px; width:auto; max-width:120px; }
   .vhead .vop { font-size:15px; font-weight:800; color:#3b3bd6; }
   .vhead .vtit { flex:1; }
   .vhead .vpn { font-size:16px; font-weight:700; color:#1c1c24; }
@@ -74,9 +79,22 @@
 
   /* Destaque opcional por plano (cores automáticas) */
   #documento.destacar tr.op td.op-name { outline:2px solid var(--c); outline-offset:-4px; border-radius:8px; }
+  /* O DESTAQUE E UM RETANGULO SOBRE A COLUNA DO PRODUTO, nao so a letra
+     colorida. Pedido dele. Texto colorido some quando o cliente imprime em
+     preto e branco ou olha de longe no celular; a moldura sobrevive aos dois.
+     `outline` e nao `border` de proposito: border muda a largura da celula e
+     desalinha a tabela inteira quando o destaque liga. */
+  #documento.destacar tr.head td.val {
+    outline:2px solid var(--c); outline-offset:-3px; border-radius:8px;
+    background:color-mix(in srgb, var(--c) 8%, transparent);
+  }
   #documento.destacar tr.head td.val .pn { color:var(--c); }
   #documento.destacar tr.total td.val { color:var(--c); }
   #documento.destacar .vcard { border-left:6px solid var(--c); }
+  #documento.destacar .vcard .vtit {
+    outline:2px solid var(--c); outline-offset:-3px; border-radius:8px;
+    background:color-mix(in srgb, var(--c) 8%, transparent); padding:6px 8px;
+  }
   #documento.destacar .vcard .vpn { color:var(--c); }
   #documento.destacar .vcard .vtot { color:var(--c); }
 
@@ -154,8 +172,12 @@
     <div class="marca">
       <!-- O logo da CORRETORA, nao o do sistema: este documento vai pro
            cliente. brand.logo e o icone do JOB e continua certo no menu. -->
-      <img src="{{ brand.logo_cliente or brand.logo }}" alt="">
-      <div><div class="nome">{{ brand.nome_curto }}</div><div class="sub">Corretora</div></div>
+      <!-- SO O LOGO. O wordmark da corretora JA tem o nome escrito dentro
+           dele: repetir "Serenus / Corretora" ao lado imprimia a marca duas
+           vezes, uma desenhada e uma digitada, com pesos e fontes diferentes.
+           Pedido dele, e ja tinhamos corrigido o mesmo erro na imagem da
+           extensao. -->
+      <img src="{{ brand.logo_cliente or brand.logo }}" alt="{{ brand.nome_curto }}">
     </div>
   </div>
 
@@ -187,7 +209,7 @@
   <table class="doc">
     <tr class="op">
       <td class="lbl"></td>
-      {% for p in cot.planos %}<td class="op-name" data-p="{{ loop.index0 }}" style="--c:{{ p.cor }}">{% if p.logo %}<img src="{{ p.logo }}" alt="{{ p.operadora }}" style="max-height:36px; max-width:130px; object-fit:contain;">{% else %}{{ p.operadora }}{% endif %}</td>{% endfor %}
+      {% for p in cot.planos %}<td class="op-name" data-p="{{ loop.index0 }}" style="--c:{{ p.cor }}">{% if p.logo %}<img src="{{ p.logo }}" alt="{{ p.operadora }}" style="max-width:130px; max-height:36px; width:auto; height:auto;">{% else %}{{ p.operadora }}{% endif %}</td>{% endfor %}
     </tr>
     <tr class="head">
       <td class="lbl"></td>
