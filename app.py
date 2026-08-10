@@ -13292,7 +13292,7 @@ def _lanc_status_efetivo(status, data_vencimento, hoje=None):
     return 'Vencido' if d < ref else st
 
 
-def _lanc_faixa_where(faixa, coluna='l.data_vencimento'):
+def _lanc_faixa_where(faixa, coluna='l.data_vencimento', de=None, ate=None):
     """WHERE da faixa de vencimento + os parâmetros. Devolve ('', []) quando
     não há filtro, pra quem chama concatenar sem if.
 
@@ -13305,6 +13305,20 @@ def _lanc_faixa_where(faixa, coluna='l.data_vencimento'):
     if not f:
         return '', []
     hoje = date.today()
+    if f == 'personalizado':
+        # INTERVALO ESCOLHIDO A MAO. Os dois lados sao opcionais: so a data
+        # inicial vale como "daqui pra frente", so a final vale como "ate".
+        # Sem nenhuma das duas, nao filtra — melhor mostrar tudo que mostrar
+        # uma tela vazia enquanto ele ainda esta escolhendo a data.
+        d1, d2 = (de or '').strip(), (ate or '').strip()
+        if d1 and d2 and d1 > d2:
+            d1, d2 = d2, d1        # digitou ao contrario: entende, nao esvazia
+        w, p = '', []
+        if d1:
+            w += " AND {c} IS NOT NULL AND {c} <> '' AND {c} >= ?".format(c=coluna); p.append(d1)
+        if d2:
+            w += " AND {c} IS NOT NULL AND {c} <> '' AND {c} <= ?".format(c=coluna); p.append(d2)
+        return w, p
     if f == 'vencidas':
         # Em aberto E com vencimento no passado. Sem o status, um lançamento
         # já pago apareceria como vencido só por ter data antiga.
@@ -13474,7 +13488,16 @@ def financeiro():
     f_status = (request.args.get('status_lanc') or '').strip()
     f_tipo_l = (request.args.get('tipo_lanc') or '').strip()
     f_meio = (request.args.get('meio') or '').strip()
-    _w, _p = _lanc_faixa_where(f_faixa)
+    f_de = (request.args.get('de') or '').strip()
+    f_ate = (request.args.get('ate') or '').strip()
+    _w, _p = _lanc_faixa_where(f_faixa, de=f_de, ate=f_ate)
+    # INTERVALO A MAO NAO SE LIMITA A COMPETENCIA DO MES.
+    #
+    # O resto da tela e sempre "o mes X". Se o intervalo escolhido a mao
+    # continuasse preso a isso, pedir 25/08 a 10/09 devolveria tela vazia — e
+    # tela vazia sem motivo parece defeito, nao resultado. Quando ele escolhe
+    # as datas, elas mandam; a tela avisa que saiu da competencia.
+    _cal_livre = bool(f_faixa == 'personalizado' and (f_de or f_ate))
     if f_centro:
         _w += " AND COALESCE(l.centro_custo,'') = ?"; _p.append(f_centro)
     if f_tipo_l:
@@ -13491,8 +13514,8 @@ def financeiro():
             mp.titular AS meio_titular, mp.final_cartao AS meio_final_cartao,
             mp.dia_vencimento_fatura AS meio_dia_vencimento
         FROM lancamentos l LEFT JOIN meios_pagamento mp ON mp.id = l.meio_pagamento_id
-        WHERE l.tipo='custo' AND l.data_competencia=?""" + _w + " ORDER BY l.id DESC",
-        [mes] + _p).fetchall()
+        WHERE l.tipo='custo' AND (? = '' OR l.data_competencia=?)""" + _w + " ORDER BY l.id DESC",
+        [('x' if _cal_livre else ''), mes] + _p).fetchall()
     custos = [dict(c) for c in custos]
     for c in custos:
         c['status_efetivo'] = _lanc_status_efetivo(c.get('status'), c.get('data_vencimento'))
@@ -13570,14 +13593,33 @@ def financeiro():
     # Uma barra por dia do mês: mostra onde os pagamentos se concentram e qual
     # dia aperta o caixa. Soma custo E fixo, porque quem olha quer saber o que
     # sai do caixa naquele dia — a separação contábil não muda o aperto.
+    # O CALENDARIO OBEDECE AOS FILTROS.
+    #
+    # Antes ele somava o mes inteiro sempre, e o numero do canto dizia
+    # "vencendo neste mes" mesmo com um filtro ligado. Ficava um total de
+    # R$ 2.594 em cima de uma lista que somava R$ 400, e quem esta olhando nao
+    # tem como saber qual dos dois responde a pergunta dele.
+    #
+    # `_w`/`_p` sao os mesmos do restante da tela, entao barra, total e lista
+    # contam a mesma historia. A coluna muda de `l.data_vencimento` pra
+    # `data_vencimento` porque aqui nao ha o apelido da tabela.
+    _cw, _cp = _lanc_faixa_where(f_faixa, coluna='data_vencimento', de=f_de, ate=f_ate)
+    if f_centro:
+        _cw += " AND COALESCE(centro_custo,'') = ?"; _cp.append(f_centro)
+    if f_tipo_l:
+        _cw += " AND COALESCE(tipo_lancamento,'') = ?"; _cp.append(f_tipo_l)
+    if f_meio:
+        _cw += " AND CAST(meio_pagamento_id AS TEXT) = ?"; _cp.append(f_meio)
+    if f_status and f_status != 'Vencido':
+        _cw += " AND COALESCE(status,'Previsto') = ?"; _cp.append(f_status)
     cal_dias, cal_max, cal_total = {}, 0, 0
     try:
         for r in conn.execute("""SELECT substr(data_vencimento, 9, 2) dia,
                    COALESCE(SUM(valor),0) v, COUNT(*) n
             FROM lancamentos
-            WHERE tipo IN ('custo','fixo') AND data_competencia=?
-              AND data_vencimento IS NOT NULL AND data_vencimento <> ''
-            GROUP BY 1""", (mes,)).fetchall():
+            WHERE tipo IN ('custo','fixo') AND (? = '' OR data_competencia=?)
+              AND data_vencimento IS NOT NULL AND data_vencimento <> ''""" + _cw + """
+            GROUP BY 1""", [('x' if _cal_livre else ''), mes] + _cp).fetchall():
             if not (r['dia'] or '').isdigit():
                 continue
             d = int(r['dia'])
@@ -13596,6 +13638,25 @@ def financeiro():
                   for d in range(1, _ult + 1)]
     close_db(conn)
 
+    # O ROTULO ACOMPANHA O NUMERO. Um total que muda de valor sem dizer de que
+    # periodo ele e vira desconfianca — e desconfianca num numero de dinheiro
+    # faz a pessoa parar de usar a tela.
+    def _br(d):
+        try: return '%s/%s/%s' % (d[8:10], d[5:7], d[0:4])
+        except Exception: return d
+    if f_faixa == 'personalizado' and (f_de or f_ate):
+        if f_de and f_ate: _cal_rotulo = 'Vencendo de %s a %s' % (_br(f_de), _br(f_ate))
+        elif f_de:         _cal_rotulo = 'Vencendo a partir de %s' % _br(f_de)
+        else:              _cal_rotulo = 'Vencendo até %s' % _br(f_ate)
+    else:
+        _cal_rotulo = {
+            '01-10': 'Vencendo entre os dias 01 e 10',
+            '11-20': 'Vencendo entre os dias 11 e 20',
+            '21-31': 'Vencendo entre os dias 21 e 31',
+            'proximos7': 'Vencendo nos próximos 7 dias',
+            'vencidas': 'Já vencido e em aberto',
+        }.get(f_faixa, 'Vencendo neste mês')
+
     return render_template('financeiro.html', mes=mes, futuras=futuras,
         custos=custos, aportes=aportes, fixos=fixos, reembolsos=reembolsos,
         meios_pagamento=meios_pagamento,
@@ -13605,9 +13666,10 @@ def financeiro():
         saldo=saldo, dre=dre, saldo_socios=saldo_socios_lista, lancamento_focus=lancamento_focus,
         centros_custo=CENTROS_CUSTO, tipos_lancamento=TIPOS_LANCAMENTO,
         canais_midia=CANAIS_MIDIA, status_lancamento=STATUS_LANCAMENTO,
-        calendario=calendario, cal_total=cal_total,
+        calendario=calendario, cal_total=cal_total, cal_rotulo=_cal_rotulo,
+        cal_livre=_cal_livre,
         filtros={'faixa': f_faixa, 'centro': f_centro, 'status_lanc': f_status,
-                 'tipo_lanc': f_tipo_l, 'meio': f_meio})
+                 'tipo_lanc': f_tipo_l, 'meio': f_meio, 'de': f_de, 'ate': f_ate})
 
 def _proximo_mes(competencia, n):
     """Soma n meses a uma competência 'YYYY-MM'. Retorna 'YYYY-MM'."""

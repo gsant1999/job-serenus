@@ -194,12 +194,38 @@
        Uma barra por dia: onde os pagamentos se concentram e qual dia aperta.
        Clicar num dia não filtra ainda — os atalhos de faixa fazem esse papel
        e cobrem o que o PRD pediu; dia a dia seria mais UI sem mais resposta. #}
-    {% if cal_total %}
     <div class="card" style="padding:14px 16px; margin-bottom:14px;">
-      <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
-        <b style="font-size:13.5px;">Calendário de vencimentos</b>
-        <span style="font-size:11.5px; color:var(--cinza-2);">{{ cal_total|moeda }} vencendo neste mês</span>
+      {# O TOTAL E A RESPOSTA, o calendario e o detalhe.
+         Ele estava em 11,5px cinza no canto, do mesmo tamanho de uma legenda —
+         a unica pergunta que essa tela responde de imediato ("quanto sai?")
+         escrita como nota de rodape. Vira numero grande, com rotulo em cima
+         dizendo DE QUE PERIODO ele e: total que muda de valor sem dizer por
+         que vira desconfianca, e desconfianca num numero de dinheiro faz a
+         pessoa parar de usar a tela.
+         Vermelho quando o filtro e VENCIDAS: dinheiro que ja venceu nao e boa
+         noticia, e pintar de verde seria mentir com cor. #}
+      {% set _venc = filtros.faixa == 'vencidas' %}
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:14px; margin-bottom:12px;">
+        <div>
+          <b style="font-size:13.5px;">Calendário de vencimentos</b>
+          <div style="font-size:11px; color:var(--cinza-2); margin-top:3px;">
+            Custos e fixos, pelo dia do vencimento.</div>
+        </div>
+        <div style="flex:none; padding:9px 14px 10px; border-radius:12px;
+                    background:{{ 'rgba(244,63,124,.10)' if _venc else 'var(--verde-soft)' }};
+                    border:1px solid {{ 'rgba(244,63,124,.28)' if _venc else 'rgba(31,216,164,.24)' }};">
+          <div style="font-size:9.5px; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
+                      color:var(--cinza-2);">{{ cal_rotulo }}</div>
+          <div style="font-size:29px; font-weight:700; line-height:1.1; margin-top:2px;
+                      letter-spacing:-.02em; font-variant-numeric:tabular-nums;
+                      color:{{ 'var(--rosa)' if _venc else 'var(--verde)' }};">{{ cal_total|moeda }}</div>
+        </div>
       </div>
+      {% if cal_livre %}
+      <div style="font-size:11px; color:var(--cinza-2); margin:-4px 0 10px;">
+        Intervalo escolhido à mão: a lista abaixo <b>não está limitada à competência de {{ mes }}</b>.
+      </div>
+      {% endif %}
       <div style="display:flex; align-items:flex-end; gap:2px; height:74px;">
         {% for d in calendario %}
         <div style="flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%;"
@@ -215,21 +241,37 @@
                     color:{{ 'var(--rosa)' if d.hoje else 'var(--cinza-2)' }};">{{ d.dia if d.dia % 5 == 0 or d.dia == 1 or d.hoje else '' }}</div>
         {% endfor %}
       </div>
+      {% if not cal_total %}
+      <div style="font-size:11.5px; color:var(--cinza-2); margin-top:8px;">
+        Nada vence no período escolhido. Os outros filtros continuam valendo — se não era isso,
+        limpe os filtros.</div>
+      {% endif %}
     </div>
-    {% endif %}
 
     {# ── Filtros (PRD 4). O de faixa de vencimento é o mais urgente. ── #}
     <form method="get" class="card" style="padding:12px 16px; margin-bottom:14px; display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end;">
       <input type="hidden" name="mes" value="{{ mes }}">
       <div class="campo" style="min-width:190px;"><label>Vence entre</label>
-        <select name="faixa" onchange="this.form.submit()">
+        {# "Personalizado" NAO envia sozinho: enviar no `change` recarregaria a
+           pagina com as duas datas vazias e devolveria a lista inteira, dando a
+           impressao de que o filtro nao funciona. Ele abre os campos e espera. #}
+        <select name="faixa" id="f-faixa">
           <option value="">Todo o mês</option>
           <option value="01-10" {{ 'selected' if filtros.faixa=='01-10' }}>Dias 01 a 10</option>
           <option value="11-20" {{ 'selected' if filtros.faixa=='11-20' }}>Dias 11 a 20</option>
           <option value="21-31" {{ 'selected' if filtros.faixa=='21-31' }}>Dias 21 a 31</option>
           <option value="proximos7" {{ 'selected' if filtros.faixa=='proximos7' }}>Próximos 7 dias</option>
           <option value="vencidas" {{ 'selected' if filtros.faixa=='vencidas' }}>VENCIDAS</option>
+          <option value="personalizado" {{ 'selected' if filtros.faixa=='personalizado' }}>Personalizado…</option>
         </select></div>
+      <div class="campo" id="f-datas" style="min-width:250px; {{ '' if filtros.faixa=='personalizado' else 'display:none;' }}">
+        <label>De / até</label>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <input type="date" name="de" id="f-de" value="{{ filtros.de }}" style="flex:1; min-width:0;">
+          <span style="color:var(--cinza-2); font-size:12px;">até</span>
+          <input type="date" name="ate" id="f-ate" value="{{ filtros.ate }}" style="flex:1; min-width:0;">
+        </div>
+      </div>
       <div class="campo" style="min-width:150px;"><label>Centro de custo</label>
         <select name="centro" onchange="this.form.submit()">
           <option value="">Todos</option>
@@ -251,10 +293,40 @@
           <option value="">Todos</option>
           {% for m in meios_pagamento %}<option value="{{ m.id }}" {{ 'selected' if filtros.meio == m.id|string }}>{{ m.nome }}</option>{% endfor %}
         </select></div>
+      <button type="submit" id="f-aplicar" style="display:none; padding:8px 16px; border-radius:9px;
+              border:1px solid var(--verde); background:var(--verde-soft); color:var(--verde);
+              font-size:12.5px; font-weight:700; cursor:pointer;">Aplicar</button>
       {% if filtros.faixa or filtros.centro or filtros.status_lanc or filtros.tipo_lanc or filtros.meio %}
       <a href="/financeiro?mes={{ mes }}" style="font-size:12.5px; color:var(--azul); text-decoration:none; padding-bottom:8px;">limpar filtros</a>
       {% endif %}
     </form>
+    <script>
+    (function () {
+      var sel = document.getElementById('f-faixa');
+      var cx = document.getElementById('f-datas');
+      var de = document.getElementById('f-de'), ate = document.getElementById('f-ate');
+      var bt = document.getElementById('f-aplicar');
+      if (!sel || !cx) return;
+      // TODAS as outras opcoes enviam na hora, como antes. "Personalizado" e a
+      // unica que espera — e por isso o botao Aplicar so existe nela.
+      function pintar(enviar) {
+        var p = sel.value === 'personalizado';
+        cx.style.display = p ? '' : 'none';
+        bt.style.display = p ? '' : 'none';
+        if (p) { if (de && !de.value) de.focus(); return; }
+        if (enviar) sel.form.submit();
+      }
+      sel.addEventListener('change', function () { pintar(true); });
+      // A final nunca antes da inicial: em vez de recusar depois de enviar, o
+      // proprio campo passa a nao oferecer a data invalida.
+      function limites() {
+        if (de && ate) { ate.min = de.value || ''; de.max = ate.value || ''; }
+      }
+      if (de) de.addEventListener('change', limites);
+      if (ate) ate.addEventListener('change', limites);
+      limites(); pintar(false);
+    })();
+    </script>
     <div class="card">
       <div class="tbl-wrap">
       <table class="tbl">

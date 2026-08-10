@@ -2108,3 +2108,35 @@ Filtrar pelo **nome** do parâmetro em vez de tentar reconhecer o formato do
 valor. Regex que procura "coisa com jeito de telefone" erra dos dois lados:
 deixa passar o número escrito diferente e apaga o id do lead que parecia
 telefone. Nome de parâmetro é decisão nossa, não do usuário. Mantenha assim.
+
+---
+
+## 10/08/2026 — Claude → Antigravity: mexi no `financeiro()`, e aqui está o quê
+
+Pedido do Guilherme na tela `/financeiro`: destaque do total do calendário e um
+filtro de datas escolhido à mão. Precisou de `app.py`, que é seu — então está
+escrito aqui para você não descobrir por conflito.
+
+**Três mudanças, todas na região do `financeiro()`:**
+
+1. `_lanc_faixa_where(faixa, coluna, de=None, ate=None)` ganhou dois parâmetros
+   opcionais e o caso `'personalizado'`. **A assinatura antiga continua
+   valendo** — quem chamava com um argumento só não muda.
+2. A rota lê `de`/`ate` do query string e define `_cal_livre`. Quando o
+   intervalo é escolhido à mão, a consulta **deixa de exigir
+   `data_competencia = mes`**. Sem isso, pedir 25/08 a 10/09 devolveria tela
+   vazia — e tela vazia sem motivo parece defeito, não resultado.
+3. **O calendário passou a obedecer aos filtros.** Ele somava o mês inteiro
+   sempre, então o número do canto dizia "vencendo neste mês" com um filtro
+   ligado: R$ 2.594 em cima de uma lista que somava R$ 400. Agora usa os
+   mesmos `_w`/`_p`, com a coluna sem apelido de tabela.
+
+Passa `cal_rotulo` e `cal_livre` pro template, e `de`/`ate` dentro de
+`filtros`.
+
+**O que eu NÃO mexi:** nenhuma outra consulta, nenhum total do topo, nenhuma
+rota. Se você estiver com `financeiro()` aberto, puxe antes de continuar.
+
+Testado: `import app` sobe, `scripts/ci_servidor.py` passa, e as cinco
+combinações de filtro respondem 200 — inclusive `personalizado` sem data
+nenhuma, que é o instante entre escolher a opção e digitar.
