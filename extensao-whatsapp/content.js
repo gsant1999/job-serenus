@@ -7176,6 +7176,32 @@
     return url;
   }
 
+  // A AREA DE TRANSFERENCIA DO CHROME SO ACEITA PNG.
+  //
+  // A imagem nasce JPEG de proposito (metade do tempo de desenho, e o WhatsApp
+  // recomprime em JPEG de todo jeito). So que `ClipboardItem` com image/jpeg
+  // levanta NotAllowedError — o botao caia direto no catch e escrevia
+  // "Use Baixar". Ou seja: "Copiar" NUNCA copiou, desde que existe.
+  //
+  // Aqui a imagem e reencodada em PNG SO pra copiar. Mandar e baixar continuam
+  // no JPEG, que e o caminho quente.
+  function _cotPngPraCopiar(dataUrl) {
+    return new Promise((ok, falhou) => {
+      const im = new Image();
+      im.onload = () => {
+        try {
+          const cv = document.createElement('canvas');
+          cv.width = im.naturalWidth; cv.height = im.naturalHeight;
+          cv.getContext('2d').drawImage(im, 0, 0);
+          cv.toBlob((b) => (b ? ok(b) : falhou(new Error('canvas nao devolveu blob'))),
+                    'image/png');
+        } catch (e) { falhou(e); }
+      };
+      im.onerror = () => falhou(new Error('a imagem da cotacao nao carregou'));
+      im.src = dataUrl;
+    });
+  }
+
   // Pre-aquece o desenho: decodifica a logo da corretora e as das operadoras
   // ANTES de ele clicar. A primeira decodificacao custa mais de um segundo e a
   // segunda quase nada; rodando aqui, quando o comparativo aparece, ele nunca
@@ -7500,11 +7526,17 @@
       });
       document.getElementById('job-cot-prev-copiar').addEventListener('click', async (e) => {
         const b = e.currentTarget;
+        b.disabled = true;
         try {
-          const blob = await (await fetch(dataUrl)).blob();
-          await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+          // O ClipboardItem recebe a PROMESSA, nao o blob pronto. Esperar o PNG
+          // primeiro e so depois chamar o clipboard faz o navegador perder o
+          // gesto do clique quando a reencodacao demora.
+          await navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': _cotPngPraCopiar(dataUrl) }),
+          ]);
           b.textContent = 'Copiada';
-        } catch (err) { b.textContent = 'Use Baixar'; }
+        } catch (err) { b.textContent = 'Não copiou — use Baixar'; }
+        b.disabled = false;
         setTimeout(() => { b.textContent = 'Copiar'; }, 2600);
       });
       document.getElementById('job-cot-prev-baixar').addEventListener('click', (e) => {
