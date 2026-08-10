@@ -66,6 +66,30 @@
 .badge-pago { background:var(--verde-soft); color:var(--verde); }
 .socio-row { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid var(--borda); }
 .socio-row:last-child { border-bottom:none; }
+/* ── Calendário: cada dia é um alvo de clique, não um enfeite ─────────── */
+.cal-grade { display:flex; align-items:flex-end; gap:2px; height:78px; }
+.cal-dia { flex:1; min-width:0; height:100%; padding:0; border:none; background:transparent;
+           display:flex; flex-direction:column; justify-content:flex-end; cursor:pointer;
+           border-radius:3px; transition:background .12s ease; }
+.cal-dia:hover  { background:rgba(255,255,255,.05); }
+.cal-dia:focus-visible { outline:2px solid var(--teal); outline-offset:1px; }
+/* Dia sem nada não some — vira um traço apagado. Some, a pessoa acha que o
+   gráfico pulou dias e conta errado no olho. */
+.cal-dia.vazio { cursor:default; }
+.cal-dia.vazio:hover { background:transparent; }
+.cal-barra { display:block; width:100%; min-height:2px; border-radius:3px 3px 0 0;
+             background:var(--azul); transition:background .12s ease, opacity .12s ease; }
+.cal-dia.vazio .cal-barra { min-height:2px; height:2px !important; opacity:.22; }
+.cal-dia.hoje .cal-barra { background:var(--rosa); }
+.cal-dia.sel  .cal-barra { background:var(--teal); }
+.cal-dia:hover .cal-barra { opacity:.85; }
+.cal-eixo { display:flex; gap:2px; margin-top:4px; }
+.cal-eixo span { flex:1; text-align:center; font-size:8.5px; color:var(--cinza-2);
+                 font-variant-numeric:tabular-nums; }
+.cal-eixo span.hoje { color:var(--rosa); font-weight:700; }
+.cal-dica { font-size:11px; color:var(--cinza-2); margin-top:8px; min-height:15px; }
+.cal-dica b { color:var(--texto); font-variant-numeric:tabular-nums; }
+@media (prefers-reduced-motion:reduce) { .cal-dia, .cal-barra { transition:none; } }
 </style>
 {% endblock %}
 
@@ -240,6 +264,9 @@
        Uma barra por dia: onde os pagamentos se concentram e qual dia aperta.
        Clicar num dia não filtra ainda — os atalhos de faixa fazem esse papel
        e cobrem o que o PRD pediu; dia a dia seria mais UI sem mais resposta. #}
+    {% set cal_dia_sel = (filtros.de[8:10]|int)
+         if (filtros.faixa == 'personalizado' and filtros.de and filtros.de == filtros.ate
+             and filtros.de[:7] == mes) else 0 %}
     <div class="card" style="padding:14px 16px; margin-bottom:14px;">
       {# O TOTAL E A RESPOSTA, o calendario e o detalhe.
          Ele estava em 11,5px cinza no canto, do mesmo tamanho de uma legenda —
@@ -272,21 +299,29 @@
         Intervalo escolhido à mão: a lista abaixo <b>não está limitada à competência de {{ mes }}</b>.
       </div>
       {% endif %}
-      <div style="display:flex; align-items:flex-end; gap:2px; height:74px;">
+      {# O GRAFICO PASSA A RESPONDER.
+         Ele era decoracao: uma barra por dia, com o valor escondido no `title`
+         do navegador — aquele que demora um segundo pra aparecer, some sozinho
+         e nao existe no teclado. Ver que o dia 8 e alto e nao conseguir chegar
+         nos lancamentos do dia 8 e mostrar o problema sem dar a saida.
+         Agora cada dia e um BOTAO: clicou, a lista abaixo filtra naquele dia.
+         Clicou de novo no mesmo dia, desfaz. #}
+      <div class="cal-grade" id="cal-grade">
         {% for d in calendario %}
-        <div style="flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%;"
-             title="Dia {{ '%02d'|format(d.dia) }}{% if d.qtd %} · {{ d.valor|moeda }} em {{ d.qtd }} lançamento(s){% else %} · nada vence{% endif %}">
-          <div style="height:{{ d.pct }}%; min-height:{{ 2 if d.valor else 0 }}px; border-radius:2px 2px 0 0;
-                      background:{{ 'var(--rosa)' if d.hoje else 'var(--azul)' }}; opacity:{{ '1' if d.valor else '.15' }};"></div>
-        </div>
+        <button type="button" class="cal-dia{{ ' hoje' if d.hoje }}{{ ' vazio' if not d.valor }}{{ ' sel' if cal_dia_sel == d.dia }}"
+                data-dia="{{ '%02d'|format(d.dia) }}"
+                aria-label="Dia {{ '%02d'|format(d.dia) }}{% if d.qtd %}: {{ d.valor|moeda }} em {{ d.qtd }} lançamento(s){% else %}: nada vence{% endif %}"
+                data-info="{% if d.qtd %}{{ d.valor|moeda }} · {{ d.qtd }} lançamento{{ '' if d.qtd == 1 else 's' }}{% else %}nada vence{% endif %}">
+          <span class="cal-barra" style="height:{{ d.pct if d.valor else 0 }}%;"></span>
+        </button>
         {% endfor %}
       </div>
-      <div style="display:flex; gap:2px; margin-top:4px;">
+      <div class="cal-eixo">
         {% for d in calendario %}
-        <div style="flex:1; text-align:center; font-size:8.5px; font-variant-numeric:tabular-nums;
-                    color:{{ 'var(--rosa)' if d.hoje else 'var(--cinza-2)' }};">{{ d.dia if d.dia % 5 == 0 or d.dia == 1 or d.hoje else '' }}</div>
+        <span class="{{ 'hoje' if d.hoje }}">{{ d.dia if d.dia % 5 == 0 or d.dia == 1 or d.hoje else '' }}</span>
         {% endfor %}
       </div>
+      <div class="cal-dica" id="cal-dica">Clique num dia para ver só os vencimentos dele.</div>
       {% if not cal_total %}
       <div style="font-size:11.5px; color:var(--cinza-2); margin-top:8px;">
         Nada vence no período escolhido. Os outros filtros continuam valendo — se não era isso,
@@ -632,6 +667,52 @@
 <script>
 const MES = "{{ mes }}";
 const MEIOS_PAGAMENTO = {{ meios_pagamento|tojson }};
+
+// ── O calendário como filtro ────────────────────────────────────────────
+//
+// A informação do dia morava no `title` do navegador: aparece depois de um
+// segundo parado, some sozinho, e no teclado não existe. Aqui ela vai pra uma
+// linha fixa embaixo do gráfico — o olho já está ali, e ela não tapa nada.
+//
+// E clicar passa a FILTRAR. Ver que o dia 8 é o pico e não conseguir chegar
+// nos lançamentos do dia 8 é mostrar o problema e esconder a saída.
+(function () {
+  var grade = document.getElementById('cal-grade');
+  var dica = document.getElementById('cal-dica');
+  if (!grade || !dica) return;
+  var PADRAO = dica.textContent;
+  var MESATUAL = "{{ mes }}";
+  var SELECIONADO = "{{ cal_dia_sel or '' }}";
+
+  function mostrar(bt) {
+    dica.innerHTML = 'Dia <b>' + bt.dataset.dia + '</b> · ' + bt.dataset.info +
+      (bt.classList.contains('vazio') ? '' : ' — clique para filtrar');
+  }
+  grade.addEventListener('mouseover', function (e) {
+    var bt = e.target.closest('.cal-dia'); if (bt) mostrar(bt);
+  });
+  grade.addEventListener('focusin', function (e) {
+    var bt = e.target.closest('.cal-dia'); if (bt) mostrar(bt);
+  });
+  grade.addEventListener('mouseleave', function () { dica.textContent = PADRAO; });
+  grade.addEventListener('click', function (e) {
+    var bt = e.target.closest('.cal-dia');
+    if (!bt || bt.classList.contains('vazio')) return;
+    var dia = bt.dataset.dia;
+    var q = new URLSearchParams(window.location.search);
+    q.set('mes', MESATUAL);
+    // Clicar de novo no mesmo dia desfaz — senão só dá pra sair pelo "limpar
+    // filtros", que apaga também centro de custo e status que ele escolheu.
+    if (SELECIONADO === dia) {
+      q.delete('faixa'); q.delete('de'); q.delete('ate');
+    } else {
+      q.set('faixa', 'personalizado');
+      q.set('de', MESATUAL + '-' + dia);
+      q.set('ate', MESATUAL + '-' + dia);
+    }
+    window.location.search = q.toString();
+  });
+})();
 
 function aba(p) {
   document.querySelectorAll('.fin-tab').forEach(t=>t.classList.toggle('active', t.dataset.pane===p));
