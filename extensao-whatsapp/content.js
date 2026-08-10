@@ -5454,7 +5454,7 @@
   // diferentes com precos diferentes.
   function _cotChaveDe(p, operadoraId) {
     const pl = (p && p.plano) || {}, tb = (p && p.tabela) || {};
-    return [operadoraId, _cotNomePlano(p), pl.acomodacaoTxt || (pl.acomodacao ? 'A' : 'E'),
+    return [operadoraId, _cotNomePlano(p), _cotAcomod(pl) || '?',
             _cotCopart(tb), _texto(p && p.produto)].join('|');
   }
   function _cotNaSacola(chave) {
@@ -5682,13 +5682,44 @@
   // Atributos como ETIQUETAS, não como frase corrida. O consultor procura um
   // atributo específico ("tem MEI?", "aceita 2 vidas?") e varrer texto pra
   // achar é o que faz ele errar o plano na frente do cliente.
+  // AMBULATORIAL VIRAVA APARTAMENTO. Nao e informacao faltando: e informacao
+  // TROCADA, no atributo que mais decide a venda.
+  //
+  // A conta era `pl.acomodacao ? 'Apartamento' : 'Enfermaria'`. Ela assume que
+  // o campo e booleano. O Painel manda a palavra — e "Ambulatorial" e uma
+  // string cheia, portanto verdadeira, portanto virava "Apartamento". O plano
+  // que NAO tem internacao nenhuma aparecia pro consultor, e ia pro cliente,
+  // como quarto individual.
+  //
+  // O comentario logo abaixo ja avisava do risco na direcao contraria
+  // (traduzir texto pro booleano faria Ambulatorial virar Enfermaria) e mesmo
+  // assim a coercao ficou. Aviso escrito nao conserta codigo.
+  //
+  // Regra nova, sem esperteza: palavra vira ela mesma, booleano vira o par que
+  // o booleano significa, e o que nao for nem um nem outro NAO VIRA NADA.
+  // Etiqueta em branco e um consultor perguntando; etiqueta errada e uma venda
+  // desfeita.
+  function _cotAcomod(pl) {
+    const o = pl || {};
+    const v = (o.acomodacaoTxt !== undefined && o.acomodacaoTxt !== null && o.acomodacaoTxt !== '')
+      ? o.acomodacaoTxt : o.acomodacao;
+    if (typeof v === 'string') {
+      const t = v.trim();
+      return (!t || t === '$undefined') ? '' : t;
+    }
+    if (v === true) return 'Apartamento';
+    if (v === false) return 'Enfermaria';
+    return '';
+  }
+
   function _cotEtiquetas(p) {
     const pl = (p && p.plano) || {}, tb = (p && p.tabela) || {};
     const et = [];
     // O Painel manda booleano; a tabela do JOB manda texto ('Apartamento',
     // 'Enfermaria', 'Ambulatorial'...). Traduzir o texto pro booleano faria
     // 'Ambulatorial' virar 'Enfermaria' na tela — mentira em etiqueta.
-    et.push({ k: 'acomodacao', t: pl.acomodacaoTxt || (pl.acomodacao ? 'Apartamento' : 'Enfermaria'), c: '' });
+    const ac = _cotAcomod(pl);
+    if (ac) et.push({ k: 'acomodacao', t: ac, c: '' });
     const cop = _cotCopart(tb);
     et.push({ k: 'copart', t: cop, c: cop === 'Sem coparticipação' ? 'ok' : 'aviso' });
     if (tb.mei === true) et.push({ k: 'mei', t: 'Aceita MEI', c: 'ok' });
@@ -7387,7 +7418,7 @@
     linha('Modalidade', lista.map(() => _cotRotulo(_cot.modalidade)));
     linha('Acomodação', lista.map((p) => {
       const pl = p.plano || {};
-      return pl.acomodacaoTxt || (pl.acomodacao ? 'Apartamento' : 'Enfermaria');
+      return _cotAcomod(pl);
     }));
     linha('Coparticipação', lista.map((p) => _cotCopart(p.tabela || {})));
     faixas.forEach((f) => linha(f.rot, lista.map((p) => valor(p, f.rot)), f.qtd + 'x'));
