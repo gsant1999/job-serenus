@@ -29,8 +29,8 @@
                   color:var(--cinza-2); }
 .fin-saldo .num { font-family:'Sora',sans-serif; font-size:34px; font-weight:700; line-height:1.12;
                   letter-spacing:-.025em; font-variant-numeric:tabular-nums; margin-top:4px; }
-.fin-saldo.ok .num   { color:var(--verde); }
-.fin-saldo.ruim .num { color:var(--rosa); }
+.fin-saldo.ok .num   { color:var(--num-pos); }
+.fin-saldo.ruim .num { color:var(--num-neg); }
 .fin-saldo .pe { font-size:11.5px; color:var(--cinza-2); margin-top:6px; line-height:1.4; }
 .fin-mini { border:1px solid var(--borda); border-radius:14px; background:var(--panel-2);
             padding:6px 16px; display:flex; flex-direction:column; justify-content:center; }
@@ -38,7 +38,7 @@
                padding:8px 0; border-top:1px solid var(--borda); }
 .fin-mini .m:first-child { border-top:none; }
 .fin-mini .m span { font-size:12px; color:var(--cinza); }
-.fin-mini .m b { font-size:13.5px; font-weight:650; font-variant-numeric:tabular-nums; }
+.fin-mini .m b { font-size:14px; font-weight:700; font-variant-numeric:tabular-nums; }
 .tbl { width:100%; border-collapse:collapse; }
 .tbl th { text-align:left; font-size:10.5px; color:var(--cinza-2); text-transform:uppercase; letter-spacing:.4px; padding:10px 12px; border-bottom:1px solid var(--borda-2); white-space:nowrap; }
 .tbl td { padding:11px 12px; border-bottom:1px solid var(--borda); font-size:13px; }
@@ -46,7 +46,7 @@
    isso a virgula dança de linha pra linha e comparar dois valores vira
    leitura algarismo por algarismo. */
 .tbl td.td-valor, .tbl td.pos, .tbl td.neg { font-variant-numeric:tabular-nums; }
-.tbl td.td-valor { text-align:right; }
+.tbl td.td-valor { text-align:right; font-weight:650; }
 .tbl th.th-valor { text-align:right; }
 .tbl tr:last-child td { border-bottom:none; }
 /* A tabela de custos tem muitas colunas (com botões que não podem quebrar
@@ -60,10 +60,22 @@
 .mes-nav { display:flex; align-items:center; gap:12px; margin-bottom:18px; }
 .mes-nav input { padding:9px 12px; }
 .add-row { display:grid; gap:10px; align-items:end; margin-bottom:14px; padding:16px; background:var(--panel-2); border:1px solid var(--borda); border-radius:12px; }
-.pos { color:var(--teal); } .neg { color:var(--rosa); }
+/* ── DINHEIRO TEM COR PRÓPRIA, e ela é forte ─────────────────────────────
+   `.pos` usava `--teal`, e --teal NÃO É REDEFINIDO no tema claro: fica com o
+   verde-menta do escuro, que sobre branco vira pastel. Justamente o número
+   que a pessoa veio ler era o mais apagado da tela.
+   Estes dois tons existem só para número de dinheiro. No claro são saturados
+   e escuros o bastante para ler à distância; no escuro, luminosos. Não são
+   usados em fundo, borda ou ícone — cor de dinheiro só pinta dinheiro. */
+:root { --num-pos:#0a8f5a; --num-neg:#d10f3f; }
+@media (prefers-color-scheme: dark) { :root { --num-pos:#1fd8a4; --num-neg:#ff4d79; } }
+:root[data-theme="light"] { --num-pos:#0a8f5a; --num-neg:#d10f3f; }
+:root[data-theme="dark"]  { --num-pos:#1fd8a4; --num-neg:#ff4d79; }
+.pos { color:var(--num-pos); font-weight:650; }
+.neg { color:var(--num-neg); font-weight:650; }
 .badge-status { display:inline-block; padding:2px 9px; border-radius:20px; font-size:11px; font-weight:600; }
 .badge-previsto { background:rgba(250,204,21,.14); color:var(--amarelo,#facc15); }
-.badge-pago { background:var(--verde-soft); color:var(--verde); }
+.badge-pago { background:var(--verde-soft); color:var(--num-pos); }
 .socio-row { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid var(--borda); }
 .socio-row:last-child { border-bottom:none; }
 /* Marca discreta: diz a origem sem competir com a descrição. */
@@ -331,7 +343,7 @@
                       color:var(--cinza-2);">{{ cal_rotulo }}</div>
           <div style="font-size:29px; font-weight:700; line-height:1.1; margin-top:2px;
                       letter-spacing:-.02em; font-variant-numeric:tabular-nums;
-                      color:{{ 'var(--rosa)' if _venc else 'var(--verde)' }};">{{ cal_total|moeda }}</div>
+                      color:{{ 'var(--num-neg)' if _venc else 'var(--num-pos)' }};">{{ cal_total|moeda }}</div>
         </div>
       </div>
       {% if cal_livre %}
