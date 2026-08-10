@@ -20715,9 +20715,24 @@ _CANARIO_ROTULO = {
     'dom_linhas':   'O reconhecimento das mensagens na tela',
     'dom_arquivo':  'O bloco de ler documento nas bolhas de arquivo',
     'dom_audio':    'O bloco de transcrever nas bolhas de áudio',
+    # AS TRES ABAIXO SAO O JUIZ INDEPENDENTE, e existem por causa de um furo
+    # real: as duas de cima perguntam "esta linha e documento?" usando a MESMA
+    # funcao que desenha o botao. Quando o WhatsApp mudou a pintura da
+    # miniatura de PDF e o detector parou de reconhecer a bolha, elas contaram
+    # ZERO documentos, chamaram de "ausencia de amostra" e disseram que estava
+    # tudo bem — enquanto o consultor abria a conversa e nao via botao nenhum.
+    #
+    # Estas comparam com a wa-js, que sabe o TIPO de cada mensagem sem depender
+    # de seletor de tela. Se ela ve tres documentos e a extensao desenhou zero,
+    # sai vermelho aqui em vez de ninguem ficar sabendo.
+    'contrato_documento': 'Documento visto pela wa-js x bloco desenhado na tela',
+    'contrato_audio':     'Áudio visto pela wa-js x bloco desenhado na tela',
+    'contrato_tela':      'A conferência entre a wa-js e a tela',
 }
 # Capacidade que, caindo, faz MENSAGEM NAO SAIR. Falha barulhenta e chata;
 # falha silenciosa custa lead. Estas viram notificacao na hora.
+# `contrato_*` nao entram aqui: elas nao impedem mensagem de sair — mas sao o
+# unico aviso de que um botao sumiu da tela sem erro nenhum no console.
 _CANARIO_CRITICAS = {'wa_js', 'enviar', 'conversa', 'achar_msg'}
 
 

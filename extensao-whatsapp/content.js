@@ -3424,6 +3424,55 @@
         }
       } catch (e) { /* uma linha estranha nao derruba a rodada */ }
     }
+    // ── O JUIZ INDEPENDENTE ──────────────────────────────────────────────
+    //
+    // A conta acima tem um furo que so aparece quando importa: ela pergunta
+    // "esta linha e documento?" usando `_docLinhaEhArquivo`, que e A MESMA
+    // funcao que desenha o botao. Se o detector para de reconhecer a bolha de
+    // PDF — que foi o que aconteceu quando o WhatsApp mudou a pintura da
+    // miniatura —, o canario conta ZERO documentos, chama de "ausencia de
+    // amostra" e declara tudo certo. Uma verificacao que se mede com a peca
+    // quebrada nunca acusa a quebra.
+    //
+    // Aqui a pergunta vai pra outra fonte: a wa-js, que sabe o TIPO de cada
+    // mensagem sem depender de seletor de tela nenhum. Se ela diz que ha tres
+    // documentos entre as linhas visiveis e nos desenhamos zero botoes, o
+    // problema esta no nosso lado — e o alerta sai sozinho, sem ninguem
+    // precisar abrir uma conversa com PDF e reclamar.
+    try {
+      const conv = await _pedirPonte('ler_conversa_completa', { limite: 150 }, 15000);
+      const porId = {};
+      ((conv && conv.mensagens) || []).forEach((m) => { porId[m.msg_id] = m.tipo || ''; });
+      const visiveis = Array.from(linhas).map((r) => r.getAttribute('data-id') || '');
+      const TIPO_ARQ = ['document', 'image'];
+      const TIPO_AUD = ['ptt', 'audio'];
+      let vArq = 0, vAud = 0;
+      visiveis.forEach((id) => {
+        const tp = porId[id];
+        if (!tp) return;                       // linha que a wa-js nao viu: nao conta
+        if (TIPO_ARQ.indexOf(tp) >= 0) vArq++;
+        else if (TIPO_AUD.indexOf(tp) >= 0) vAud++;
+      });
+      const slotsArq = main.querySelectorAll('.job-doc-slot').length;
+      const slotsAud = main.querySelectorAll('.job-tr-slot:not(.job-doc-slot)').length;
+      // Tolerancia de um: a linha pode ter entrado na tela no meio da medicao.
+      if (vArq) {
+        out.push({ cap: 'contrato_documento', ok: slotsArq >= vArq - 1, ms: 0,
+          detalhe: 'a wa-js ve ' + vArq + ' documento(s)/imagem(ns) nas linhas visiveis e a '
+                 + 'extensao desenhou ' + slotsArq + ' bloco(s)'
+                 + (slotsArq >= vArq - 1 ? '' : ' — o seletor de bolha de documento parou de casar') });
+      }
+      if (vAud) {
+        out.push({ cap: 'contrato_audio', ok: slotsAud >= vAud - 1, ms: 0,
+          detalhe: 'a wa-js ve ' + vAud + ' audio(s) nas linhas visiveis e a extensao desenhou '
+                 + slotsAud + ' bloco(s)'
+                 + (slotsAud >= vAud - 1 ? '' : ' — o seletor de bolha de audio parou de casar') });
+      }
+    } catch (e) {
+      out.push({ cap: 'contrato_tela', ok: false, ms: 0,
+                 detalhe: 'nao consegui perguntar a wa-js: ' + String((e && e.message) || e).slice(0, 90) });
+    }
+
     // Zero bolhas daquele tipo na tela nao e falha — e ausencia de amostra.
     if (arq) out.push({ cap: 'dom_arquivo', ok: arqOk === arq, ms: 0,
                         detalhe: arqOk + ' de ' + arq + ' bolhas de arquivo com o bloco' });
