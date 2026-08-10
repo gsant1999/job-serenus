@@ -1398,6 +1398,14 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   border-top: 1px solid rgba(255,255,255,.09);
   width: 100%; max-width: 100%; box-sizing: border-box;
 }
+/* BLOCO VAZIO NAO OCUPA ESPACO.
+   O slot nasce vazio e so ganha conteudo quando o estado do documento e
+   resolvido. Entre uma coisa e outra ele era um <div> de 13px com borda em
+   cima DENTRO da bolha — e numa bolha de imagem, cuja altura o WhatsApp
+   calcula pela midia, isso empurra a foto e joga a hora pra fora.
+   Ninguem via botao nenhum e a bolha ficava torta: os dois sintomas, uma
+   causa. Vazio some; quando tiver o que mostrar, aparece. */
+.job-doc-slot:empty, .job-tr-slot:empty { display: none; }
 /* Nada aqui dentro pode esticar: select herda a largura do pai e virava uma
    barra atravessando a conversa inteira. */
 .job-doc-slot select, .job-doc-slot button { width: auto; max-width: 100%; }

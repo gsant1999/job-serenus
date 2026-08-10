@@ -3879,6 +3879,7 @@
           '<button class="job-cnpj-btn" id="dev-varrer">Rodar a varredura agora</button>' +
           '<button class="job-cnpj-btn" id="dev-repintar">Repintar etiquetas</button>' +
           '<button class="job-cnpj-btn" id="dev-bruto">Copiar dados brutos dos planos</button>' +
+          '<button class="job-cnpj-btn" id="dev-bolha">Copiar como a bolha está montada</button>' +
         '</div>' +
         '<div class="job-dev-saida" id="dev-saida"></div>' +
       '</div>');
@@ -3921,6 +3922,53 @@
     // Nao vai preco nem nome de cliente: sao os planos da tela de escolha,
     // antes de qualquer cotacao. Mesmo assim a saida e o texto cru, entao ela
     // fica no diagnostico e nao num botao que qualquer um encosta.
+    // COMO A BOLHA ESTA MONTADA — so a estrutura, nenhum texto.
+    //
+    // "Ta dando problema na bolha" com um print e o maximo que eu consigo ver:
+    // que esta torta. Qual elemento o bloco pegou, e se aquele elemento tem
+    // altura fixa ou corta o que passa dele, so o DOM responde — e adivinhar
+    // isso ja me custou duas correcoes erradas hoje.
+    //
+    // Copia TAG, CLASSE e a geometria de cada nivel das bolhas de arquivo.
+    // NENHUM texto de mensagem, nenhum src, nenhum nome, nenhum telefone: essa
+    // e a diferenca entre um diagnostico e um vazamento de conversa de
+    // cliente. O que interessa aqui e a forma, nao o conteudo.
+    btn('dev-bolha', 'bolha', async () => {
+      const linhas = document.querySelectorAll('#main [data-id]');
+      const achados = [];
+      for (const row of linhas) {
+        if (!_docLinhaEhArquivo(row) && !row.querySelector('.job-doc-slot')) continue;
+        const cam = [];
+        let el = row.querySelector('.job-doc-slot') || _docAncora(row);
+        // Sobe ate a linha desenhando a arvore de fora pra dentro.
+        while (el && el !== row && cam.length < 9) {
+          const cs = getComputedStyle(el);
+          const r = el.getBoundingClientRect();
+          cam.unshift({
+            tag: el.tagName.toLowerCase(),
+            classe: String(el.className || '').slice(0, 90),
+            l: Math.round(r.width) + 'x' + Math.round(r.height),
+            overflow: cs.overflow, altura: cs.height, aspecto: cs.aspectRatio,
+            pos: cs.position, display: cs.display,
+          });
+          el = el.parentElement;
+        }
+        achados.push({
+          temSlot: !!row.querySelector('.job-doc-slot'),
+          slotSolto: !!row.querySelector('.job-doc-slot.job-doc-solto'),
+          slotVazio: !!(row.querySelector('.job-doc-slot') || {}).children
+                     && !(row.querySelector('.job-doc-slot').children.length),
+          caminho: cam,
+        });
+        if (achados.length >= 4) break;
+      }
+      if (!achados.length) return 'Nenhuma bolha de arquivo nesta conversa. Abra a conversa onde a bolha está torta e clique de novo.';
+      const txt = JSON.stringify({ versao: (chrome.runtime.getManifest() || {}).version, bolhas: achados }, null, 2);
+      try { await navigator.clipboard.writeText(txt); } catch (e) {
+        return 'Nao consegui copiar: ' + ((e && e.message) || e);
+      }
+      return 'Copiado: ' + achados.length + ' bolha(s), so estrutura — nenhum texto de mensagem. Cole aqui na conversa.';
+    });
     btn('dev-bruto', 'bruto', async () => {
       const pls = (_cot && _cot.planos) || [];
       if (!pls.length) {
