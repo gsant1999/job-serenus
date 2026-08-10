@@ -5672,12 +5672,26 @@
   // jogava fora exatamente a informação que decide a venda: parcial cobra só
   // consulta e exame; completa cobra também internação. Mesmo texto dos dois
   // lados, pra ninguém ler uma coisa na extensão e outra no documento.
+  //
+  // E A PALAVRA E DELES, NAO MINHA.
+  //
+  // A versao anterior classificava: pegava o `coparticipacaoTipo`, procurava
+  // 'parcial'/'total'/'complet'/'integral' dentro dele e devolvia UM DOS MEUS
+  // dois rotulos. Funciona enquanto eles escrevem o que eu previ. No dia em
+  // que aparecer um terceiro tipo — e existe, porque a tela deles ja mostra
+  // "Coparticipacao" sem qualificador ao lado de "Coparticipacao Parcial" —
+  // ele cai no generico "Com coparticipacao" e a distincao morre, sem erro
+  // nenhum, com o consultor achando que leu o que o Painel disse.
+  //
+  // Agora o tipo vai INTEIRO, do jeito que veio. Eu so acrescento a palavra
+  // "Coparticipacao" na frente quando ela nao esta la — e nao mexo em mais
+  // nada. Classificar dado de terceiro e sempre uma aposta de que eu conheco a
+  // lista toda dele. Nao conheco.
   function _cotCopart(tb) {
     if (!(tb || {}).coparticipacao) return 'Sem coparticipação';
-    const t = String((tb || {}).coparticipacaoTipo || '').toLowerCase();
-    if (t.indexOf('parcial') >= 0) return 'Coparticipação parcial';
-    if (['total', 'complet', 'integral'].some((x) => t.indexOf(x) >= 0)) return 'Coparticipação completa';
-    return 'Com coparticipação';
+    const bruto = String((tb || {}).coparticipacaoTipo || '').trim();
+    if (!bruto || bruto === '$undefined') return 'Com coparticipação';
+    return /copartic/i.test(bruto) ? bruto : ('Coparticipação ' + bruto);
   }
   // Atributos como ETIQUETAS, não como frase corrida. O consultor procura um
   // atributo específico ("tem MEI?", "aceita 2 vidas?") e varrer texto pra
