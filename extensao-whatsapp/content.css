@@ -1189,6 +1189,10 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-bc-quebra-b:hover { border-color: rgba(232,179,57,.55); }
 .job-bc-quebra-b:disabled { opacity: .6; cursor: default; }
 
+/* "Confirme se aceita MEI" e AVISO, nao bloqueio: a linha continua clicavel.
+   Ambar porque exige conferencia; vermelho leria como impedimento. */
+.job-cot-porque.aviso { color: var(--job-aviso, #e8b339); }
+
 .job-cot-res-dif { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
 .job-cot-res.sem .job-cot-res-dif { opacity: .8; }
 /* Sem preco nao some e nao vira zero: fica visivel e apagado. */

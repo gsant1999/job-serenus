@@ -283,12 +283,15 @@
     setTimeout(function(){
       var alvo = document.getElementById('documento');
       if (!alvo || typeof html2canvas !== 'function') return;
+      _achatarLogos(alvo).then(function (restaurar) {
       html2canvas(alvo, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(function(canvas){
+        restaurar();
         fetch('/cotacao/' + COTACAO_ID + '/imagem', {
           method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify({ imagem: canvas.toDataURL('image/png') })
         }).catch(function(){});
       }).catch(function(){});
+      });
     }, 1500);
   });
 })();
@@ -311,6 +314,47 @@ function copiarLink() {
     navigator.clipboard.writeText(url).then(function(){ _aviso('Link copiado. Cole na conversa do cliente.'); },
       function(){ window.prompt('Copie o link da cotação:', url); });
   } else { window.prompt('Copie o link da cotação:', url); }
+}
+// SVG NAO SOBREVIVE AO html2canvas.
+//
+// Os logos das operadoras sao .svg. O navegador desenha certo na tela; o
+// html2canvas nao — ele reinterpreta o SVG por conta e sai so um pedaco. Foi
+// isso que virou a mancha vermelha no lugar do logo da Hapvida na imagem que
+// vai pro cliente.
+//
+// Aqui cada <img> e ACHATADA em PNG antes da captura: o proprio navegador ja
+// rasterizou aquele SVG pra mostrar na tela, entao desenhar a imagem num
+// canvas devolve o bitmap correto. Depois da captura, tudo volta ao que era —
+// a pagina continua com o SVG, que e mais nitido em zoom.
+async function _achatarLogos(raiz) {
+  var voltar = [];
+  var imgs = Array.prototype.slice.call(raiz.querySelectorAll('img'));
+  for (var i = 0; i < imgs.length; i++) {
+    var im = imgs[i];
+    if (!/\.svg(\?|$)/i.test(im.src || '') && (im.src || '').indexOf('image/svg') < 0) continue;
+    try {
+      if (!im.complete) { await im.decode().catch(function () {}); }
+      var r = im.getBoundingClientRect();
+      // 3x pra nao perder nitidez: o html2canvas ja captura em escala 2.
+      var w = Math.max(1, Math.round((r.width || im.width || 120) * 3));
+      var h = Math.max(1, Math.round((r.height || im.height || 40) * 3));
+      var cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(im, 0, 0, w, h);
+      var png = cv.toDataURL('image/png');
+      if (png && png.length > 64) {
+        voltar.push([im, im.src, im.style.width, im.style.height]);
+        // Trava o tamanho junto: sem largura escrita, o PNG entra com o
+        // tamanho do bitmap (3x) e estoura a celula.
+        im.style.width = Math.round(r.width) + 'px';
+        im.style.height = Math.round(r.height) + 'px';
+        im.src = png;
+      }
+    } catch (e) { /* um logo que nao achata nao pode impedir a imagem */ }
+  }
+  return function () {
+    voltar.forEach(function (v) { v[0].src = v[1]; v[0].style.width = v[2]; v[0].style.height = v[3]; });
+  };
 }
 function _fmtBR(n){ return (n||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 // A MOLDURA DO DESTAQUE E DESENHADA POR CIMA DA TABELA.
@@ -530,7 +574,9 @@ function _copiarFallback(txt) {
 async function copiarImagem() {
   var alvo = document.getElementById('documento');
   try {
+    var _restaurar = await _achatarLogos(alvo);
     var canvas = await html2canvas(alvo, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
+    _restaurar();
     canvas.toBlob(async function(blob) {
       try {
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
@@ -559,7 +605,9 @@ async function copiarImagemPlano(idx) {
     if (el.getAttribute('data-p') !== String(idx)) { escondidos.push([el, el.style.display]); el.style.display = 'none'; }
   });
   try {
+    var _restaurar = await _achatarLogos(alvo);
     var canvas = await html2canvas(alvo, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
+    _restaurar();
     canvas.toBlob(async function(blob) {
       try {
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
@@ -574,12 +622,15 @@ async function copiarImagemPlano(idx) {
 }
 function baixarImagem() {
   var alvo = document.getElementById('documento');
+  _achatarLogos(alvo).then(function (restaurar) {
   html2canvas(alvo, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(function(canvas) {
+    restaurar();
     var link = document.createElement('a');
     link.download = 'cotacao-{{ (cot.cliente_nome or cot.titulo or "serenus")|replace(" ", "_") }}.png';
     link.href = canvas.toDataURL('image/png');
     link.click();
   }).catch(function(e) { _aviso('Não consegui gerar a imagem. Use Baixar ou PDF.', true); });
+  });
 }
 
 {% if publico %}

@@ -5759,6 +5759,19 @@
     return _cotCtx;
   }
 
+  // Tira "60.744.947 " da frente de "60.744.947 GUILHERME HENRIQUE LOPES",
+  // e SO quando esses digitos sao a raiz do CNPJ que acabou de ser consultado.
+  function _cotNomeSemRaiz(nome, cnpjDigitos) {
+    const n = String(nome || '').trim();
+    const raiz = String(cnpjDigitos || '').replace(/[^0-9]/g, '').slice(0, 8);
+    if (!n || raiz.length !== 8) return n;
+    const m = n.match(/^([0-9][0-9.\/-]{7,})\s+(.+)$/);
+    if (!m) return n;
+    if (m[1].replace(/[^0-9]/g, '') !== raiz) return n;
+    const resto = m[2].trim();
+    return resto.length >= 3 ? resto : n;
+  }
+
   function _cotNomePlano(p) {
     return ((p && p.plano) || {}).nome || (p && p.nome) || 'Plano';
   }
@@ -6206,7 +6219,17 @@
       _cot = _cot || {};
       _cot.cnpj = dig;
       _cot.cnpjDados = c;
-      if (iCli) iCli.value = c.nome || '';
+      // O NOME DO MEI VEM COM A RAIZ DO CNPJ NA FRENTE.
+      //
+      // A Receita registra MEI assim: "60.744.947 GUILHERME HENRIQUE LOPES".
+      // E a razao social de verdade — nao e erro de leitura. So que ela vai
+      // parar na cotacao que o CLIENTE le, e ali parece dado de sistema
+      // vazado, nao documento de corretora.
+      //
+      // Corta so quando os digitos sao a raiz do PROPRIO CNPJ consultado.
+      // Cortar numero do comeco de qualquer nome mutilaria razao social
+      // legitima que comeca com numero — e existem.
+      if (iCli) iCli.value = _cotNomeSemRaiz(c.nome || '', dig);
       meiDoCnpj = !!c.eh_mei;
       verCliente();
       // SITUACAO CADASTRAL APARECE. Operadora recusa proposta de empresa
@@ -6231,10 +6254,47 @@
             : '') +
         '</div>';
       const bc = document.getElementById('job-cot-usar-cidade');
-      if (bc) bc.addEventListener('click', () => {
-        iCid.value = c.municipio;
+      if (bc) bc.addEventListener('click', async () => {
+        // A CIDADE TEM QUE SER A STRING DO CATALOGO DELES.
+        //
+        // Este botao escrevia `c.municipio` no campo — e `municipio` e uma
+        // string que NOS montamos ("INDAIATUBA - SP", cidade + ' - ' + UF). O
+        // Painel nao tem cidade com esse nome, entao a busca respondia
+        // "nenhuma cidade com esse nome" e o consultor achava que tinha
+        // digitado errado. O proprio comentario da funcao de busca ja avisava:
+        // montar na mao nao funciona.
+        //
+        // Agora ele PROCURA no catalogo com o nome puro (sem o " - UF") e
+        // escolhe. Um resultado: escolhe sozinho. Mais de um: abre a lista
+        // filtrada, pra ele decidir — cidade errada muda preco.
+        const puro = String(c.municipio || '').replace(/\s*-\s*[A-Z]{2}\s*$/i, '').trim();
+        if (!puro) return;
+        bc.disabled = true; bc.textContent = 'Procurando na lista…';
+        let achados = [];
+        try {
+          const rr = await _safeSendMessage({ type: 'cotador_cidades', termo: puro });
+          achados = (rr && rr.ok && Array.isArray(rr.cidades)) ? rr.cidades : [];
+        } catch (e) { achados = []; }
+        bc.disabled = false;
+        if (!achados.length) {
+          bc.textContent = 'O Painel não tem ' + puro + ' na lista';
+          return;
+        }
+        const nomeDe = (x) => (typeof x === 'string' ? x : (x.nome || x.label || x.descricao || ''));
+        const exato = achados.filter((x) => nomeDe(x).toLowerCase() === puro.toLowerCase());
+        const escolhido = (exato.length === 1) ? exato[0] : (achados.length === 1 ? achados[0] : null);
+        if (escolhido) {
+          iCid.value = nomeDe(escolhido);
+          iCid.classList.add('ok');
+          iCid.dispatchEvent(new Event('input', { bubbles: true }));
+          bc.textContent = 'Cidade: ' + nomeDe(escolhido);
+          return;
+        }
+        // Mais de uma: devolve a escolha pra ele, com o campo ja filtrado.
+        iCid.value = puro;
         iCid.dispatchEvent(new Event('input', { bubbles: true }));
-        bc.textContent = 'Cidade trocada — confirme na lista';
+        iCid.focus();
+        bc.textContent = achados.length + ' cidades com esse nome — escolha na lista';
       });
     });
     const dica = document.getElementById('job-cot-dica');
@@ -6874,7 +6934,13 @@
       // A abrangencia e o que separa MedSenior Campinas 1 de Campinas 2 — e
       // por isso ela ocupa o lugar do produto na arvore de gavetas.
       produto: { nome: (x.abrangencia || '').trim() },
+      // MEI COM TRES ESTADOS, nao dois. `true` = a tabela aceita; `false` =
+      // esta escrito que nao aceita; `null` = NINGUEM PREENCHEU.
+      // Achatar os tres em booleano foi o que travou a venda: sem o campo, o
+      // plano caia em "nao aceita" e sumia a operadora inteira pro cliente MEI.
       tabela: { coparticipacao: !semCop, coparticipacaoTipo: cop,
+                mei: (x.mei === true || x.mei === 1) ? true
+                     : ((x.mei === false || x.mei === 0) ? false : null),
                 qtdVidaMin: x.vidas_min || 0, qtdVidaMax: x.vidas_max || 0 },
       operadora: { nome: x.operadora || '' },
       vigencia: x.vigencia || '',
@@ -7107,7 +7173,21 @@
               // opcoes que condiz com o CNPJ". Bloqueado e nao escondido: some
               // da tela ele procuraria o plano e acharia que a extensao perdeu;
               // bloqueado com o motivo escrito, ele entende em um segundo.
-              const naoServeMei = !!(_cot.clienteMei && ((pls[i].tabela || {}).mei !== true));
+              // AUSENCIA DE INFORMACAO NAO E "NAO ACEITA".
+              //
+              // A regra era `mei !== true`. Como as tabelas do JOB nem
+              // devolviam o campo, TODO plano de operadora fora do Painel
+              // aparecia bloqueado pra cliente MEI — Vera Cruz, MedSenior,
+              // Beneficencia, todas. Quatro linhas cinzas e o botao morto, sem
+              // uma palavra dizendo por que. Venda que existe, travada por um
+              // campo em branco.
+              //
+              // Agora so bloqueia quando esta escrito que NAO aceita. Quando
+              // ninguem preencheu, libera e avisa — decidir por falta de dado
+              // e o consultor perdendo negocio calado.
+              const _meiTab = (pls[i].tabela || {}).mei;
+              const naoServeMei = !!(_cot.clienteMei && _meiTab === false);
+              const meiDuvida = !!(_cot.clienteMei && (_meiTab === null || _meiTab === undefined));
               // A marcacao sobrevive a troca de operadora: quem ja esta na
               // sacola volta marcado quando ele volta pra ca.
               return '<label class="job-cot-plano' + (naoServeMei ? ' bloq' : '') + '"' +
@@ -7122,6 +7202,7 @@
                     '</span>'
                   : '') +
                 (naoServeMei ? '<span class="job-cot-porque">Não aceita MEI</span>' : '') +
+                (meiDuvida ? '<span class="job-cot-porque aviso">Confirme se aceita MEI</span>' : '') +
                 '</span></label>';
             };
             const arvore = _cotArvore(pls, pls.map((p, i) => i), 0);

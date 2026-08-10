@@ -19729,6 +19729,11 @@ def api_v1_cotacao_planos():
                                 'coparticipacao': t['coparticipacao'], 'abrangencia': t['abrangencia'],
                                 'vigencia': t['vigencia'], 'ativo': bool(t['ativo']),
                                 'vidas_min': _n(t, 'vidas_min'), 'vidas_max': _n(t, 'vidas_max'),
+                                # `mei` nunca saia daqui, e sem ele a extensao
+                                # tratava TODA tabela do JOB como "nao aceita
+                                # MEI" — travava Vera Cruz, MedSenior e
+                                # Beneficencia inteiras pra cliente MEI.
+                                'mei': _n(t, 'mei') == 1,
                                 'faixas': precos.get(t['id'], {})} for t in linhas]})
 
 
