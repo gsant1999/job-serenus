@@ -152,5 +152,25 @@ const pe='<div id="job-painel-doc" style="position:static;margin-top:18px"><div 
  'continua aqui.</div>'+
  '<a class="job-cot-nova">Nova cotação (link novo)</a>'+
  '</div></div></div>';
-A.innerHTML=html+ops+cots+p4+pe;B.innerHTML=html+ops+cots+p4+pe;
+// Sexta tela: quatro planos com o MESMO nome. Foi o print da Hapvida: quatro
+// "Smart UP", quatro precos, nada dizendo por que. So entra a etiqueta que MUDA.
+const tagCmp=(t,c)=>'<span class="job-cot-tag'+(c?' '+c:'')+'">'+t+'</span>';
+const linhaCmp=(n,v,difs)=>'<div class="job-cot-res"><div class="job-cot-res-n">'+n+
+ (difs?'<span class="job-cot-res-dif">'+difs+'</span>':'')+'</div>'+
+ '<div class="job-cot-res-v">'+v+'</div></div>';
+const cmp='<div id="job-painel-doc" style="position:static;margin-top:18px"><div class="job-painel-doc-corpo">'+
+ '<div class="job-sec-head"><div class="job-sec-head-row"><div class="job-sec-t">Comparativo</div>'+
+ '<span class="job-sec-cont">4</span></div></div><div class="job-cot-wrap">'+
+ '<div class="job-cot-gaveta aberta"><button class="job-cot-gaveta-t">'+
+ '<span class="job-cot-gaveta-n">Hapvida NotreDame</span>'+
+ '<span class="job-cot-gaveta-r">4 · desde R$ 247,93</span>'+
+ '<span class="job-cot-gaveta-s"></span></button><div class="job-cot-gaveta-c">'+
+ linhaCmp('Smart UP','R$ 247,93',tagCmp('Enfermaria')+tagCmp('Coparticipação completa','aviso'))+
+ linhaCmp('Smart UP','R$ 291,68',tagCmp('Enfermaria')+tagCmp('Coparticipação parcial','aviso'))+
+ linhaCmp('Smart UP','R$ 313,28',tagCmp('Apartamento')+tagCmp('Coparticipação completa','aviso'))+
+ linhaCmp('Smart UP','R$ 368,57',tagCmp('Apartamento')+tagCmp('Sem coparticipação','ok'))+
+ '</div></div>'+
+ '<button class="job-cot-bt-mandar" style="width:100%;margin-top:12px">Salvar no JOB</button>'+
+ '</div></div></div>';
+A.innerHTML=html+ops+cots+p4+pe+cmp;B.innerHTML=html+ops+cots+p4+pe+cmp;
 </script>

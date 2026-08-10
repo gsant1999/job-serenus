@@ -1136,6 +1136,14 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-cot-res-n { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--job-txt); }
 .job-cot-res-v { flex: none; font-size: 14.5px; font-weight: 800; color: var(--job-txt);
   font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+/* O QUE DIFERENCIA UM PLANO DO OUTRO, embaixo do nome.
+   A gaveta vinha com quatro linhas escritas "Smart UP" e quatro precos, sem
+   nada explicando por que. Aqui entra so o atributo que MUDA entre eles — o
+   que e igual em todos nao ajuda a escolher e viraria ruido em toda linha.
+   Alinhado a esquerda com o nome, e nao no meio: o olho desce pela primeira
+   letra de cada linha comparando, e centralizar quebra essa coluna. */
+.job-cot-res-dif { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.job-cot-res.sem .job-cot-res-dif { opacity: .8; }
 /* Sem preco nao some e nao vira zero: fica visivel e apagado. */
 .job-cot-res.sem { border-style: dashed; opacity: .72; }
 .job-cot-res.sem .job-cot-res-v { color: var(--job-txt-fraco); font-weight: 600;

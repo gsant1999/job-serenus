@@ -5506,19 +5506,47 @@
     // O Painel manda booleano; a tabela do JOB manda texto ('Apartamento',
     // 'Enfermaria', 'Ambulatorial'...). Traduzir o texto pro booleano faria
     // 'Ambulatorial' virar 'Enfermaria' na tela — mentira em etiqueta.
-    et.push({ t: pl.acomodacaoTxt || (pl.acomodacao ? 'Apartamento' : 'Enfermaria'), c: '' });
+    et.push({ k: 'acomodacao', t: pl.acomodacaoTxt || (pl.acomodacao ? 'Apartamento' : 'Enfermaria'), c: '' });
     const cop = _cotCopart(tb);
-    et.push({ t: cop, c: cop === 'Sem coparticipação' ? 'ok' : 'aviso' });
-    if (tb.mei === true) et.push({ t: 'Aceita MEI', c: 'ok' });
+    et.push({ k: 'copart', t: cop, c: cop === 'Sem coparticipação' ? 'ok' : 'aviso' });
+    if (tb.mei === true) et.push({ k: 'mei', t: 'Aceita MEI', c: 'ok' });
     const vmin = tb.qtdVidaMin, vmax = tb.qtdVidaMax;
     if (vmin || vmax) {
-      et.push({ t: (vmin || 1) + (vmax ? ' a ' + vmax : '+') + ' vidas', c: '' });
+      et.push({ k: 'vidas', t: (vmin || 1) + (vmax ? ' a ' + vmax : '+') + ' vidas', c: '' });
     }
     const prod = ((p && p.produto) || {}).nome;
-    if (prod) et.push({ t: prod, c: '' });
+    if (prod) et.push({ k: 'produto', t: prod, c: '' });
     const ent = _texto(p && p.entidade);
-    if (ent) et.push({ t: ent, c: '' });
+    if (ent) et.push({ k: 'entidade', t: ent, c: '' });
     return et;
+  }
+
+  // O QUE MUDA DE UM PLANO PRO OUTRO — e SO isso.
+  //
+  // A gaveta da Hapvida veio com quatro linhas escritas "Smart UP", com quatro
+  // precos diferentes e nada dizendo por que. O consultor tinha que adivinhar
+  // ou abrir o Painel pra conferir — na frente do cliente.
+  //
+  // Despejar todas as etiquetas em toda linha resolveria e criaria outro
+  // problema: quatro linhas repetindo "Aceita MEI · 1 a 29 vidas" enterram a
+  // unica palavra que interessa. Entao entra so o atributo cujo valor NAO e
+  // igual em todos. Se os quatro sao Enfermaria, "Enfermaria" nao ajuda a
+  // escolher e nao aparece.
+  //
+  // Atributo presente em uns e ausente em outros (um aceita MEI, o outro nao)
+  // TAMBEM e diferenca — por isso a contagem entra na conta, nao so os valores.
+  function _cotDiferencas(lista) {
+    if (!lista || lista.length < 2) return null;
+    const porChave = {};
+    lista.forEach((p) => _cotEtiquetas(p).forEach((e) => {
+      (porChave[e.k] = porChave[e.k] || []).push(e.t);
+    }));
+    const mudam = {};
+    Object.keys(porChave).forEach((k) => {
+      const v = porChave[k];
+      if (v.length !== lista.length || v.some((x) => x !== v[0])) mudam[k] = true;
+    });
+    return mudam;
   }
   function _texto(v) {
     if (!v) return '';
@@ -6879,13 +6907,28 @@
   // enquadramento que ofende — o cliente não está procurando o mais barato,
   // está procurando o que resolve.
   function _cotCartoes(lista) {
-    return lista.map((p) =>
-      '<div class="job-cot-res' + (p.total == null ? ' sem' : '') + '">' +
-        '<div class="job-cot-res-n">' + esc(_cotNomePlano(p)) + '</div>' +
+    const mudam = _cotDiferencas(lista);
+    return lista.map((p) => {
+      let dif = mudam ? _cotEtiquetas(p).filter((e) => mudam[e.k]) : [];
+      // Nada difere nas etiquetas e mesmo assim os precos sao outros: a
+      // diferenca existe e esta num lugar que a gente nao mostra. O nome da
+      // tabela e o que sobra — pior que uma etiqueta boa, muito melhor que
+      // quatro linhas identicas.
+      if (mudam && !dif.length) {
+        const tn = ((p && p.tabela) || {}).nome || (p && p.tabelaNome) || '';
+        if (tn) dif = [{ k: 'tabela', t: tn, c: '' }];
+      }
+      return '<div class="job-cot-res' + (p.total == null ? ' sem' : '') + '">' +
+        '<div class="job-cot-res-n">' + esc(_cotNomePlano(p)) +
+          (dif.length ? '<span class="job-cot-res-dif">' + dif.map((e) =>
+            '<span class="job-cot-tag' + (e.c ? ' ' + e.c : '') + '">' +
+            esc(e.t) + '</span>').join('') + '</span>' : '') +
+        '</div>' +
         '<div class="job-cot-res-v">' +
           (p.total == null ? 'sem preço' : _cotMoeda(p.total)) +
         '</div>' +
-      '</div>').join('');
+      '</div>';
+    }).join('');
   }
 
   function _cotPintarResultado() {
