@@ -5552,9 +5552,19 @@
   // Cada motivo vira uma frase que diz O QUE FAZER. "precisa_aprender" sozinho
   // manda o consultor abrir um chamado; a instrução resolve em um minuto.
   const _COT_EXPLICA = {
-    painel_fechado: 'O JOB busca o preço pela <b>sua sessão</b> no Painel do Corretor — e ela precisa estar aberta. ' +
-      'Enquanto a aba fica aberta, o JOB segura a sessão viva sozinho.',
-    painel_precisa_recarregar: 'A aba do Painel do Corretor está aberta, mas precisa de <b>F5</b> depois da atualização da extensão.',
+    // "NESTE COMPUTADOR" NAO E DETALHE — e a frase inteira.
+    //
+    // O Danilo nao conseguiu cotar e o Guilherme achou que era defeito, porque
+    // ELE estava com a aba do Painel aberta na maquina dele. So que a extensao
+    // le as abas do proprio Chrome de quem clicou: a aba do Guilherme e
+    // invisivel pro Chrome do Danilo. Sem essas duas palavras, a mensagem
+    // parece dizer "alguem tem que estar com o Painel aberto" — e ai um erro
+    // de um minuto vira uma hora de conversa achando que o sistema quebrou.
+    painel_fechado: 'O JOB busca o preço pela <b>sua sessão</b> no Painel do Corretor, ' +
+      'aberta <b>neste computador</b> — a aba de outra pessoa não serve, nem no mesmo escritório. ' +
+      'Enquanto a aba fica aberta aqui, o JOB segura a sessão viva sozinho.',
+    painel_precisa_recarregar: 'A aba do Painel do Corretor está aberta neste computador, ' +
+      'mas precisa de <b>F5</b> depois da atualização da extensão.',
     precisa_aprender: 'Vá na aba do <b>Painel do Corretor</b> e faça uma cotação na mão até <b>ver o preço na tela</b>. ' +
       'A extensão aprende vendo você usar, e destrava sozinha — não precisa terminar nem salvar a cotação lá.',
     hash_expirado: 'O Painel do Corretor publicou uma versão nova e um atalho venceu. ' +
