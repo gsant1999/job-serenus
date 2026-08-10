@@ -3481,6 +3481,90 @@
     return out;
   }
 
+  // ELE NAO PODE SER O DETECTOR DE DEFEITO.
+  //
+  // "Voce precisa saber quando algo nao esta funcionando, sem eu precisar te
+  // avisar." Ele tem razao, e o canario ja sabia — so que contava pro servidor
+  // e pro console, dois lugares onde ele nunca esta. Quem descobria que o
+  // "Ler documento" tinha sumido continuava sendo ele, abrindo a conversa.
+  //
+  // Aqui a checagem passa a falar NO LUGAR onde o defeito aparece: a conversa.
+  // A pergunta e feita pra wa-js, que sabe o tipo de cada mensagem sem depender
+  // de seletor de tela — ela ve tres documentos, nos desenhamos zero, o
+  // problema e nosso e a barra diz isso com essas palavras.
+  //
+  // Uma vez por conversa aberta. Nao e para ficar perguntando: o custo e uma
+  // chamada a ponte, e repetir a cada rolagem gastaria por nada.
+  const _CONF_JA = new Set();
+  async function _conferirBlocosDaConversa() {
+    const main = document.querySelector('#main');
+    if (!main) return;
+    const linhas = main.querySelectorAll('[data-id]');
+    if (!linhas.length) return;
+    const marca = (linhas[linhas.length - 1].getAttribute('data-id') || '') + ':' + linhas.length;
+    if (_CONF_JA.has(marca)) return;
+    _CONF_JA.add(marca);
+    if (_CONF_JA.size > 40) _CONF_JA.clear();
+    let quebrou = null;
+    try {
+      const conv = await _pedirPonte('ler_conversa_completa', { limite: 150 }, 15000);
+      const porId = {};
+      ((conv && conv.mensagens) || []).forEach((m) => { porId[m.msg_id] = m.tipo || ''; });
+      let vArq = 0, vAud = 0;
+      Array.from(linhas).forEach((r) => {
+        const tp = porId[r.getAttribute('data-id') || ''];
+        if (!tp) return;
+        if (tp === 'document' || tp === 'image') vArq++;
+        else if (tp === 'ptt' || tp === 'audio') vAud++;
+      });
+      const sArq = main.querySelectorAll('.job-doc-slot').length;
+      const sAud = main.querySelectorAll('.job-tr-slot:not(.job-doc-slot)').length;
+      // Tolerancia de um: linha pode ter entrado na tela no meio da medicao.
+      if (vArq && sArq < vArq - 1) {
+        quebrou = 'Vejo ' + vArq + (vArq === 1 ? ' documento' : ' documentos') +
+                  ' nesta conversa e não consegui pôr o botão de ler em ' +
+                  (sArq ? 'todos' : 'nenhum') + '. O defeito é meu, não seu.';
+      } else if (vAud && sAud < vAud - 1) {
+        quebrou = 'Vejo ' + vAud + (vAud === 1 ? ' áudio' : ' áudios') +
+                  ' nesta conversa e não consegui pôr o botão de transcrever em ' +
+                  (sAud ? 'todos' : 'nenhum') + '. O defeito é meu, não seu.';
+      }
+    } catch (e) { return; }               // sem a wa-js nao da pra julgar: cala
+    if (!quebrou) return;
+    _docAvisoQuebra(quebrou);
+    // E avisa o JOB junto, pra aparecer em Configuracoes sem ele reclamar.
+    try { canarioRodar('bloco faltando na conversa'); } catch (e) {}
+  }
+
+  // O aviso mora na barra da conversa, com saida: "Tentar de novo" forca uma
+  // passada nova do injetor. As vezes resolve — a bolha pode ter entrado na
+  // tela depois. Quando nao resolve, o texto fica, e e a prova de que o
+  // problema existe e nao e impressao dele.
+  function _docAvisoQuebra(texto) {
+    const barra = document.querySelector('.job-barra-conv');
+    if (!barra) return;
+    let a = barra.querySelector('.job-bc-quebra');
+    if (!a) {
+      a = document.createElement('div');
+      a.className = 'job-bc-quebra';
+      barra.insertBefore(a, barra.firstChild);
+    }
+    a.innerHTML = '<span class="job-bc-quebra-t"></span>' +
+      '<button type="button" class="job-bc-quebra-b">Tentar de novo</button>';
+    a.querySelector('.job-bc-quebra-t').textContent = texto;
+    a.querySelector('.job-bc-quebra-b').addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const b = ev.currentTarget;
+      b.disabled = true; b.textContent = 'Conferindo…';
+      try { trInjetar(); } catch (e) {}
+      setTimeout(() => {
+        _CONF_JA.clear();
+        a.remove();
+        _conferirBlocosDaConversa();
+      }, 900);
+    });
+  }
+
   async function canarioRodar(motivo) {
     let daPonte = [], semConversa = false;
     try {
@@ -3601,6 +3685,13 @@
           m._jobTrObservado = true;
           obs.observe(m, { childList: true, subtree: true });
           trInjetar();               // varredura cheia UMA vez, na troca de conversa
+          // E, cinco segundos depois, confere se o que a wa-js ve tem bloco na
+          // tela. Cinco e nao zero: o injetor acabou de rodar e as bolhas ainda
+          // estao entrando. Perguntar cedo demais acusaria quebra em conversa
+          // que esta so carregando — alarme falso ensina a ignorar alarme.
+          setTimeout(() => {
+            try { _conferirBlocosDaConversa(); } catch (e) {}
+          }, 5000);
         }
       }, 4000);
       try { canarioIniciar(); } catch (e) { /* canario nao pode derrubar a extensao */ }

@@ -172,5 +172,12 @@ const cmp='<div id="job-painel-doc" style="position:static;margin-top:18px"><div
  '</div></div>'+
  '<button class="job-cot-bt-mandar" style="width:100%;margin-top:12px">Salvar no JOB</button>'+
  '</div></div></div>';
-A.innerHTML=html+ops+cots+p4+pe+cmp;B.innerHTML=html+ops+cots+p4+pe+cmp;
+// Setima tela: a extensao admitindo que quebrou, dentro da conversa.
+const qb='<div id="job-painel-doc" style="position:static;margin-top:18px"><div class="job-painel-doc-corpo">'+
+ '<div class="job-cot-wrap"><div class="job-barra-conv" style="position:static;display:block">'+
+ '<div class="job-bc-quebra"><span class="job-bc-quebra-t">Vejo 3 documentos nesta conversa '+
+ 'e não consegui pôr o botão de ler em nenhum. O defeito é meu, não seu.</span>'+
+ '<button class="job-bc-quebra-b">Tentar de novo</button></div>'+
+ '</div></div></div></div>';
+A.innerHTML=html+ops+cots+p4+pe+cmp+qb;B.innerHTML=html+ops+cots+p4+pe+cmp+qb;
 </script>
