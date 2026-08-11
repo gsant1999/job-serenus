@@ -18564,7 +18564,20 @@ def _wa_cors(resp):
 _WA_LOGIN_ATTEMPTS = {}  # { (ip, email): [timestamp, ...] }
 
 @app.route('/api/whatsapp/login', methods=['POST', 'OPTIONS'])
-@requer('whatsapp:enviar')
+# SEM DECORADOR DE CREDENCIAL AQUI, DE PROPOSITO.
+#
+# Esta e a rota que CRIA a credencial. Exigir credencial pra entrar e uma porta
+# trancada por fora: quem ainda nao entrou nunca vai conseguir. O `@requer`
+# entrou aqui junto com o lote que espalhou escopos pelas rotas da extensao, e
+# ninguem notou porque quem ja estava logado no site do JOB no mesmo navegador
+# passava pela primeira porta do decorador (a sessao por cookie) e o login
+# funcionava. Pra quem nao esta logado no site — as consultoras, no dia a dia —
+# a resposta era 401 nao_autenticado antes mesmo de o e-mail e a senha serem
+# lidos.
+#
+# A rota se defende sozinha e nao precisa do decorador: trata OPTIONS, aplica
+# CORS em todas as saidas, confere e-mail e senha contra a tabela de usuarios,
+# e tem limite proprio de 10 tentativas por hora por (IP, e-mail).
 def api_whatsapp_login():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
