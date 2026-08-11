@@ -35574,10 +35574,9 @@ def admin_crm_formatar_telefones():
 
 @app.route('/admin/crm/debug-datas')
 @login_required
+@admin_required
 def admin_crm_debug_datas():
     """Mostra amostra de telefones e datas no banco para debug."""
-    if session.get('perfil') != 'admin':
-        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
     conn = db()
     try:
         # Amostra de 10 leads do Facebook
