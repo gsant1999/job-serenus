@@ -1165,6 +1165,22 @@
   const _ICO_NOTA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.4 12.6v6.2a2 2 0 0 1-2 2H6.1a2 2 0 0 1-2-2V6.9a2 2 0 0 1 2-2h6.1"/><path d="M17.5 3.3a1.9 1.9 0 0 1 2.7 2.7l-7.6 7.6-3.4.7.7-3.4 7.6-7.6Z"/></svg>';
   const _ICO_COTACAO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12.9 2.9H19a2 2 0 0 1 2 2v6.1a2 2 0 0 1-.59 1.42l-8 8a2 2 0 0 1-2.83 0l-6.1-6.1a2 2 0 0 1 0-2.83l8-8A2 2 0 0 1 12.9 2.9Z"/><path d="M16.6 7.4v.02"/></svg>';
   const _ICO_CRM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.2" cy="7.9" r="3.7"/><path d="M3.6 20.4a6.6 6.6 0 0 1 13.2 0"/><path d="M19.6 6.4v5.4M16.9 9.1h5.4"/></svg>';
+  // O ICONE DO "LER DOCUMENTO" — que nao existia.
+  //
+  // `_ICO_DOC` era usado em QUATRO lugares e nao estava definido em lugar
+  // nenhum. Sumiu num recorte, e o efeito foi este: `docRenderSlot` estourava
+  // com ReferenceError toda vez que tentava desenhar o botao. O bloco era
+  // criado, ficava VAZIO, e a regra que esconde bloco vazio o tornava
+  // invisivel. Tres blocos na tela, nenhum botao, nenhum sintoma.
+  //
+  // Foi a causa raiz do dia inteiro de 10/08/2026 — e as duas outras coisas
+  // que eu "consertei" antes disso eram sintomas dela.
+  const _ICO_DOC = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>' +
+    '<polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/>' +
+    '<line x1="16" y1="17" x2="8" y2="17"/></svg>';
+
   const _ICO_COPIAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 
   // Kit de ícones SVG (traço, herda a cor via currentColor) — o Guilherme NÃO
@@ -3663,8 +3679,19 @@
         if (tp === 'document' || tp === 'image') vArq++;
         else if (tp === 'ptt' || tp === 'audio') vAud++;
       });
-      const sArq = main.querySelectorAll('.job-doc-slot').length;
-      const sAud = main.querySelectorAll('.job-tr-slot:not(.job-doc-slot)').length;
+      // CONTAR BLOCO NAO E CONTAR BOTAO.
+      //
+      // Isto contava `.job-doc-slot` — e no dia 10/08 havia TRES na tela, todos
+      // vazios, porque `docRenderSlot` estourava antes de escrever o botao. A
+      // verificacao disse "Tudo certo por aqui" com o defeito na cara.
+      //
+      // E a mesma armadilha do canario de ontem, um nivel mais fundo: eu troquei
+      // "o seletor achou?" por "o bloco existe?", quando a pergunta que importa
+      // e "o botao esta la?". So conta bloco com filho dentro.
+      const cheio = (sel) => Array.prototype.filter.call(
+        main.querySelectorAll(sel), (e) => e.children.length > 0).length;
+      const sArq = cheio('.job-doc-slot');
+      const sAud = cheio('.job-tr-slot:not(.job-doc-slot)');
       // Tolerancia de um: linha pode ter entrado na tela no meio da medicao.
       if (vArq && sArq < vArq - 1) {
         quebrou = 'Vejo ' + vArq + (vArq === 1 ? ' documento' : ' documentos') +
