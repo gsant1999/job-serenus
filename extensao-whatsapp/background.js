@@ -394,6 +394,23 @@ async function chamarJob(caminho, metodo, corpo, timeoutMs, reqId, opts) {
     try {
       const resp = await fetch(jobUrl + caminho, {
         method: metodo,
+        // SEM COOKIE. ESTA CHAMADA E DO APARELHO, NAO DO NAVEGADOR.
+        //
+        // Foi isto que escondeu tudo na noite de 10/08. O Chrome manda os
+        // cookies do JOB junto com as chamadas da extensao, e a PRIMEIRA porta
+        // dos decoradores no servidor e a sessao do site. Resultado: quem
+        // estivesse logado no JOB naquele navegador — o admin, sempre — era
+        // autenticado pelo proprio login do site, e o token do aparelho virava
+        // decoracao. Revogar o aparelho nao mudava nada, o /ping respondia 200
+        // com o token morto, e o painel dizia "conectado" com toda a razao do
+        // ponto de vista dele.
+        //
+        // Pior: cada consultora veria um comportamento diferente da mesma
+        // extensao, dependendo de estar ou nao logada no site naquele Chrome.
+        //
+        // `omit` faz a chamada valer por si: ou o token do aparelho autentica,
+        // ou nao passa.
+        credentials: 'omit',
         // TOKEN MANDA A CHAVE EMBORA.
         //
         // Se as duas viajassem juntas, o servidor registraria "chave antiga
@@ -577,6 +594,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       try {
         const resp = await fetch(jobUrl + '/api/whatsapp/login', {
           method: 'POST',
+          // Mesma razao do `chamarJob`: entrar tem que valer pelo e-mail e
+          // senha digitados, nao por um cookie do site que por acaso existe
+          // naquele navegador. Sem `omit`, o admin logado no JOB "entrava"
+          // sem que a senha fosse conferida de verdade.
+          credentials: 'omit',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(msg.payload || {}),
         });
