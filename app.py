@@ -23194,6 +23194,321 @@ def api_whatsapp_extensao_funis():
     return _wa_cors(jsonify({"ok": True, "gestor": eh_gestor, "funis": out}))
 
 
+# --- FILA DE COTAÇÃO SERVIDOR ---
+
+@app.route('/api/whatsapp/cotacao/fila', methods=['POST', 'OPTIONS'])
+@chave_ou_login_ou_extensao('cotacao:ler')
+def api_wa_cotacao_fila():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    
+    # 1. Verifica se existe trabalhador vivo (< 3min)
+    conn = db()
+    agora = datetime.now(TZ_SP)
+    agora_txt = agora.strftime('%Y-%m-%d %H:%M:%S')
+    cutoff_3m = (agora - timedelta(minutes=3)).strftime('%Y-%m-%d %H:%M:%S')
+    
+    trabalhador = conn.execute("""
+        SELECT id FROM extensao_sessao 
+        WHERE trabalhador_cotacao=1 AND ultimo_uso >= ?
+    """, (cutoff_3m,)).fetchone()
+    
+    if not trabalhador:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "motivo": "sem_trabalhador"}))
+        
+    req = request.get_json(silent=True) or {}
+    pedido_json = req.get('pedido')
+    if not pedido_json:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "sem_pedido"}))
+        
+    import json
+    if not isinstance(pedido_json, str):
+        pedido_json = json.dumps(pedido_json)
+        
+    uid = getattr(g, 'usuario_id', 0)
+    sid = getattr(g, 'sessao_id', 0)
+    
+    # Insere
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO cotacao_fila (usuario_id, sessao_id, pedido_json, estado, criado_em)
+        VALUES (?, ?, ?, 'esperando', ?)
+    """, (uid, sid, pedido_json, agora_txt))
+    novo_id = cur.lastrowid
+    
+    # Calcula posicao: quantos estão esperando ou rodando ANTES dele (id menor)
+    pos = conn.execute("""
+        SELECT COUNT(*) as c FROM cotacao_fila 
+        WHERE estado IN ('esperando', 'rodando') AND id < ?
+    """, (novo_id,)).fetchone()['c']
+    
+    conn.commit()
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "id": novo_id, "posicao": pos}))
+
+
+@app.route('/api/whatsapp/cotacao/fila/proximo', methods=['GET', 'OPTIONS'])
+@chave_ou_login_ou_extensao('cotacao:ler')
+def api_wa_cotacao_fila_proximo():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+        
+    sid = getattr(g, 'sessao_id', 0)
+    conn = db()
+    
+    # Verifica se a sessao atual eh trabalhadora
+    sessao = conn.execute("SELECT trabalhador_cotacao FROM extensao_sessao WHERE id=?", (sid,)).fetchone()
+    if not sessao or not sessao['trabalhador_cotacao']:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "motivo": "nao_e_trabalhador"}))
+        
+    agora = datetime.now(TZ_SP)
+    agora_txt = agora.strftime('%Y-%m-%d %H:%M:%S')
+    cutoff_3m = (agora - timedelta(minutes=3)).strftime('%Y-%m-%d %H:%M:%S')
+    
+    # 1. Recupera pedidos presos em 'rodando' > 3min
+    conn.execute("""
+        UPDATE cotacao_fila 
+        SET estado='esperando', pegado_em=NULL, trabalhador_sessao=NULL 
+        WHERE estado='rodando' AND pegado_em < ?
+    """, (cutoff_3m,))
+    conn.commit()
+    
+    # 2. Pega o mais antigo esperando
+    candidato = conn.execute("""
+        SELECT id, pedido_json FROM cotacao_fila 
+        WHERE estado='esperando' 
+        ORDER BY criado_em ASC LIMIT 1
+    """).fetchone()
+    
+    if not candidato:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": True, "id": None}))
+        
+    # Atomic Lock
+    claim = conn.execute("""
+        UPDATE cotacao_fila 
+        SET estado='rodando', pegado_em=?, trabalhador_sessao=? 
+        WHERE id=? AND estado='esperando'
+    """, (agora_txt, sid, candidato['id']))
+    
+    if getattr(claim, 'rowcount', 1) == 0:
+        # Alguem pegou milissegundos antes
+        conn.rollback()
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": True, "id": None}))
+        
+    conn.commit()
+    
+    # IMPORTANTE: O contrato pede que pedido seja devolvido exatamente como json
+    import json
+    try:
+        pedido_obj = json.loads(candidato['pedido_json'])
+    except:
+        pedido_obj = candidato['pedido_json']
+        
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "id": candidato['id'], "pedido": pedido_obj}))
+
+
+@app.route('/api/whatsapp/cotacao/fila/<int:cid>/etapa', methods=['POST', 'OPTIONS'])
+@chave_ou_login_ou_extensao('cotacao:ler')
+def api_wa_cotacao_fila_etapa(cid):
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    req = request.get_json(silent=True) or {}
+    etapa = req.get('etapa', '')
+    fracao = req.get('fracao', 0.0)
+    
+    conn = db()
+    conn.execute("UPDATE cotacao_fila SET etapa=? WHERE id=?", (f"{etapa}|{fracao}", cid))
+    conn.commit()
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True}))
+
+
+@app.route('/api/whatsapp/cotacao/fila/<int:cid>/pronto', methods=['POST', 'OPTIONS'])
+@chave_ou_login_ou_extensao('cotacao:ler')
+def api_wa_cotacao_fila_pronto(cid):
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    req = request.get_json(silent=True) or {}
+    
+    agora_txt = datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S')
+    
+    import json
+    conn = db()
+    if 'erro' in req:
+        conn.execute("UPDATE cotacao_fila SET estado='erro', erro=?, terminado_em=? WHERE id=?", 
+            (req['erro'], agora_txt, cid))
+    else:
+        resultado = req.get('resultado')
+        if not isinstance(resultado, str):
+            resultado = json.dumps(resultado)
+        conn.execute("UPDATE cotacao_fila SET estado='pronto', resultado_json=?, terminado_em=? WHERE id=?", 
+            (resultado, agora_txt, cid))
+            
+    conn.commit()
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True}))
+
+
+@app.route('/api/whatsapp/cotacao/fila/<int:cid>', methods=['GET', 'OPTIONS'])
+@chave_ou_login_ou_extensao('cotacao:ler')
+def api_wa_cotacao_fila_status(cid):
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+        
+    conn = db()
+    agora = datetime.now(TZ_SP)
+    cutoff_3m = (agora - timedelta(minutes=3)).strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Rotina passiva de recuperação
+    conn.execute("""
+        UPDATE cotacao_fila 
+        SET estado='esperando', pegado_em=NULL, trabalhador_sessao=NULL 
+        WHERE estado='rodando' AND pegado_em < ? AND id=?
+    """, (cutoff_3m, cid))
+    conn.commit()
+    
+    item = conn.execute("SELECT * FROM cotacao_fila WHERE id=?", (cid,)).fetchone()
+    if not item:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "nao_encontrado"}))
+        
+    uid = getattr(g, 'usuario_id', 0)
+    is_admin = getattr(g, 'admin', False)
+    
+    # Soh quem pediu ou admin pode ver o resultado final, por causa de PII
+    pode_ver_resultado = (item['usuario_id'] == uid or is_admin)
+    
+    pos = 0
+    if item['estado'] in ('esperando', 'rodando'):
+        pos = conn.execute("""
+            SELECT COUNT(*) as c FROM cotacao_fila 
+            WHERE estado IN ('esperando', 'rodando') AND id < ?
+        """, (cid,)).fetchone()['c']
+        
+    close_db(conn)
+    
+    # Desempacota etapa
+    etapa_str = item['etapa'] or ''
+    etapa_nome = etapa_str.split('|')[0] if '|' in etapa_str else etapa_str
+    try: fracao = float(etapa_str.split('|')[1])
+    except: fracao = 0.0
+    
+    import json
+    resultado_obj = None
+    if item['estado'] == 'pronto' and pode_ver_resultado and item['resultado_json']:
+        try: resultado_obj = json.loads(item['resultado_json'])
+        except: resultado_obj = item['resultado_json']
+        
+    return _wa_cors(jsonify({
+        "ok": True,
+        "estado": item['estado'],
+        "posicao": pos,
+        "etapa": etapa_nome,
+        "fracao": fracao,
+        "resultado": resultado_obj,
+        "erro": item['erro'] if item['estado'] == 'erro' else None
+    }))
+
+
+@app.route('/api/whatsapp/cotacao/fila/<int:cid>/cancelar', methods=['POST', 'OPTIONS'])
+@chave_ou_login_ou_extensao('cotacao:ler')
+def api_wa_cotacao_fila_cancelar(cid):
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+        
+    uid = getattr(g, 'usuario_id', 0)
+    conn = db()
+    # Verifica dono
+    item = conn.execute("SELECT usuario_id, estado FROM cotacao_fila WHERE id=?", (cid,)).fetchone()
+    if not item or item['usuario_id'] != uid:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False}))
+        
+    conn.execute("UPDATE cotacao_fila SET estado='cancelado' WHERE id=?", (cid,))
+    conn.commit()
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True}))
+
+
+@app.route('/api/whatsapp/trabalhador/vivo', methods=['POST', 'OPTIONS'])
+@chave_ou_login_ou_extensao('cotacao:ler')
+def api_wa_trabalhador_vivo():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    
+    sid = getattr(g, 'sessao_id', 0)
+    req = request.get_json(silent=True) or {}
+    painel_logado = bool(req.get('painel_logado'))
+    
+    conn = db()
+    # Soh se for trabalhador
+    sess = conn.execute("SELECT trabalhador_cotacao FROM extensao_sessao WHERE id=?", (sid,)).fetchone()
+    if not sess or not sess['trabalhador_cotacao']:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False}))
+        
+    agora_txt = datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S')
+    conn.execute("UPDATE extensao_sessao SET ultimo_uso=? WHERE id=?", (agora_txt, sid))
+    conn.commit()
+    close_db(conn)
+    
+    return _wa_cors(jsonify({"ok": True}))
+
+
+@app.route('/api/whatsapp/trabalhador/estado', methods=['GET', 'OPTIONS'])
+@chave_ou_login_ou_extensao('cotacao:ler')
+def api_wa_trabalhador_estado():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+        
+    conn = db()
+    sess = conn.execute("""
+        SELECT ultimo_uso FROM extensao_sessao 
+        WHERE trabalhador_cotacao=1
+        ORDER BY ultimo_uso DESC LIMIT 1
+    """).fetchone()
+    
+    close_db(conn)
+    
+    if not sess or not sess['ultimo_uso']:
+        return _wa_cors(jsonify({"vivo": False, "ultimo_sinal": None}))
+        
+    try:
+        if isinstance(sess['ultimo_uso'], str):
+            ultimo = datetime.strptime(sess['ultimo_uso'], '%Y-%m-%d %H:%M:%S').replace(tzinfo=TZ_SP)
+        else:
+            ultimo = sess['ultimo_uso'].replace(tzinfo=TZ_SP)
+            
+        vivo = (datetime.now(TZ_SP) - ultimo).total_seconds() < 180
+        return _wa_cors(jsonify({"vivo": vivo, "ultimo_sinal": ultimo.strftime('%Y-%m-%dT%H:%M:%S')}))
+    except:
+        return _wa_cors(jsonify({"vivo": False, "ultimo_sinal": None}))
+
+
+@app.route('/admin/extensao/sessao/<int:sid>/trabalhador', methods=['POST'])
+@login_required
+@admin_required
+def admin_set_trabalhador(sid):
+    req = request.get_json(silent=True) or {}
+    ligado = req.get('ligado', False)
+    
+    conn = db()
+    # Atômico: desmarca todas, depois marca a selecionada se ligado=True
+    conn.execute("UPDATE extensao_sessao SET trabalhador_cotacao=0")
+    if ligado:
+        conn.execute("UPDATE extensao_sessao SET trabalhador_cotacao=1 WHERE id=?", (sid,))
+    conn.commit()
+    close_db(conn)
+    
+    return jsonify({"ok": True})
+
+
 @app.route('/api/whatsapp/extensao/funis/<int:fid>/disparado', methods=['POST', 'OPTIONS'])
 @requer('crm:escrever')
 def api_whatsapp_extensao_funil_disparado(fid):
