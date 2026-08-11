@@ -35474,14 +35474,13 @@ def admin_crm_diagnostico_leads():
 
 @app.route('/admin/crm/restaurar-etapas', methods=['POST'])
 @login_required
+@admin_required
 def admin_crm_restaurar_etapas():
     """
     Restaura leads que foram movidos incorretamente para 'lead_novo' durante
     a reimportação de histórico. Identifica pela atividade 'movimentacao' de hoje
     com texto 'Nova solicitação' e devolve o lead para a etapa anterior.
     """
-    if session.get('perfil') != 'admin':
-        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
 
     conn = db()
     try:
