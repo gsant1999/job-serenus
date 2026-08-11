@@ -15623,7 +15623,7 @@ def api_bi_propostas():
     """Power BI endpoint — propostas com filtros, sem login. Requer API_KEY no header."""
     api_key = request.headers.get('X-API-Key', '').strip()
     expected_key = os.environ.get('API_KEY_BI', '')
-    if not api_key or not expected_key or api_key != expected_key:
+    if not _token_bate(api_key, expected_key):
         return jsonify({"erro": "API_KEY inválida ou não configurada"}), 401
 
     # Filtros opcionais
@@ -15687,7 +15687,7 @@ def api_bi_comissoes():
     """
     api_key = request.headers.get('X-API-Key', '').strip()
     expected_key = os.environ.get('API_KEY_BI', '')
-    if not api_key or not expected_key or api_key != expected_key:
+    if not _token_bate(api_key, expected_key):
         return jsonify({"erro": "API_KEY inválida ou não configurada"}), 401
 
     f_competencia = request.args.get('competencia', '').strip()
@@ -15780,7 +15780,7 @@ def api_bi_regras():
     """
     api_key = request.headers.get('X-API-Key', '').strip()
     expected_key = os.environ.get('API_KEY_BI', '')
-    if not api_key or not expected_key or api_key != expected_key:
+    if not _token_bate(api_key, expected_key):
         return jsonify({"erro": "API_KEY inválida ou não configurada"}), 401
 
     def g(r, k):
@@ -35124,6 +35124,15 @@ def webhook_google():
 _SHEETS_TOKEN_SEM_PADRAO = os.environ.get('SHEETS_WEBHOOK_TOKEN')
 
 
+def _token_bate(recebido, esperado):
+    """Compara token em tempo constante (hmac.compare_digest) — uma comparação
+    `==` normal vaza, por timing, quantos caracteres do início já acertaram,
+    o que dá pra um atacante ir descobrindo o token byte a byte."""
+    if not recebido or not esperado:
+        return False
+    return hmac.compare_digest(str(recebido), str(esperado))
+
+
 @app.route('/webhook/sheets/diagnostico', methods=['GET'])
 def webhook_sheets_diagnostico():
     """Diagnóstico para AppScript validar conexão e token."""
@@ -35179,7 +35188,7 @@ def webhook_sheets():
         # Validar token
         token_esperado = _SHEETS_TOKEN_SEM_PADRAO
         token_recebido = data.get('token', '')
-        if token_recebido != token_esperado:
+        if not _token_bate(token_recebido, token_esperado):
             app.logger.warning(f"[WEBHOOK_SHEETS] Token inválido: '{token_recebido}'")
             return jsonify({"ok": False, "erro": "Token inválido"}), 401
 
@@ -36013,7 +36022,7 @@ def admin_crm_debug_datas():
 @app.route('/webhook/diag-datas', methods=['GET'])
 def webhook_diag_datas():
     """Diagnóstico das datas e telefones dos leads. Protegido por token na query."""
-    if request.args.get('token') != _SHEETS_TOKEN_SEM_PADRAO:
+    if not _token_bate(request.args.get('token'), _SHEETS_TOKEN_SEM_PADRAO):
         return jsonify({"erro": "token invalido"}), 401
     conn = db()
 
@@ -36067,7 +36076,7 @@ def admin_corrigir_datas_servidor():
     de cada lead com a data REAL da planilha. Tudo numa requisição.
     Protegido por token (?token=) ou login admin.
     """
-    token_ok = request.args.get('token') == _SHEETS_TOKEN_SEM_PADRAO
+    token_ok = _token_bate(request.args.get('token'), _SHEETS_TOKEN_SEM_PADRAO)
     if not token_ok and session.get('perfil') != 'admin':
         return jsonify({"erro": "acesso negado"}), 403
 
@@ -36174,7 +36183,7 @@ def webhook_corrigir_datas():
     try:
         data = request.get_json(force=True) or {}
         token_esperado = _SHEETS_TOKEN_SEM_PADRAO
-        if data.get('token') != token_esperado:
+        if not _token_bate(data.get('token'), token_esperado):
             return jsonify({"ok": False, "erro": "Token invalido"}), 401
 
         registros = data.get('registros', [])
