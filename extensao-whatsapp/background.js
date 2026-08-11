@@ -206,14 +206,53 @@ function _trabalhadorVivo() {
   });
 }
 
-// Dois relogios, de proposito. O de trabalho muda de ritmo sozinho conforme a
-// maquina seja ou nao a marcada; o de vida bate sempre, porque uma maquina
-// que parou de bater e exatamente o que o outro lado precisa descobrir.
-(function _filaIniciar() {
-  const passo = () => { try { _trabalhadorTick(); } catch (e) {} setTimeout(passo, _trabRitmo); };
-  setTimeout(passo, 8000);
-  setInterval(() => { try { _trabalhadorVivo(); } catch (e) {} }, 60000);
-})();
+// RELOGIO DE SERVICE WORKER NAO E RELOGIO.
+//
+// Isto aqui era um setTimeout em cadeia e um setInterval de 60s. Num service
+// worker do Manifest V3 os dois sao inuteis: o Chrome MATA o worker depois de
+// ~30s parado, e os temporizadores morrem junto. O worker so volta quando
+// acontece um EVENTO. Resultado medido: a sessao 10 estava marcada como a
+// maquina que cota e o `trabalhador_sinal` no banco continuava NULL — pro
+// servidor, uma maquina ligada, logada e configurada certo parecia morta, e a
+// fila responderia "sem_trabalhador" pra todo mundo.
+//
+// `chrome.alarms` e o unico relogio que sobrevive: ele RESSUSCITA o worker.
+// O minimo e 1 minuto, e cotar nao pode esperar um minuto — entao o alarme faz
+// duas coisas: bate o sinal de vida e, se esta maquina for a marcada, abre uma
+// janela curta em que ela pergunta de 2 em 2 segundos. Enquanto essa janela
+// roda ha rede saindo, e rede saindo mantem o worker de pe. As outras sete
+// nao pagam nada por isso: quem nao e a trabalhadora fecha a janela no
+// primeiro "nao_e_trabalhador".
+const _ALARME = 'job-fila';
+const _JANELA_MS = 55000;   // fecha antes do proximo alarme, sem sobrepor
+
+let _janelaAte = 0;
+function _abrirJanela() {
+  const agora = Date.now();
+  const jaAberta = _janelaAte > agora;
+  _janelaAte = agora + _JANELA_MS;
+  if (jaAberta) return;      // ja ha um passo em cadeia rodando
+  const passo = () => {
+    if (Date.now() > _janelaAte) return;
+    try { _trabalhadorTick(); } catch (e) {}
+    // Quem nao e a trabalhadora descobre isso na primeira resposta: o ritmo
+    // vai pra 5 min e a janela fecha sozinha no proximo passo.
+    if (_trabRitmo > 10000) { _janelaAte = 0; return; }
+    setTimeout(passo, _trabRitmo);
+  };
+  passo();
+}
+
+chrome.alarms.create(_ALARME, { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener((al) => {
+  if (al.name !== _ALARME) return;
+  try { _trabalhadorVivo(); } catch (e) {}
+  try { _abrirJanela(); } catch (e) {}
+});
+// O worker tambem acorda por outros motivos (uma mensagem da aba, por
+// exemplo). Quando isso acontece, nao ha razao pra esperar o proximo alarme.
+try { _trabalhadorVivo(); } catch (e) {}
+try { _abrirJanela(); } catch (e) {}
 
 
 // Apaga a sessao morta e faz o estado da extensao contar a verdade.
