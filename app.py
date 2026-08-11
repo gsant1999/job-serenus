@@ -39406,11 +39406,10 @@ def crm_frios_contato_promover(cid):
 
 @app.route('/crm/importar', methods=['GET', 'POST'])
 @login_required
+@admin_required
 def crm_importar():
     """GET: mostra form com seletor de datas. POST: processa importação."""
     usuario = session.get('usuario')
-    if session.get('perfil') != 'admin':
-        return jsonify({'erro': 'Acesso negado'}), 403
     
     conn = db()
     
