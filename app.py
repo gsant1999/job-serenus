@@ -24066,9 +24066,8 @@ def api_ia_caca_docs_regras():
 
 @app.route('/admin/migrar-cidade-empresa', methods=['POST'])
 @login_required
+@admin_required
 def admin_migrar_cidade_empresa():
-    if session.get('perfil') != 'admin':
-        return jsonify({"ok": False, "erro": "Sem permissão"}), 403
         
     conn = db()
     try:
