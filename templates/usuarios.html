@@ -207,6 +207,25 @@
     return 'há ' + dias + (dias === 1 ? ' dia' : ' dias');
   }
 
+  // TEXTO QUE VAI VIRAR ARGUMENTO DENTRO DE UM onclick="".
+  //
+  // Aqui o mesmo pedaco de texto atravessa DUAS linguagens: primeiro o
+  // navegador le o atributo como HTML, depois le o que sobrou como JavaScript.
+  // `JSON.stringify` so cuida da segunda — ele devolve o texto entre aspas
+  // DUPLAS, e a aspa dupla e justamente o que fecha o atributo. O onclick
+  // terminava no meio, o botao ficava sem clique nenhum e, por ser HTML
+  // invalido e nao erro de codigo, nao saia nada no console, nao abria
+  // confirmacao e nao ia requisicao: o botao "Desconectar" simplesmente nao
+  // fazia nada, tres vezes seguidas, sem deixar pista.
+  //
+  // A ordem importa: escapa pro JavaScript primeiro (barra e aspa simples),
+  // depois pro HTML — o contrario escaparia as proprias marcas de escape.
+  function argJs(t) {
+    return "'" + String(t == null ? '' : t)
+      .replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;') + "'";
+  }
+
   function esc(t) {
     return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
@@ -284,7 +303,7 @@
               'title="Marca esta máquina como a que cota pelas outras. Só uma por vez." ' +
               'onclick="trabalhador(' + s.id + ', 1)">Este é o computador que cota</button>') +
         '<button type="button" class="u-acao" style="color:var(--erro); font-weight:600;"' +
-          ' onclick="desconectar(' + s.id + ', ' + JSON.stringify(esc(s.apelido || 'este aparelho')) + ')">' +
+          ' onclick="desconectar(' + s.id + ', ' + argJs(s.apelido || 'este aparelho') + ')">' +
           'Desconectar</button>' +
       '</div>';
     }).join('');
