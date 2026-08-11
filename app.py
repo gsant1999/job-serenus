@@ -11428,6 +11428,12 @@ def resolver_solicitacao(sid):
 
     if acao == 'aprovar':
         p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+        if not p:
+            # A proposta foi excluída depois que a solicitação foi aberta e
+            # antes de ser resolvida — sem isto, o loop abaixo quebra com 500
+            # ao tentar ler p[campo] de um None.
+            close_db(conn)
+            return jsonify({"ok": False, "msg": "A proposta desta solicitação não existe mais (foi excluída). Recuse a solicitação em vez de aprovar."}), 409
         NUMERICOS = {'valor','total_vidas','dia_vencimento'}
         aplicados = []
         for campo, info in alteracoes.items():
