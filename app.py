@@ -14944,11 +14944,9 @@ def ver_boleto_adesao(pid):
 
 @app.route('/proposta/<int:pid>/boleto-adesao/cancelar', methods=['POST'])
 @login_required
+@admin_required
 def cancelar_boleto_adesao(pid):
     """Cancela o boleto de adesão no Asaas e limpa os dados na proposta."""
-    if session.get('perfil') != 'admin':
-        return jsonify({'ok': False, 'erro': 'Apenas administradores podem cancelar boletos.'}), 403
-
     conn = db()
     p = conn.execute(
         "SELECT adesao_asaas_payment_id, adesao_status, razao_social FROM propostas WHERE id=?",
