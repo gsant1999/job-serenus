@@ -347,10 +347,16 @@
     // O endereco leva o DONO junto (uid/sid). E o desenho do Antigravity e e
     // melhor que o meu: amarra a sessao ao usuario na propria URL, entao nao
     // da pra revogar a sessao de outra pessoa nem por engano de digitacao.
+    // A ROTA REDIRECIONA (302 -> pagina HTML), NAO DEVOLVE JSON.
+    //
+    // `r.json()` estourava tentando ler HTML como JSON, a cadeia caia sempre
+    // no `.catch` -- e foi ALI, no lado que nunca roda de verdade em caso de
+    // sucesso, que o aviso instantaneo ficou preso. `carregar()` sempre
+    // funcionou porque tambem estava no catch; o aviso, nao. `.finally`
+    // garante que os dois rodem sempre, sucesso ou "erro" de parsing.
     fetch('/admin/extensao/sessoes/' + apUsuario + '/' + id + '/revogar', { method: 'POST' })
-      .then(function (r) { return r.json(); })
-      .then(function () { avisarExtensaoDesteNavegador(); carregar(); })
-      .catch(function () { carregar(); });
+      .catch(function () {})
+      .finally(function () { avisarExtensaoDesteNavegador(); carregar(); });
   };
 
   // SE FOR O PROPRIO NAVEGADOR, NAO PRECISA ESPERAR RELOGIO NENHUM.
