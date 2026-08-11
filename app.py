@@ -4816,8 +4816,9 @@ def chave_ou_login_ou_extensao(escopo):
 def login_ou_extensao(f):
     @wraps(f)
     def w(*a, **kw):
-        # 1. Site
-        if 'user_id' in session:
+        # 1. Site — mas NAO quando o pedido traz token de aparelho (ver
+        #    `_tem_token_de_aparelho`): ai quem manda e o token.
+        if 'user_id' in session and not _tem_token_de_aparelho():
             g.usuario_id = session['user_id']
             g.auth_via = 'sessao'
             # Para popular g.usuario de forma consistente, fazemos a query.
@@ -4913,6 +4914,29 @@ def login_ou_extensao(f):
         resp.headers['Access-Control-Allow-Origin'] = '*'
         return resp, 403
     return w
+
+def _tem_token_de_aparelho():
+    """Veio um token de aparelho (formato <id>.<segredo>) neste pedido?
+
+    Serve pra decidir QUEM autentica quando ha duas credenciais na mesma
+    requisicao. O navegador manda o cookie do site junto com as chamadas da
+    extensao, e a sessao do site era a primeira porta dos decoradores: quem
+    estivesse logado no JOB naquele Chrome era autenticado pelo login do site,
+    e o token do aparelho nunca chegava a ser conferido.
+
+    Isso tornava a revogacao de aparelho invisivel justamente pra quem
+    administra o sistema — e fazia a mesma extensao se comportar de um jeito
+    pra quem estava logado no site e de outro pra quem nao estava.
+
+    Quem manda token esta dizendo "me autentique COMO ESTE APARELHO". O cookie
+    deixa de ter preferencia nesse caso.
+    """
+    auth = (request.headers.get('Authorization') or '').strip()
+    if not auth.lower().startswith('bearer '):
+        return False
+    partes = auth[7:].strip().split('.')
+    return len(partes) == 2 and partes[0].isdigit()
+
 
 def _sessao_morta():
     """Resposta para token de aparelho que existe, mas nao vale mais.
@@ -5396,8 +5420,9 @@ def requer(escopo):
             if request.method == 'OPTIONS':
                 return _wa_cors(Response(status=204))
             
-            # 1. Sessão do site
-            if 'user_id' in session:
+            # 1. Sessão do site — mesma regra do `login_ou_extensao`: cede a
+            #    vez quando ha token de aparelho no pedido.
+            if 'user_id' in session and not _tem_token_de_aparelho():
                 g.usuario_id = session['user_id']
                 g.auth_via = 'sessao'
                 g.corretora_id = 1
