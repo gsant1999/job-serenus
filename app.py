@@ -1079,6 +1079,33 @@ def init_db():
                 ultimo_uso TIMESTAMP,
                 revogado_em TIMESTAMP
             )""",
+            # A FILA DE COTACAO SO EXISTIA NO SQLITE.
+            #
+            # A tabela foi criada no bloco de schema do SQLite e nunca no do
+            # Postgres — entao em desenvolvimento tudo passava e em producao,
+            # que e Postgres, a tabela simplesmente nao existia. Toda rota da
+            # fila responderia erro de banco, e a fila inteira estava morta por
+            # baixo dos consertos que fizemos hoje.
+            #
+            # Os dois blocos de schema sao listas separadas e nada obriga a
+            # segunda a acompanhar a primeira: e o tipo de esquecimento que nao
+            # aparece em teste local nenhum.
+            """CREATE TABLE IF NOT EXISTS cotacao_fila (
+                id SERIAL PRIMARY KEY,
+                usuario_id INTEGER NOT NULL,
+                sessao_id INTEGER,
+                pedido_json TEXT NOT NULL,
+                estado TEXT NOT NULL,
+                resultado_json TEXT,
+                erro TEXT,
+                etapa TEXT,
+                fracao REAL DEFAULT 0.0,
+                criado_em TIMESTAMP NOT NULL,
+                pegado_em TIMESTAMP,
+                terminado_em TIMESTAMP,
+                trabalhador_sessao INTEGER
+            )""",
+            """CREATE INDEX IF NOT EXISTS ix_cotacao_fila_estado ON cotacao_fila(estado, id)""",
             """CREATE TABLE IF NOT EXISTS whatsapp_extensao_fila (
                 id SERIAL PRIMARY KEY,
                 lead_id INTEGER,
