@@ -6728,9 +6728,38 @@
   // botao nenhum: a tela voltaria sozinha alguns segundos depois.
   function _cotEsperando(txt, sub, aoVoltar, rotulo) {
     setCorpoSecao(
-      (aoVoltar ? _cotTopo(aoVoltar, rotulo) : '') + _telaCarregando(txt, sub));
+      (aoVoltar ? _cotTopo(aoVoltar, rotulo) : '') + _telaCarregando(txt, sub) +
+      '<div class="job-cot-fila" id="job-cot-fila"></div>');
     if (aoVoltar) _cotTopoLigar(() => { _cotGer++; aoVoltar(); });
   }
+
+  // ESPERA MUDA PARECE SISTEMA TRAVADO.
+  //
+  // Quando o preco vem de outra maquina, a espera deixa de ser "o Painel esta
+  // respondendo" e passa a ter uma fila no meio. Sem dizer isso, o consultor
+  // olha uma tela parada e conclui que quebrou — e clica de novo, que e a
+  // pior coisa que ele pode fazer.
+  //
+  // A palavra "fila" nao aparece, nem "Dell", nem "servidor": ele ve quantos
+  // estao na frente e o que esta acontecendo agora. COMO o JOB busca o preco e
+  // problema do JOB.
+  try {
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (!msg || msg.type !== 'fila_andamento') return;
+      const cx = document.getElementById('job-cot-fila');
+      if (!cx) return;
+      const n = msg.posicao || 0;
+      const etapa = String(msg.etapa || '').trim();
+      cx.innerHTML =
+        (n > 0
+          ? '<b>' + n + (n === 1 ? ' na frente' : ' na frente') + '</b> — já já é a sua vez.'
+          : (etapa ? esc(etapa) : 'Buscando os preços…')) +
+        (msg.fracao > 0
+          ? '<div class="job-cot-barra" style="margin-top:8px"><i style="width:' +
+            Math.round(Math.min(1, msg.fracao) * 100) + '%"></i></div>'
+          : '');
+    });
+  } catch (e) { /* sem o aviso, a espera volta a ser muda — nao quebra nada */ }
   // Geracao da navegacao. Sobe a cada saida; resposta de geracao velha e
   // descartada em vez de repintar.
   let _cotGer = 0;

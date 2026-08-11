@@ -1178,6 +1178,13 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 /* A EXTENSAO ADMITINDO QUE QUEBROU, no lugar onde quebrou.
    Vermelho seria alarme de sistema fora do ar — nao e o caso: o resto da
    conversa funciona. Ambar, discreto, e com saida do lado. */
+/* A ESPERA DIZ ONDE ESTA. Quando o preco vem de outra maquina, a tela precisa
+   dizer o que acontece — sem nomear a maquina, a fila ou o servidor. */
+.job-cot-fila:empty { display: none; }
+.job-cot-fila { margin: 10px 2px 0; font-family: var(--job-ui); font-size: 12px;
+  line-height: 1.5; color: var(--job-txt-fraco); text-align: center; }
+.job-cot-fila b { color: var(--job-txt); font-weight: 700; }
+
 .job-bc-quebra { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   width: 100%; margin-bottom: 7px; padding: 9px 11px; border-radius: 10px;
   background: rgba(232,179,57,.12); border: 1px solid rgba(232,179,57,.34); }

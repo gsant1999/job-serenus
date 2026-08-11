@@ -74,6 +74,140 @@ function _resumoTempos() {
   }).sort((a, b) => b.pior - a.pior);
 }
 
+// ═══════════════════════ FILA DE COTACAO ═══════════════════════════════
+//
+// Uma maquina cota para todas. Quem nao tem o Painel aberto manda o pedido
+// pro JOB; a maquina marcada como trabalhadora pega, cota na sessao dela e
+// devolve. O consultor nunca ve o Painel — some a pergunta "como e que cota
+// aqui", que era metade do problema.
+//
+// O DESVIO E O ULTIMO RECURSO, nao o primeiro. Quem tem Painel local continua
+// cotando por ele: sem rede no meio, sem fila, e sem passar a depender de uma
+// segunda maquina estar ligada. So cai na fila quem hoje receberia
+// "Painel fechado" e ficaria sem cotar.
+
+const _FILA_ESPERA_MS = 300;      // de quanto em quanto o pedinte pergunta
+const _FILA_LIMITE_MS = 120000;   // 2 min: uma cotacao inteira cabe folgada
+
+// Manda um passo pra fila e espera a resposta. `cb(null)` quando nao ha
+// trabalhador — ai quem chamou devolve o "Painel fechado" de sempre, que
+// continua sendo a verdade naquele caso.
+function _filaPedir(pedido, cb) {
+  chamarJob('/api/whatsapp/cotacao/fila', 'POST', { pedido: pedido }, 15000)
+    .then((r) => {
+      if (!r || !r.ok || !r.id) { cb(null); return; }
+      const id = r.id;
+      const t0 = Date.now();
+      const perguntar = () => {
+        if (Date.now() - t0 > _FILA_LIMITE_MS) {
+          cb({ ok: false, motivo: 'fila_demorou' });
+          return;
+        }
+        chamarJob('/api/whatsapp/cotacao/fila/' + id, 'GET', null, 12000).then((s) => {
+          if (!s || !s.ok) { setTimeout(perguntar, _FILA_ESPERA_MS); return; }
+          if (s.estado === 'pronto') { cb(s.resultado || { ok: false, motivo: 'sem_resposta' }); return; }
+          if (s.estado === 'erro') { cb({ ok: false, motivo: s.erro || 'fila_erro' }); return; }
+          if (s.estado === 'cancelado') { cb({ ok: false, motivo: 'cancelado' }); return; }
+          // Ainda esperando ou rodando: avisa a tela onde esta na fila e
+          // pergunta de novo. Espera muda parece sistema travado.
+          _filaAvisarTela(id, s);
+          setTimeout(perguntar, _FILA_ESPERA_MS);
+        }).catch(() => setTimeout(perguntar, _FILA_ESPERA_MS));
+      };
+      perguntar();
+    })
+    .catch(() => cb(null));
+}
+
+// O andamento vai pra aba que pediu, pelo mesmo caminho do andamento local.
+function _filaAvisarTela(id, s) {
+  if (_abaQuePediuCotacao == null) return;
+  try {
+    chrome.tabs.sendMessage(_abaQuePediuCotacao, {
+      type: 'fila_andamento', id: id, estado: s.estado,
+      posicao: s.posicao || 0, etapa: s.etapa || '', fracao: s.fracao || 0,
+    }, () => { void chrome.runtime.lastError; });
+  } catch (e) { /* aba fechou: o andamento some, a cotacao continua */ }
+}
+
+// ── O LADO TRABALHADOR ─────────────────────────────────────────────────
+//
+// Esta maquina pergunta ao JOB se ha trabalho. Se ela nao for a marcada, o
+// servidor responde `nao_e_trabalhador` — e ai ela pergunta muito de vez em
+// quando, pra nao gastar rede das outras sete a toa. Nao existe rota separada
+// pra "sou eu?": a propria resposta do /proximo ja diz.
+let _trabRitmo = 2000;            // enquanto e trabalhadora
+const _TRAB_RITMO_LENTO = 300000; // 5 min, quando nao e
+let _trabOcupado = false;
+
+function _trabalhadorTick() {
+  if (_trabOcupado) return;
+  chamarJob('/api/whatsapp/cotacao/fila/proximo', 'GET', null, 12000).then((r) => {
+    if (!r) return;
+    if (r.motivo === 'nao_e_trabalhador') { _trabRitmo = _TRAB_RITMO_LENTO; return; }
+    _trabRitmo = 2000;
+    if (!r.ok || !r.id) return;
+    _trabOcupado = true;
+    _trabalhadorExecutar(r.id, r.pedido);
+  }).catch(() => {});
+}
+
+// Roda o pedido na aba do Painel DESTA maquina e devolve o resultado.
+//
+// Se nao houver Painel aqui, devolve ERRO em vez de ficar quieto: a maquina
+// marcada como trabalhadora sem Painel aberto e um defeito de configuracao, e
+// quem esta esperando precisa saber disso em vez de esperar pra sempre.
+function _trabalhadorExecutar(id, pedido) {
+  const terminar = (corpo) => {
+    chamarJob('/api/whatsapp/cotacao/fila/' + id + '/pronto', 'POST', corpo, 20000)
+      .catch(() => {})
+      .then(() => { _trabOcupado = false; });
+  };
+  chrome.tabs.query({}, (todas) => {
+    const lista = (todas || []).filter(
+      (a) => a.url && a.url.indexOf('paineldocorretor.com.br') >= 0);
+    const aba = lista.filter((a) => a.active)[0] || lista[0];
+    if (!aba) { terminar({ erro: 'painel_fechado_no_trabalhador' }); return; }
+    let respondeu = false;
+    const relogio = setTimeout(() => {
+      if (!respondeu) { respondeu = true; terminar({ erro: 'sem_resposta_a_tempo' }); }
+    }, 90000);
+    try {
+      chrome.tabs.sendMessage(aba.id, pedido, (r) => {
+        if (respondeu) return;
+        respondeu = true; clearTimeout(relogio);
+        if (chrome.runtime.lastError) { terminar({ erro: 'painel_precisa_recarregar' }); return; }
+        terminar({ resultado: r || { ok: false, motivo: 'sem_resposta' } });
+      });
+    } catch (e) {
+      if (!respondeu) { respondeu = true; clearTimeout(relogio); terminar({ erro: String(e && e.message || e) }); }
+    }
+  });
+}
+
+// SINAL DE VIDA. Escreve numa coluna propria no servidor — nao no carimbo
+// generico da sessao, que qualquer requisicao ja atualiza. Um Dell com o
+// Painel morto e o navegador ativo pareceria vivo, e e justamente o caso que
+// este sinal existe pra pegar.
+function _trabalhadorVivo() {
+  chrome.tabs.query({}, (todas) => {
+    const temPainel = (todas || []).some(
+      (a) => a.url && a.url.indexOf('paineldocorretor.com.br') >= 0);
+    chamarJob('/api/whatsapp/trabalhador/vivo', 'POST',
+              { painel_logado: temPainel }, 10000).catch(() => {});
+  });
+}
+
+// Dois relogios, de proposito. O de trabalho muda de ritmo sozinho conforme a
+// maquina seja ou nao a marcada; o de vida bate sempre, porque uma maquina
+// que parou de bater e exatamente o que o outro lado precisa descobrir.
+(function _filaIniciar() {
+  const passo = () => { try { _trabalhadorTick(); } catch (e) {} setTimeout(passo, _trabRitmo); };
+  setTimeout(passo, 8000);
+  setInterval(() => { try { _trabalhadorVivo(); } catch (e) {} }, 60000);
+})();
+
+
 async function chamarJob(caminho, metodo, corpo, timeoutMs, reqId, opts) {
   const _t0 = Date.now();
   const _anota = (ok) => { try { _anotarTempo(caminho.split('?')[0], Date.now() - _t0, ok); } catch (e) {} };
@@ -777,7 +911,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       msg.type === 'cotador_passo'       ? { type: 'cotador_passo', pedido: msg.pedido } :
                                            { type: 'cotador_estado' };
     // Guarda quem pediu, pra devolver o andamento pra aba certa.
-    if ((msg.type === 'cotar_painel' || msg.type === 'cotador_catalogo') &&
+    // `cotador_passo` entrou na lista por causa da fila: o andamento dela
+    // ("2 na frente") precisa achar a aba que pediu, e antes so o multicalculo
+    // registrava isso.
+    if ((msg.type === 'cotar_painel' || msg.type === 'cotador_catalogo' ||
+         msg.type === 'cotador_passo') &&
         sender && sender.tab && sender.tab.id != null) {
       _abaQuePediuCotacao = sender.tab.id;
     }
@@ -805,11 +943,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         ? lista[msg.aba % lista.length]
         : (lista.filter((a) => a.active)[0] || lista[0]);
       if (!aba) {
-        // Diz quantas abas foram examinadas: sem isso, "Painel fechado" é
-        // palpite, e quem está do outro lado não tem como saber se o problema
-        // é a aba ou a extensão.
-        sendResponse({ ok: false, motivo: 'painel_fechado',
-                       abasExaminadas: (todas || []).length });
+        // SEM PAINEL AQUI? ENTAO PERGUNTA PRA MAQUINA QUE TEM.
+        //
+        // Era aqui que a cotacao morria com "Painel fechado" — e foi o que o
+        // Danilo levou. A aba do Guilherme, na maquina do Guilherme, e
+        // invisivel pro Chrome do Danilo, e sempre vai ser.
+        //
+        // Agora, quando nao ha Painel NESTE navegador, o pedido vai pra fila
+        // do JOB e uma maquina marcada como trabalhadora responde por ele. A
+        // ordem importa: local PRIMEIRO. Quem tem o Painel aberto continua
+        // cotando pela propria sessao, sem rede no meio e sem fila — nada do
+        // que funciona hoje passa a depender do Dell estar ligado.
+        _filaPedir(oQuePedir, (r) => {
+          if (r) { sendResponse(r); return; }
+          // Diz quantas abas foram examinadas: sem isso, "Painel fechado" é
+          // palpite, e quem está do outro lado não tem como saber se o problema
+          // é a aba ou a extensão.
+          sendResponse({ ok: false, motivo: 'painel_fechado',
+                         abasExaminadas: (todas || []).length });
+        });
         return;
       }
       chrome.tabs.sendMessage(aba.id, oQuePedir, (r) => {
