@@ -34870,10 +34870,28 @@ def webhook_google():
         return jsonify({"ok": False, "erro": str(e)}), 200
 
 
+# O VALOR DE PRODUCAO E IGUAL AO PADRAO ESCRITO AQUI EMBAIXO.
+#
+# Verificado em 11/08/2026: SHEETS_WEBHOOK_TOKEN no Railway vale exatamente
+# 'serenus_sheets_2026' -- o mesmo texto que ficava espalhado em SEIS lugares
+# deste arquivo como valor padrao de fallback. Nao e uma senha secreta: e uma
+# senha publica, porque esta no codigo-fonte.
+#
+# A troca do valor de verdade (rotacionar no Railway) fica pendente porque o
+# Apps Script do Google Sheets tambem manda este token, e so eu mudar aqui
+# quebraria a entrada de leads ate alguem atualizar o outro lado junto.
+#
+# O que da pra fechar sem coordenar nada: tirar o valor padrao. Hoje isso nao
+# muda NADA (a variavel esta setada com este mesmo valor) — so fecha o
+# buraco de "se a variavel cair um dia, a rota aceita o valor que esta
+# publico no repositorio".
+_SHEETS_TOKEN_SEM_PADRAO = os.environ.get('SHEETS_WEBHOOK_TOKEN')
+
+
 @app.route('/webhook/sheets/diagnostico', methods=['GET'])
 def webhook_sheets_diagnostico():
     """Diagnóstico para AppScript validar conexão e token."""
-    token_env = os.environ.get('SHEETS_WEBHOOK_TOKEN', 'serenus_sheets_2026')
+    token_env = _SHEETS_TOKEN_SEM_PADRAO
     return jsonify({
         "ok": True,
         "webhook_url": "https://job-serenus-production.up.railway.app/webhook/sheets",
@@ -34907,7 +34925,7 @@ def webhook_sheets():
     }
     """
     if request.method == 'GET':
-        token_env = os.environ.get('SHEETS_WEBHOOK_TOKEN', 'serenus_sheets_2026')
+        token_env = _SHEETS_TOKEN_SEM_PADRAO
         accept = request.headers.get('Accept', '')
         if 'text/html' in accept or not accept:
             return render_template('webhook_sheets_status.html', token=token_env)
@@ -34923,7 +34941,7 @@ def webhook_sheets():
         data = request.get_json(force=True) or {}
 
         # Validar token
-        token_esperado = os.environ.get('SHEETS_WEBHOOK_TOKEN', 'serenus_sheets_2026')
+        token_esperado = _SHEETS_TOKEN_SEM_PADRAO
         token_recebido = data.get('token', '')
         if token_recebido != token_esperado:
             app.logger.warning(f"[WEBHOOK_SHEETS] Token inválido: '{token_recebido}'")
@@ -35756,7 +35774,7 @@ def admin_crm_debug_datas():
 @app.route('/webhook/diag-datas', methods=['GET'])
 def webhook_diag_datas():
     """Diagnóstico das datas e telefones dos leads. Protegido por token na query."""
-    if request.args.get('token') != os.environ.get('SHEETS_WEBHOOK_TOKEN', 'serenus_sheets_2026'):
+    if request.args.get('token') != _SHEETS_TOKEN_SEM_PADRAO:
         return jsonify({"erro": "token invalido"}), 401
     conn = db()
 
@@ -35810,7 +35828,7 @@ def admin_corrigir_datas_servidor():
     de cada lead com a data REAL da planilha. Tudo numa requisição.
     Protegido por token (?token=) ou login admin.
     """
-    token_ok = request.args.get('token') == os.environ.get('SHEETS_WEBHOOK_TOKEN', 'serenus_sheets_2026')
+    token_ok = request.args.get('token') == _SHEETS_TOKEN_SEM_PADRAO
     if not token_ok and session.get('perfil') != 'admin':
         return jsonify({"erro": "acesso negado"}), 403
 
@@ -35916,7 +35934,7 @@ def webhook_corrigir_datas():
     """
     try:
         data = request.get_json(force=True) or {}
-        token_esperado = os.environ.get('SHEETS_WEBHOOK_TOKEN', 'serenus_sheets_2026')
+        token_esperado = _SHEETS_TOKEN_SEM_PADRAO
         if data.get('token') != token_esperado:
             return jsonify({"ok": False, "erro": "Token invalido"}), 401
 
