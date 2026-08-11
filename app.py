@@ -4866,6 +4866,12 @@ def login_ou_extensao(f):
                             return resp, 403
                         return f(*a, **kw)
                 close_db(conn)
+                # O token tem a forma certa (id.segredo) e mesmo assim nao
+                # autenticou: ou a sessao foi revogada, ou o segredo nao bate.
+                # Nos dois casos aquele aparelho precisa entrar de novo. So nao
+                # corta quem ainda esta na chave antiga da transicao.
+                if not request.headers.get('X-Extension-Key'):
+                    return _sessao_morta()
                 
         # 3. Chave Antiga (Transição)
         # IMPORTANTE: _wa_auth_ok() acessa `request`, que é global na thread no Flask.
@@ -4896,6 +4902,26 @@ def login_ou_extensao(f):
         resp.headers['Access-Control-Allow-Origin'] = '*'
         return resp, 403
     return w
+
+def _sessao_morta():
+    """Resposta para token de aparelho que existe, mas nao vale mais.
+
+    A extensao guarda o token no proprio Chrome. Revogar do lado do servidor
+    nao apaga nada la — entao ela continuava mostrando a pessoa logada, com o
+    nome e tudo, e so parava de funcionar em silencio. Foi assim que o
+    Guilherme "entrou pelo popup" sem entrar: nao havia o que clicar, porque a
+    tela nao estava pedindo login.
+
+    Antes isto caia no 403 generico de "Acesso negado", que e a mesma resposta
+    de falta de permissao — e deslogar alguem por falta de permissao seria pior
+    que o defeito. Por isso o motivo vem escrito: `sessao_revogada` quer dizer
+    UMA coisa so, e a extensao pode agir sobre ela sem adivinhar.
+    """
+    resp = jsonify({'ok': False, 'erro': 'sessao_revogada',
+                    'mensagem': 'Este aparelho foi desconectado. Entre de novo pelo popup da extensao.'})
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    return resp, 401
+
 
 def login_required(f):
     @wraps(f)
@@ -5420,6 +5446,12 @@ def requer(escopo):
                                 return _wa_cors(r[0]), r[1]
                             return f(*a, **kw)
                     close_db(conn)
+                    # Mesma regra do `login_ou_extensao`: forma certa e sem
+                    # autenticar quer dizer aparelho desconectado. Sem isto o
+                    # token morto seguia adiante e era testado como chave de
+                    # API, terminando num erro que nao diz o que aconteceu.
+                    if not request.headers.get('X-Extension-Key'):
+                        return _wa_cors(_sessao_morta()[0]), 401
             
             # 2.5 Chave Antiga (Transição)
             if request.headers.get('X-Extension-Key') and _wa_auth_ok():
