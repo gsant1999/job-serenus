@@ -98,8 +98,32 @@ Legenda: [ ] pendente · [~] em andamento · [x] feito · (?) aguardando decisã
 > travar e devorar a RAM do computador?"* — e, na mesma conversa, o Chrome dele
 > avisando **"uso elevado da memória: 2,3 GB"** na aba do WhatsApp.
 >
-> **Levantamento começado, NÃO terminado.** Ficou pausado pra fechar a fila de
-> cotação primeiro. Retomar daqui — não do zero.
+> **RESOLVIDO em 10/08/2026, com medição antes e depois.** O que sobrou de
+> pendência está no fim desta seção.
+
+### O resultado, medido nas duas pontas
+
+| | antes | depois |
+|---|---|---|
+| Pior caso de uma passada | **340 ms** | ~70 ms |
+| Procurando a bolha | **280 ms** (82% do total) | **12 ms** |
+| Memória da aba | 1,2 GB | (não era a causa) |
+
+**A causa não era a memória, e não era a quantidade de medição — era a
+INTERCALAÇÃO.** O laço media a bolha, inseria o bloco, media a próxima. Cada
+inserção invalida o layout que a leitura seguinte precisa, então o navegador
+recalculava a página inteira a cada linha. Trinta linhas entrando numa rolagem
+custavam trinta recálculos completos.
+
+O conserto (4.57.0) foi mover todas as medições para antes da primeira
+escrita. O laço que desenha continuou idêntico — mudou **quando** a pergunta é
+feita, não a resposta.
+
+**A lição que vale mais que o conserto:** o dossiê de mercado apontava
+`subtree: true` e leitura de DOM como o vilão, e propunha reescrever o coração
+da extensão. O número mostrou que o gargalo era outro, e a correção coube em
+duas fases dentro de uma função. **Medir primeiro economizou semanas de
+reescrita — e a reescrita teria atacado a peça errada.**
 
 ### O que já se sabe, medido ou lido no código
 
@@ -130,17 +154,19 @@ Existe um utilitário de poda em `content.js:215-225` (apaga do Map e limpa o
 Set quando passa de um teto) — **usado em alguns lugares e não em outros**.
 Metade do trabalho pode ser só aplicar o que já existe.
 
-### O caminho, na ordem
+### O que continua pendente (e não é urgente)
 
-1. **Ler o número do Diagnóstico** numa conversa longa, depois de rolar. Sem
-   ele, qualquer conserto é chute.
-2. **Confirmar quais estruturas retêm de verdade** — tamanho em memória, não
-   contagem de itens. `_cvCache` com cinco imagens pesa mais que `TR.cache`
-   com quinhentas transcrições.
-3. **Aplicar teto no que retém**, com o utilitário que já existe.
-4. **O caminho grande, se o número justificar**: trocar leitura de DOM por
-   leitura de módulo do WhatsApp. É reescrita do coração da extensão — não
-   começar sem o número da etapa 1.
+1. **A memória em si.** 1,2 GB numa aba continua alto, mas **não era a causa do
+   travamento** — o travamento era layout. Vale confirmar quais estruturas
+   retêm de verdade (tamanho, não contagem: `_cvCache` com cinco imagens pesa
+   mais que `TR.cache` com quinhentas transcrições) e aplicar teto com o
+   utilitário que já existe em `content.js:215`.
+2. **Sobra uma intercalação menor**: depois de inserir o bloco, o código
+   pergunta à tela se ele pintou (`getClientRects`). É outro recálculo, mas só
+   nas linhas com documento — poucas. Só mexer se o número voltar a subir.
+3. **Ler módulo em vez de DOM** (a ideia boa do dossiê) deixa de ser urgente:
+   o gargalo que a justificava caiu 23×. Fica como melhoria de arquitetura,
+   não como conserto.
 
 ### O que já foi feito e conta como parte disso
 
