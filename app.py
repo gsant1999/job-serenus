@@ -35317,10 +35317,9 @@ def crm_lead_sms_reforco(lid):
 # ─── CRM CONFIG ───────────────────────────────────────────────────
 @app.route('/admin/crm/analise-quantitativos')
 @login_required
+@admin_required
 def admin_crm_analise_quantitativos():
     """Análise completa de quantitativos do CRM para debug de divergências."""
-    if session.get('perfil') != 'admin':
-        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
 
     conn = db()
     try:
