@@ -912,7 +912,36 @@
   //  Aqui cada acao e uma chamada e acabou. A pausa entre elas acontece na aba
   //  visivel, onde o relogio funciona — e o disfarce continua igual, porque o
   //  que o servidor deles ve e exatamente o mesmo espacamento irregular.
-  let _cartoesAtuais = [];
+  // O ESTADO DO PRECO E POR COTACAO, NAO DA ABA.
+  //
+  // `precoDoPlano` deduz o preco pela DIFERENCA contra a resposta anterior — a
+  // resposta deles traz todos os cenarios juntos, sem dizer qual e de qual
+  // plano. Por isso e preciso guardar "o que eu tinha antes".
+  //
+  // Enquanto so o proprio consultor cotava na propria aba, uma variavel unica
+  // bastava: uma cotacao por vez. Com a fila, a MESMA aba passa a atender
+  // pedidos intercalados de cotacoes diferentes — e o "antes" de uma vira o
+  // "antes" da outra. Daria preco colado no plano errado, marcado como
+  // conferido (as faixas somam o total daquele cartao), sem erro nenhum na
+  // tela, indo pra proposta de cliente.
+  //
+  // Chaveado por `cotacaoId`, cada cotacao carrega o proprio antes e a
+  // intercalacao deixa de existir. O teto evita que a aba do Dell acumule o
+  // estado de todas as cotacoes do dia.
+  const _cartoesPorCotacao = new Map();
+  const _CARTOES_TETO = 40;
+  function _cartoesLer(cid) {
+    const v = _cartoesPorCotacao.get(String(cid || '-'));
+    return (v && v.cartoes) || [];
+  }
+  function _cartoesGravar(cid, cartoes) {
+    _cartoesPorCotacao.set(String(cid || '-'), { cartoes: cartoes, quando: Date.now() });
+    if (_cartoesPorCotacao.size > _CARTOES_TETO) {
+      let velhaK = null, velhaT = Infinity;
+      _cartoesPorCotacao.forEach((v, kk) => { if (v.quando < velhaT) { velhaT = v.quando; velhaK = kk; } });
+      if (velhaK !== null) _cartoesPorCotacao.delete(velhaK);
+    }
+  }
 
   async function passo(p) {
     const a = (p && p.acao) || '';
@@ -925,8 +954,8 @@
         return { cotacaoId: ultimaCotacao,
                  url: ORIGEM + '/cotacoes/' + ultimaCotacao + '/edit', reaproveitada: true };
       }
-      _cartoesAtuais = [];
       ultimaCotacao = await criarCotacao(p.titulo);
+      _cartoesGravar(ultimaCotacao, []);
       ultimaAssinatura = assinatura;
       // As vidas vão JUNTO com a criação, sempre. Separar em outro passo seria
       // dar chance de existir cotação sem distribuição — e cotação sem
@@ -1044,8 +1073,8 @@
                nota: faltando().length ? 'falta: ' + faltando().join(', ') : 'os 7 papéis' });
 
       let cid = await passoTeste('criar', async () => {
-        _cartoesAtuais = [];
         const id = await criarCotacao();
+        _cartoesGravar(id, []);
         ultimaCotacao = id;
         return id + ' (id veio de: ' + (_idVeioDe || '?') + ')';
       });
@@ -1103,8 +1132,8 @@
                descartados: (p.planos || []).length - servem.length };
     }
     if (a === 'preco') {
-      const r = await precoDoPlano(p.cotacaoId, p, p.plano, _cartoesAtuais);
-      _cartoesAtuais = r.estado;
+      const r = await precoDoPlano(p.cotacaoId, p, p.plano, _cartoesLer(p.cotacaoId));
+      _cartoesGravar(p.cotacaoId, r.estado);
       return { cartao: r.cartao };
     }
     throw new Error('passo_desconhecido:' + a);
