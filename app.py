@@ -11186,7 +11186,16 @@ def proposta_editar(pid):
             regime = p['regime_aplicado']
             mod = p['modalidade']
             tipo_p = p['tipo_pessoa']
-            prod_acum = 0  # Simplificado
+            # ERA 'prod_acum = 0 # Simplificado'. Editar o valor de UMA proposta
+            # recalculava a comissao como se o consultor tivesse produzido ZERO
+            # no mes — mesmo que ele ja tivesse batido N3 com outras vendas.
+            # Cenario real: consultor bate nivel alto no mes; admin corrige um
+            # erro de digitacao numa proposta (R$1.000,00 -> R$1.050,00); a
+            # comissao inteira e regravada usando nivel 1, pagando a menos.
+            # Mesma conta que a tela de detalhe ja usa pra mostrar o aviso de
+            # comissao (linha ~9097): soma a producao das OUTRAS propostas do
+            # mes (exclui esta, que esta sendo editada) e soma o valor NOVO.
+            prod_acum = _producao_mes(conn, p['usuario_id'], p['mes_meta'], excluir_pid=pid) + novo_valor
 
             # Recalcular comissão
             calc = calc_comissao(operadora, regime, prod_acum, novo_valor, mod, tipo_p)
