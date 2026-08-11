@@ -79,6 +79,30 @@
 .socio-row { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid var(--borda); }
 .socio-row:last-child { border-bottom:none; }
 /* Marca discreta: diz a origem sem competir com a descrição. */
+/* ── Conferência: previsto × recebido ────────────────────────────────── */
+.conf { padding:0; }
+.conf-topo { display:flex; justify-content:space-between; align-items:flex-start;
+             flex-wrap:wrap; gap:16px; padding:16px 18px 14px;
+             border-bottom:1px solid var(--borda); }
+.conf-topo b { font-size:14px; }
+.conf-sub { font-size:11.5px; color:var(--cinza-2); margin-top:3px; }
+.conf-nums { display:flex; gap:22px; flex-wrap:wrap; }
+.cn { display:flex; flex-direction:column; align-items:flex-end; }
+.cn span { font-size:10px; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
+           color:var(--cinza-2); }
+.cn b { font-size:17px; font-weight:750; font-variant-numeric:tabular-nums; margin-top:2px; }
+/* "Falta entrar" e a razao de a tela existir, entao e o maior dos tres. */
+.cn.destaque b { font-size:22px; letter-spacing:-.02em; }
+.conf-link { color:var(--texto); font-weight:650; text-decoration:none;
+             border-bottom:1px solid var(--borda-2); }
+.conf-link:hover { color:var(--info); border-bottom-color:currentColor; }
+.conf-qtd { display:block; font-size:11px; color:var(--cinza-2); margin-top:2px; }
+.conf-tag { display:inline-block; padding:2px 9px; border-radius:20px; font-size:10.5px;
+            font-weight:700; }
+.conf-tag.falta { background:rgba(209,15,63,.12); color:var(--num-neg); }
+.conf-tag.ok { background:var(--verde-soft); color:var(--num-pos); }
+.conf-vazio { padding:16px 18px; font-size:12.5px; color:var(--cinza-2); }
+
 .chip-fixo { display:inline-block; margin-left:7px; padding:1px 7px; border-radius:20px;
              font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
              background:rgba(139,92,246,.15); color:var(--roxo); vertical-align:middle; }
@@ -220,6 +244,55 @@
 
   <!-- COMISSÕES FUTURAS -->
   <div class="fin-pane active" id="pane-futuras">
+    {# CONFERÊNCIA DO MÊS: previsto × recebido, proposta por proposta.
+       Era a pergunta sem resposta da tela. Existia o total do mês e mais nada —
+       quando o número assustava, não havia caminho DE DENTRO daqui pra
+       descobrir de quem era. Foi o que aconteceu com a comissão inflada: a
+       resposta só veio por auditoria fora do sistema.
+       Quem não recebeu vem primeiro: a tela existe pra achar o que falta. #}
+    <div class="card conf" style="margin-bottom:14px;">
+      <div class="conf-topo">
+        <div>
+          <b>Conferência de {{ mes }}</b>
+          <div class="conf-sub">O que era pra entrar, e o que entrou de fato.</div>
+        </div>
+        <div class="conf-nums">
+          <div class="cn"><span>Previsto</span><b>{{ conferencia.prev|moeda }}</b></div>
+          <div class="cn"><span>Recebido</span><b class="pos">{{ conferencia.receb|moeda }}</b></div>
+          <div class="cn destaque"><span>Falta entrar</span>
+            <b class="{{ 'neg' if conferencia.falta > 0.005 else 'pos' }}">{{ conferencia.falta|moeda }}</b></div>
+        </div>
+      </div>
+      {% if conferencia.itens %}
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr><th>Proposta</th><th>Consultor</th><th>Operadora</th>
+            <th class="th-valor">Previsto</th><th class="th-valor">Recebido</th>
+            <th class="th-valor">Falta</th><th></th></tr></thead>
+          <tbody>
+            {% for i in conferencia.itens %}
+            <tr>
+              <td><a class="conf-link" href="/proposta/{{ i.proposta_id }}">{{ i.razao_social or ('Proposta ' ~ i.proposta_id) }}</a>
+                <span class="conf-qtd">{{ i.qtd }} parcela{{ '' if i.qtd == 1 else 's' }}</span></td>
+              <td style="font-size:12.5px;">{{ i.consultor or '—' }}</td>
+              <td style="font-size:12.5px;">{{ i.adm_operadora or '—' }}</td>
+              <td class="td-valor">{{ i.prev|moeda }}</td>
+              <td class="td-valor pos">{{ i.receb|moeda }}</td>
+              <td class="td-valor {{ 'neg' if i.falta > 0.005 else '' }}">{{ i.falta|moeda }}</td>
+              <td style="white-space:nowrap;">
+                {% if i.falta > 0.005 %}<span class="conf-tag falta">falta entrar</span>
+                {% else %}<span class="conf-tag ok">recebido</span>{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="conf-vazio">Nenhuma comissão com competência em {{ mes }}. As parcelas
+        aparecem aqui quando há propostas com vencimento cadastrado neste mês.</div>
+      {% endif %}
+    </div>
+
     <div class="card">
       <div class="card-header"><h3>Comissões a receber por mês</h3></div>
       <div class="tbl-wrap">

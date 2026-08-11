@@ -13742,6 +13742,59 @@ def meio_pagamento_excluir(mid):
     return jsonify({"ok": True})
 
 
+# ─── Conferência do mês: previsto × recebido, proposta por proposta ─────────
+#
+# "Entrou o que era pra entrar?" é a segunda das três perguntas que levam
+# alguém ao Financeiro, e era a única sem resposta na tela: existia o total do
+# mês e mais nada. Quando o número assustava — que foi exatamente o que
+# aconteceu com a comissão inflada — não havia caminho DE DENTRO da tela para
+# descobrir de quem era.
+#
+# RECEBIDO é dinheiro que chegou na corretora, e isso são três estados do
+# fluxo, não um: chegou e não foi repassado, já liberado, já pago. Contar só
+# 'Pago ao corretor' diria que nada entrou até o consultor receber, o que é o
+# contrário do que a pergunta quer saber.
+_PARC_RECEBIDAS = ('Recebido e não repassado', 'Liberado para o corretor', 'Pago ao corretor')
+
+
+def _conferencia_mes(conn, mes):
+    """Por proposta: quanto era previsto e quanto de fato entrou, na competência.
+
+    Aplica o mesmo filtro das somas do topo (cancelada, estornada, excluída) —
+    se divergir de lá, a conferência vira mais uma versão da verdade, que é
+    justamente o problema que ela existe para resolver."""
+    marca = ','.join(['?'] * len(_PARC_RECEBIDAS))
+    linhas = conn.execute(f"""
+        SELECT pr.id AS proposta_id, pr.razao_social, pr.consultor, pr.adm_operadora,
+               COUNT(*) AS qtd,
+               COALESCE(SUM(p.valor_corretora), 0) AS prev,
+               COALESCE(SUM(CASE WHEN p.status IN ({marca})
+                                 THEN p.valor_corretora ELSE 0 END), 0) AS receb
+        FROM parcelas p
+        JOIN propostas pr ON pr.id = p.proposta_id
+        WHERE p.competencia = ?
+          AND p.status <> 'Cancelada / Estornada'
+          AND COALESCE(pr.estornada, 0) = 0
+          AND COALESCE(pr.status, '') <> 'Excluída'
+        GROUP BY pr.id, pr.razao_social, pr.consultor, pr.adm_operadora
+    """, list(_PARC_RECEBIDAS) + [mes]).fetchall()
+    itens = []
+    for r in linhas:
+        d = dict(r)
+        d['falta'] = round(float(d['prev'] or 0) - float(d['receb'] or 0), 2)
+        itens.append(d)
+    # O QUE FALTA VEM PRIMEIRO. A tela existe pra achar o que não entrou; quem
+    # já recebeu tudo não precisa de atenção nenhuma.
+    itens.sort(key=lambda x: (-x['falta'], -float(x['prev'] or 0)))
+    return {
+        'itens': itens,
+        'prev': round(sum(float(i['prev'] or 0) for i in itens), 2),
+        'receb': round(sum(float(i['receb'] or 0) for i in itens), 2),
+        'falta': round(sum(i['falta'] for i in itens), 2),
+    }
+
+
+
 @app.route('/financeiro')
 @login_required
 @admin_required
@@ -13939,6 +13992,10 @@ def financeiro():
                    'hoje': (date.today().year == _ano and date.today().month == _m
                             and date.today().day == d)}
                   for d in range(1, _ult + 1)]
+    # A CONFERENCIA E LIDA ENQUANTO A CONEXAO AINDA ESTA ABERTA.
+    # `close_db` acontece logo abaixo; chamar isto dentro do render_template
+    # usaria conexao fechada e a tela caia inteira.
+    conferencia = _conferencia_mes(conn, mes)
     close_db(conn)
 
     # O ROTULO ACOMPANHA O NUMERO. Um total que muda de valor sem dizer de que
@@ -13969,6 +14026,7 @@ def financeiro():
         saldo=saldo, dre=dre, saldo_socios=saldo_socios_lista, lancamento_focus=lancamento_focus,
         centros_custo=CENTROS_CUSTO, tipos_lancamento=TIPOS_LANCAMENTO,
         canais_midia=CANAIS_MIDIA, status_lancamento=STATUS_LANCAMENTO,
+        conferencia=conferencia,
         calendario=calendario, cal_total=cal_total, cal_rotulo=_cal_rotulo,
         cal_livre=_cal_livre,
         filtros={'faixa': f_faixa, 'centro': f_centro, 'status_lanc': f_status,
