@@ -35070,19 +35070,18 @@ def webhook_sheets():
             dados_extras_wh = json.dumps({'click': click}, ensure_ascii=False) if click else None
 
             # ── Verificar se lead já existe (por telefone OU email) ──
-            # Usa telefone_norm (só dígitos) comparado contra telefone_norm do banco
-            lead_existente = None
-            if telefone_norm:
-                lead_existente = conn.execute(
-                    "SELECT id, etapa, nome, criado_em FROM crm_leads WHERE telefone_norm = ?",
-                    (telefone_norm,)
-                ).fetchone()
-            # Fallback: compara só dígitos do telefone bruto armazenado
-            if not lead_existente and telefone_norm and len(telefone_norm) >= 8:
-                lead_existente = conn.execute(
-                    "SELECT id, etapa, nome, criado_em FROM crm_leads WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(telefone,'-',''),' ',''),'(',''),')',''),'+','') LIKE ?",
-                    (f'%{telefone_norm[-8:]}',)
-                ).fetchone()
+            # `_buscar_lead_por_telefone` é a mesma busca usada em todo lugar
+            # que cria lead a partir de telefone (import manual, análise de
+            # WhatsApp) — critério único, sem duplicar lógica.
+            #
+            # ERA duas queries manuais aqui, e a de fallback comparava só os
+            # últimos 8 dígitos SEM amarrar ao DDD — a mesma falha que
+            # `_buscar_lead_por_telefone` já corrige (comentário lá: "(19)
+            # 9681-0150 e (11) 9681-0150 eram tratados como a mesma pessoa").
+            # Lead de um DDD podia casar com lead de outro DDD só por
+            # coincidência dos últimos 8 dígitos, e o "já existe" atualizava
+            # (inclusive responsável, se estava vazio) o lead errado.
+            lead_existente = _buscar_lead_por_telefone(conn, telefone_norm)
             if not lead_existente and email:
                 lead_existente = conn.execute(
                     "SELECT id, etapa, nome, criado_em FROM crm_leads WHERE LOWER(email) = LOWER(?)",
