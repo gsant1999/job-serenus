@@ -2003,7 +2003,7 @@
     // indistinguivel de "o WhatsApp ta lento" sem numero — e porque, sem medir,
     // eu ia adivinhar qual das dez coisas era a culpada. Aparecem no modo
     // desenvolvedor e vao no canario.
-    perf: { regs: 0, passadas: 0, linhas: 0, ms: 0, pior: 0, puladas: 0 },
+    perf: { regs: 0, passadas: 0, linhas: 0, ms: 0, pior: 0, puladas: 0, geo: 0, geoN: 0 },
   };
 
   function _trPodeRodar() { return !!document.querySelector('#main'); }
@@ -2476,7 +2476,31 @@
   // O certo e subir e parar no PRIMEIRO ancestral que sabe pintar um filho
   // embaixo: nao e elemento substituido e nao e linha de flex sem quebra. Esse
   // ancestral E a bolha, porque o card foi recusado logo abaixo dela.
+  // QUANTO CUSTA MEDIR GEOMETRIA — separado do resto da passada.
+  //
+  // Guilherme, 10/08/2026, no Diagnostico: aba em 1,2 GB e PIOR CASO 340ms.
+  // 340ms numa passada e congelamento visivel, e esta acima do limite que eu
+  // mesmo pus pra dizer "o problema e nosso".
+  //
+  // O suspeito e aritmetico: achar a bolha sobe ate 10 ancestrais lendo
+  // `clientWidth` de cada um, DUAS vezes (dois tetos). Ler largura obriga o
+  // navegador a recalcular o layout na hora. Sao ~25 recalculos forcados por
+  // linha nova; rolar traz 30 linhas de uma vez.
+  //
+  // Isto NAO conserta nada — mede. Se `geo` for a maior parte dos 340ms, o
+  // conserto e separar leitura de escrita (medir tudo, depois inserir tudo),
+  // que colapsa N recalculos em um. Se nao for, o conserto e outro e eu teria
+  // reescrito a peca errada.
   function _trBolhaDoc(row, ancora) {
+    const _g0 = performance.now();
+    try {
+      return _trBolhaDocMedir(row, ancora);
+    } finally {
+      TR.perf.geo += performance.now() - _g0;
+      TR.perf.geoN++;
+    }
+  }
+  function _trBolhaDocMedir(row, ancora) {
     const larguraLinha = row.clientWidth || 1;
     let el = ancora;
     if (el) {
@@ -3803,7 +3827,14 @@
     const perf = '<div class="job-tr-diag"><b>Custo:</b> ' +
       p.passadas + ' passada(s) · ' + Math.round(p.ms) + 'ms no total · pior ' +
       Math.round(p.pior) + 'ms · ' + p.regs + ' mutações vistas · ' +
-      Math.round(p.puladas / total * 100) + '% das linhas puladas</div>';
+      Math.round(p.puladas / total * 100) + '% das linhas puladas' +
+      // A FATIA DA GEOMETRIA. Sem separar, "340ms de pior caso" nao diz o que
+      // consertar — e reescrever a peca errada custa mais que nao mexer.
+      (p.geoN
+        ? ' · <b>' + Math.round(p.geo) + 'ms procurando a bolha</b> (' +
+          Math.round(p.geo / (p.ms || 1) * 100) + '% do total, em ' + p.geoN + ' linhas)'
+        : ' · geometria ainda não medida') +
+      '</div>';
     return '<div class="job-tr-diag"><b>Transcrição:</b> sob demanda · ' +
       document.querySelectorAll('.job-tr-slot').length + ' botão(ões) na tela · ' +
       TR.cache.size + ' em memória · ' + TR.erro.size + ' com erro' +
