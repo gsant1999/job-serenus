@@ -35393,14 +35393,13 @@ def admin_crm_analise_quantitativos():
 
 @app.route('/admin/crm/diagnostico-leads', methods=['POST'])
 @login_required
+@admin_required
 def admin_crm_diagnostico_leads():
     """
     Analisa divergências de quantitativo entre planilha e banco.
     Recebe JSON: {leads: [...]} (mesmo formato do webhook)
     Retorna breakdown detalhado de por que cada lead foi ignorado/duplicado.
     """
-    if session.get('perfil') != 'admin':
-        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
 
     d = request.get_json(force=True) or {}
     leads_raw = d.get('leads', [])
