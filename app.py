@@ -4868,12 +4868,23 @@ def login_ou_extensao(f):
                 close_db(conn)
                 # O token tem a forma certa (id.segredo) e mesmo assim nao
                 # autenticou: ou a sessao foi revogada, ou o segredo nao bate.
-                # Nos dois casos aquele aparelho precisa entrar de novo. So nao
-                # corta quem ainda esta na chave antiga da transicao.
-                if not request.headers.get('X-Extension-Key'):
-                    return _sessao_morta()
+                #
+                # ISTO E O DEFEITO QUE ANULAVA TODOS OS OUTROS CONSERTOS DE HOJE.
+                # Ate aqui, so recusava se a chave antiga TAMBEM estivesse
+                # ausente — e a extensao manda as duas quando tem as duas
+                # guardadas. Resultado: revogar um aparelho em /usuarios nao
+                # tirava o acesso dele, so trocava o crachá. O aparelho seguia
+                # chamando fila, mensagem, nota, tudo, com a chave que e igual
+                # nas oito maquinas. "Desconectar" nunca desconectou.
+                #
+                # Um Bearer com a FORMA certa (id.segredo) que nao autentica e
+                # sempre um aparelho que precisa entrar de novo — revogado ou
+                # com segredo errado. Isso vale por si só, tenha ou não chave
+                # antiga junto. Barra sempre.
+                return _sessao_morta()
                 
-        # 3. Chave Antiga (Transição)
+        # 3. Chave Antiga (Transição) — só chega aqui quem NUNCA mandou Bearer.
+        #    Quem manda Bearer de aparelho revogado já foi barrado acima.
         # IMPORTANTE: _wa_auth_ok() acessa `request`, que é global na thread no Flask.
         if request.headers.get('X-Extension-Key') and _wa_auth_ok():
             app.logger.info('[EXT] chave antiga usada em %s', request.path)
@@ -5446,14 +5457,15 @@ def requer(escopo):
                                 return _wa_cors(r[0]), r[1]
                             return f(*a, **kw)
                     close_db(conn)
-                    # Mesma regra do `login_ou_extensao`: forma certa e sem
-                    # autenticar quer dizer aparelho desconectado. Sem isto o
-                    # token morto seguia adiante e era testado como chave de
-                    # API, terminando num erro que nao diz o que aconteceu.
-                    if not request.headers.get('X-Extension-Key'):
-                        return _wa_cors(_sessao_morta()[0]), 401
+                    # Mesma correcao do `login_ou_extensao` logo acima: Bearer
+                    # com forma certa que nao autentica barra SEMPRE, mesmo com
+                    # chave antiga junto. Era essa condicao extra que deixava o
+                    # aparelho revogado continuar chamando toda rota protegida
+                    # por `requer` — que e a maioria da extensao.
+                    return _wa_cors(_sessao_morta()[0]), 401
             
-            # 2.5 Chave Antiga (Transição)
+            # 2.5 Chave Antiga (Transição) — só chega aqui quem NUNCA mandou
+            # Bearer. Quem manda Bearer de aparelho revogado já foi barrado.
             if request.headers.get('X-Extension-Key') and _wa_auth_ok():
                 app.logger.info('[EXT] chave antiga usada em %s', request.path)
                 g.auth_via = 'chave'
