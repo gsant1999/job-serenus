@@ -2894,15 +2894,51 @@
       el = row.querySelector('[data-icon="audio-play"], [data-icon="play"], [data-icon*="ptt"], audio')
            || row.querySelector('[aria-label*="udio"]');
     }
-    if (!el) return null;
     let melhor = null;
-    for (let i = 0; i < 8 && el && el !== row; i++) {
+    for (let i = 0; el && i < 8 && el !== row; i++) {
       const w = el.clientWidth;
       // Larga o bastante pra ser bolha, estreita o bastante pra nao ser a linha.
       if (w > 150 && w < larguraLinha * 0.94) melhor = el;
       el = el.parentElement;
     }
-    return melhor;
+    if (melhor) return melhor;
+
+    // A ANCORA MORREU E LEVOU O BOTAO JUNTO.
+    //
+    // Ate aqui, sem ancora esta funcao devolvia `null` — e o injetor
+    // (`if (!bolha) continue`) descartava a linha em silencio. O problema: os
+    // seletores acima sao os MESMOS que o comentario de ~2258 ja declara
+    // obsoletos ("o WhatsApp trocou a marcacao, nao ha mais <audio> na bolha e
+    // o icone mudou de nome"). Quando a deteccao de audio migrou pra wa-js, ela
+    // deixou de depender desses seletores; a ancora nao. Resultado medido em
+    // 11/08/2026: 10 audios reconhecidos, 0 botoes na tela, nenhum erro.
+    //
+    // A licao ja estava escrita no caminho do documento (`_trBolhaDocMedir`):
+    // "NUNCA devolve vazio: botao que some e pior que botao no lugar mais ou
+    // menos certo". O caminho do audio nao tinha essa rede — agora tem.
+    //
+    // Sem ancora, acha a bolha pela GEOMETRIA, que e o que o proprio arquivo
+    // diz nao mudar entre redesenhos: dentro da linha, o maior bloco que NAO
+    // ocupa a linha inteira. Nao depende de nome de icone nenhum.
+    try {
+      let area = 0;
+      for (const e2 of row.querySelectorAll('div, span')) {
+        const w = e2.clientWidth;
+        if (w <= 150 || w >= larguraLinha * 0.94) continue;
+        if (_TR_SUBSTITUIDO[e2.tagName] || _trEhLinhaFlex(e2)) continue;
+        const a = w * (e2.clientHeight || 1);
+        if (a > area) { area = a; melhor = e2; }
+      }
+    } catch (e) { /* cai no return abaixo */ }
+    if (melhor) return melhor;
+    // Ultimo recurso: a propria linha, marcada como SOLTO — igual ao documento.
+    // Botao levemente fora do lugar e recuperavel; botao que nao existe, nao.
+    // A marca importa: pendurado na linha inteira, sem a classe de solto, o
+    // bloco atravessa a conversa de ponta a ponta (foi o que ficou horrivel no
+    // documento antes da `.job-doc-solto` existir). Quem cria o slot le esta
+    // marca e limita a largura.
+    row._jobTrSolto = true;
+    return row;
   }
 
   // De que lado ficou — so pra escolher a COR do rotulo. Se errar aqui nada
@@ -3073,10 +3109,12 @@
         }
         continue;
       }
+      row._jobTrSolto = false;
       const bolha = _trBolha(row);
-      if (!bolha) continue;             // sem bolha identificada, nao inventa lugar
+      if (!bolha) continue;             // nao deveria mais acontecer; guarda mantida
       const slot = document.createElement('div');
-      slot.className = 'job-tr-slot ' + (_trLado(bolha, row) === 'consultor' ? 'job-tr-dir' : 'job-tr-esq');
+      slot.className = 'job-tr-slot ' + (_trLado(bolha, row) === 'consultor' ? 'job-tr-dir' : 'job-tr-esq')
+                     + (row._jobTrSolto ? ' job-tr-solto' : '');
       slot.dataset.msg = id;
       // DENTRO da bolha: herda posicao, largura e cor de quem ja esta no lugar certo.
       bolha.appendChild(slot);

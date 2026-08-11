@@ -1913,6 +1913,19 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   display: block; margin: 6px 0 1px; padding-top: 6px;
   border-top: 1px solid rgba(255,255,255,.09);
 }
+/* SEM BOLHA IDENTIFICADA — o bloco nasce pendurado na linha inteira.
+   Acontece quando a ancora de audio nao e encontrada (o WhatsApp troca o nome
+   do icone de tempos em tempos) e a geometria tambem nao acha nada. Sem isto o
+   bloco atravessaria a conversa de ponta a ponta; e o mesmo remendo que a
+   `.job-doc-solto` ja faz pro documento, pela mesma razao: melhor um botao no
+   lugar mais ou menos certo do que nenhum botao. */
+.job-tr-slot.job-tr-solto {
+  max-width: 380px; border-top: none; margin: 4px 9%;
+  background: rgba(0,0,0,.22); border: 1px solid rgba(255,255,255,.1);
+  border-radius: 8px; padding: 7px 10px;
+}
+.job-tr-slot.job-tr-solto.job-tr-dir { margin-left: auto; }
+.job-tr-slot.job-tr-solto.job-tr-esq { margin-right: auto; }
 .job-tr-btn {
   display: inline-flex; align-items: center; gap: 5px;
   background: transparent; border: none; padding: 1px 0;
