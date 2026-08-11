@@ -7554,6 +7554,18 @@ def _enviar_sms(telefone, mensagem):
 
 
 # ─── RECUPERAÇÃO DE SENHA (usuário) ─────────────────────────────────────────
+# O CODIGO E NUMERICO DE 6 DIGITOS. SEM LIMITE, DA PRA CHUTAR.
+#
+# Nao e um segredo de 32 caracteres — sao 1 milhao de combinacoes, validas
+# por 15 minutos, e quem sabe so o e-mail (previsivel: nome@serenus...) podia
+# tentar todas dentro da janela, sem nada barrando. Mesmo padrao ja usado no
+# login da extensao (_WA_LOGIN_ATTEMPTS): dicionario em memoria, chave
+# (ip, email), zera sozinho quando o servidor reinicia — aceitavel pelo
+# mesmo motivo de la, e simples de auditar.
+_RESET_SENHA_TENTATIVAS = {}  # { (ip, email): [timestamp, ...] }
+_RESET_SENHA_MAX = 5          # depois disso, o codigo morre — pede um novo
+
+
 @app.route('/esqueci-senha', methods=['GET','POST'])
 def esqueci_senha():
     """Passo 1: usuário informa o e-mail → recebe código de 6 dígitos."""
@@ -7596,6 +7608,27 @@ def redefinir_senha():
     codigo = request.form.get('codigo','').strip()
     s1 = request.form.get('senha','')
     s2 = request.form.get('senha2','')
+
+    import time as _time
+    ip = request.remote_addr
+    k = (ip, email)
+    agora = _time.time()
+    if k in _RESET_SENHA_TENTATIVAS:
+        # Mesma janela do proprio codigo: passado 15 min o codigo ja expirou
+        # sozinho, entao tentativa velha nao precisa continuar contando.
+        _RESET_SENHA_TENTATIVAS[k] = [t for t in _RESET_SENHA_TENTATIVAS[k] if agora - t < 900]
+    if len(_RESET_SENHA_TENTATIVAS.get(k, [])) >= _RESET_SENHA_MAX:
+        conn = db()
+        # Invalida o codigo de verdade — nao so recusa a tentativa. Sem isto,
+        # a pessoa só ficava impedida enquanto o rate-limit em memoria
+        # durasse; o codigo continuava valido pra quem tivesse mais paciencia
+        # ou tentasse de outro IP.
+        conn.execute("UPDATE usuarios SET reset_code=NULL, reset_expira=NULL WHERE email=?", (email,))
+        conn.commit(); close_db(conn)
+        app.logger.warning(f"[RESET-SENHA] limite de tentativas atingido: {email} via {ip}")
+        return render_template('redefinir_senha.html', email=email,
+            erro='Muitas tentativas erradas. Por segurança, este código foi cancelado — solicite um novo.')
+
     conn = db()
     u = conn.execute("SELECT id,reset_code,reset_expira FROM usuarios WHERE email=? AND ativo=1", (email,)).fetchone()
     erro = None
@@ -7608,8 +7641,13 @@ def redefinir_senha():
     elif s1 != s2:
         erro = 'Senhas não conferem.'
     if erro:
+        # Conta como tentativa so quando o CODIGO estava errado — senha curta
+        # ou senhas diferentes nao e um chute, e nao deve gastar do limite.
+        if not u or u['reset_code'] != codigo:
+            _RESET_SENHA_TENTATIVAS.setdefault(k, []).append(agora)
         close_db(conn)
         return render_template('redefinir_senha.html', email=email, erro=erro)
+    _RESET_SENHA_TENTATIVAS.pop(k, None)
     conn.execute("UPDATE usuarios SET senha_hash=?, reset_code=NULL, reset_expira=NULL WHERE id=?",
                  (hash_senha(s1), u['id']))
     conn.commit(); close_db(conn)
