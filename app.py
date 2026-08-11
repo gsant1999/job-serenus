@@ -27869,6 +27869,7 @@ _TABELAS_LEAD_ID = [
 
 @app.route('/crm/lead/<int:lid>/juntar', methods=['POST'])
 @login_required
+@admin_required
 def crm_lead_juntar(lid):
     """Junta OUTRO lead neste: traz conversas, histórico, cotações, propostas e
     anexos, e apaga o card que sobrou.
@@ -27877,8 +27878,6 @@ def crm_lead_juntar(lid):
     identificado pelo id — não por nome parecido. Adivinhar quem é duplicado e
     juntar sozinho é como se perde venda de gente diferente com o mesmo
     sobrenome."""
-    if session.get('perfil') != 'admin':
-        return jsonify({"ok": False, "erro": "Só admin pode juntar leads"}), 403
     d = request.json or {}
     try:
         outro = int(d.get('outro_id') or 0)
