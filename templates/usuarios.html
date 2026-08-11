@@ -189,6 +189,24 @@
     }
     #modal-novo .modal-botoes, #modal-editar .modal-botoes { flex-direction:column-reverse; }
   }
+
+  /* O AVISO DE "DEU CERTO" PRECISA SER LIDO NOS DOIS TEMAS.
+     Estas cores eram do tema escuro, cravadas no meio do JavaScript: verde
+     claro (#4fe3b8) sobre verde de 10% de opacidade. No escuro funciona; no
+     claro isso vira letra clara sobre fundo quase branco — a mensagem estava
+     na tela e nao dava pra ler. Aviso que nao se le e o mesmo que aviso que
+     nao existe: quem revoga uma sessao fica sem saber se revogou.
+     Vira CSS de verdade (o navegador aplica junto com o resto, em vez de
+     depois que o script roda) e o tom do texto muda com o tema. */
+  .alert { padding:12px 16px; border-radius:8px; font-size:13.5px; }
+  .alert-ok  { background:var(--verde-soft); color:var(--verde);
+               border:1px solid var(--verde); }
+  .alert-err { background:rgba(244,63,94,.12); color:var(--erro);
+               border:1px solid var(--erro); }
+  /* Sobre branco, o --verde do tema claro (#17a882) ainda fica no limite pra
+     texto pequeno. So aqui ele escurece — a cor de marca continua a mesma nos
+     seus lugares. */
+  [data-theme="light"] .alert-ok { color:#0a7d5f; background:rgba(23,168,130,.12); }
 </style>
 
 <script>
@@ -646,9 +664,5 @@ function copiarLink() {
   navigator.clipboard.writeText(link).then(() => toast('Link copiado','ok'));
 }
 
-// Estilos alert inline
-const st = document.createElement('style');
-st.textContent = '.alert{padding:12px 16px;border-radius:8px;font-size:13.5px;}.alert-ok{background:rgba(31,216,164,.1);color:#4fe3b8;border:1px solid rgba(31,216,164,.3);}.alert-err{background:rgba(244,63,94,.12);color:#fb8497;border:1px solid rgba(244,63,94,.3);}';
-document.head.appendChild(st);
 </script>
 {% endblock %}
