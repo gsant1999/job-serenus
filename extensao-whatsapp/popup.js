@@ -98,6 +98,26 @@ async function carregar() {
                                     'extensaoAtiva', 'extUsuario', 'extApelido']);
   pintarQuem(extUsuario, extApelido);
   if (extApelido) $('loginApelido').value = extApelido;
+  // O QUE ESTA GUARDADO AQUI NAO PROVA NADA.
+  //
+  // Este popup mostrava o nome e o botao "Sair deste computador" so porque
+  // havia um `extUsuario` no storage — mesmo depois de um admin ter
+  // desconectado o aparelho pelo site. Quem abria via a si proprio conectado,
+  // nao tinha o que clicar, fechava, e continuava desconectado. Isso aconteceu
+  // tres vezes seguidas hoje, com "entrei pelo popup" que nunca criou sessao.
+  //
+  // Agora pergunta ao servidor. Se o token morreu, o background apaga tudo e
+  // esta tela volta pro formulario de entrar, que e a unica coisa que resolve.
+  if (extUsuario) {
+    try {
+      const r = await chrome.runtime.sendMessage({ type: 'sessao_confere' });
+      // So o 401 derruba: servidor fora do ar nao desloga ninguem.
+      if (r && r.valida === false && r.tinhaToken) {
+        pintarQuem(null, '');
+        status('Este aparelho foi desconectado. Entre de novo.', 'err');
+      }
+    } catch (e) { /* sem resposta: nao mexe no que esta na tela */ }
+  }
   try {
     const v = (chrome.runtime.getManifest() || {}).version;
     if (v) $('topoVersao').textContent = 'Extensão do WhatsApp · v' + v;
