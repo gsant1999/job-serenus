@@ -2222,6 +2222,7 @@ def init_db():
             resultado_json TEXT,
             erro TEXT,
             etapa TEXT,
+            fracao REAL DEFAULT 0.0,
             criado_em TIMESTAMP NOT NULL,
             pegado_em TIMESTAMP,
             terminado_em TIMESTAMP,
@@ -2831,6 +2832,8 @@ def init_db():
     # Novas colunas (agosto 2026):
     add_col('cotacao_salva', 'cidade', 'TEXT')
     add_col('extensao_sessao', 'trabalhador_cotacao', 'INTEGER DEFAULT 0')
+    add_col('extensao_sessao', 'trabalhador_sinal', 'TIMESTAMP')
+    add_col('cotacao_fila', 'fracao', 'REAL DEFAULT 0.0')
     add_col('cotacao_salva', 'modalidades', 'TEXT')
     add_col('crm_leads', 'auditado_em', 'TIMESTAMP')
     add_col('cotacao_tabela', 'administradora', 'TEXT')
@@ -23339,7 +23342,7 @@ def api_wa_cotacao_fila():
     
     trabalhador = conn.execute("""
         SELECT id FROM extensao_sessao 
-        WHERE trabalhador_cotacao=1 AND ultimo_uso >= ?
+        WHERE trabalhador_cotacao=1 AND trabalhador_sinal >= ?
     """, (cutoff_3m,)).fetchone()
     
     if not trabalhador:
@@ -23357,6 +23360,10 @@ def api_wa_cotacao_fila():
         pedido_json = json.dumps(pedido_json)
         
     uid = getattr(g, 'usuario_id', 0)
+    if not uid:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "nao_identificado"}))
+        
     sid = getattr(g, 'sessao_id', 0)
     
     # Insere
@@ -23365,7 +23372,7 @@ def api_wa_cotacao_fila():
         INSERT INTO cotacao_fila (usuario_id, sessao_id, pedido_json, estado, criado_em)
         VALUES (?, ?, ?, 'esperando', ?)
     """, (uid, sid, pedido_json, agora_txt))
-    novo_id = cur.lastrowid
+    novo_id = _last_insert_id(cur)
     
     # Calcula posicao: quantos estão esperando ou rodando ANTES dele (id menor)
     pos = conn.execute("""
@@ -23396,6 +23403,10 @@ def api_wa_cotacao_fila_proximo():
     agora = datetime.now(TZ_SP)
     agora_txt = agora.strftime('%Y-%m-%d %H:%M:%S')
     cutoff_3m = (agora - timedelta(minutes=3)).strftime('%Y-%m-%d %H:%M:%S')
+    cutoff_7d = (agora - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+    
+    # 0. Limpeza
+    conn.execute("DELETE FROM cotacao_fila WHERE estado IN ('pronto', 'erro', 'cancelado') AND terminado_em < ?", (cutoff_7d,))
     
     # 1. Recupera pedidos presos em 'rodando' > 3min
     conn.execute("""
@@ -23447,12 +23458,19 @@ def api_wa_cotacao_fila_proximo():
 def api_wa_cotacao_fila_etapa(cid):
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
+    
+    sid = getattr(g, 'sessao_id', 0)
+    conn = db()
+    sessao = conn.execute("SELECT trabalhador_cotacao FROM extensao_sessao WHERE id=?", (sid,)).fetchone()
+    if not sessao or not sessao['trabalhador_cotacao']:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "motivo": "nao_e_trabalhador"}))
+        
     req = request.get_json(silent=True) or {}
     etapa = req.get('etapa', '')
     fracao = req.get('fracao', 0.0)
     
-    conn = db()
-    conn.execute("UPDATE cotacao_fila SET etapa=? WHERE id=?", (f"{etapa}|{fracao}", cid))
+    conn.execute("UPDATE cotacao_fila SET etapa=?, fracao=? WHERE id=?", (etapa, fracao, cid))
     conn.commit()
     close_db(conn)
     return _wa_cors(jsonify({"ok": True}))
@@ -23463,12 +23481,19 @@ def api_wa_cotacao_fila_etapa(cid):
 def api_wa_cotacao_fila_pronto(cid):
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
+        
+    sid = getattr(g, 'sessao_id', 0)
+    conn = db()
+    sessao = conn.execute("SELECT trabalhador_cotacao FROM extensao_sessao WHERE id=?", (sid,)).fetchone()
+    if not sessao or not sessao['trabalhador_cotacao']:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "motivo": "nao_e_trabalhador"}))
+        
     req = request.get_json(silent=True) or {}
     
     agora_txt = datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S')
     
     import json
-    conn = db()
     if 'erro' in req:
         conn.execute("UPDATE cotacao_fila SET estado='erro', erro=?, terminado_em=? WHERE id=?", 
             (req['erro'], agora_txt, cid))
@@ -23523,10 +23548,8 @@ def api_wa_cotacao_fila_status(cid):
     close_db(conn)
     
     # Desempacota etapa
-    etapa_str = item['etapa'] or ''
-    etapa_nome = etapa_str.split('|')[0] if '|' in etapa_str else etapa_str
-    try: fracao = float(etapa_str.split('|')[1])
-    except: fracao = 0.0
+    etapa_nome = item['etapa'] or ''
+    fracao = item.get('fracao') or 0.0
     
     import json
     resultado_obj = None
@@ -23583,7 +23606,7 @@ def api_wa_trabalhador_vivo():
         return _wa_cors(jsonify({"ok": False}))
         
     agora_txt = datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S')
-    conn.execute("UPDATE extensao_sessao SET ultimo_uso=? WHERE id=?", (agora_txt, sid))
+    conn.execute("UPDATE extensao_sessao SET trabalhador_sinal=? WHERE id=?", (agora_txt, sid))
     conn.commit()
     close_db(conn)
     
@@ -23598,26 +23621,27 @@ def api_wa_trabalhador_estado():
         
     conn = db()
     sess = conn.execute("""
-        SELECT ultimo_uso FROM extensao_sessao 
+        SELECT trabalhador_sinal FROM extensao_sessao 
         WHERE trabalhador_cotacao=1
-        ORDER BY ultimo_uso DESC LIMIT 1
+        ORDER BY trabalhador_sinal DESC LIMIT 1
     """).fetchone()
     
     close_db(conn)
     
-    if not sess or not sess['ultimo_uso']:
+    if not sess or not sess['trabalhador_sinal']:
         return _wa_cors(jsonify({"vivo": False, "ultimo_sinal": None}))
         
     try:
-        if isinstance(sess['ultimo_uso'], str):
-            ultimo = datetime.strptime(sess['ultimo_uso'], '%Y-%m-%d %H:%M:%S').replace(tzinfo=TZ_SP)
+        if isinstance(sess['trabalhador_sinal'], str):
+            ultimo = datetime.strptime(sess['trabalhador_sinal'], '%Y-%m-%d %H:%M:%S').replace(tzinfo=TZ_SP)
         else:
-            ultimo = sess['ultimo_uso'].replace(tzinfo=TZ_SP)
+            ultimo = sess['trabalhador_sinal'].replace(tzinfo=TZ_SP)
             
         vivo = (datetime.now(TZ_SP) - ultimo).total_seconds() < 180
         return _wa_cors(jsonify({"vivo": vivo, "ultimo_sinal": ultimo.strftime('%Y-%m-%dT%H:%M:%S')}))
     except:
         return _wa_cors(jsonify({"vivo": False, "ultimo_sinal": None}))
+
 
 
 @app.route('/admin/extensao/sessao/<int:sid>/trabalhador', methods=['POST'])
