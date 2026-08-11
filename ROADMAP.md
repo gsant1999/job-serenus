@@ -92,6 +92,63 @@ Legenda: [ ] pendente · [~] em andamento · [x] feito · (?) aguardando decisã
 - [ ] Testes automatizados mínimos (smoke test de rotas) rodando antes do deploy — confirmado: zero arquivos de teste no repo hoje
 - (?) **Migrar Postgres do Railway pra banco na VPS** (pedido do Gabriel via PDF, 04/07/2026) — mais segurança e possibilidade de escala. Guilherme confirmou: não é pra agora, "vamos conversar mais pra frente" — só registrar como pendência, não iniciar sem sinal verde
 
+## Extensão — memória e travamento (levantamento iniciado 10/08/2026)
+
+> Guilherme, 10/08/2026: *"como deixamos a extensão melhor em termos de não
+> travar e devorar a RAM do computador?"* — e, na mesma conversa, o Chrome dele
+> avisando **"uso elevado da memória: 2,3 GB"** na aba do WhatsApp.
+>
+> **Levantamento começado, NÃO terminado.** Ficou pausado pra fechar a fila de
+> cotação primeiro. Retomar daqui — não do zero.
+
+### O que já se sabe, medido ou lido no código
+
+- **2,3 GB numa aba** — aviso do próprio Chrome, print do Guilherme. O teto de
+  uma aba fica perto de 4 GB, e ao encostar nele ela morre com a tela
+  "Ah, não! Código de erro: 5", que ele já viu duas vezes hoje.
+- **A extensão já se mede**: passadas, linhas varridas, linhas puladas, tempo
+  total e PIOR CASO. Está em Configurações → Diagnóstico, e desde 4.52.0
+  mostra também a memória da aba. **Ninguém nunca abriu.** Esse número decide
+  se o problema é nosso: pior caso < 50ms e não é; > 200ms e é.
+- **O que o Antigravity propôs no dossiê já existe** (debounce de 400ms em
+  `trAgendarInjecao`, `Set` de dedup, marca `_jobPronta` por linha). E ele leu
+  a versão 3.21.0 — a atual é 4.55.0. Só a ideia de ler módulos em vez de HTML
+  é nova, e a `wa-js` já faz isso pra áudio e documento.
+
+### Suspeitos levantados (crescem e não se sabe se são soltos)
+
+Achados por varredura, **ainda não confirmados como vazamento**:
+
+- `TR.cache` — transcrições por `msg_id`. Só perde item quando falha.
+- `_cvCache` (`content.js`) — imagens decodificadas do desenho da cotação.
+- `_cotLogos` — logos em data URL, memória da aba.
+- `DOC.estado` / `_docCrono` — estado por documento.
+- `_analises` — uma entrada por análise, com o resultado inteiro dentro.
+- `_SAUDE`, `_errosReportados`, `_pastasAbertas` — pequenos, mas sem teto.
+
+Existe um utilitário de poda em `content.js:215-225` (apaga do Map e limpa o
+Set quando passa de um teto) — **usado em alguns lugares e não em outros**.
+Metade do trabalho pode ser só aplicar o que já existe.
+
+### O caminho, na ordem
+
+1. **Ler o número do Diagnóstico** numa conversa longa, depois de rolar. Sem
+   ele, qualquer conserto é chute.
+2. **Confirmar quais estruturas retêm de verdade** — tamanho em memória, não
+   contagem de itens. `_cvCache` com cinco imagens pesa mais que `TR.cache`
+   com quinhentas transcrições.
+3. **Aplicar teto no que retém**, com o utilitário que já existe.
+4. **O caminho grande, se o número justificar**: trocar leitura de DOM por
+   leitura de módulo do WhatsApp. É reescrita do coração da extensão — não
+   começar sem o número da etapa 1.
+
+### O que já foi feito e conta como parte disso
+
+- 4.41.0: análise parou de rebaixar áudio já transcrito (cache por `msg_id`).
+- 4.42.0: imagem da cotação desenhada em canvas à mão, não com html2canvas —
+  118ms contra travar o WhatsApp inteiro.
+- 4.52.0: memória da aba no Diagnóstico.
+
 ## BotConversa (integração — em construção a partir de 04/07/2026)
 
 - (?) API oficial mapeada: `POST /subscriber/{id}/send_message/` (mandar msg automática por etapa do CRM), `POST /subscriber/{id}/change_conversation_status/` (atribuir atendente via campo `manager`), `GET /subscriber/get_by_phone/{tel}/` (achar contato pelo telefone do lead). Auth: header `API-KEY`. Limite 600 req/min. Exige `has_opt_in_whatsapp:true` ao criar contato (política Meta)
