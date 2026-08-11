@@ -2573,6 +2573,39 @@
     }
     TR.perf.passadas++;
     TR.perf.linhas += linhas.length;
+
+    // ── FASE 1: MEDIR TUDO ANTES DE ESCREVER QUALQUER COISA ─────────────
+    //
+    // MEDIDO: 280ms dos 340ms do pior caso estavam aqui — 82%. E o custo nao
+    // e a medicao em si, e a INTERCALACAO.
+    //
+    // O laco de baixo fazia, por linha: medir a bolha (le layout), inserir o
+    // bloco (invalida o layout), medir a proxima (o navegador recalcula a
+    // pagina INTEIRA de novo). Cada insercao joga fora o layout que a leitura
+    // seguinte precisa, entao N linhas custam N recalculos completos em vez
+    // de um. Rolar traz 30 linhas de uma vez.
+    //
+    // Aqui todas as medicoes acontecem juntas, antes da primeira escrita: o
+    // navegador calcula o layout UMA vez e responde todas as perguntas com
+    // ele. O laco de baixo continua identico — so pega a medida pronta em vez
+    // de pedir na hora.
+    //
+    // Nada muda no resultado: as mesmas linhas, a mesma bolha, o mesmo lado.
+    // Muda quando a pergunta e feita.
+    for (const row of linhas) {
+      row._jobMedida = null;
+      const id = row.getAttribute('data-id') || '';
+      if (!id || row._jobPronta === id) continue;
+      if (!_docLinhaEhArquivo(row)) continue;
+      const sdAtual = row.querySelector('.job-doc-slot');
+      const soltoAtual = !!(sdAtual && sdAtual.classList.contains('job-doc-solto'));
+      // Mesma condicao do laco de baixo — se ele nao for medir, nao mede aqui.
+      const vaiMedir = !sdAtual || (soltoAtual && (sdAtual._jobTentativas || 0) < 5);
+      if (!vaiMedir) continue;
+      const anc = _docAncora(row);
+      row._jobMedida = { ancora: anc, bolha: _trBolhaDoc(row, anc) };
+    }
+
     for (const row of linhas) {
       const id = row.getAttribute('data-id') || '';
       if (!id) continue;
@@ -2611,8 +2644,13 @@
         const tentarDeNovo = solto && sd._jobTentativas <= 5;
         pendente = tentarDeNovo;
         if (!sd || tentarDeNovo) {
-          const ancoraD = _docAncora(row);
-          const r = _trBolhaDoc(row, ancoraD);
+          // A medida veio da fase 1, feita antes de qualquer escrita. Quando
+          // ela nao existe (linha que entrou depois, caso raro), mede aqui
+          // mesmo — melhor pagar um recalculo que perder o botao.
+          const _m = row._jobMedida;
+          const ancoraD = _m ? _m.ancora : _docAncora(row);
+          const r = _m ? _m.bolha : _trBolhaDoc(row, ancoraD);
+          row._jobMedida = null;
           const lado = _trLado(ancoraD || r.alvo, row) === 'consultor' ? 'job-tr-dir' : 'job-tr-esq';
           // Ja estava solto e continua sem bolha: deixa quieto, nao fica pulando.
           if (r && r.alvo && !(sd && r.solto)) {
