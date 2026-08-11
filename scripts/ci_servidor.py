@@ -134,6 +134,32 @@ for nome, oque in FUNCOES_QUE_NAO_PODEM_SUMIR:
 if not falhas:
     print('ok: nada do que ja funcionava desapareceu')
 
+# ── 5. Aspas duplas dentro de um atributo onclick ──────────────────────
+#
+# O botao "Desconectar" da tela de usuarios passou dias sem funcionar por
+# causa disto: o apelido do aparelho entrava no onclick por JSON.stringify,
+# que devolve o texto entre aspas DUPLAS — a mesma aspa que fecha o atributo.
+# O onclick terminava no meio e o botao virava enfeite.
+#
+# E o pior tipo de defeito: HTML invalido nao e erro de codigo. Nao sai nada
+# no console, nao abre confirmacao, nao vai requisicao. O botao esta la, o
+# clique nao faz nada, e nao ha pista nenhuma de onde procurar.
+import glob as _glob
+import re as _re
+_ATRIB_JS = _re.compile(r'on\w+="[^"\n]*\+[^"\n]*JSON\.stringify')
+for _arq in sorted(_glob.glob('templates/**/*.html', recursive=True)):
+    with open(_arq, encoding='utf-8') as _f:
+        for _n, _linha in enumerate(_f, 1):
+            if _ATRIB_JS.search(_linha):
+                erro('%s:%d monta um atributo on...="" com JSON.stringify' % (_arq, _n),
+                     'JSON.stringify devolve aspas DUPLAS e elas fecham o '
+                     'atributo — o clique morre em silencio. Use um helper '
+                     'que escape pro JavaScript e depois pro HTML (veja '
+                     '`argJs` em templates/usuarios.html), ou passe o valor '
+                     'por data-atributo em vez de por argumento.')
+if not falhas:
+    print('ok: nenhum atributo de clique montado com aspas duplas')
+
 if falhas:
     print('\n%d verificacao(oes) falharam.' % len(falhas))
     sys.exit(1)
