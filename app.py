@@ -13170,7 +13170,15 @@ def usuario_editar(uid):
         ext = os.path.splitext(fimg.filename)[1].lower()
         if ext in ('.png','.jpg','.jpeg','.webp'):
             foto_nome = f"perfil_{uid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}{ext}"
-            fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
+            # R2 + fallback local — mesmo padrão de usuario_foto_upload().
+            # Salvar só local aqui sumia no próximo deploy (Railway não
+            # persiste disco).
+            try:
+                upload_arquivo_r2(fimg, foto_nome)
+            except Exception as e:
+                app.logger.warning(f"[FOTO] R2 falhou, usando local: {e}")
+                fimg.seek(0)
+                fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
     # Módulos liberados (checkboxes). "modulos_todos" marcado = sem restrição
     # (grava NULL = tudo). Senão grava só os marcados. Só vale pra não-admin.
     if d.get('modulos_todos') or d.get('perfil') == 'admin':
