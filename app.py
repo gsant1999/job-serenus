@@ -2880,6 +2880,12 @@ def init_db():
     # agravo da primeira em silencio (last-write-wins). Sobe a cada UPDATE;
     # o front manda a versao que carregou e a rota recusa se nao bater.
     add_col('cotacao_salva', 'versao', 'INTEGER DEFAULT 0')
+    # meta_conversoes so tinha fbclid — mas 100% do trafego de Facebook do
+    # Serenus vem de Formulario Instantaneo (Lead Ads dentro da propria rede),
+    # que nunca gera fbclid porque a pessoa nao clica pra nenhuma landing.
+    # Confirmado em 11/08/2026: 4.779 leads de Facebook, zero com fbclid. A
+    # chave que a Meta pede pra este caso e outra: user_data.lead_id.
+    add_col('meta_conversoes', 'facebook_lead_id', 'TEXT')
     # Config do parceiro Affinity — específico do Serenus (e-mails/contato deles).
     # Não vai pra instância de cliente (SEED_DADOS_SERENUS=0).
     if SEED_DADOS_SERENUS:
@@ -12059,14 +12065,29 @@ def _meta_fbc(fbclid, quando):
 
 
 def _meta_click_do_lead(conn, lead_id):
-    """fbclid do lead. Diferente do Google, aqui e um so — a Meta nao tem os
-    equivalentes de gbraid/wbraid."""
+    """(fbclid, facebook_lead_id) do lead — os DOIS jeitos da Meta identificar
+    quem clicou, pra dois tipos de anuncio diferentes que nao se misturam.
+
+    fbclid: anuncio que levou a uma landing (clique de verdade, formato
+    'fb.1.<timestamp>.<fbclid>' pro campo `fbc`).
+    facebook_lead_id: Formulario Instantaneo — a pessoa preenche dentro do
+    proprio Facebook/Instagram, nunca sai pra lugar nenhum, entao nunca existe
+    fbclid. Vai cru (sem formatacao, sem hash) no campo `lead_id`.
+
+    Usa `_ler_do_extras` direto (nao `_campo_de_midia`) de proposito: aquele
+    alias junta fbclid e facebook_lead_id pra tela de exibicao generica (onde
+    "algum id de clique" basta), mas aqui os dois precisam ir pro campo CERTO
+    do payload da Meta — misturar um formato no outro faz a Meta recusar o
+    evento ou nao casar com ninguem."""
     if not lead_id:
-        return None
+        return None, None
     lead = conn.execute("SELECT dados_extras FROM crm_leads WHERE id=?", (lead_id,)).fetchone()
     if not lead:
-        return None
-    return _campo_de_midia(lead['dados_extras'], 'fbclid') or None
+        return None, None
+    extras = lead['dados_extras']
+    fbclid = _ler_do_extras(extras, 'click.fbclid') or _ler_do_extras(extras, 'fbclid') or None
+    fb_lead_id = _ler_do_extras(extras, 'click.facebook_lead_id') or _ler_do_extras(extras, 'facebook_lead_id') or None
+    return fbclid, fb_lead_id
 
 
 def _meta_enfileirar(conn, proposta_id, motivo='venda confirmada'):
@@ -12085,23 +12106,26 @@ def _meta_enfileirar(conn, proposta_id, motivo='venda confirmada'):
                      ('reativada após envio — ajuste manual no Events Manager, não reenviar', proposta_id))
         return dict(ja), 'ja_enviada_nao_reenvia'
     lead_id = prop['lead_id'] if 'lead_id' in prop.keys() else None
-    fbclid = _meta_click_do_lead(conn, lead_id)
+    fbclid, fb_lead_id = _meta_click_do_lead(conn, lead_id)
     valor = _ads_valor_da_proposta(prop)   # mesma regua do Google: receita, nao mensalidade
-    status = 'pendente' if fbclid else 'sem_clique'
+    # PENDENTE com QUALQUER UM dos dois identificadores — sao dois jeitos de
+    # achar a mesma pessoa. Pra Serenus, na pratica, e sempre facebook_lead_id
+    # (Lead Ads); fbclid fica pronto pro dia que um anuncio levar a uma landing.
+    status = 'pendente' if (fbclid or fb_lead_id) else 'sem_clique'
     agora = _agora_sp()
     quando_venda = (prop['criado_em'] if 'criado_em' in prop.keys() else None) or agora
     # event_id estavel: se o mesmo evento subir duas vezes (retentativa, deploy no
     # meio do lote), a Meta deduplica em vez de contar a venda dobrada.
     event_id = f"job-venda-{proposta_id}"
     if ja:
-        conn.execute("""UPDATE meta_conversoes SET lead_id=?, fbclid=?, valor=?, status=?,
-                        detalhe=?, conversao_em=?, event_id=? WHERE proposta_id=?""",
-                     (lead_id, fbclid, valor, status, motivo, quando_venda, event_id, proposta_id))
+        conn.execute("""UPDATE meta_conversoes SET lead_id=?, fbclid=?, facebook_lead_id=?, valor=?,
+                        status=?, detalhe=?, conversao_em=?, event_id=? WHERE proposta_id=?""",
+                     (lead_id, fbclid, fb_lead_id, valor, status, motivo, quando_venda, event_id, proposta_id))
     else:
         conn.execute("""INSERT INTO meta_conversoes
-            (proposta_id, lead_id, fbclid, valor, conversao_em, status, detalhe, event_id, criado_em)
-            VALUES (?,?,?,?,?,?,?,?,?)""",
-            (proposta_id, lead_id, fbclid, valor, quando_venda, status, motivo, event_id, agora))
+            (proposta_id, lead_id, fbclid, facebook_lead_id, valor, conversao_em, status, detalhe, event_id, criado_em)
+            VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (proposta_id, lead_id, fbclid, fb_lead_id, valor, quando_venda, status, motivo, event_id, agora))
     return dict(conn.execute("SELECT * FROM meta_conversoes WHERE proposta_id=?",
                              (proposta_id,)).fetchone()), status
 
@@ -12425,9 +12449,15 @@ def enviar_conversoes_meta(limite=200, so_simular=False):
     exatamente o inflar de ROAS que este modulo diz impedir."""
     cfg, faltando = _meta_config()
     conn = db()
+    # QUALQUER UM dos dois identificadores basta — sao dois jeitos de achar a
+    # mesma pessoa (fbclid = clique numa landing; facebook_lead_id = Formulario
+    # Instantaneo). Exigir so fbclid deixava de fora TODA a venda vinda de Lead
+    # Ads, que e 100% do trafego de Facebook do Serenus hoje.
     pend = conn.execute("""SELECT m.* FROM meta_conversoes m
                            JOIN propostas p ON p.id = m.proposta_id
-                           WHERE m.status='pendente' AND m.fbclid IS NOT NULL AND m.fbclid <> ''
+                           WHERE m.status='pendente'
+                             AND ((m.fbclid IS NOT NULL AND m.fbclid <> '')
+                               OR (m.facebook_lead_id IS NOT NULL AND m.facebook_lead_id <> ''))
                              AND p.status_operacional='Emitida/Ativa'
                              AND COALESCE(p.status,'') <> 'Excluída'
                              AND COALESCE(p.estornada,0)=0
@@ -12454,7 +12484,14 @@ def enviar_conversoes_meta(limite=200, so_simular=False):
         lead = conn.execute("SELECT nome, email, telefone_norm FROM crm_leads WHERE id=?",
                             (c['lead_id'],)).fetchone() if c['lead_id'] else None
         quando = _conversao_dt_sp(c['conversao_em'])
+        # 'lead_id' vai CRU — sem hash, sem formatacao — e o campo que a Meta
+        # documenta especificamente pra casar evento com Formulario Instantaneo.
+        # 'fbc' e outro campo, outro formato, outro tipo de clique — os dois
+        # podem coexistir no mesmo evento se um dia a venda tiver os dois.
         user = {'fbc': _meta_fbc(c['fbclid'], c['conversao_em'])}
+        fb_lead_id_col = c['facebook_lead_id'] if 'facebook_lead_id' in c.keys() else None
+        if fb_lead_id_col:
+            user['lead_id'] = fb_lead_id_col
         if lead:
             em = _meta_hash(lead['email'])
             if em:
@@ -35234,10 +35271,14 @@ def webhook_sheets():
             click = {k: (lead.get(k) or '').strip() for k in
                      ('utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
                       'gclid', 'gbraid', 'wbraid', 'landing_url', 'facebook_lead_id', 'fb_lead_id', 'fbclid')}
+            # facebook_lead_id NAO e fbclid — sao dois jeitos diferentes da Meta
+            # dizer "de quem e este lead", e a Meta exige o formato certo pra
+            # cada um (fbc tem prefixo/timestamp; lead_id e o numero cru). Jogar
+            # um dentro do outro mandava pra Meta um "fbc" que era na verdade um
+            # lead_id — formato invalido, a conversao seria recusada ou nao
+            # casaria com ninguem.
             if fb_lead_id:
                 click['facebook_lead_id'] = fb_lead_id
-                if 'fbclid' not in click or not click['fbclid']:
-                    click['fbclid'] = fb_lead_id
 
             click = {k: v for k, v in click.items() if v}
             dados_extras_wh = json.dumps({'click': click}, ensure_ascii=False) if click else None
@@ -39167,8 +39208,13 @@ def _processar_lead(row, conn):
     utm_campaign = _col(row, 'utm_campaign', 'UTM CAMPAIGN', 'utm campaign')
     utm_term = _col(row, 'utm_term', 'UTM TERM', 'utm term')
     utm_content = _col(row, 'UTM_Content', 'utm_content', 'UTM CONTENT', 'utm content')
+    # facebook_lead_id so existe pra quem preencheu um Formulario Instantaneo —
+    # e sempre anuncio, nunca organico. Le a coluna aqui (antes do click, que
+    # define depois) so pra decidir trafego; o valor de verdade e montado
+    # abaixo, junto dos outros ids de clique.
+    _fb_lead_id_chk = _col(row, 'facebook_lead_id', 'Facebook Lead Id', 'FACEBOOK_LEAD_ID', 'lead_id')
     _med = (utm_medium or '').strip().lower()
-    if _med in ('cpc', 'ppc', 'paid', 'paidsearch', 'paid_search', 'paid-search', 'display', 'cpm'):
+    if _med in ('cpc', 'ppc', 'paid', 'paidsearch', 'paid_search', 'paid-search', 'display', 'cpm') or _fb_lead_id_chk:
         trafego = 'Pago'
     elif utm_source or utm_medium or utm_campaign or utm_content:
         trafego = 'Orgânico'
@@ -39177,11 +39223,21 @@ def _processar_lead(row, conn):
     utm = {k: v for k, v in {'source': utm_source, 'medium': utm_medium, 'campaign': utm_campaign,
                              'term': utm_term, 'content': utm_content}.items() if v}
     # Ids de clique (conversão offline): gclid (Google), gbraid/wbraid (iOS/app),
-    # fbclid (Meta) + landing page. Vêm do snippet colado na landing (campo oculto).
+    # fbclid (Meta, veio de clique numa landing) + landing page. Vêm do snippet
+    # colado na landing (campo oculto).
     gclid = _col(row, 'gclid', 'GCLID', 'GClid')
+    # facebook_lead_id: DIFERENTE de fbclid. Não é clique em anúncio que levou a
+    # uma landing — é o Formulário Instantâneo do próprio Facebook/Instagram, que
+    # nunca gera fbclid porque a pessoa nem sai da rede social. Confirmado em
+    # 11/08/2026: 4.779 leads de Facebook, ZERO com fbclid, porque NENHUM vem de
+    # landing — mas a coluna facebook_lead_id existe na planilha (n8n já grava)
+    # e simplesmente não tinha nome nenhum na lista de colunas procuradas aqui.
+    # É a chave que a Meta pede pra Lead Ads: user_data.lead_id, sem hash.
+    facebook_lead_id = _col(row, 'facebook_lead_id', 'Facebook Lead Id', 'FACEBOOK_LEAD_ID', 'lead_id')
     click = {k: v for k, v in {
         'gclid': gclid, 'gbraid': _col(row, 'gbraid', 'GBRAID'),
         'wbraid': _col(row, 'wbraid', 'WBRAID'), 'fbclid': _col(row, 'fbclid', 'FBCLID'),
+        'facebook_lead_id': facebook_lead_id,
         'landing': _col(row, 'landing_url', 'landing', 'Landing', 'page', 'url'),
         'device': _col(row, 'device', 'Device', 'aparelho')}.items() if v}
     # Planilha META/Facebook: SEMPRE só a coluna "Consultor" (nunca "Consultor 2" —
