@@ -218,7 +218,16 @@ html.job-push-esquerda #job-trilho {
 .job-logo-txt {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   font-family: 'NunitoJOB', -apple-system, "Segoe UI", sans-serif;
-  font-size: 9.5px; font-weight: 800; color: var(--job-trilho-txt); letter-spacing: .04em; z-index: 1;
+  font-size: 9.5px; font-weight: 800; letter-spacing: .04em; z-index: 1;
+  /* --job-trilho-txt e declarada DENTRO da regra do trilho, entao so existe
+     la. Fora dele a variavel nao resolve, o `color` cai fora e o "JOB" acaba
+     herdando a cor de texto do WhatsApp — clara. Na tela de entrar, que tem
+     cartao creme, isso deixava a marca invisivel: o logo girando com um vazio
+     no meio.
+     Com a reserva, o trilho continua com a letra clara (a superficie dele nao
+     segue o tema, de proposito) e em qualquer outro lugar a letra passa a
+     seguir o tema — preta no claro. */
+  color: var(--job-trilho-txt, var(--job-txt));
 }
 @keyframes jobLogoSpin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .job-logo-arcos { animation: none; } }
