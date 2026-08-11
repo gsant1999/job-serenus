@@ -35539,13 +35539,12 @@ def admin_crm_restaurar_etapas():
 
 @app.route('/admin/crm/formatar-telefones', methods=['POST'])
 @login_required
+@admin_required
 def admin_crm_formatar_telefones():
     """
     Formata todos os telefones existentes para (XX) XXXXX-XXXX e
     preenche a coluna telefone_norm (só dígitos) para dedup futura.
     """
-    if session.get('perfil') != 'admin':
-        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
 
     conn = db()
     try:
