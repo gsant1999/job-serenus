@@ -11516,44 +11516,60 @@ def fluxo_caixa():
     ciclo = ciclo_atual()
     eh_admin = session['perfil'] == 'admin'
 
+    # PARCELA DE PROPOSTA ESTORNADA/EXCLUIDA NAO CONTA EM LUGAR NENHUM DESTA
+    # TELA. /financeiro ja filtra isso em toda consulta; aqui nao filtrava em
+    # NENHUMA — nem nos totais, nem no lote que decide o pagamento real. Uma
+    # parcela ja 'Liberado para o corretor' de uma proposta estornada depois
+    # continuava aparecendo pronta pra entrar no lote de PIX, sem aviso
+    # nenhum: os dois paineis contavam historias diferentes, e este e o que
+    # decide o dinheiro que sai. Mesmo predicado usado em todo o resto do
+    # arquivo (`_conferencia_mes`, `financeiro()`, etc).
+    _AVIVA = "p.status <> 'Excluída' AND COALESCE(p.estornada,0)=0"
+
     if eh_admin:
         # Totais por status
         totais = {}
         for s in ["Pendente de receber","Recebido e não repassado","Liberado para o corretor","Pago ao corretor"]:
-            totais[s] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM parcelas WHERE status=?", (s,)).fetchone()['v']
-        totais['antecipacoes'] = conn.execute(
-            "SELECT COALESCE(SUM(valor),0) v FROM parcelas WHERE status IN ('Antecipação - Aguardando ADM','Antecipação Solicitada à Operadora')").fetchone()['v']
+            totais[s] = conn.execute(f"""
+                SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
+                JOIN propostas p ON p.id=pa.proposta_id
+                WHERE pa.status=? AND {_AVIVA}""", (s,)).fetchone()['v']
+        totais['antecipacoes'] = conn.execute(f"""
+            SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE pa.status IN ('Antecipação - Aguardando ADM','Antecipação Solicitada à Operadora')
+              AND {_AVIVA}""").fetchone()['v']
         totais['total_em_aberto'] = sum(totais[s] for s in ["Pendente de receber","Recebido e não repassado","Liberado para o corretor"])
 
         # Antecipações aguardando aprovação ADM
-        antecipacoes = conn.execute("""
+        antecipacoes = conn.execute(f"""
             SELECT pa.*, p.razao_social, p.consultor, p.adm_operadora, p.valor as val_proposta
             FROM parcelas pa JOIN propostas p ON p.id=pa.proposta_id
-            WHERE pa.status='Antecipação - Aguardando ADM' ORDER BY pa.id DESC
+            WHERE pa.status='Antecipação - Aguardando ADM' AND {_AVIVA} ORDER BY pa.id DESC
         """).fetchall()
 
         # Lote do ciclo atual (liberados para o corretor)
-        lote = conn.execute("""
+        lote = conn.execute(f"""
             SELECT pa.*, p.razao_social, p.consultor, p.adm_operadora, p.id as proposta_id,
                    u.chave_pix
             FROM parcelas pa
             JOIN propostas p ON p.id=pa.proposta_id
             LEFT JOIN usuarios u ON u.id=p.usuario_id
-            WHERE pa.status='Liberado para o corretor' ORDER BY p.consultor, pa.id
+            WHERE pa.status='Liberado para o corretor' AND {_AVIVA} ORDER BY p.consultor, pa.id
         """).fetchall()
 
         # Todos os recebidos aguardando repasse
-        recebidos = conn.execute("""
+        recebidos = conn.execute(f"""
             SELECT pa.*, p.razao_social, p.consultor, p.adm_operadora, p.id as proposta_id
             FROM parcelas pa JOIN propostas p ON p.id=pa.proposta_id
-            WHERE pa.status='Recebido e não repassado' ORDER BY pa.id DESC
+            WHERE pa.status='Recebido e não repassado' AND {_AVIVA} ORDER BY pa.id DESC
         """).fetchall()
 
         # Histórico de pagos (últimos 30)
-        pagos = conn.execute("""
+        pagos = conn.execute(f"""
             SELECT pa.*, p.razao_social, p.consultor, p.adm_operadora
             FROM parcelas pa JOIN propostas p ON p.id=pa.proposta_id
-            WHERE pa.status='Pago ao corretor' ORDER BY pa.id DESC LIMIT 30
+            WHERE pa.status='Pago ao corretor' AND {_AVIVA} ORDER BY pa.id DESC LIMIT 30
         """).fetchall()
 
         close_db(conn)
@@ -11562,17 +11578,18 @@ def fluxo_caixa():
                                recebidos=recebidos, pagos=pagos,
                                status_fluxo=STATUS_FLUXO)
     else:
-        # Visão do consultor
-        a_receber = conn.execute("""SELECT pa.*, p.razao_social, p.adm_operadora, p.id as proposta_id
+        # Visão do consultor. Mesmo filtro: sem ele, o consultor via (e
+        # esperava receber) parcela de proposta ja estornada na propria tela.
+        a_receber = conn.execute(f"""SELECT pa.*, p.razao_social, p.adm_operadora, p.id as proposta_id
             FROM parcelas pa JOIN propostas p ON p.id=pa.proposta_id
-            WHERE p.usuario_id=? AND pa.status='Liberado para o corretor' ORDER BY pa.id""",(uid,)).fetchall()
-        em_analise = conn.execute("""SELECT pa.*, p.razao_social, p.adm_operadora, p.id as proposta_id
+            WHERE p.usuario_id=? AND pa.status='Liberado para o corretor' AND {_AVIVA} ORDER BY pa.id""",(uid,)).fetchall()
+        em_analise = conn.execute(f"""SELECT pa.*, p.razao_social, p.adm_operadora, p.id as proposta_id
             FROM parcelas pa JOIN propostas p ON p.id=pa.proposta_id
             WHERE p.usuario_id=? AND pa.status NOT IN ('Liberado para o corretor','Pago ao corretor')
-            ORDER BY pa.id DESC""",(uid,)).fetchall()
-        pagos_consul = conn.execute("""SELECT pa.*, p.razao_social, p.adm_operadora
+            AND {_AVIVA} ORDER BY pa.id DESC""",(uid,)).fetchall()
+        pagos_consul = conn.execute(f"""SELECT pa.*, p.razao_social, p.adm_operadora
             FROM parcelas pa JOIN propostas p ON p.id=pa.proposta_id
-            WHERE p.usuario_id=? AND pa.status='Pago ao corretor' ORDER BY pa.id DESC LIMIT 30""",(uid,)).fetchall()
+            WHERE p.usuario_id=? AND pa.status='Pago ao corretor' AND {_AVIVA} ORDER BY pa.id DESC LIMIT 30""",(uid,)).fetchall()
         total_a_receber = sum(p['valor'] for p in a_receber)
         total_pago = sum(p['valor'] for p in pagos_consul)
         # Fixo do mês do consultor (se houver)
