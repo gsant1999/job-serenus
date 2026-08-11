@@ -77,18 +77,24 @@ _RE_URL_COT = _re.compile(r'/c/[A-Za-z0-9_\-]+')
 def _limpar_url(v):
     if not v:
         return v
-    added_q = False
+    # o Flask entrega query_string em bytes; sem isto vira "b'...'" no relatorio
     if isinstance(v, (bytes, bytearray)):
-        try: v = v.decode('utf-8', 'replace')
-        except Exception: return '[FILTRADO]'
+        try:
+            v = v.decode('utf-8', 'replace')
+        except Exception:
+            return '[FILTRADO]'
     else:
         v = str(v)
+        
+    added_q = False
     if '=' in v and '?' not in v and '/' not in v:
         v = '?' + v
         added_q = True
+        
     v = _RE_URL_PARAM.sub(lambda m: m.group(1) + '[FILTRADO]', v)
     v = _RE_URL_Q.sub(lambda m: m.group(1) + '[FILTRADO]', v)
     v = _RE_URL_COT.sub('/c/[FILTRADO]', v)
+    
     return v.lstrip('?') if added_q else v
 
 def _sentry_before_send(event, hint):
