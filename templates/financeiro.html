@@ -53,12 +53,89 @@
    linha) — sem isso ela empurrava a PÁGINA INTEIRA pro lado (sidebar junto),
    em vez de só ela mesma rolar. .card tem overflow:hidden (só corta, não
    rola), então o scroll precisa acontecer neste wrapper aqui dentro. */
-.tbl-wrap { overflow-x:auto; }
+.tbl-wrap {
+  overflow-x:auto;
+  /* O ÓBVIO DEVE SER DITO — inclusive "tem mais coluna pra lá".
+     Sem isto, a tabela cortava a última coluna na borda da tela e nada
+     indicava que dava pra rolar: parecia truncada, não rolável. É o truque de
+     "scroll shadow" só em CSS — duas sombras que só aparecem quando ainda há
+     conteúdo pra rolar naquele lado, porque `background-attachment:scroll`
+     rola com o conteúdo enquanto `local` fica preso ao viewport do wrapper. */
+  background:
+    linear-gradient(to right, var(--panel) 30%, rgba(0,0,0,0)) 0 0,
+    linear-gradient(to left, var(--panel) 30%, rgba(0,0,0,0)) 100% 0,
+    linear-gradient(to right, rgba(0,0,0,.10), rgba(0,0,0,0)) 0 0,
+    linear-gradient(to left, rgba(0,0,0,.10), rgba(0,0,0,0)) 100% 0;
+  background-repeat: no-repeat;
+  background-color: var(--panel);
+  background-size: 34px 100%, 34px 100%, 12px 100%, 12px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+/* AÇÕES QUEBRAM LINHA EM VEZ DE ALARGAR A TABELA.
+   O caso raro (comprovante + editar + excluir, 5 botões) não pode ditar a
+   largura de uma coluna que na maioria das linhas mostra só "Anexar" e
+   "Editar". Com wrap, o caso comum fica numa linha e o caso cheio vira duas
+   — a tabela nem sente. */
+.td-acoes { display:flex; flex-wrap:wrap; gap:2px 10px; align-items:center; min-width:190px; }
+
+/* NO CELULAR, TABELA DE DEZ COLUNAS NÃO VIRA TABELA MENOR — VIRA OUTRA COISA.
+   Rolar de lado pra ler o valor de um custo é o tipo de fricção que faz a
+   pessoa desistir e abrir o desktop depois. Abaixo de 700px a linha deixa de
+   ser linha: cada custo vira um cartão, com a descrição como título (do
+   mesmo jeito que já era visualmente a mais importante) e o resto em pares
+   rótulo/valor empilhados — o rótulo vem do `data-label` de cada célula, sem
+   duplicar o texto no HTML. Escopado só à tabela de Custos: as outras cinco
+   abas do financeiro têm menos colunas e não têm este problema hoje. */
+@media (max-width:700px) {
+  #pane-custos .tbl-wrap { overflow-x:visible; background:none; }
+  #pane-custos .tbl thead { display:none; }
+  {# base.html tem uma regra generica pra QUALQUER tabela no celular:
+     `table { min-width:600px; }`, pensada pra quem so tem o scroll horizontal
+     como saida. Sem zerar aqui, ela vencia o `width:100%` de baixo — a tabela
+     virava cartao por fora e continuava com 600px por dentro, empurrando
+     cada valor pra fora da area visivel do cartao (cortado pelo overflow do
+     .card). Foi assim que "Valor" e "Vencimento" sumiram sem erro nenhum. #}
+  #pane-custos .tbl, #pane-custos .tbl tbody, #pane-custos .tbl tr, #pane-custos .tbl td {
+    display:block; width:100%; min-width:0;
+  }
+  #pane-custos .tbl tr {
+    border:1px solid var(--borda); border-radius:12px; padding:4px 0; margin-bottom:10px;
+  }
+  #pane-custos .tbl tr:last-child { margin-bottom:0; }
+  #pane-custos .tbl td { border-bottom:1px solid var(--borda); padding:8px 14px; }
+  #pane-custos .tbl tr td:last-child { border-bottom:none; }
+  #pane-custos .tbl td.td-descricao { font-size:14.5px; font-weight:650; }
+  /* Todo td com rótulo vira uma linha rótulo à esquerda, valor à direita —
+     como um "recibo". Status e Ações têm mais de uma coisa dentro (badge +
+     botão, vários botões): rótulo em cima, conteúdo embaixo, senão amontoa. */
+  #pane-custos .tbl td[data-label] {
+    display:flex; justify-content:space-between; align-items:center; gap:12px; text-align:right;
+  }
+  #pane-custos .tbl td[data-label]::before {
+    content:attr(data-label); flex:0 0 auto; text-align:left;
+    font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.4px;
+    color:var(--cinza-2);
+  }
+  #pane-custos .tbl td[data-label="Status"],
+  #pane-custos .tbl td.td-acoes {
+    flex-direction:column; align-items:flex-start; text-align:left; gap:6px;
+  }
+  #pane-custos .tbl td[data-label="Status"]::before,
+  #pane-custos .tbl td.td-acoes::before { text-align:left; }
+  #pane-custos .tbl td.td-acoes { min-width:0; }
+}
 .meio-detalhe { font-size:11.5px; color:var(--cinza-2); }
 .meio-tipo-chip { display:inline-block; padding:2px 9px; border-radius:20px; font-size:10.5px; font-weight:600; background:var(--panel-3); color:var(--cinza); }
 .mp-campo-cartao, .mp-campo-credito { display:none; }
 .mes-nav { display:flex; align-items:center; gap:12px; margin-bottom:18px; }
 .mes-nav input { padding:9px 12px; }
+/* No celular, a topbar reserva 60px de padding a esquerda pro icone do menu —
+   sobra menos espaco, e "Competencia" + o seletor de mes lado a lado nao
+   cabem mais. Rotulo em cima, input embaixo: mesmo padrao ja usado em todo
+   campo de formulario da tela, so que aqui dentro do cabecalho. */
+@media (max-width:480px) {
+  .mes-nav { flex-direction:column; align-items:flex-start; gap:4px; }
+}
 .add-row { display:grid; gap:10px; align-items:end; margin-bottom:14px; padding:16px; background:var(--panel-2); border:1px solid var(--borda); border-radius:12px; }
 /* ── DINHEIRO TEM COR PRÓPRIA, e ela é forte ─────────────────────────────
    `.pos` usava `--teal`, e --teal NÃO É REDEFINIDO no tema claro: fica com o
@@ -589,7 +666,15 @@
     <div class="card">
       <div class="tbl-wrap">
       <table class="tbl">
-        <thead><tr><th>Descrição</th><th>Centro de custo</th><th>Categoria</th><th>Emissão</th><th>Vencimento</th><th class="th-valor">Valor</th><th>Pago por</th><th>Fonte</th><th>Forma</th><th>Status</th><th>Comprovante</th><th></th></tr></thead>
+        {# DOZE COLUNAS PRA UM CUSTO E PEDIR PRA TELA SE ESPREMER.
+           Fonte era coluna própria dizendo "Caixa" ou "Terceiro" — cabe como
+           texto pequeno junto de quem pagou, igual já se faz com centro de
+           custo + canal de mídia logo ali do lado. E Comprovante e a coluna
+           de ações eram TRÊS grupos de botão disputando espaço (Ver/Anexar,
+           Celular, Editar/×) quando são a mesma pergunta: "o que eu faço com
+           esta linha?". Uma coluna só, os botões quebram linha se precisar —
+           dez ficam onze com folga em vez de doze apertadas. #}
+        <thead><tr><th>Descrição</th><th>Centro de custo</th><th>Categoria</th><th>Emissão</th><th>Vencimento</th><th class="th-valor">Valor</th><th>Pago por</th><th>Forma</th><th>Status</th><th>Ações</th></tr></thead>
         <tbody id="tbody-custos">
           {% for c in custos %}
           <tr data-id="{{ c.id }}">
@@ -600,41 +685,46 @@
                distinguir sem abrir nada. #}
             <td class="td-descricao">{{ c.descricao }}{% if c.tipo == 'fixo' %}
               <span class="chip-fixo">fixo</span>{% endif %}</td>
-            <td class="td-centro" style="font-size:12px;">{{ c.centro_custo or '—' }}{% if c.canal_midia %} <span style="color:var(--cinza-2);">· {{ c.canal_midia }}</span>{% endif %}</td>
-            <td class="td-categoria">{% if c.categoria == 'fixo' %}Fixo{% elif c.categoria == 'recorrente' %}Recorrente{% elif c.categoria == 'parcela_unica' %}Parcela única{% else %}{{ c.categoria or '—' }}{% endif %}</td>
-            <td class="td-emissao">{{ (c.data_emissao|data_br) if c.data_emissao else (c.data_lancamento|data_br or '—') }}</td>
+            <td class="td-centro" data-label="Centro de custo" style="font-size:12px;">{{ c.centro_custo or '—' }}{% if c.canal_midia %} <span style="color:var(--cinza-2);">· {{ c.canal_midia }}</span>{% endif %}</td>
+            <td class="td-categoria" data-label="Categoria">{% if c.categoria == 'fixo' %}Fixo{% elif c.categoria == 'recorrente' %}Recorrente{% elif c.categoria == 'parcela_unica' %}Parcela única{% else %}{{ c.categoria or '—' }}{% endif %}</td>
+            <td class="td-emissao" data-label="Emissão">{{ (c.data_emissao|data_br) if c.data_emissao else (c.data_lancamento|data_br or '—') }}</td>
             {# Vencimento em vermelho quando venceu e não foi pago: é o dado que
                a pessoa abre esta tela pra encontrar, e cor economiza a leitura
                linha por linha. #}
-            <td class="td-vencimento" {% if c.status_efetivo == 'Vencido' %}style="color:var(--rosa); font-weight:600;"{% endif %}>{{ (c.data_vencimento|data_br) if c.data_vencimento else '—' }}</td>
-            <td class="neg td-valor">{{ c.valor|moeda  }}</td>
-            <td class="td-pagou">{{ c.pago_por or '—' }}</td>
-            <td class="td-fonte">{% if c.fonte_pagamento == 'Caixa' %}Caixa{% elif c.fonte_pagamento == 'Terceiro' %}Terceiro{% else %}—{% endif %}</td>
-            <td class="td-forma">
+            <td class="td-vencimento" data-label="Vencimento" {% if c.status_efetivo == 'Vencido' %}style="color:var(--rosa); font-weight:600;"{% endif %}>{{ (c.data_vencimento|data_br) if c.data_vencimento else '—' }}</td>
+            <td class="neg td-valor" data-label="Valor">{{ c.valor|moeda  }}</td>
+            <td class="td-pagou" data-label="Pago por">{{ c.pago_por or '—' }}{% if c.fonte_pagamento == 'Terceiro' %} <span style="color:var(--cinza-2);">· terceiro</span>{% endif %}</td>
+            <td class="td-forma" data-label="Forma">
               {% if c.meio_nome %}
                 {{ c.meio_nome }}{% if c.meio_final_cartao %} •••• {{ c.meio_final_cartao }}{% endif %}
               {% elif c.forma_pagamento == 'pix' %}Pix{% elif c.forma_pagamento == 'cartao_credito' %}Cartão crédito{% elif c.forma_pagamento == 'cartao_debito' %}Cartão débito{% elif c.forma_pagamento == 'boleto' %}Boleto{% elif c.forma_pagamento == 'dinheiro' %}Dinheiro{% elif c.forma_pagamento == 'transferencia' %}Transferência{% else %}—{% endif %}
             </td>
-            <td>
+            <td data-label="Status">
               {# status_efetivo, não status: 'Vencido' é derivado do vencimento
                  na hora da leitura, e é ele que a pessoa precisa ver. #}
               <span class="badge-status {{ 'badge-pago' if c.status in ('Pago','Conciliado') else 'badge-previsto' }}"
                     {% if c.status_efetivo == 'Vencido' %}style="background:rgba(244,63,94,.16); color:var(--rosa);"{% endif %}>{{ c.status_efetivo }}</span>
               {% if c.status != 'Pago' %}<button class="btn-ghost" style="color:var(--verde);" onclick="conciliar({{ c.id }})">Marcar pago</button>{% endif %}
             </td>
-            <td style="white-space:nowrap;">
+            {# TRES GRUPOS DE BOTAO ERAM A MESMA PERGUNTA.
+               Comprovante (Ver/Anexar/Celular) e Ações (Editar/×) disputavam
+               três colunas de largura fixa cada uma pro caso raro de ter tudo
+               — a maioria das linhas mostrava duas ou três células quase
+               vazias. Uma coluna só, com quebra de linha: o normal (Anexar +
+               Editar) cabe numa linha, o caso cheio (Ver + Trocar + Celular +
+               Editar + Excluir) quebra pra duas em vez de alargar a tabela
+               inteira pra caber um caso raro. #}
+            <td class="td-acoes" data-label="Ações">
               {% if c.comprovante %}
                 <a class="btn-ghost" style="color:var(--verde);" href="/anexos/{{ c.comprovante }}" target="_blank">Ver</a>
               {% endif %}
               <button class="btn-ghost" onclick="anexarDesktop({{ c.id }})">{{ 'Trocar' if c.comprovante else 'Anexar' }}</button>
               <button class="btn-ghost" style="color:var(--azul);" onclick="abrirQR({{ c.id }}, '{{ c.descricao|replace("'","") }}')">Celular</button>
-            </td>
-            <td style="white-space:nowrap;">
               <button class="btn-ghost" onclick='abrirEdicaoCusto({{ c.id }}, {{ c.descricao|tojson }}, {{ (c.categoria or "")|tojson }}, {{ c.valor }}, {{ (c.data_emissao or c.data_lancamento or "")|tojson }}, {{ (c.data_vencimento or "")|tojson }}, {{ (c.pago_por or "")|tojson }}, {{ (c.fonte_pagamento or "")|tojson }}, {{ (c.forma_pagamento or "")|tojson }}, {{ (c.meio_pagamento_id or "")|tojson }})'>Editar</button>
               <button class="btn-ghost" style="color:var(--rosa);" onclick="excluir({{ c.id }})">×</button>
             </td>
           </tr>
-          {% else %}<tr><td colspan="12" style="color:var(--cinza-2);">Nenhum custo ou fixo neste período.</td></tr>{% endfor %}
+          {% else %}<tr><td colspan="10" style="color:var(--cinza-2);">Nenhum custo ou fixo neste período.</td></tr>{% endfor %}
         </tbody>
       </table>
       </div>
