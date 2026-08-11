@@ -35943,11 +35943,10 @@ def admin_crm_corrigir_leads():
 
 @app.route('/admin/crm/retroalimentar-aprendizado', methods=['GET', 'POST'])
 @login_required
+@admin_required
 def admin_crm_retroalimentar_aprendizado():
     """Rota de administração para retroalimentar a análise de inteligência em lote 
     de todas as vendas/leads fechados ou perdidos de um consultor (default: Guilherme)."""
-    if session.get('perfil') != 'admin':
-        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
 
     consultor = request.args.get('consultor') or (request.json or {}).get('consultor') or 'Guilherme'
     conn = db()
