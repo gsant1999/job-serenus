@@ -39179,6 +39179,15 @@ def _clique_backfill_lead(conn, lead_id, gclid, click, trafego):
                             VALUES (?,?,?,?,?)""",
                          (lead_id, 'Sistema', 'edicao',
                           'Identificador do clique do anúncio registrado (veio da planilha)', _agora_sp()))
+        # COMMIT PRÓPRIO: quem chama isto (_importar_leads_automatico) só faz
+        # commit no ramo de lead NOVO — um lead duplicado nunca commitava nada,
+        # então este UPDATE ficava pendente na transação e sumia quando a conexão
+        # fechava sem commit (Postgres com autocommit=False). Resultado: o
+        # backfill de clique nunca persistia na rodada automática de 15 min,
+        # só no webhook em tempo real (que faz um commit único no fim do loop).
+        # Confirmado em 11/08/2026: 2 rodadas rodaram depois do deploy do fix de
+        # facebook_lead_id e nenhum dos 3 leads de teste foi gravado.
+        conn.commit()
         return True
     except Exception as e:
         app.logger.info(f"[CLIQUE] backfill no lead {lead_id} falhou: {e}")
