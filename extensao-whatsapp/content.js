@@ -1736,6 +1736,26 @@
     });
   } catch (e) { /* sem isso, ainda confere na abertura */ }
 
+  // O RELOGIO QUE EU PROMETI NO COMENTARIO E NUNCA ESCREVI.
+  //
+  // `_CONFIRMA_CADA_MS` era so um PISO: ele limitava chamadas que ja iriam
+  // acontecer, e nao agendava nenhuma. Com a aba aberta, visivel, e o painel ja
+  // aberto desde antes, os tres gatilhos existentes (abertura do painel, volta
+  // pra aba, mudanca de storage) nao disparam — e a extensao nunca mais
+  // perguntava nada ao servidor. Revogar as 00:54 e a tela seguir dizendo
+  // "conectado" as 01:16 era o comportamento exato deste codigo.
+  //
+  // Foi o defeito que anulou todos os outros consertos da noite: servidor
+  // recusando certo, extensao sabendo reagir, e ninguem perguntando.
+  //
+  // `forcar` verdadeiro porque o proprio intervalo passa a ser a trava de
+  // ritmo; com `false` e periodo igual ao piso, viraria corrida de
+  // milissegundo. `document.hidden` poupa a rede com a aba em segundo plano —
+  // ao voltar, o ouvinte acima ja confere na hora.
+  _registrarLoop(setInterval(() => {
+    if (!document.hidden) _confirmarSessaoNoServidor(true);
+  }, _CONFIRMA_CADA_MS));
+
   // Reconfere quando a credencial muda (login feito noutra aba, por exemplo).
   try {
     chrome.storage.onChanged.addListener((mud) => {
