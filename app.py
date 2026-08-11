@@ -2870,6 +2870,11 @@ def init_db():
     add_col('crm_leads', 'qual_cidade', 'TEXT')
     add_col('crm_leads', 'qual_cnpj', 'TEXT')
     add_col('crm_leads', 'empresa_antes_migracao', 'TEXT')
+    # Falha no processamento do webhook do Asaas nao ficava em lugar nenhum
+    # consultavel — so no log volatil do Railway. Evento com erro passava
+    # sem rastro e sem re-tentativa (o Asaas nao reenvia porque a rota
+    # sempre responde 200). NULL = sucesso normal; preenchido = o motivo.
+    add_col('webhook_log', 'erro', 'TEXT')
     # Config do parceiro Affinity — específico do Serenus (e-mails/contato deles).
     # Não vai pra instância de cliente (SEED_DADOS_SERENUS=0).
     if SEED_DADOS_SERENUS:
@@ -6965,6 +6970,11 @@ def webhook_asaas():
     
     Retorna sempre 200 para não gerar fila de retentativas infinita.
     """
+    # Declarados aqui fora, nao dentro do try: se a excecao acontecer ANTES
+    # de uma destas linhas rodar (ex: JSON malformado), o bloco de erro
+    # ainda precisa saber o que da pra saber — em vez de estourar de novo
+    # tentando ler um nome que nunca existiu.
+    evento_id = evento = None
     try:
         # 1. VALIDAÇÃO DO TOKEN (se configurado)
         if ASAAS_WEBHOOK_TOKEN:
@@ -7052,6 +7062,24 @@ def webhook_asaas():
     
     except Exception as e:
         app.logger.error(f"[WEBHOOK] 🔴 ERRO: {str(e)}", exc_info=True)
+        # A ROTA SEMPRE RESPONDE 200 (de proposito: 200 evita o Asaas
+        # reenviando o mesmo evento em fila). Mas isso tem um preco: o Asaas
+        # NUNCA vai saber que falhou, entao NADA reenvia. Se o unico rastro
+        # for o log do Railway (volatil, rotaciona), o evento desaparece —
+        # uma parcela podia ter sido paga de verdade e o sistema nunca soube.
+        # Grava aqui, mesmo sem saber o evento_id direito (JSON pode nem ter
+        # chegado a parsear): um id sintetico com timestamp garante que o
+        # UNIQUE em evento_id nao apague o registro por cima de outro.
+        try:
+            conn_erro = db()
+            conn_erro.execute(
+                "INSERT INTO webhook_log (evento_id, evento, erro) VALUES (?,?,?)",
+                (evento_id or f"falha_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S%f')}",
+                 evento or '', str(e)[:500]))
+            conn_erro.commit()
+            close_db(conn_erro)
+        except Exception:
+            pass  # Se nem isso funcionar, o log do Railway acima ainda existe.
         return jsonify({"ok": False, "erro": str(e)[:100]}), 200
 
 
@@ -7064,15 +7092,20 @@ def webhook_diagnostico():
     try:
         # Últimos 20 webhooks
         webhooks = conn.execute(
-            "SELECT id, evento_id, evento, processado_em FROM webhook_log ORDER BY processado_em DESC LIMIT 20"
+            "SELECT id, evento_id, evento, erro, processado_em FROM webhook_log ORDER BY processado_em DESC LIMIT 20"
         ).fetchall()
 
         total = conn.execute("SELECT COUNT(*) AS cnt FROM webhook_log").fetchone()
         total_webhooks = total['cnt'] if total else 0
+        # Falha que existia so no log volatil do Railway agora fica aqui —
+        # este contador e o que diz se sobrou algo pra investigar.
+        falhas = conn.execute("SELECT COUNT(*) AS cnt FROM webhook_log WHERE erro IS NOT NULL").fetchone()
+        total_falhas = falhas['cnt'] if falhas else 0
     except Exception as e:
         app.logger.error(f"[WEBHOOK-DIAG] Erro ao consultar webhook_log: {e}")
         webhooks = []
         total_webhooks = 0
+        total_falhas = 0
     finally:
         close_db(conn)
 
@@ -7088,11 +7121,13 @@ def webhook_diagnostico():
                 "id": w['id'],
                 "evento_id": w['evento_id'],
                 "evento": w['evento'],
+                "erro": w['erro'] if 'erro' in w.keys() else None,
                 "processado_em": str(w['processado_em']),
             }
             for w in webhooks
         ],
         "total_webhooks": total_webhooks,
+        "total_falhas": total_falhas,
     }
 
     return jsonify(resultado), 200
