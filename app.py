@@ -8792,6 +8792,34 @@ def salvar_proposta():
     try:
         d = request.form
 
+        # O FORMULARIO JA MARCA ISSO COMO OBRIGATORIO — SO NO NAVEGADOR.
+        #
+        # `required` no HTML e `.required = true` no toggleDocs() (JS) sao a
+        # UNICA validacao que existia; nada no servidor conferia de novo. Quem
+        # manda o POST direto (bug de outro lugar do sistema, requisicao
+        # manual) passa reto, e uma proposta sem razao social/CPF/vigencia
+        # entra no banco — vigencia vazia, por exemplo, cai no fallback
+        # silencioso de "mes atual" do gerador de parcelas em vez de barrar o
+        # cadastro (ninguem percebe ate o relatorio do mes nao bater).
+        #
+        # A regra espelha EXATAMENTE o que o form.html ja exige: razao social,
+        # valor, vigencia sempre; CPF do titular sempre (mesmo em proposta de
+        # empresa, tem uma pessoa titular); CNPJ so quando tipo_pessoa e
+        # PME/PJ. Nao e regra nova — e a mesma regra, confirmada duas vezes.
+        faltando = []
+        if not (d.get('razao_social') or '').strip(): faltando.append('razão social')
+        if not (d.get('vigencia') or '').strip(): faltando.append('vigência')
+        if not _num_brl(d.get('valor', '0')): faltando.append('valor')
+        if not (d.get('cpf_titular') or '').strip(): faltando.append('CPF do titular')
+        tipo_pessoa_chk = (d.get('tipo_pessoa') or '').strip()
+        if tipo_pessoa_chk in ('PME', 'PJ') and not (d.get('cnpj') or '').strip():
+            faltando.append('CNPJ')
+        if faltando:
+            # 'msg', nao 'mensagem': e a chave que form.html ja le no erro
+            # ('Erro: '+data.msg) e no proprio catch desta rota (linha ~8989).
+            return jsonify({"ok": False, "erro": "campos_obrigatorios",
+                            "msg": "Faltou preencher: " + ', '.join(faltando) + "."}), 400
+
         def salvar_arquivo(file_field, prefixo):
             """Salva um único arquivo localmente e retorna o nome ou None."""
             f = request.files.get(file_field)
