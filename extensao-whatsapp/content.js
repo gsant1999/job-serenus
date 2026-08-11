@@ -2672,12 +2672,60 @@
     }
   }
 
+  // A FONTE CONFIAVEL VOLTOU — SO QUE SEM O CUSTO QUE A TIROU DA ULTIMA VEZ.
+  //
+  // Em 31/07 a checagem por CSS (icone "ptt", data-testid de audio) substituiu
+  // a pergunta direta ao WhatsApp (wa-js) porque perguntar buscava as 400
+  // ultimas mensagens da conversa a CADA passada do varredor — caro, e pesava
+  // no proprio WhatsApp. Virou so CSS.
+  //
+  // Em 11/08 o botao sumiu de TODO audio, em toda conversa. O motivo apareceu
+  // no proprio HTML inspecionado: o WhatsApp novo usa nomes de classe
+  // ofuscados (`x1n2onr6`, sem significado) e o icone que o seletor procurava
+  // deixou de existir do jeito esperado. Isso nao e um seletor errado pra
+  // consertar — e a prova de que seletor de CSS nao e mais um chao firme pra
+  // pisar: o WhatsApp pode trocar de novo amanha, sem aviso, e o botao some
+  // de novo em silencio.
+  //
+  // A pergunta direta ao WhatsApp NAO precisa custar cada passada: ela roda
+  // UMA vez por conversa aberta (o gatilho e `_barraConvInjetar`, que so roda
+  // de novo quando o rodape e recriado — e o rodape so e recriado quando a
+  // conversa troca) e guarda os ids num Set. Depois disso, saber se uma linha
+  // e audio vira uma consulta ao Set — sem rede, sem custo por passada. O
+  // CSS fica de reserva pra ANTES do Set estar pronto (a fracao de segundo
+  // logo apos abrir a conversa) e pra quando a ponte falhar.
+  const _TR_AUDIO_IDS = new Set();
+
   function _trLinhaEhAudio(row) {
+    const id = row.getAttribute('data-id') || '';
+    if (id && _TR_AUDIO_IDS.has(id)) return true;
     return !!row.querySelector(
       'audio, [data-icon="ptt"], [data-icon*="ptt"], [data-icon*="audio"],' +
       '[data-icon="audio-play"], [data-icon="play"],' +
       '[aria-label*="udio"], [data-testid*="audio"], [data-testid*="ptt"]');
   }
+
+  // Chamada UMA vez por conversa aberta (ver `_barraConvInjetar`), e de novo
+  // a cada `_TR_AUDIO_REFRESH_MS` enquanto ela continua aberta — mensagem de
+  // audio nova, chegando ao vivo, tambem precisa entrar no Set. Silenciosa: se
+  // a ponte falhar, quem sustenta a deteccao nesse intervalo e o CSS.
+  const _TR_AUDIO_REFRESH_MS = 90000;
+  async function _trAtualizarIdsDeAudio() {
+    try {
+      const r = await _pedirPonte('listar_audios', {}, 12000);
+      if (r && Array.isArray(r.audios)) {
+        _TR_AUDIO_IDS.clear();
+        for (const a of r.audios) { if (a && a.msg_id) _TR_AUDIO_IDS.add(a.msg_id); }
+      }
+    } catch (e) { /* Set fica com o que tinha (ou vazio) — CSS cobre o resto */ }
+  }
+  // Audio chegando ao vivo na MESMA conversa tambem precisa entrar no Set —
+  // o gatilho de `_barraConvInjetar` so dispara na troca de conversa, nao a
+  // cada mensagem nova dentro dela. Aba em segundo plano nao gasta nada.
+  _registrarLoop(setInterval(() => {
+    if (!_contextoValido() || document.hidden) return;
+    _trAtualizarIdsDeAudio();
+  }, _TR_AUDIO_REFRESH_MS));
 
   // A BOLHA, achada por geometria — nao por classe de CSS nem por formato de id.
   //
@@ -3272,6 +3320,10 @@
     // Barra nova (troca de conversa recria o #main): repinta o pino do que ja
     // se sabe, sem ir na rede de novo.
     try { _bcSinalPintar(); } catch (e) {}
+    // MESMO GATILHO: rodape novo e o sinal mais barato que existe de "e uma
+    // conversa diferente". A lista de audios desta conversa vem uma vez aqui
+    // — nao bloqueia a barra, roda por conta propria.
+    try { _trAtualizarIdsDeAudio(); } catch (e) {}
 
     // ══ O TEMA QUEM DIZ É O PIXEL, NÃO A CLASSE ═══════════════════════
     //
