@@ -1685,14 +1685,51 @@
     });
   }
 
+  // "CONECTADO" TEM QUE SER VERDADE DO LADO DE LA, NAO SO DAQUI.
+  //
+  // O token mora no Chrome; quem o cancela e o servidor. Enquanto ninguem
+  // perguntava, os dois discordavam em silencio: o painel mostrava o nome, o
+  // selo verde e "Sair deste computador", e o JOB listava zero aparelhos.
+  //
+  // Nao da pra deixar isso por conta do service worker: no Manifest V3 ele
+  // dorme, e uma extensao dormindo nunca descobre que foi desconectada. Este
+  // script, nao — ele vive enquanto o WhatsApp estiver aberto. Entao a
+  // pergunta sai daqui.
+  //
+  // Trava de tempo pra nao virar enxurrada: o portao e reconferido a cada
+  // mudanca de storage e a cada volta pra aba.
+  let _ultimaConfirmacao = 0;
+  const _CONFIRMA_CADA_MS = 120000;
+  async function _confirmarSessaoNoServidor(forcar) {
+    const agora = Date.now();
+    if (!forcar && agora - _ultimaConfirmacao < _CONFIRMA_CADA_MS) return;
+    _ultimaConfirmacao = agora;
+    try {
+      const r = await _safeSendMessage({ type: 'sessao_confere' });
+      // Só o 401 derruba. Sem resposta, servidor fora do ar ou rede caída não
+      // deslogam ninguém — quem não sabe não mexe.
+      if (r && r.valida === false && r.tinhaToken) _abrirPortao();
+    } catch (e) { /* sem resposta: nao mexe */ }
+  }
+
   async function _conferirPortao() {
     try {
       const g = await _safeStorageGet(['extensaoAtiva']);
       if (g.extensaoAtiva === false) { _fecharPortao(); return; }
-      if (await _semCredencial()) _abrirPortao();
-      else _fecharPortao();
+      if (await _semCredencial()) { _abrirPortao(); return; }
+      _fecharPortao();
+      // Tem token guardado: agora confere se ele ainda vale LA.
+      _confirmarSessaoNoServidor(false);
     } catch (e) { _fecharPortao(); }
   }
+
+  // Voltar pra aba e o momento certo de reconferir: e quando a pessoa vai
+  // usar, e e quando ela descobriria do jeito ruim.
+  try {
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) _confirmarSessaoNoServidor(false);
+    });
+  } catch (e) { /* sem isso, ainda confere na abertura */ }
 
   // Reconfere quando a credencial muda (login feito noutra aba, por exemplo).
   try {

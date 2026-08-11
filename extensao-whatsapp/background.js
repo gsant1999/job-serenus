@@ -621,6 +621,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true;
   }
+  // "ESTOU CONECTADO?" QUEM RESPONDE E O SERVIDOR.
+  //
+  // O painel dizia "conectado" olhando so o que estava guardado aqui no
+  // Chrome. Como o token e apagado do lado do servidor, os dois discordavam em
+  // silencio: a tela mostrava o nome, o selo verde e "Sair deste computador",
+  // enquanto o JOB listava zero aparelhos. Foi exatamente o que aconteceu hoje.
+  //
+  // O /ping e a rota mais barata que exige credencial. Se o token morreu, ela
+  // responde 401 e o `chamarJob` ja apaga tudo — o portao abre sozinho, porque
+  // ele escuta a mudanca do storage.
+  if (msg && msg.type === 'sessao_confere') {
+    (async () => {
+      const { extToken } = await chrome.storage.local.get(['extToken']);
+      if (!extToken) { sendResponse({ valida: false, tinhaToken: false }); return; }
+      const r = await chamarJob('/api/whatsapp/ping', 'GET', null, 10000);
+      // So o 401 derruba. Servidor fora do ar, rede caida ou 500 NAO sao
+      // motivo pra deslogar ninguem: nesses casos a resposta e "nao sei", e
+      // quem nao sabe nao mexe.
+      if (r && r.sessaoRevogada) { sendResponse({ valida: false, tinhaToken: true }); return; }
+      sendResponse({ valida: true, incerta: !(r && r.ok !== false) });
+    })();
+    return true;
+  }
   if (msg && msg.type === 'logout') {
     (async () => {
       // Avisa o servidor pra revogar, mas NÃO depende disso pra limpar aqui:
