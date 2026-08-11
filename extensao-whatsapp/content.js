@@ -2259,9 +2259,16 @@
   // falhar e me custou varias rodadas de adivinhacao.
   //
   // Agora eu pergunto pro proprio WhatsApp (wa-js) quais mensagens da conversa
-  // sao ptt/audio e caso com a linha pelo data-id, que e o mesmo id dos dois
-  // lados. Seletor de CSS quebra a cada atualizacao; o tipo da mensagem, nao.
-  // DETECCAO 100% LOCAL, sem perguntar nada a ninguem.
+  // sao ptt/audio e caso com a linha pelo data-id. Seletor de CSS quebra a cada
+  // atualizacao; o tipo da mensagem, nao. DETECCAO 100% LOCAL, sem perguntar
+  // nada a ninguem.
+  //
+  // CORRECAO DE 11/08/2026: esta linha dizia "que e o mesmo id dos dois lados".
+  // NAO E — em conversa `@lid` o DOM e o store escrevem `remote` diferente, e a
+  // comparacao exata nao casa nada (medido: 10 audios achados, 0 na tela). O
+  // casamento agora normaliza o id dos dois lados; ver `_trHashDoId` perto do
+  // `_TR_AUDIO_IDS`. Deixo o erro escrito aqui de proposito: foi este comentario
+  // que me fez procurar o defeito na wa-js por horas em vez de na comparacao.
   //
   // Eu buscava as 400 ultimas mensagens pela wa-js a CADA conversa aberta so pra
   // saber quais linhas eram audio. Caro — uma leitura do store inteiro por chat,
@@ -2695,10 +2702,45 @@
   // CSS fica de reserva pra ANTES do Set estar pronto (a fracao de segundo
   // logo apos abrir a conversa) e pra quando a ponte falhar.
   const _TR_AUDIO_IDS = new Set();
+  // O MESMO ID, ESCRITO DE DOIS JEITOS.
+  //
+  // Medido em 11/08/2026, conversa 187943809491161@lid: a ponte devolveu 10
+  // audios e NENHUM casou com linha do DOM. Nao era a wa-js (getActiveChat
+  // respondia, listar_audios voltou sem erro) — era a comparacao aqui, que
+  // exigia string identica.
+  //
+  // O id de mensagem do WhatsApp e `origem_remote_id[...]`. Só a parte final
+  // identifica a MENSAGEM; o `remote` diz ONDE ela esta — e e justamente isso
+  // que muda quando a conversa passa a ser endereçada por `@lid` em vez do
+  // telefone: um lado escreve `false_5519...@c.us_3EB0...`, o outro
+  // `false_1879...@lid_3EB0...`. Mesma mensagem, strings diferentes.
+  //
+  // ISTO JA ESTAVA RESOLVIDO — e eu nao reusei. `_idCru` (wpp-bridge.js:478)
+  // existe exatamente por causa deste bug, e o comentario de la ja conta a
+  // historia toda. Quando a deteccao de audio passou a vir da ponte, o
+  // casamento aqui voltou a comparar a string inteira e o conserto de la nao
+  // valia mais pra ca.
+  //
+  // POR QUE AQUI PEGA SO `p[2]` E NAO `slice(2).join('_')` COMO O `_idCru`:
+  // em GRUPO o serializado tem uma quarta parte, o participante — e ele tambem
+  // muda de `@lid` pra `@c.us` entre o DOM e o store. Mantendo o participante,
+  // grupo continuaria sem casar (testado: os dois lados dao strings
+  // diferentes). O hash sozinho ja identifica a mensagem, entao e o unico
+  // pedaco que serve pros dois formatos e pros dois tipos de conversa.
+  // Colisao nao e risco real: o hash e unico por mensagem e a comparacao so
+  // acontece dentro da conversa aberta.
+  const _TR_AUDIO_HASH = new Set();
+
+  function _trHashDoId(id) {
+    const p = String(id || '').split('_');
+    return (p.length > 2 ? p[2] : p[p.length - 1] || '').trim();
+  }
 
   function _trLinhaEhAudio(row) {
     const id = row.getAttribute('data-id') || '';
     if (id && _TR_AUDIO_IDS.has(id)) return true;
+    const h = _trHashDoId(id);
+    if (h && _TR_AUDIO_HASH.has(h)) return true;
     return !!row.querySelector(
       'audio, [data-icon="ptt"], [data-icon*="ptt"], [data-icon*="audio"],' +
       '[data-icon="audio-play"], [data-icon="play"],' +
@@ -2715,7 +2757,37 @@
       const r = await _pedirPonte('listar_audios', {}, 12000);
       if (r && Array.isArray(r.audios)) {
         _TR_AUDIO_IDS.clear();
-        for (const a of r.audios) { if (a && a.msg_id) _TR_AUDIO_IDS.add(a.msg_id); }
+        _TR_AUDIO_HASH.clear();
+        for (const a of r.audios) {
+          if (!a || !a.msg_id) continue;
+          // O msg_id CANONICO continua sendo o do store — e ele que vai pro
+          // servidor, pro cache de transcricao e pro download. O normalizado
+          // serve SO pra achar a linha na tela.
+          _TR_AUDIO_IDS.add(a.msg_id);
+          const h = _trHashDoId(a.msg_id);
+          if (h) _TR_AUDIO_HASH.add(h);
+        }
+        // ESTA RESPOSTA CHEGA TARDE DEMAIS PRA PASSADA QUE JA RODOU.
+        //
+        // `trInjetar` pula toda linha marcada `_jobPronta` — e ela ja marcou
+        // essas linhas ANTES de a ponte responder (isto aqui e assincrono, com
+        // ate 12s de teto). Sem desmarcar, a linha que acabou de ser
+        // reconhecida como audio nunca mais e visitada e o botao so apareceria
+        // se o WhatsApp redesenhasse a bolha por conta propria.
+        //
+        // Desmarca so as linhas que AGORA sao audio (nao a conversa inteira) e
+        // pede uma passada. Se nenhuma mudou, nao mexe em nada.
+        try {
+          let mudou = 0;
+          for (const row of document.querySelectorAll('#main [data-id]')) {
+            if (!row._jobPronta) continue;
+            if (!_trLinhaEhAudio(row)) continue;
+            if (row.querySelector('.job-tr-slot')) continue;  // ja tem botao
+            row._jobPronta = null;
+            mudou++;
+          }
+          if (mudou) trInjetar();
+        } catch (e) { /* passada seguinte cobre */ }
       }
     } catch (e) { /* Set fica com o que tinha (ou vazio) — CSS cobre o resto */ }
   }
