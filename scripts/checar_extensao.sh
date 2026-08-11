@@ -30,5 +30,34 @@ if [ "$_n" -lt "$_FUNCOES_MIN" ]; then
 fi
 echo "content.js: $_n funcoes (piso $_FUNCOES_MIN)"
 
+# ── CONSTANTE USADA E NUNCA DEFINIDA ────────────────────────────────────────
+#
+# 10/08/2026: `_ICO_DOC` era usado em quatro lugares e definido em nenhum. A
+# funcao que desenha o botao "Ler documento" estourava com ReferenceError toda
+# vez, o bloco ficava vazio, e a regra que esconde bloco vazio o tornava
+# invisivel. Tres blocos na tela, nenhum botao, nenhum sintoma.
+#
+# `node --check` NAO pega isso: sintaxe valida nao e o mesmo que variavel
+# existir. Passei o dia perseguindo os sintomas dessa linha, e quando finalmente
+# achei pelo console, consertei so ela — uma hora depois o mesmo erro voltou com
+# `_ICO_MAIS`, e faltavam TRES.
+#
+# Isto e a busca de trinta segundos que eu deveria ter feito de primeira,
+# rodando sozinha antes de todo commit.
+_faltando=""
+for _u in $(grep -ohE '_ICO_[A-Z_]+' *.js | sort -u); do
+  if ! grep -qE "(const|let|var)[[:space:]]+${_u}[[:space:]]*=" *.js; then
+    _faltando="$_faltando $_u"
+  fi
+done
+if [ -n "$_faltando" ]; then
+  echo "ALERTA: constante(s) usada(s) e nunca definida(s):$_faltando"
+  echo "        Isso NAO quebra a sintaxe — quebra em execucao, e some da tela"
+  echo "        sem erro visivel pro usuario. Defina ou remova o uso."
+  exit 1
+fi
+echo "constantes de icone: todas definidas"
+
+
 [ $erro -eq 0 ] && echo "todos os JS da extensao compilam"
 exit $erro

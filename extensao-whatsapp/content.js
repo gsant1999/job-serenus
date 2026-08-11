@@ -1165,6 +1165,28 @@
   const _ICO_NOTA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.4 12.6v6.2a2 2 0 0 1-2 2H6.1a2 2 0 0 1-2-2V6.9a2 2 0 0 1 2-2h6.1"/><path d="M17.5 3.3a1.9 1.9 0 0 1 2.7 2.7l-7.6 7.6-3.4.7.7-3.4 7.6-7.6Z"/></svg>';
   const _ICO_COTACAO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12.9 2.9H19a2 2 0 0 1 2 2v6.1a2 2 0 0 1-.59 1.42l-8 8a2 2 0 0 1-2.83 0l-6.1-6.1a2 2 0 0 1 0-2.83l8-8A2 2 0 0 1 12.9 2.9Z"/><path d="M16.6 7.4v.02"/></svg>';
   const _ICO_CRM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.2" cy="7.9" r="3.7"/><path d="M3.6 20.4a6.6 6.6 0 0 1 13.2 0"/><path d="M19.6 6.4v5.4M16.9 9.1h5.4"/></svg>';
+  // OS OUTROS TRES QUE TAMBEM NAO EXISTIAM.
+  //
+  // Achei o `_ICO_DOC` pelo console e consertei so ele — sem procurar os
+  // vizinhos. Uma hora depois o mesmo erro voltou com `_ICO_MAIS`, e uma
+  // auditoria de trinta segundos mostrou que faltavam TRES. Consertar o
+  // sintoma que apareceu, em vez da familia inteira, custou uma ida e volta
+  // e mais uma hora do Guilherme.
+  //
+  // Agora `scripts/checar_extensao.sh` recusa o pacote quando um `_ICO_*` e
+  // usado sem existir — a busca que eu deveria ter feito de primeira roda
+  // sozinha antes de todo commit.
+  const _ICO_MAIS = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
+    'stroke="currentColor" stroke-width="2.2" stroke-linecap="round">' +
+    '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+  const _ICO_CHECK = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
+    'stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">' +
+    '<polyline points="20 6 9 17 4 12"/></svg>';
+  const _ICO_ABRIR = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>' +
+    '<polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
+
   // O ICONE DO "LER DOCUMENTO" — que nao existia.
   //
   // `_ICO_DOC` era usado em QUATRO lugares e nao estava definido em lugar
