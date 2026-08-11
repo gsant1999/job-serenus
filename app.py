@@ -36649,7 +36649,15 @@ def minha_foto():
     if foto_antiga and foto_antiga['foto']:
         try: os.remove(os.path.join(UPLOAD_FOLDER, foto_antiga['foto']))
         except: pass
-    fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
+
+    # Upload para R2 + fallback local
+    try:
+        upload_arquivo_r2(fimg, foto_nome)
+    except Exception as e:
+        app.logger.warning(f"[FOTO] R2 falhou, usando local: {e}")
+        fimg.seek(0)
+        fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
+
     conn.execute("UPDATE usuarios SET foto=? WHERE id=?", (foto_nome, uid))
     conn.commit(); close_db(conn)
     session['foto'] = foto_nome
