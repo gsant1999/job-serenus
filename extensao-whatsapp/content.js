@@ -3995,6 +3995,12 @@
 
   async function abrirSecaoDev() {
     setCorpoSecao(_telaCarregando('Coletando estado…'));
+    // Estado da fila de cotacao: quando o worker subiu e o que a ultima batida
+    // devolveu. Sem isto, "o sinal esta NULL" e um beco sem saida — nao da pra
+    // saber se a batida nem sai, se sai sem credencial, ou se o servidor
+    // recusa. Cada uma dessas hipoteses custou uma rodada de tentativa e erro.
+    const sw = await _safeStorageGet(['swSubiuEm', 'swTemAlarme', 'swVersao',
+                                      'batidaEm', 'batidaPainel', 'batidaResposta']);
     const ponte = await _pedirPonte('listar_audios', {}, 12000);
     const temWpp = !(ponte && ponte.erro === 'wpp_ausente');
     const d = TR.diag || {};
@@ -4032,6 +4038,20 @@
               d.etapa === 'ponte_fora') +
         (TR.erro.size ? linha('Último erro', Array.from(TR.erro.values()).slice(-1)[0], true) : '') +
         '<div id="job-dev-tempos"></div>' +
+        (function () {
+          const q = (t) => t ? new Date(t).toLocaleTimeString('pt-BR') : '—';
+          const semAlarme = sw.swTemAlarme === false;
+          // Sem batida ha mais de 3 min o servidor ja considera a maquina
+          // morta — e a fila para de aceitar pedido de quem nao tem Painel.
+          const velha = sw.batidaEm && (Date.now() - new Date(sw.batidaEm).getTime() > 180000);
+          return linha('Motor da extensão', 'subiu ' + q(sw.swSubiuEm) +
+                       ' · v' + (sw.swVersao || '?') +
+                       (semAlarme ? ' · SEM RELÓGIO (permissão alarms)' : ''), semAlarme) +
+                 linha('Sinal de vida', (sw.batidaEm ? q(sw.batidaEm) : 'nunca bateu') +
+                       ' · ' + (sw.batidaResposta || '—') +
+                       (sw.batidaPainel ? ' · Painel aberto' : ' · sem Painel aqui'),
+                       !sw.batidaEm || !!velha);
+        })() +
         linha('Varredura (motivo)', VAR.motivo || '—') +
         linha('Varredura', VAR.rodando ? 'rodando agora'
               : (VAR.ultimaRodada ? 'última: ' + new Date(VAR.ultimaRodada).toLocaleTimeString('pt-BR') : 'ainda não rodou')) +

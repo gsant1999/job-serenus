@@ -202,8 +202,33 @@ function _trabalhadorVivo() {
     const temPainel = (todas || []).some(
       (a) => a.url && a.url.indexOf('paineldocorretor.com.br') >= 0);
     chamarJob('/api/whatsapp/trabalhador/vivo', 'POST',
-              { painel_logado: temPainel }, 10000).catch(() => {});
+              { painel_logado: temPainel }, 10000)
+      .then((r) => _anotarBatida(temPainel, r))
+      .catch((e) => _anotarBatida(temPainel, { erro: String(e && e.message || e) }));
   });
+}
+
+// O QUE ACONTECEU NA ULTIMA BATIDA — GRAVADO, NAO SO TENTADO.
+//
+// O `trabalhador_sinal` no servidor ficou NULL a noite inteira e nao havia
+// como saber onde a corrente quebrava: se a batida nao saia, se saia sem
+// token, se o servidor recusava, ou se o worker nem acordava. Cada hipotese
+// dessas custou uma rodada de tentativa e erro.
+//
+// Agora fica escrito: quando foi, se havia Painel aberto, e o que o servidor
+// respondeu. Aparece no diagnostico do painel, entao da pra ler sem devtools.
+function _anotarBatida(temPainel, r) {
+  try {
+    chrome.storage.local.set({
+      batidaEm: new Date().toISOString(),
+      batidaPainel: !!temPainel,
+      // `{ok:false}` sem erro e a resposta do servidor pra "voce nao e a
+      // maquina marcada" — que e uma informacao, nao uma falha.
+      batidaResposta: !r ? 'sem resposta'
+        : (r.erro ? String(r.erro)
+          : (r.ok === false ? 'nao sou a maquina marcada' : 'gravado')),
+    });
+  } catch (e) { /* diagnostico nao pode derrubar a batida */ }
 }
 
 // RELOGIO DE SERVICE WORKER NAO E RELOGIO.
