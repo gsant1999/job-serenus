@@ -337,7 +337,15 @@ async function _sessaoMorreu() {
   if (_sessaoMorrendo) return;
   _sessaoMorrendo = true;
   try {
-    await chrome.storage.local.remove(['extToken', 'extUsuario', 'extApelido']);
+    // A CHAVE ANTIGA SAI JUNTO.
+    //
+    // O servidor agora recusa o Bearer revogado mesmo com a chave presente
+    // (conserto do mesmo dia, do lado de la). Mas enquanto a chave continuar
+    // guardada aqui, um segundo problema sobra: quem reabre o popup ve o
+    // campo "Chave de acesso" preenchido e pode achar que basta salvar de
+    // novo pra voltar a funcionar sem entrar com senha. Apagando os dois, so
+    // sobra um caminho pra voltar: o login.
+    await chrome.storage.local.remove(['extToken', 'extUsuario', 'extApelido', 'extKey']);
     // O aviso vai pro icone, nao pra uma notificacao do sistema: ninguem
     // precisa de um alarme, precisa de saber onde clicar. O icone da barra e
     // exatamente onde a pessoa vai clicar pra resolver.
@@ -678,13 +686,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true;
   }
+  // A TELA DE USUARIOS AVISOU: "ALGUEM FOI DESCONECTADO AGORA MESMO".
+  //
+  // Fogo-e-esquece: uma chamada barata que ja existe (/ping), fora do relogio
+  // normal. Se o token daqui morreu, o 401 sessao_revogada dispara dentro do
+  // proprio chamarJob e ja limpa tudo — o portao abre sozinho porque o
+  // content.js escuta a mudanca do storage. Se nao for este aparelho, a
+  // resposta e 200 e nada muda.
+  if (msg && msg.type === 'conferir_sessao_agora') {
+    chamarJob('/api/whatsapp/ping', 'GET', null, 8000).catch(() => {});
+    sendResponse({ ok: true });
+    return true;
+  }
   if (msg && msg.type === 'logout') {
     (async () => {
       // Avisa o servidor pra revogar, mas NÃO depende disso pra limpar aqui:
       // se o JOB estiver fora do ar, sair da máquina tem que funcionar mesmo
       // assim — senão a pessoa fica presa numa sessão que ela quer encerrar.
       try { await chamarJob('/api/whatsapp/logout', 'POST', {}, 8000); } catch (e) {}
-      await chrome.storage.local.remove(['extToken', 'extUsuario', 'extApelido']);
+      // Mesma razao do _sessaoMorreu: "Sair deste computador" tem que
+      // significar sair de verdade, sem a chave antiga sustentando por baixo.
+      await chrome.storage.local.remove(['extToken', 'extUsuario', 'extApelido', 'extKey']);
       sendResponse({ ok: true });
     })();
     return true;

@@ -349,9 +349,23 @@
     // da pra revogar a sessao de outra pessoa nem por engano de digitacao.
     fetch('/admin/extensao/sessoes/' + apUsuario + '/' + id + '/revogar', { method: 'POST' })
       .then(function (r) { return r.json(); })
-      .then(function () { carregar(); })
+      .then(function () { avisarExtensaoDesteNavegador(); carregar(); })
       .catch(function () { carregar(); });
   };
+
+  // SE FOR O PROPRIO NAVEGADOR, NAO PRECISA ESPERAR RELOGIO NENHUM.
+  //
+  // A extensao confere sozinha a cada 30s ou quando a aba volta ao foco — bom
+  // pra outra maquina, mas o caso comum e ESTE: alguem desconecta o proprio
+  // aparelho, no mesmo navegador, e esperava ver o efeito na hora. A ponte que
+  // a extensao ja injeta neste site (site-bridge.js) leva o aviso ate ela sem
+  // esperar nada. Se este navegador nao for o desconectado, e uma chamada de
+  // graca que nao muda nada.
+  function avisarExtensaoDesteNavegador() {
+    try {
+      window.postMessage({ source: 'JOB_SITE_REQ', tipo: 'aparelho_pode_ter_mudado' }, '*');
+    } catch (e) { /* sem a extensao aqui, nao ha o que avisar */ }
+  }
 })();
 </script>
 

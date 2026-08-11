@@ -44,7 +44,8 @@
 
 
   const _SABE = ['abrir_chat', 'cotar', 'passo', 'abas', 'catalogo', 'cotador_estado',
-                 'cotador_cidades', 'descobrir_modalidades', 'canario_agora'];
+                 'cotador_cidades', 'descobrir_modalidades', 'canario_agora',
+                 'aparelho_pode_ter_mudado'];
   let _versao = '';
   try { _versao = chrome.runtime.getManifest().version; } catch (e) { /* contexto órfão */ }
 
@@ -61,6 +62,20 @@
     // hora, em vez de esperar a rodada de 6h — que era a unica forma de saber
     // se uma peca voltou a funcionar depois de uma correcao.
     if (d.tipo === 'canario_agora') return { type: 'canario_agora' };
+    // A TELA DE USUARIOS ACABOU DE DESCONECTAR ALGUEM. TALVEZ ESTA MAQUINA.
+    //
+    // "Desconectar" mudava so o banco; a extensao so descobria na proxima
+    // conferencia periodica (ate 30s+, ou quando a aba voltasse ao foco). No
+    // MESMO navegador — o caso comum, admin desconectando o proprio aparelho
+    // — isso e demora sem motivo: a resposta ja existe aqui do lado.
+    //
+    // Nao manda ID nenhum e nao decide nada aqui. So pede pro background
+    // conferir a PROPRIA credencial na hora — o mesmo /ping que ja roda a
+    // cada 30s, so que agora. Se este for o aparelho revogado, o 401 derruba
+    // sozinho (chamarJob ja trata isso); se nao for, e uma chamada de graça
+    // que nao muda nada. Uma pagina mal-intencionada, no maximo, gasta uma
+    // chamada de ping alheia — nao consegue derrubar aparelho de ninguem.
+    if (d.tipo === 'aparelho_pode_ter_mudado') return { type: 'conferir_sessao_agora' };
     if (d.tipo === 'cotar') return { type: 'cotar_painel', pedido: d.pedido };
     // `aba` diz em QUAL aba do Painel executar. É o que permite a tela rodar
     // mais de uma frente ao mesmo tempo sem que duas escrevam na mesma cotação.
