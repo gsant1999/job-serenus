@@ -19251,12 +19251,19 @@ def api_whatsapp_notas_excluir():
 
 
 @app.route('/api/whatsapp/versao', methods=['GET', 'OPTIONS'])
-@requer('whatsapp:ler')
 def api_whatsapp_versao():
     """Diz qual é a versão mais nova da extensão (a que está no deploy). A própria
     extensão compara com a sua (chrome.runtime.getManifest().version) e, se estiver
     atrasada, mostra o aviso de atualizar. Público (sem chave) de propósito: é só um
-    número de versão e o aviso precisa aparecer mesmo antes de configurar a chave."""
+    número de versão e o aviso precisa aparecer mesmo antes de configurar a chave.
+
+    SEM @requer DE PROPOSITO — e o docstring acima ja dizia isso. Um @requer
+    ('whatsapp:ler') tinha sido colado aqui, provavelmente numa passada que
+    fechou todas as /api/whatsapp/*, e contradizia o desenho: a extensao chama
+    isto com fetch() puro do content.js, sem Authorization (o token so e anexado
+    no background.js), entao a resposta era 401 SEMPRE e o aviso de versao nova
+    nunca aparecia pra ninguem. Mesmo padrao de /api/ia/caca-docs/regras, que e
+    publica e por isso funciona."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     # `versao` é a que gera aviso (a publicada na loja). `versao_dev` é a do
@@ -19352,11 +19359,33 @@ def _config_remota_atual(conn):
 
 
 @app.route('/api/whatsapp/config-remota', methods=['GET', 'OPTIONS'])
-@requer('whatsapp:ler')
 def api_whatsapp_config_remota():
     """Seletores DOM + flags de comportamento atuais — a extensão consulta a
     cada ~15min e usa esses valores em vez dos fixos no código. Público (sem
-    chave) de propósito, igual /api/whatsapp/versao."""
+    chave) de propósito, igual /api/whatsapp/versao.
+
+    SEM @requer DE PROPOSITO, e aqui a razao e mais forte que na rota de versao:
+    ESTE E O CANAL DE CONSERTO REMOTO. Quando o WhatsApp muda o HTML e a
+    extensao para de achar um elemento, e por aqui que o seletor novo chega sem
+    publicar versao nem esperar a loja. Exigir autenticacao justamente aqui
+    significa que uma falha de autenticacao tambem tira a nossa capacidade de
+    consertar — foi o que aconteceu: a extensao chama com fetch() puro (sem
+    Authorization), levava 401, e caia nos seletores fixos do codigo em silencio.
+
+    De quebra, isto tambem derrubava a VARREDURA AUTOMATICA: varreduraConfig()
+    le `d.varredura` desta resposta; com 401 vinha undefined, virava null, e
+    varreduraRodar() saia na hora com motivo='sem_config'. Ninguem via erro.
+
+    O que fica exposto sem chave e operacional, nao pessoal: seletores de DOM
+    (descrevem o HTML do WhatsApp, nao o nosso), flags de comportamento, nome da
+    marca (ja publico no site) e a janela de horario da varredura. O
+    `usuario_id` da query NAO vira oraculo de enumeracao: `varredura_pode_agora`
+    devolve 'consultor_fora' tanto pra id inexistente quanto pra consultor com a
+    varredura desligada — as duas respostas sao indistinguiveis.
+
+    ATENCAO PRO FUTURO MULTI-CORRETORA: hoje o sistema e single-tenant e `marca`
+    e uma so. Se um dia houver mais de uma corretora, esta rota passa a
+    devolver config de tenant sem autenticar — revisar antes de virar SaaS."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     conn = db()
