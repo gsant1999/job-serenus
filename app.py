@@ -23645,11 +23645,21 @@ def api_wa_trabalhador_vivo():
     painel_logado = bool(req.get('painel_logado'))
     
     conn = db()
-    # Soh se for trabalhador
+    # DUAS RECUSAS DIFERENTES, COM NOMES DIFERENTES.
+    #
+    # Antes as duas devolviam so `{ok:false}`, e o diagnostico da extensao
+    # traduzia tudo como "nao sou a maquina marcada". So que "nao sei QUAL
+    # aparelho e voce" (quem entrou pela chave antiga, sem login) e outra coisa
+    # completamente diferente de "sei quem voce e, e voce nao e a marcada" — a
+    # primeira nao se resolve marcando maquina nenhuma, se resolve entrando.
+    # Diagnostico que junta duas causas manda consertar a coisa errada.
     sess = conn.execute("SELECT trabalhador_cotacao FROM extensao_sessao WHERE id=?", (sid,)).fetchone()
-    if not sess or not sess['trabalhador_cotacao']:
+    if not sess:
         close_db(conn)
-        return _wa_cors(jsonify({"ok": False}))
+        return _wa_cors(jsonify({"ok": False, "motivo": "sem_aparelho"}))
+    if not sess['trabalhador_cotacao']:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "motivo": "nao_marcada"}))
         
     agora_txt = datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S')
     conn.execute("UPDATE extensao_sessao SET trabalhador_sinal=? WHERE id=?", (agora_txt, sid))
