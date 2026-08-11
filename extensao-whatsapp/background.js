@@ -243,16 +243,55 @@ function _abrirJanela() {
   passo();
 }
 
-chrome.alarms.create(_ALARME, { periodInMinutes: 1 });
-chrome.alarms.onAlarm.addListener((al) => {
-  if (al.name !== _ALARME) return;
-  try { _trabalhadorVivo(); } catch (e) {}
-  try { _abrirJanela(); } catch (e) {}
-});
+// NADA DISTO PODE DERRUBAR O WORKER INTEIRO.
+//
+// Isto roda no topo do arquivo. Se `chrome.alarms` nao existir — permissao
+// nova que o Chrome ainda nao concedeu, extensao carregada de um jeito
+// diferente — a excecao acontece ANTES do resto do arquivo, e o service
+// worker inteiro morre com ela: some o painel, some a analise, some tudo. Um
+// relogio da fila nao vale esse risco, entao ele falha sozinho e o resto
+// segue, com o relogio velho como reserva.
+if (chrome.alarms && chrome.alarms.create) {
+  try {
+    chrome.alarms.create(_ALARME, { periodInMinutes: 1 });
+    chrome.alarms.onAlarm.addListener((al) => {
+      if (al.name !== _ALARME) return;
+      try { _trabalhadorVivo(); } catch (e) {}
+      try { _abrirJanela(); } catch (e) {}
+    });
+  } catch (e) { _relogioVelho(); }
+} else {
+  _relogioVelho();
+}
+
+// A reserva e o que existia antes: temporizador em cadeia. Ele morre junto com
+// o worker e por isso nao serve como relogio de verdade — mas enquanto o
+// worker esta de pe (que e quando alguem esta usando a extensao) ele funciona,
+// e e melhor que silencio.
+function _relogioVelho() {
+  const passo = () => { try { _trabalhadorTick(); } catch (e) {} setTimeout(passo, _trabRitmo); };
+  setTimeout(passo, 8000);
+  setInterval(() => { try { _trabalhadorVivo(); } catch (e) {} }, 60000);
+}
+
 // O worker tambem acorda por outros motivos (uma mensagem da aba, por
 // exemplo). Quando isso acontece, nao ha razao pra esperar o proximo alarme.
 try { _trabalhadorVivo(); } catch (e) {}
 try { _abrirJanela(); } catch (e) {}
+
+// CAIXA-PRETA DO WORKER.
+//
+// Um service worker que nao subiu nao deixa rastro: nao ha tela, nao ha log
+// que fique. Ficamos duas horas sem conseguir dizer se ele estava morto ou so
+// dormindo. Estas tres linhas ficam gravadas e respondem isso na hora, sem
+// depender de pegar o console aberto no momento certo.
+try {
+  chrome.storage.local.set({
+    swSubiuEm: new Date().toISOString(),
+    swTemAlarme: !!(chrome.alarms && chrome.alarms.create),
+    swVersao: (chrome.runtime.getManifest() || {}).version || '?',
+  });
+} catch (e) { /* sem diagnostico, o resto continua */ }
 
 
 // Apaga a sessao morta e faz o estado da extensao contar a verdade.
