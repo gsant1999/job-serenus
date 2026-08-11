@@ -14944,11 +14944,9 @@ def ver_boleto_adesao(pid):
 
 @app.route('/proposta/<int:pid>/boleto-adesao/cancelar', methods=['POST'])
 @login_required
+@admin_required
 def cancelar_boleto_adesao(pid):
     """Cancela o boleto de adesão no Asaas e limpa os dados na proposta."""
-    if session.get('perfil') != 'admin':
-        return jsonify({'ok': False, 'erro': 'Apenas administradores podem cancelar boletos.'}), 403
-
     conn = db()
     p = conn.execute(
         "SELECT adesao_asaas_payment_id, adesao_status, razao_social FROM propostas WHERE id=?",
@@ -24068,9 +24066,8 @@ def api_ia_caca_docs_regras():
 
 @app.route('/admin/migrar-cidade-empresa', methods=['POST'])
 @login_required
+@admin_required
 def admin_migrar_cidade_empresa():
-    if session.get('perfil') != 'admin':
-        return jsonify({"ok": False, "erro": "Sem permissão"}), 403
         
     conn = db()
     try:
@@ -27872,6 +27869,7 @@ _TABELAS_LEAD_ID = [
 
 @app.route('/crm/lead/<int:lid>/juntar', methods=['POST'])
 @login_required
+@admin_required
 def crm_lead_juntar(lid):
     """Junta OUTRO lead neste: traz conversas, histórico, cotações, propostas e
     anexos, e apaga o card que sobrou.
@@ -27880,8 +27878,6 @@ def crm_lead_juntar(lid):
     identificado pelo id — não por nome parecido. Adivinhar quem é duplicado e
     juntar sozinho é como se perde venda de gente diferente com o mesmo
     sobrenome."""
-    if session.get('perfil') != 'admin':
-        return jsonify({"ok": False, "erro": "Só admin pode juntar leads"}), 403
     d = request.json or {}
     try:
         outro = int(d.get('outro_id') or 0)
@@ -29309,10 +29305,9 @@ def api_cotacao_entidade_salvar():
 
 @app.route('/cotacao/bloco/entidades', methods=['GET'])
 @login_required
+@admin_required
 def cotacao_bloco_entidades():
     """Lista todas as entidades (para painel admin)."""
-    if session.get('perfil') != 'admin':
-        return jsonify({"ok": False, "erro": "Acesso negado"}), 403
         
     conn = db()
     try:
@@ -35322,10 +35317,9 @@ def crm_lead_sms_reforco(lid):
 # ─── CRM CONFIG ───────────────────────────────────────────────────
 @app.route('/admin/crm/analise-quantitativos')
 @login_required
+@admin_required
 def admin_crm_analise_quantitativos():
     """Análise completa de quantitativos do CRM para debug de divergências."""
-    if session.get('perfil') != 'admin':
-        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
 
     conn = db()
     try:
@@ -35399,14 +35393,13 @@ def admin_crm_analise_quantitativos():
 
 @app.route('/admin/crm/diagnostico-leads', methods=['POST'])
 @login_required
+@admin_required
 def admin_crm_diagnostico_leads():
     """
     Analisa divergências de quantitativo entre planilha e banco.
     Recebe JSON: {leads: [...]} (mesmo formato do webhook)
     Retorna breakdown detalhado de por que cada lead foi ignorado/duplicado.
     """
-    if session.get('perfil') != 'admin':
-        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
 
     d = request.get_json(force=True) or {}
     leads_raw = d.get('leads', [])
@@ -35481,14 +35474,13 @@ def admin_crm_diagnostico_leads():
 
 @app.route('/admin/crm/restaurar-etapas', methods=['POST'])
 @login_required
+@admin_required
 def admin_crm_restaurar_etapas():
     """
     Restaura leads que foram movidos incorretamente para 'lead_novo' durante
     a reimportação de histórico. Identifica pela atividade 'movimentacao' de hoje
     com texto 'Nova solicitação' e devolve o lead para a etapa anterior.
     """
-    if session.get('perfil') != 'admin':
-        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
 
     conn = db()
     try:
@@ -35547,13 +35539,12 @@ def admin_crm_restaurar_etapas():
 
 @app.route('/admin/crm/formatar-telefones', methods=['POST'])
 @login_required
+@admin_required
 def admin_crm_formatar_telefones():
     """
     Formata todos os telefones existentes para (XX) XXXXX-XXXX e
     preenche a coluna telefone_norm (só dígitos) para dedup futura.
     """
-    if session.get('perfil') != 'admin':
-        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
 
     conn = db()
     try:
@@ -35583,10 +35574,9 @@ def admin_crm_formatar_telefones():
 
 @app.route('/admin/crm/debug-datas')
 @login_required
+@admin_required
 def admin_crm_debug_datas():
     """Mostra amostra de telefones e datas no banco para debug."""
-    if session.get('perfil') != 'admin':
-        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
     conn = db()
     try:
         # Amostra de 10 leads do Facebook
@@ -35859,6 +35849,7 @@ def webhook_corrigir_datas():
 
 @app.route('/admin/crm/corrigir-leads', methods=['POST'])
 @login_required
+@admin_required
 def admin_crm_corrigir_leads():
     """
     Corrige retroativamente leads importados:
@@ -35866,8 +35857,6 @@ def admin_crm_corrigir_leads():
     2. Corrige criado_em com base na atividade de criação (que tem a data real)
     Roda apenas para leads com responsavel_id IS NULL ou criado_em = data de hoje
     """
-    if session.get('perfil') != 'admin':
-        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
 
     conn = db()
     try:
@@ -35954,11 +35943,10 @@ def admin_crm_corrigir_leads():
 
 @app.route('/admin/crm/retroalimentar-aprendizado', methods=['GET', 'POST'])
 @login_required
+@admin_required
 def admin_crm_retroalimentar_aprendizado():
     """Rota de administração para retroalimentar a análise de inteligência em lote 
     de todas as vendas/leads fechados ou perdidos de um consultor (default: Guilherme)."""
-    if session.get('perfil') != 'admin':
-        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
 
     consultor = request.args.get('consultor') or (request.json or {}).get('consultor') or 'Guilherme'
     conn = db()
@@ -36019,10 +36007,9 @@ def admin_crm_retroalimentar_aprendizado():
 # ─── CRM CONFIG ───────────────────────────────────────────────────
 @app.route('/crm/transferir-em-massa', methods=['POST'])
 @login_required
+@admin_required
 def crm_transferir_em_massa():
     """Transferência em massa de leads (filtros) de um consultor para outro. Admin only."""
-    if session.get('perfil') != 'admin':
-        return jsonify({"ok": False, "erro": "Apenas administrador"}), 403
     d = request.json or {}
     consultor_de = d.get('consultor_de', '').strip()
     consultor_para = d.get('consultor_para', '').strip()
@@ -39419,11 +39406,10 @@ def crm_frios_contato_promover(cid):
 
 @app.route('/crm/importar', methods=['GET', 'POST'])
 @login_required
+@admin_required
 def crm_importar():
     """GET: mostra form com seletor de datas. POST: processa importação."""
     usuario = session.get('usuario')
-    if session.get('perfil') != 'admin':
-        return jsonify({'erro': 'Acesso negado'}), 403
     
     conn = db()
     
