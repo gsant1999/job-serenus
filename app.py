@@ -4844,6 +4844,15 @@ def login_ou_extensao(f):
                     ok = hmac.compare_digest(esperado, sessao['token_hash'])
                     if ok:
                         g.usuario_id = sessao['usuario_id']
+                        # QUAL APARELHO, e nao so quem. A fila de cotacao inteira
+                        # depende disto: e por `sessao_id` que o servidor sabe se
+                        # QUEM esta pedindo trabalho e a maquina marcada como
+                        # trabalhadora. Sem esta linha, `getattr(g,'sessao_id',0)`
+                        # devolvia 0 nas cinco rotas da fila, nenhuma sessao tem
+                        # id 0, e o resultado era a fila inteira morta em silencio:
+                        # "sem_trabalhador" pra quem pede e "nao_e_trabalhador"
+                        # pro Dell, mesmo tudo configurado certo.
+                        g.sessao_id = sess_id
                         g.auth_via = 'token'
                         g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
                         conn.execute("UPDATE extensao_sessao SET ultimo_uso=? WHERE id=?", (_agora_sp(), sess_id))
@@ -5388,6 +5397,10 @@ def requer(escopo):
                         esperado = hashlib.sha256(secreto.encode()).hexdigest()
                         if hmac.compare_digest(esperado, sessao_db['token_hash']):
                             g.usuario_id = sessao_db['usuario_id']
+                            # Mesma coisa do `login_ou_extensao`: por simetria, e
+                            # pra que qualquer rota futura protegida por `requer`
+                            # saiba de QUAL aparelho veio o pedido, nao so de quem.
+                            g.sessao_id = sess_id
                             g.auth_via = 'token'
                             g.corretora_id = 1
                             g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
