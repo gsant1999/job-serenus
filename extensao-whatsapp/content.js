@@ -6036,12 +6036,34 @@
     return _cotEtiquetas(p).map((e) => e.t).join(' · ');
   }
 
+  // OS RELOGIOS PRECISAM ESTAR EM ORDEM, DO MENOR PRA O MAIOR.
+  //
+  // Quando o passo vai pra fila, quem espera sao quatro relogios em serie: a
+  // aba que pediu, a fila no JOB (2 min), a maquina que executa (90s) e a
+  // recuperacao do servidor (3 min). Se o de fora for MENOR que o de dentro,
+  // quem pediu desiste enquanto o trabalho continua — e ninguem fica sabendo
+  // que aquele preco chegou tarde.
+  //
+  // Local, 45s continua certo: sem fila no meio, passar disso e defeito. Mas
+  // assim que o primeiro sinal de fila chega, a espera legitima passa a ser a
+  // da fila, e o relogio daqui sobe pra 150s — acima dos 2 min dela, pra que a
+  // fila consiga dizer o proprio motivo em vez de morrer no grito daqui.
+  let _cotFilaSinal = 0;
+  const _COT_ESPERA_FILA_MS = 150000;
+
   function _cotPasso(pedido, ms) {
     return new Promise((resolve) => {
       let respondeu = false;
-      const relogio = setTimeout(() => {
-        if (!respondeu) { respondeu = true; resolve({ ok: false, motivo: 'sem_resposta_a_tempo' }); }
-      }, ms || 45000);
+      const t0 = Date.now();
+      const limiteLocal = ms || 45000;
+      const vencer = () => {
+        if (respondeu) return;
+        const naFila = _cotFilaSinal > t0;
+        const limite = naFila ? Math.max(limiteLocal, _COT_ESPERA_FILA_MS) : limiteLocal;
+        if (Date.now() - t0 < limite) { setTimeout(vencer, 1000); return; }
+        respondeu = true; resolve({ ok: false, motivo: 'sem_resposta_a_tempo' });
+      };
+      const relogio = setTimeout(vencer, limiteLocal);
       _safeSendMessage({ type: 'cotador_passo', pedido: pedido }).then((r) => {
         if (respondeu) return;
         respondeu = true; clearTimeout(relogio); resolve(r || { ok: false, motivo: 'sem_resposta' });
@@ -6054,6 +6076,13 @@
 
   // Cada motivo vira uma frase que diz O QUE FAZER. "precisa_aprender" sozinho
   // manda o consultor abrir um chamado; a instrução resolve em um minuto.
+  // Motivos que NAO sao sobre o plano, e sim sobre o caminho ate o Painel.
+  const _COT_CAMINHO_MORTO = {
+    sem_resposta_a_tempo: 1, extensao_indisponivel: 1, sem_resposta: 1,
+    painel_fechado: 1, painel_precisa_recarregar: 1,
+    painel_fechado_no_trabalhador: 1, fila_demorou: 1, sem_trabalhador: 1,
+  };
+
   const _COT_EXPLICA = {
     // "NESTE COMPUTADOR" NAO E DETALHE — e a frase inteira.
     //
@@ -6795,6 +6824,7 @@
   try {
     chrome.runtime.onMessage.addListener((msg) => {
       if (!msg || msg.type !== 'fila_andamento') return;
+      _cotFilaSinal = Date.now();
       const cx = document.getElementById('job-cot-fila');
       if (!cx) return;
       const n = msg.posicao || 0;
@@ -7457,6 +7487,20 @@
       feitos.push(Object.assign({}, fila[i], cartao
         ? { total: cartao.total, faixas: cartao.faixas, conferido: cartao.conferido }
         : { total: null, motivo: r.motivo || 'sem_valor_na_resposta' }));
+      // CAMINHO MORTO NAO SE TENTA SEIS VEZES.
+      //
+      // "Sem preco pra este plano" e resposta: o Painel respondeu e aquele
+      // plano nao tem valor. Ja "nao respondeu ninguem" nao e sobre o plano —
+      // e o caminho inteiro que caiu, e ele vai cair igual nos proximos. Com
+      // seis planos e 45s cada, insistir custava quatro minutos e meio de tela
+      // parada pra chegar no mesmo lugar. Os que sobram entram marcados, nao
+      // somem: continua sem preco inventado.
+      if (!cartao && _COT_CAMINHO_MORTO[r.motivo]) {
+        for (let j = i + 1; j < fila.length; j++) {
+          feitos.push(Object.assign({}, fila[j], { total: null, motivo: r.motivo }));
+        }
+        break;
+      }
       if (i + 1 < fila.length) { await _cotRespira(240, 780); if (g !== _cotGer) return; }
     }
     feitos.sort((a, b) => (a.total == null) - (b.total == null) || (a.total - b.total));

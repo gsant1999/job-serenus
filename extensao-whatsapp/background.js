@@ -100,6 +100,14 @@ function _filaPedir(pedido, cb) {
       const t0 = Date.now();
       const perguntar = () => {
         if (Date.now() - t0 > _FILA_LIMITE_MS) {
+          // DESISTIU AQUI? ENTAO AVISA LA.
+          //
+          // Sem isso o pedido continuava 'rodando' no JOB: a maquina
+          // trabalhadora seguia cotando pra ninguem, e o proximo da fila
+          // esperava atras de um trabalho que ja nao interessa mais. O
+          // servidor so se recuperava sozinho depois de 3 min de silencio.
+          chamarJob('/api/whatsapp/cotacao/fila/' + id + '/cancelar', 'POST', {}, 8000)
+            .catch(() => {});
           cb({ ok: false, motivo: 'fila_demorou' });
           return;
         }
