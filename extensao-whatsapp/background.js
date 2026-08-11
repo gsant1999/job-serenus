@@ -673,6 +673,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // O /ping e a rota mais barata que exige credencial. Se o token morreu, ela
   // responde 401 e o `chamarJob` ja apaga tudo — o portao abre sozinho, porque
   // ele escuta a mudanca do storage.
+  // QUAL VERSAO ESTA INSTALADA DE VERDADE.
+  //
+  // O content script de uma aba antiga responde a versao ANTIGA quando pergunta
+  // o proprio manifesto — foi assim que o painel mostrou v4.64.0 com a v4.71.0
+  // instalada, e ninguem percebeu por horas. O background sempre roda o codigo
+  // novo, entao so ele sabe a verdade. Comparar as duas e o unico jeito da aba
+  // descobrir sozinha que esta velha.
+  if (msg && msg.type === 'versao_instalada') {
+    let v = '';
+    try { v = (chrome.runtime.getManifest() || {}).version || ''; } catch (e) {}
+    sendResponse({ ok: true, versao: v });
+    return true;
+  }
   if (msg && msg.type === 'sessao_confere') {
     (async () => {
       const { extToken } = await chrome.storage.local.get(['extToken']);

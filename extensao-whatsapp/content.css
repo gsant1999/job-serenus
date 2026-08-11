@@ -3893,3 +3893,47 @@ body[data-job-tema="claro"] .job-cot-prev-txt { color-scheme: light; }
 .job-proc.oficial  { color: var(--job-acento); }
 .job-proc.campanha { color: var(--job-info, #53bdeb); }
 .job-proc.ia       { color: var(--job-aviso, #e8b339); }
+
+/* ══ "Está tudo certo?" ═══════════════════════════════════════════════════
+   Uma linha por pergunta, com um ponto colorido na frente. O ponto carrega o
+   estado ANTES da leitura: verde some da atenção, vermelho puxa. É a mesma
+   lógica do selo "conectado" logo acima, pra tela não ter dois vocabulários.
+
+   As cores não vêm dos tokens de tema porque estas três precisam significar a
+   MESMA coisa nos dois temas — verde é "pode seguir", vermelho é "resolve
+   isto". Um token que muda de tom por tema enfraqueceria justamente o sinal. */
+.job-sit-l {
+  display: flex; align-items: flex-start; gap: 9px;
+  font-size: 12.5px; line-height: 1.55; color: var(--job-txt);
+  padding: 7px 0;
+}
+.job-sit-l + .job-sit-l { border-top: 1px solid var(--job-borda); }
+.job-sit-p {
+  flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%;
+  margin-top: 6px; background: var(--job-txt-fraco);
+}
+.job-sit-ok   .job-sit-p { background: #21c58f; box-shadow: 0 0 0 3px rgba(33,197,143,.2); }
+.job-sit-meio .job-sit-p { background: #d97706; box-shadow: 0 0 0 3px rgba(217,119,6,.18); }
+.job-sit-ruim .job-sit-p { background: #e0265e; box-shadow: 0 0 0 3px rgba(224,38,94,.18); }
+.job-sit-t { flex: 1 1 auto; min-width: 0; }
+/* O botão fica NA linha do problema, não num rodapé: quem lê a frase já tem a
+   saída ao lado, sem procurar. */
+.job-sit-bt {
+  flex: 0 0 auto; align-self: center; cursor: pointer;
+  font: 600 11.5px inherit; padding: 5px 11px; border-radius: 7px;
+  border: 1px solid var(--job-acento); background: var(--job-acento);
+  color: var(--job-acento-txt);
+}
+.job-sit-bt:hover { filter: brightness(1.06); }
+.job-sit-rod {
+  margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--job-borda);
+  font-size: 11.5px; line-height: 1.5; color: var(--job-txt-fraco);
+}
+/* Discreto de propósito: o consultor não precisa dele, quem conserta precisa. */
+.job-sit-det {
+  margin-top: 10px; cursor: pointer; font: 600 11px inherit;
+  padding: 5px 10px; border-radius: 7px;
+  border: 1px solid var(--job-borda); background: transparent;
+  color: var(--job-txt-fraco);
+}
+.job-sit-det:hover { color: var(--job-txt); border-color: var(--job-borda-forte, var(--job-borda)); }

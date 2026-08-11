@@ -1840,6 +1840,125 @@
     });
   } catch (e) { /* sem extensão viva, nada a fazer */ }
 
+  // O QUE ESTA TELA RESPONDE, EM ORDEM DE QUEM ESTRAGA MAIS O DIA:
+  //
+  // 1. Esta aba esta rodando a versao nova? Recarregar a extensao NAO troca o
+  //    codigo de uma aba ja aberta — so o F5 troca. Sem esta linha, uma aba
+  //    velha se comporta como uma nova quebrada, e nao ha nada na tela que
+  //    denuncie. Custou uma noite inteira em 10/08.
+  // 2. O JOB responde? Distingue "o sistema caiu" de "a minha conta caiu", que
+  //    tem consertos completamente diferentes.
+  // 3. Esta conta ainda vale aqui? O token e apagado la, nao aqui.
+  //
+  // Sem jargao e sem nome de peca: quem le isso e o consultor as 9h da manha.
+  function _sitLinha(estado, texto, acao) {
+    return '<div class="job-sit-l job-sit-' + estado + '">' +
+      '<span class="job-sit-p"></span><span class="job-sit-t">' + texto + '</span>' +
+      (acao || '') + '</div>';
+  }
+
+  async function _pintarSituacao() {
+    const cx = document.getElementById('job-sit');
+    if (!cx) return;
+    let aqui = '';
+    try { aqui = (chrome.runtime.getManifest() || {}).version || ''; } catch (e) {}
+
+    let linhas = '';
+    let tudoBem = true;
+
+    // 1. VERSAO DESTA ABA
+    let instalada = '';
+    try {
+      const r = await _safeSendMessage({ type: 'versao_instalada' });
+      instalada = (r && r.versao) || '';
+    } catch (e) { /* sem resposta: nao acusa nada */ }
+    if (instalada && aqui && instalada !== aqui) {
+      tudoBem = false;
+      linhas += _sitLinha('ruim',
+        'Esta aba está com uma versão antiga (v' + esc(aqui) + '). ' +
+        'A instalada é a v' + esc(instalada) + '.',
+        '<button type="button" class="job-sit-bt" id="job-sit-recarregar">Recarregar esta aba</button>');
+    } else {
+      linhas += _sitLinha('ok', 'Esta aba está com a versão atual' +
+        (aqui ? ' (v' + esc(aqui) + ')' : '') + '.');
+    }
+
+    // 2 e 3. CONEXAO E CONTA — a mesma pergunta responde as duas, porque uma
+    // conta so pode ser conferida se o JOB estiver respondendo.
+    let r2 = null;
+    try { r2 = await _safeSendMessage({ type: 'sessao_confere' }); } catch (e) { r2 = null; }
+    if (!r2) {
+      tudoBem = false;
+      linhas += _sitLinha('ruim', 'Não consegui falar com o JOB agora. ' +
+        'Se persistir, confira o endereço logo abaixo.');
+    } else if (r2.tinhaToken === false) {
+      tudoBem = false;
+      linhas += _sitLinha('ruim', 'Este computador não está conectado a nenhuma conta. ' +
+        'Entre com seu e-mail e senha acima.');
+    } else if (r2.valida === false) {
+      tudoBem = false;
+      linhas += _sitLinha('ruim', 'Esta conta foi desconectada deste computador. ' +
+        'Entre de novo acima.');
+    } else if (r2.incerta) {
+      linhas += _sitLinha('meio', 'O JOB não respondeu agora. ' +
+        'Sua conta continua valendo — é a conexão que está oscilando.');
+    } else {
+      linhas += _sitLinha('ok', 'Conectado ao JOB e com a conta em dia.');
+    }
+
+    // O BOTAO DOS DETALHES EXISTE PORQUE ESTE PAINEL PODE ESTAR ERRADO.
+    //
+    // Ele le a situacao pela MESMA conferencia que pode ter quebrado — se ela
+    // quebrar, o painel repete a mesma mentira com cara de diagnostico. Os
+    // dados crus nao passam por interpretacao nenhuma: dizem se existe conta
+    // guardada aqui, o que o servidor respondeu literalmente, e quando.
+    //
+    // Fica atras de um botao pra nao virar poluicao pro consultor, que so
+    // precisa das frases acima.
+    cx.innerHTML = linhas +
+      (tudoBem ? '' : '<div class="job-sit-rod">Se você não entendeu alguma linha, ' +
+        'tire um print desta tela e mande — ela foi feita pra isso.</div>') +
+      '<button type="button" class="job-sit-det" id="job-sit-det">Copiar detalhes</button>';
+
+    const bd = document.getElementById('job-sit-det');
+    if (bd) bd.addEventListener('click', async () => {
+      const g2 = await _safeStorageGet(['extToken', 'extKey', 'extUsuario', 'extApelido',
+                                        'jobUrl', 'swSubiuEm', 'swTemAlarme', 'swVersao',
+                                        'batidaEm', 'batidaPainel', 'batidaResposta']);
+      // O token NAO vai junto, nem pedaco dele: ele e a chave da conta. O que
+      // interessa e SE existe, nao qual e.
+      const bruto = {
+        versaoDestaAba: aqui,
+        versaoInstalada: instalada,
+        temContaGuardadaAqui: !!g2.extToken,
+        temChaveAntigaAqui: !!g2.extKey,
+        nomeGuardado: (g2.extUsuario && g2.extUsuario.nome) || null,
+        apelidoGuardado: g2.extApelido || null,
+        enderecoDoJob: g2.jobUrl || null,
+        respostaDaConferencia: r2,
+        motorSubiuEm: g2.swSubiuEm || null,
+        motorTemRelogio: g2.swTemAlarme,
+        motorVersao: g2.swVersao || null,
+        ultimoSinalEm: g2.batidaEm || null,
+        ultimoSinalResposta: g2.batidaResposta || null,
+        painelDoCorretorAberto: g2.batidaPainel,
+        agora: new Date().toISOString(),
+      };
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(bruto, null, 2));
+        bd.textContent = 'Copiado — pode colar';
+      } catch (e) {
+        bd.textContent = 'Não consegui copiar';
+      }
+      setTimeout(() => { bd.textContent = 'Copiar detalhes'; }, 4000);
+    });
+
+    const br = document.getElementById('job-sit-recarregar');
+    // location.reload e API da janela: funciona mesmo com o vinculo da extensao
+    // ja perdido, que e exatamente o caso em que este botao aparece.
+    if (br) br.addEventListener('click', () => location.reload());
+  }
+
   async function abrirSecaoConfig() {
     const g = await _safeStorageGet(['jobUrl', 'extToken', 'extUsuario', 'extApelido',
                                      'railSide', 'tema', 'extensaoAtiva']);
@@ -1884,6 +2003,24 @@
                 '<div class="job-cfg-dica">Você pode entrar em mais de um computador com o mesmo ' +
                   'usuário — um por WhatsApp. O nome serve pra saber qual desconectar depois.</div>') +
             '<div class="job-cfg-msg" id="job-cfg-msg"></div>' +
+          '</div>' +
+        '</div>' +
+
+        // ESTA TELA RESPONDE "ESTA TUDO CERTO?" SEM NINGUEM PRECISAR PERGUNTAR.
+        //
+        // A noite de 10/08 foi gasta sem conseguir responder tres coisas
+        // simples: esta aba esta rodando a versao nova? o JOB esta respondendo?
+        // esta conta ainda vale? Cada uma exigiu consulta ao banco ou console
+        // aberto. Sao dados que a propria extensao tem na mao — o custo de
+        // mostrar e zero e o custo de nao mostrar foi uma noite.
+        //
+        // Fica dentro de Configurações, aberta, sem modo escondido: quem precisa
+        // e o consultor as 9h da manha, nao quem sabe onde clicar.
+        '<div class="job-cfg-bloco">' +
+          '<div class="job-cfg-bloco-t">' + _cfgTile(_ICO_CHECK, '#8b5cf6') + 'Está tudo certo?</div>' +
+          '<div class="job-cfg-cartao" id="job-sit">' +
+            '<div class="job-sit-l"><span class="job-sit-p"></span>' +
+              '<span class="job-sit-t">Conferindo…</span></div>' +
           '</div>' +
         '</div>' +
 
@@ -1998,6 +2135,8 @@
       }
       abrirSecaoConfig();     // redesenha já mostrando quem entrou
     });
+
+    _pintarSituacao();
 
     const bs = document.getElementById('job-cfg-sair');
     if (bs) bs.addEventListener('click', async () => {
