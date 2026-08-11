@@ -19379,9 +19379,28 @@ def api_whatsapp_config_remota():
     O que fica exposto sem chave e operacional, nao pessoal: seletores de DOM
     (descrevem o HTML do WhatsApp, nao o nosso), flags de comportamento, nome da
     marca (ja publico no site) e a janela de horario da varredura. O
-    `usuario_id` da query NAO vira oraculo de enumeracao: `varredura_pode_agora`
-    devolve 'consultor_fora' tanto pra id inexistente quanto pra consultor com a
-    varredura desligada — as duas respostas sao indistinguiveis.
+    NAO DEVOLVE DECISAO POR USUARIO — e o `usuario_id` da query e ignorado de
+    proposito. Eu tinha escrito aqui que nao havia como enumerar usuario, porque
+    testei num banco novo onde a varredura estava DESLIGADA: naquele estado o
+    `if not cfg.get('ativa')` dispara antes da checagem de usuario e os dois
+    caminhos devolvem 'desligada'. Testei um galho que nao existe em producao.
+    Com a varredura ligada (o estado real), uid valido devolvia 'ok' e uid
+    inexistente devolvia 'consultor_fora' — ou seja, dava pra descobrir quais
+    ids existem, numa rota publica com CORS aberto. Achado do Codex, confirmado
+    contra producao antes de mexer.
+
+    Entao a parte generica (horario, teto por rodada, intervalo) continua
+    publica, porque nao e de ninguem; a decisao individual saiu. Sem
+    autenticacao a resposta e SEMPRE a mesma, para qualquer uid.
+
+    Efeito colateral desejado: a varredura automatica fica desligada ate alguem
+    ligar de propósito. Ela ja estava morta desde 09/08 (o 401 a matava em
+    silencio) e ninguem sentiu falta — e ela e justamente uma das principais
+    suspeitas de consumo de memoria (ate 400 mensagens por conversa nova, 12
+    conversas por rodada, sem a valvula de RAM que so existe no outro caminho).
+    Religar junto com o conserto do 401 seria reacender o suspeito no meio da
+    investigacao. `varreduraRodar` com `manual=true` ignora `pode_rodar`, entao
+    o botao de varrer na mao continua funcionando.
 
     ATENCAO PRO FUTURO MULTI-CORRETORA: hoje o sistema e single-tenant e `marca`
     e uma so. Se um dia houver mais de uma corretora, esta rota passa a
@@ -19394,14 +19413,10 @@ def api_whatsapp_config_remota():
     # marca: a extensão é um artefato único (Chrome Web Store), então ela puxa a
     # marca da INSTÂNCIA que está conectada e mostra no painel — cada cliente vê
     # a marca dele, não "Serenus" fixo.
-    # Varredura vai junto: a extensão já consulta isso a cada ~15min, então não
-    # precisa de mais um canal. O usuario_id vem por query — sem ele responde o
-    # geral (a extensão sem usuário configurado não deve varrer nada).
-    uid = request.args.get('usuario_id', type=int)
     conn2 = db()
     cfg = varredura_cfg(conn2)
-    pode, motivo = varredura_pode_agora(cfg, uid, conn2)
     close_db(conn2)
+    pode, motivo = False, 'nao_autenticado'
     varr = {k: cfg.get(k) for k in ('horas', 'max_rodada', 'intervalo_min',
                                     'hora_inicio', 'hora_fim', 'dias_uteis')}
     varr['pode_rodar'] = pode
