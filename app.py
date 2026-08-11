@@ -13795,6 +13795,76 @@ def _conferencia_mes(conn, mes):
 
 
 
+def _previsao_meses(conn, mes, quantos=6):
+    """Os próximos meses: o que entra, o que sai, e o que sobra.
+
+    Eu tinha escrito no estudo que previsão precisaria de dado que não existe.
+    Estava errado — o dado existe há meses, e nunca foi somado:
+
+      · comissão a receber já está em `parcelas` com competência futura;
+      · custo parcelado já grava N lançamentos, um por mês;
+      · fixo é o valor cadastrado do consultor, dois pagamentos por mês.
+
+    O fixo é o único CALCULADO em vez de lido: `gerar_fixo_mes` só cria os
+    lançamentos quando o mês chega. Projetar sem ele daria a impressão de que
+    sobra dinheiro que não sobra — e é justamente o erro que faz alguém
+    aprovar um custo em novembro achando que cabe.
+    """
+    ano, m = int(mes[:4]), int(mes[5:7])
+    meses = []
+    for k in range(1, quantos + 1):
+        t = (ano * 12 + (m - 1)) + k
+        meses.append('%04d-%02d' % (t // 12, t % 12 + 1))
+    if not meses:
+        return []
+    marca = ','.join(['?'] * len(meses))
+
+    entra = {}
+    for r in conn.execute(f"""
+            SELECT p.competencia AS c, COALESCE(SUM(p.valor_corretora), 0) AS v
+            FROM parcelas p JOIN propostas pr ON pr.id = p.proposta_id
+            WHERE p.competencia IN ({marca})
+              AND p.status <> 'Cancelada / Estornada'
+              AND COALESCE(pr.estornada, 0) = 0
+              AND COALESCE(pr.status, '') <> 'Excluída'
+            GROUP BY p.competencia""", meses).fetchall():
+        entra[dict(r)['c']] = float(dict(r)['v'] or 0)
+
+    sai = {}
+    for r in conn.execute(f"""
+            SELECT data_competencia AS c, COALESCE(SUM(valor), 0) AS v
+            FROM lancamentos WHERE tipo IN ('custo','fixo')
+              AND data_competencia IN ({marca})
+            GROUP BY data_competencia""", meses).fetchall():
+        sai[dict(r)['c']] = float(dict(r)['v'] or 0)
+
+    # O fixo que AINDA NÃO FOI GERADO. Sem isto, o mês que ninguém abriu
+    # aparece leve e mente.
+    fixo_mensal = 0.0
+    try:
+        fixo_mensal = float(conn.execute("""SELECT COALESCE(SUM(valor_fixo), 0) v FROM usuarios
+            WHERE ativo=1 AND regime_base='com_fixo_lead' AND COALESCE(valor_fixo,0)>0"""
+        ).fetchone()['v'] or 0)
+    except Exception:
+        fixo_mensal = 0.0
+    gerados = set()
+    for r in conn.execute(f"""SELECT DISTINCT data_competencia AS c FROM lancamentos
+            WHERE tipo='fixo' AND data_competencia IN ({marca})""", meses).fetchall():
+        gerados.add(dict(r)['c'])
+
+    fora = []
+    for c in meses:
+        ent = entra.get(c, 0.0)
+        lanc = sai.get(c, 0.0)
+        estimado = 0.0 if c in gerados else fixo_mensal
+        fora.append({'mes': c, 'entra': round(ent, 2),
+                     'sai': round(lanc + estimado, 2),
+                     'fixo_estimado': round(estimado, 2),
+                     'saldo': round(ent - lanc - estimado, 2)})
+    return fora
+
+
+
 @app.route('/financeiro')
 @login_required
 @admin_required
@@ -13996,6 +14066,7 @@ def financeiro():
     # `close_db` acontece logo abaixo; chamar isto dentro do render_template
     # usaria conexao fechada e a tela caia inteira.
     conferencia = _conferencia_mes(conn, mes)
+    previsao = _previsao_meses(conn, mes)
     close_db(conn)
 
     # O ROTULO ACOMPANHA O NUMERO. Um total que muda de valor sem dizer de que
@@ -14026,7 +14097,7 @@ def financeiro():
         saldo=saldo, dre=dre, saldo_socios=saldo_socios_lista, lancamento_focus=lancamento_focus,
         centros_custo=CENTROS_CUSTO, tipos_lancamento=TIPOS_LANCAMENTO,
         canais_midia=CANAIS_MIDIA, status_lancamento=STATUS_LANCAMENTO,
-        conferencia=conferencia,
+        conferencia=conferencia, previsao=previsao,
         calendario=calendario, cal_total=cal_total, cal_rotulo=_cal_rotulo,
         cal_livre=_cal_livre,
         filtros={'faixa': f_faixa, 'centro': f_centro, 'status_lanc': f_status,

@@ -103,6 +103,25 @@
 .conf-tag.ok { background:var(--verde-soft); color:var(--num-pos); }
 .conf-vazio { padding:16px 18px; font-size:12.5px; color:var(--cinza-2); }
 
+/* ── Previsão: um cartão por mês, clicável ───────────────────────────── */
+.prev-grade { display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr));
+              gap:1px; background:var(--borda); }
+.prev-mes { display:block; padding:14px 16px; background:var(--panel); text-decoration:none;
+            transition:background .12s ease; }
+.prev-mes:hover { background:var(--panel-2); }
+.prev-mes:focus-visible { outline:2px solid var(--teal); outline-offset:-2px; }
+/* Mes que aperta e o unico que precisa ser achado de longe. */
+.prev-mes.aperta { background:rgba(209,15,63,.05); }
+.pm-mes { font-size:10.5px; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
+          color:var(--cinza-2); }
+.pm-saldo { font-size:19px; font-weight:750; font-variant-numeric:tabular-nums;
+            letter-spacing:-.02em; margin:3px 0 7px; }
+.pm-l { display:flex; justify-content:space-between; gap:10px; font-size:11.5px;
+        color:var(--cinza-2); line-height:1.7; }
+.pm-l b { font-variant-numeric:tabular-nums; font-weight:650; }
+.pm-est { font-size:10.5px; color:var(--cinza-2); margin-top:6px; font-style:italic; }
+@media (prefers-reduced-motion:reduce) { .prev-mes { transition:none; } }
+
 .chip-fixo { display:inline-block; margin-left:7px; padding:1px 7px; border-radius:20px;
              font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
              background:rgba(139,92,246,.15); color:var(--roxo); vertical-align:middle; }
@@ -292,6 +311,40 @@
         aparecem aqui quando há propostas com vencimento cadastrado neste mês.</div>
       {% endif %}
     </div>
+
+    {# PREVISÃO: a quarta pergunta, "e nos próximos meses?".
+       O dado sempre existiu — comissão futura em parcelas, custo parcelado em
+       lançamentos — e nunca foi somado na mesma linha do tempo. O fixo é o
+       único calculado: ele só vira lançamento quando o mês chega, e sem ele o
+       mês que ninguém abriu apareceria leve e mentiria. #}
+    {% if previsao %}
+    <div class="card conf" style="margin-bottom:14px;">
+      <div class="conf-topo">
+        <div>
+          <b>Próximos meses</b>
+          <div class="conf-sub">Comissão já contratada contra o que já está lançado.</div>
+        </div>
+      </div>
+      <div class="prev-grade">
+        {% for p in previsao %}
+        <a class="prev-mes {{ 'aperta' if p.saldo < 0 else '' }}" href="/financeiro?mes={{ p.mes }}">
+          <div class="pm-mes">{{ p.mes }}</div>
+          <div class="pm-saldo {{ 'neg' if p.saldo < 0 else 'pos' }}">{{ p.saldo|moeda }}</div>
+          <div class="pm-l"><span>entra</span><b class="pos">{{ p.entra|moeda }}</b></div>
+          <div class="pm-l"><span>sai</span><b class="neg">{{ p.sai|moeda }}</b></div>
+          {% if p.fixo_estimado > 0.005 %}
+          <div class="pm-est">inclui {{ p.fixo_estimado|moeda }} de fixo estimado</div>
+          {% endif %}
+        </a>
+        {% endfor %}
+      </div>
+      <div class="conf-vazio" style="border-top:1px solid var(--borda);">
+        Só entra o que já está contratado ou lançado. Venda nova e custo que ainda
+        não foi lançado não aparecem aqui — <b>o mês real tende a ser melhor na
+        entrada e pior na saída</b> do que esta previsão.
+      </div>
+    </div>
+    {% endif %}
 
     <div class="card">
       <div class="card-header"><h3>Comissões a receber por mês</h3></div>
