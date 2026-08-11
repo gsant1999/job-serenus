@@ -11378,6 +11378,15 @@ def proposta_fase(pid):
     p = conn.execute("SELECT fase,contrato_arquivo,comprovante_boleto FROM propostas WHERE id=?", (pid,)).fetchone()
     if not p: close_db(conn); return jsonify({"ok": False}), 404
     fase_info = next((f for f in FASES if f['id']==nova), None)
+    # ANTES: fase_info so decidia o AVISO de comprovante — mesmo None (fase
+    # que nao existe em FASES), o UPDATE seguia gravando o valor bruto. Uma
+    # fase inexistente (erro de digitacao, campo com bug) entrava no banco e
+    # ficava invisivel pra badge/filtro/relatorio que so conhecem a lista
+    # oficial — a proposta sumia das telas sem erro nenhum.
+    if not fase_info:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "fase_invalida",
+                        "mensagem": "Essa fase não existe."}), 400
     aviso = ''
     if fase_info and fase_info['falta']=='comprovante' and not p['comprovante_boleto']:
         aviso = 'Atenção: esta proposta ainda está sem comprovante anexado. Você pode prosseguir, mas lembre de anexar quando a operadora aprovar.'

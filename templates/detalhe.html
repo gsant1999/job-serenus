@@ -1070,6 +1070,7 @@ async function mudarFase() {
   const r=await fetch(`/proposta/${PROP_ID}/fase`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fase})});
   const d=await r.json();
   if(d.ok){document.getElementById('fase-atual').textContent=fase;if(d.aviso){const a=document.getElementById('aviso-fase');a.textContent=''+d.aviso;a.style.display='block';}toast('Fase atualizada','ok');carregarTimeline();}
+  else{toast(d.mensagem||'Não consegui mudar a fase','err');}
 }
 
 // ── EDIÇÃO ──
