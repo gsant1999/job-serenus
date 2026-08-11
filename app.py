@@ -35849,6 +35849,7 @@ def webhook_corrigir_datas():
 
 @app.route('/admin/crm/corrigir-leads', methods=['POST'])
 @login_required
+@admin_required
 def admin_crm_corrigir_leads():
     """
     Corrige retroativamente leads importados:
@@ -35856,8 +35857,6 @@ def admin_crm_corrigir_leads():
     2. Corrige criado_em com base na atividade de criação (que tem a data real)
     Roda apenas para leads com responsavel_id IS NULL ou criado_em = data de hoje
     """
-    if session.get('perfil') != 'admin':
-        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
 
     conn = db()
     try:
