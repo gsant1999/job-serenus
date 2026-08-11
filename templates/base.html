@@ -830,6 +830,31 @@
 {% endif %}
 
 <style>
+  /* A FAIXA DE AVISO MORA AQUI, E SO AQUI.
+     Cada tela que precisava dizer "deu certo" ou "deu errado" escrevia a
+     propria faixa: quatro copias, tres nomes diferentes pra mesma coisa
+     (alert-err, alert-erro) e uma delas com as cores cravadas no meio do
+     JavaScript. Essa ultima nasceu com a cor do tema escuro e, no tema claro,
+     dava 1,43:1 — o aviso de "sessao revogada" estava na tela e nao dava pra
+     ler. Aviso ilegivel e o mesmo que aviso nenhum.
+     O defeito nao foi de quem escreveu: com quatro copias, cada faixa nova tem
+     a mesma chance de nascer errada. Uma definicao so acaba com a classe
+     inteira de erro. `alert-erro` continua valendo como apelido de
+     `alert-err` — as duas grafias ja estao espalhadas pelas telas e trocar
+     todas seria mexer onde nao precisa. */
+  .alert, .alert-ok, .alert-err, .alert-erro {
+    padding:13px 16px; border-radius:9px; font-size:13.5px; line-height:1.5;
+    margin-bottom:14px; border:1px solid transparent;
+  }
+  .alert-ok { background:var(--verde-soft); color:var(--verde); border-color:var(--verde); }
+  .alert-err, .alert-erro { background:rgba(244,63,94,.1); color:var(--erro); border-color:var(--erro); }
+  /* Sobre branco o --verde do tema claro (#17a882) fica no limite pra texto
+     pequeno: 2,67:1. So o texto da faixa escurece — a cor de marca continua a
+     mesma em todo o resto. */
+  [data-theme="light"] .alert-ok { color:#0a7d5f; background:rgba(23,168,130,.12); }
+</style>
+
+<style>
   /* Ícone de informação: todo termo que é jargão do sistema (e não do negócio)
      ganha um "i" VISÍVEL do lado, não um tooltip escondido no hover do
      elemento. Quem usa o JOB é consultor de plano de saúde — dado que ninguém
