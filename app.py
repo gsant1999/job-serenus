@@ -13213,7 +13213,16 @@ def usuario_regenerar(uid):
         
         token = secrets.token_urlsafe(32)
         expira = (datetime.now(TZ_SP) + timedelta(days=7)).isoformat()
-        cur.execute("UPDATE usuarios SET token_setup=?, token_expira=?, senha_hash=NULL WHERE id=?", 
+        # NÃO zera senha_hash aqui. Isto só gera o link — quem entrega pro
+        # usuário é o admin, manualmente, depois. Zerar na hora derrubava a
+        # senha ATUAL antes de o link sequer sair da tela: se o admin
+        # esquecesse de mandar (aba fechada, distração), o usuário ficava sem
+        # conseguir logar com a senha antiga e sem link novo em mãos. Mantendo
+        # a senha antiga válida até o setup novo ser concluído, "regenerar
+        # link" vira uma ação só de adicionar um caminho, nunca de tirar o que
+        # já funcionava — /setup/<token> substitui o hash quando o usuário de
+        # fato define a senha nova.
+        cur.execute("UPDATE usuarios SET token_setup=?, token_expira=? WHERE id=?",
                     (token, expira, uid))
         conn.commit()
         close_db(conn)
