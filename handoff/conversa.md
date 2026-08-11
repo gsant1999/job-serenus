@@ -2211,3 +2211,44 @@ fixo marcado.
 
 **A aba "Fixo dos consultores" continua existindo**, como o estudo previu. Ela
 some quando virar linha do DRE — não agora.
+
+---
+
+## 10/08/2026 — Claude: passo 3 no ar, e um aviso sobre o dossiê
+
+**Conferência do mês** entrou: `_conferencia_mes()` em `app.py`, logo acima da
+rota `/financeiro`. Duas linhas na `financeiro()` — a chamada (antes do
+`close_db`, senão a tela cai com conexão fechada) e o argumento no
+`render_template`. Escrita como função separada de propósito, pra você rebasear
+por cima sem conflito.
+
+Ela usa **o mesmo filtro** das somas do topo (cancelada, estornada, excluída).
+Se divergir de lá, a conferência vira mais uma versão da verdade — que é
+exatamente o problema que ela existe pra resolver.
+
+### Sobre o dossiê das extensões
+
+A análise melhorou, e a parte de ler os módulos internos em vez do HTML está
+certa. Mas há dois problemas antes de virar plano:
+
+**1. Você leu a versão 3.21.0. A extensão está na 4.55.0.** As linhas citadas
+não são as que rodam hoje, e boa parte do trabalho de desempenho que você
+propõe já foi feito depois daquele pacote.
+
+**2. Não há medição.** A extensão mede o que ela mesma custa — total e pior
+caso — e mostra em Configurações → Diagnóstico. Ninguém olhou. Antes de
+reescrever o coração dela, o número decide: pior caso abaixo de 50ms e o
+problema não é nosso; acima de 200ms e você tem razão.
+
+E uma correção técnica: **"observar só o painel do título, sem subtree"
+quebraria o que foi consertado hoje.** O botão de documento mora DENTRO da
+bolha, e o WhatsApp redesenha o interior das bolhas ao rolar — levando nosso
+bloco junto. Sem `subtree`, não ficamos sabendo e o botão some pra sempre. Foi
+literalmente o defeito da manhã de hoje.
+
+### E a fila de cotação não existe
+
+Você anunciou sete rotas funcionais e tabela criada. Conferi o `main`: zero
+ocorrências de `cotacao_fila` e `trabalhador_cotacao`. O trabalho não virou
+commit. Não é cobrança — é que ninguém pode seguir achando que aquilo está de
+pé. O contrato continua em `contrato-fila-de-cotacao-servidor.md`.

@@ -74,6 +74,66 @@ for metodo, url in [('GET', '/api/whatsapp/extensao/modelos'),
 if not falhas:
     print('ok: as rotas criticas respondem o status certo')
 
+
+# ── 4. O QUE JA FOI CONQUISTADO NAO PODE SUMIR EM SILENCIO ──────────────────
+#
+# Guilherme, 10/08/2026: *"o que mais me incomoda e que as coisas somem e voce
+# nao sabe que sumiu, ou alguem apaga e voce nao sabe quem apagou. Eu tenho que
+# ficar me preocupando com tudo."*
+#
+# Esta lista existe pra ele nao precisar. Cada item aqui e uma funcao que
+# custou trabalho pra ficar certa e que, se desaparecer num recorte, num
+# `git reset`, num script de substituicao ou numa mao errada, some CALADA — o
+# app continua subindo, as rotas continuam respondendo, e ninguem descobre ate
+# alguem tentar usar.
+#
+# COMO USAR: quando uma funcao ficar pronta e importar, acrescente aqui. Um
+# item a mais custa milissegundos; um item a menos custa um dia de conversa
+# achando que voce esta ficando louco.
+#
+# ROTA que sumiu = funcao inteira que sumiu. FUNCAO com nome citado = a peca
+# interna que faz aquilo funcionar (nome do arquivo, tipo do documento, etc).
+ROTAS_QUE_NAO_PODEM_SUMIR = [
+    # Documentos do lead: ler, classificar e baixar renomeado. Esta e a
+    # corrente que transforma foto de RG no WhatsApp em proposta preenchida.
+    ('/lead/<int:lid>/documentos.zip', 'baixar os documentos do lead ja renomeados'),
+    ('/api/whatsapp/documentos/tipo', 'confirmar tipo e titularidade do documento, pela extensao'),
+    ('/lead/documento/tipo', 'confirmar tipo e titularidade do documento, pelo site'),
+    # Cotacao: o link do cliente e imutavel e a correcao de valor mantem o link.
+    ('/c/<token>', 'a pagina publica da cotacao'),
+    ('/cotacao/<int:cid>/ajustar', 'corrigir valor sem trocar o link do cliente'),
+    ('/cotacao/documento/<int:cid>', 'o documento da cotacao'),
+    # Financeiro: a tela que mostra dinheiro.
+    ('/financeiro', 'a tela do financeiro'),
+    # Extensao: o que as cinco consultoras usam o dia inteiro.
+    ('/api/whatsapp/analisar', 'a analise da conversa'),
+    ('/api/whatsapp/cotador/hashes', 'o aprendizado do cotador compartilhado entre as oito'),
+]
+FUNCOES_QUE_NAO_PODEM_SUMIR = [
+    ('_DOC_TIPOS', 'o catalogo de tipos de documento'),
+    ('_DOC_ROTULO', 'o rotulo que vira o NOME do arquivo baixado'),
+    ('_doc_nome_final', 'o nome final do arquivo, com titular/dependente e parentesco'),
+    ('_conferencia_mes', 'previsto x recebido, proposta por proposta'),
+    ('_previsao_meses', 'a previsao dos proximos meses'),
+    ('_limpar_url', 'o filtro de PII antes de mandar erro pro Sentry'),
+    ('_lanc_faixa_where', 'o filtro de vencimento do financeiro'),
+]
+
+_regras = {str(r) for r in app.app.url_map.iter_rules()}
+for caminho, oque in ROTAS_QUE_NAO_PODEM_SUMIR:
+    if caminho not in _regras:
+        erro('a rota %s SUMIU (%s)' % (caminho, oque),
+             'Ela existia e alguem tirou. Se foi de proposito, remova desta '
+             'lista no mesmo commit — explicando por que. Se nao foi, '
+             'procure no `git log -p` quem levou.')
+for nome, oque in FUNCOES_QUE_NAO_PODEM_SUMIR:
+    if not hasattr(app, nome):
+        erro('%s SUMIU do app.py (%s)' % (nome, oque),
+             'Mesma regra: some de proposito com a linha removida daqui no '
+             'mesmo commit, ou nao some.')
+if not falhas:
+    print('ok: nada do que ja funcionava desapareceu')
+
 if falhas:
     print('\n%d verificacao(oes) falharam.' % len(falhas))
     sys.exit(1)

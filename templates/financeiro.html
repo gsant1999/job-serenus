@@ -29,8 +29,8 @@
                   color:var(--cinza-2); }
 .fin-saldo .num { font-family:'Sora',sans-serif; font-size:34px; font-weight:700; line-height:1.12;
                   letter-spacing:-.025em; font-variant-numeric:tabular-nums; margin-top:4px; }
-.fin-saldo.ok .num   { color:var(--verde); }
-.fin-saldo.ruim .num { color:var(--rosa); }
+.fin-saldo.ok .num   { color:var(--num-pos); }
+.fin-saldo.ruim .num { color:var(--num-neg); }
 .fin-saldo .pe { font-size:11.5px; color:var(--cinza-2); margin-top:6px; line-height:1.4; }
 .fin-mini { border:1px solid var(--borda); border-radius:14px; background:var(--panel-2);
             padding:6px 16px; display:flex; flex-direction:column; justify-content:center; }
@@ -38,7 +38,7 @@
                padding:8px 0; border-top:1px solid var(--borda); }
 .fin-mini .m:first-child { border-top:none; }
 .fin-mini .m span { font-size:12px; color:var(--cinza); }
-.fin-mini .m b { font-size:13.5px; font-weight:650; font-variant-numeric:tabular-nums; }
+.fin-mini .m b { font-size:14px; font-weight:700; font-variant-numeric:tabular-nums; }
 .tbl { width:100%; border-collapse:collapse; }
 .tbl th { text-align:left; font-size:10.5px; color:var(--cinza-2); text-transform:uppercase; letter-spacing:.4px; padding:10px 12px; border-bottom:1px solid var(--borda-2); white-space:nowrap; }
 .tbl td { padding:11px 12px; border-bottom:1px solid var(--borda); font-size:13px; }
@@ -46,7 +46,7 @@
    isso a virgula dança de linha pra linha e comparar dois valores vira
    leitura algarismo por algarismo. */
 .tbl td.td-valor, .tbl td.pos, .tbl td.neg { font-variant-numeric:tabular-nums; }
-.tbl td.td-valor { text-align:right; }
+.tbl td.td-valor { text-align:right; font-weight:650; }
 .tbl th.th-valor { text-align:right; }
 .tbl tr:last-child td { border-bottom:none; }
 /* A tabela de custos tem muitas colunas (com botões que não podem quebrar
@@ -60,13 +60,68 @@
 .mes-nav { display:flex; align-items:center; gap:12px; margin-bottom:18px; }
 .mes-nav input { padding:9px 12px; }
 .add-row { display:grid; gap:10px; align-items:end; margin-bottom:14px; padding:16px; background:var(--panel-2); border:1px solid var(--borda); border-radius:12px; }
-.pos { color:var(--teal); } .neg { color:var(--rosa); }
+/* ── DINHEIRO TEM COR PRÓPRIA, e ela é forte ─────────────────────────────
+   `.pos` usava `--teal`, e --teal NÃO É REDEFINIDO no tema claro: fica com o
+   verde-menta do escuro, que sobre branco vira pastel. Justamente o número
+   que a pessoa veio ler era o mais apagado da tela.
+   Estes dois tons existem só para número de dinheiro. No claro são saturados
+   e escuros o bastante para ler à distância; no escuro, luminosos. Não são
+   usados em fundo, borda ou ícone — cor de dinheiro só pinta dinheiro. */
+:root { --num-pos:#0a8f5a; --num-neg:#d10f3f; }
+@media (prefers-color-scheme: dark) { :root { --num-pos:#1fd8a4; --num-neg:#ff4d79; } }
+:root[data-theme="light"] { --num-pos:#0a8f5a; --num-neg:#d10f3f; }
+:root[data-theme="dark"]  { --num-pos:#1fd8a4; --num-neg:#ff4d79; }
+.pos { color:var(--num-pos); font-weight:650; }
+.neg { color:var(--num-neg); font-weight:650; }
 .badge-status { display:inline-block; padding:2px 9px; border-radius:20px; font-size:11px; font-weight:600; }
 .badge-previsto { background:rgba(250,204,21,.14); color:var(--amarelo,#facc15); }
-.badge-pago { background:var(--verde-soft); color:var(--verde); }
+.badge-pago { background:var(--verde-soft); color:var(--num-pos); }
 .socio-row { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid var(--borda); }
 .socio-row:last-child { border-bottom:none; }
 /* Marca discreta: diz a origem sem competir com a descrição. */
+/* ── Conferência: previsto × recebido ────────────────────────────────── */
+.conf { padding:0; }
+.conf-topo { display:flex; justify-content:space-between; align-items:flex-start;
+             flex-wrap:wrap; gap:16px; padding:16px 18px 14px;
+             border-bottom:1px solid var(--borda); }
+.conf-topo b { font-size:14px; }
+.conf-sub { font-size:11.5px; color:var(--cinza-2); margin-top:3px; }
+.conf-nums { display:flex; gap:22px; flex-wrap:wrap; }
+.cn { display:flex; flex-direction:column; align-items:flex-end; }
+.cn span { font-size:10px; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
+           color:var(--cinza-2); }
+.cn b { font-size:17px; font-weight:750; font-variant-numeric:tabular-nums; margin-top:2px; }
+/* "Falta entrar" e a razao de a tela existir, entao e o maior dos tres. */
+.cn.destaque b { font-size:22px; letter-spacing:-.02em; }
+.conf-link { color:var(--texto); font-weight:650; text-decoration:none;
+             border-bottom:1px solid var(--borda-2); }
+.conf-link:hover { color:var(--info); border-bottom-color:currentColor; }
+.conf-qtd { display:block; font-size:11px; color:var(--cinza-2); margin-top:2px; }
+.conf-tag { display:inline-block; padding:2px 9px; border-radius:20px; font-size:10.5px;
+            font-weight:700; }
+.conf-tag.falta { background:rgba(209,15,63,.12); color:var(--num-neg); }
+.conf-tag.ok { background:var(--verde-soft); color:var(--num-pos); }
+.conf-vazio { padding:16px 18px; font-size:12.5px; color:var(--cinza-2); }
+
+/* ── Previsão: um cartão por mês, clicável ───────────────────────────── */
+.prev-grade { display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr));
+              gap:1px; background:var(--borda); }
+.prev-mes { display:block; padding:14px 16px; background:var(--panel); text-decoration:none;
+            transition:background .12s ease; }
+.prev-mes:hover { background:var(--panel-2); }
+.prev-mes:focus-visible { outline:2px solid var(--teal); outline-offset:-2px; }
+/* Mes que aperta e o unico que precisa ser achado de longe. */
+.prev-mes.aperta { background:rgba(209,15,63,.05); }
+.pm-mes { font-size:10.5px; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
+          color:var(--cinza-2); }
+.pm-saldo { font-size:19px; font-weight:750; font-variant-numeric:tabular-nums;
+            letter-spacing:-.02em; margin:3px 0 7px; }
+.pm-l { display:flex; justify-content:space-between; gap:10px; font-size:11.5px;
+        color:var(--cinza-2); line-height:1.7; }
+.pm-l b { font-variant-numeric:tabular-nums; font-weight:650; }
+.pm-est { font-size:10.5px; color:var(--cinza-2); margin-top:6px; font-style:italic; }
+@media (prefers-reduced-motion:reduce) { .prev-mes { transition:none; } }
+
 .chip-fixo { display:inline-block; margin-left:7px; padding:1px 7px; border-radius:20px;
              font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
              background:rgba(139,92,246,.15); color:var(--roxo); vertical-align:middle; }
@@ -208,6 +263,89 @@
 
   <!-- COMISSÕES FUTURAS -->
   <div class="fin-pane active" id="pane-futuras">
+    {# CONFERÊNCIA DO MÊS: previsto × recebido, proposta por proposta.
+       Era a pergunta sem resposta da tela. Existia o total do mês e mais nada —
+       quando o número assustava, não havia caminho DE DENTRO daqui pra
+       descobrir de quem era. Foi o que aconteceu com a comissão inflada: a
+       resposta só veio por auditoria fora do sistema.
+       Quem não recebeu vem primeiro: a tela existe pra achar o que falta. #}
+    <div class="card conf" style="margin-bottom:14px;">
+      <div class="conf-topo">
+        <div>
+          <b>Conferência de {{ mes }}</b>
+          <div class="conf-sub">O que era pra entrar, e o que entrou de fato.</div>
+        </div>
+        <div class="conf-nums">
+          <div class="cn"><span>Previsto</span><b>{{ conferencia.prev|moeda }}</b></div>
+          <div class="cn"><span>Recebido</span><b class="pos">{{ conferencia.receb|moeda }}</b></div>
+          <div class="cn destaque"><span>Falta entrar</span>
+            <b class="{{ 'neg' if conferencia.falta > 0.005 else 'pos' }}">{{ conferencia.falta|moeda }}</b></div>
+        </div>
+      </div>
+      {% if conferencia.itens %}
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr><th>Proposta</th><th>Consultor</th><th>Operadora</th>
+            <th class="th-valor">Previsto</th><th class="th-valor">Recebido</th>
+            <th class="th-valor">Falta</th><th></th></tr></thead>
+          <tbody>
+            {% for i in conferencia.itens %}
+            <tr>
+              <td><a class="conf-link" href="/proposta/{{ i.proposta_id }}">{{ i.razao_social or ('Proposta ' ~ i.proposta_id) }}</a>
+                <span class="conf-qtd">{{ i.qtd }} parcela{{ '' if i.qtd == 1 else 's' }}</span></td>
+              <td style="font-size:12.5px;">{{ i.consultor or '—' }}</td>
+              <td style="font-size:12.5px;">{{ i.adm_operadora or '—' }}</td>
+              <td class="td-valor">{{ i.prev|moeda }}</td>
+              <td class="td-valor pos">{{ i.receb|moeda }}</td>
+              <td class="td-valor {{ 'neg' if i.falta > 0.005 else '' }}">{{ i.falta|moeda }}</td>
+              <td style="white-space:nowrap;">
+                {% if i.falta > 0.005 %}<span class="conf-tag falta">falta entrar</span>
+                {% else %}<span class="conf-tag ok">recebido</span>{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="conf-vazio">Nenhuma comissão com competência em {{ mes }}. As parcelas
+        aparecem aqui quando há propostas com vencimento cadastrado neste mês.</div>
+      {% endif %}
+    </div>
+
+    {# PREVISÃO: a quarta pergunta, "e nos próximos meses?".
+       O dado sempre existiu — comissão futura em parcelas, custo parcelado em
+       lançamentos — e nunca foi somado na mesma linha do tempo. O fixo é o
+       único calculado: ele só vira lançamento quando o mês chega, e sem ele o
+       mês que ninguém abriu apareceria leve e mentiria. #}
+    {% if previsao %}
+    <div class="card conf" style="margin-bottom:14px;">
+      <div class="conf-topo">
+        <div>
+          <b>Próximos meses</b>
+          <div class="conf-sub">Comissão já contratada contra o que já está lançado.</div>
+        </div>
+      </div>
+      <div class="prev-grade">
+        {% for p in previsao %}
+        <a class="prev-mes {{ 'aperta' if p.saldo < 0 else '' }}" href="/financeiro?mes={{ p.mes }}">
+          <div class="pm-mes">{{ p.mes }}</div>
+          <div class="pm-saldo {{ 'neg' if p.saldo < 0 else 'pos' }}">{{ p.saldo|moeda }}</div>
+          <div class="pm-l"><span>entra</span><b class="pos">{{ p.entra|moeda }}</b></div>
+          <div class="pm-l"><span>sai</span><b class="neg">{{ p.sai|moeda }}</b></div>
+          {% if p.fixo_estimado > 0.005 %}
+          <div class="pm-est">inclui {{ p.fixo_estimado|moeda }} de fixo estimado</div>
+          {% endif %}
+        </a>
+        {% endfor %}
+      </div>
+      <div class="conf-vazio" style="border-top:1px solid var(--borda);">
+        Só entra o que já está contratado ou lançado. Venda nova e custo que ainda
+        não foi lançado não aparecem aqui — <b>o mês real tende a ser melhor na
+        entrada e pior na saída</b> do que esta previsão.
+      </div>
+    </div>
+    {% endif %}
+
     <div class="card">
       <div class="card-header"><h3>Comissões a receber por mês</h3></div>
       <div class="tbl-wrap">
@@ -331,7 +469,7 @@
                       color:var(--cinza-2);">{{ cal_rotulo }}</div>
           <div style="font-size:29px; font-weight:700; line-height:1.1; margin-top:2px;
                       letter-spacing:-.02em; font-variant-numeric:tabular-nums;
-                      color:{{ 'var(--rosa)' if _venc else 'var(--verde)' }};">{{ cal_total|moeda }}</div>
+                      color:{{ 'var(--num-neg)' if _venc else 'var(--num-pos)' }};">{{ cal_total|moeda }}</div>
         </div>
       </div>
       {% if cal_livre %}
