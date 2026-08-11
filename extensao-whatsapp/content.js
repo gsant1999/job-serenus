@@ -1699,7 +1699,12 @@
   // Trava de tempo pra nao virar enxurrada: o portao e reconferido a cada
   // mudanca de storage e a cada volta pra aba.
   let _ultimaConfirmacao = 0;
-  const _CONFIRMA_CADA_MS = 120000;
+  // 30s, nao 2 minutos. O Guilherme reparou: revogado no site, a extensao
+  // seguia aberta no WhatsApp. Dois minutos de "conectado" depois de
+  // desconectado sao dois minutos em que a tela mente. Trinta segundos e uma
+  // chamada de nada — /ping devolve tres campos — e abrir o painel confere na
+  // hora, sem esperar relogio nenhum.
+  const _CONFIRMA_CADA_MS = 30000;
   async function _confirmarSessaoNoServidor(forcar) {
     const agora = Date.now();
     if (!forcar && agora - _ultimaConfirmacao < _CONFIRMA_CADA_MS) return;
@@ -1983,6 +1988,9 @@
   }
 
   async function abrirSecao(secao) {
+    // Abrir o painel e o momento em que a pessoa vai usar: confere AGORA, sem
+    // respeitar a trava de tempo. E aqui que ela descobriria do jeito ruim.
+    _confirmarSessaoNoServidor(true);
     _secaoAtiva = secao;
     document.querySelectorAll('.job-trilho-item').forEach((i) =>
       i.classList.toggle('job-trilho-item-ativo', i.dataset.secao === secao));
