@@ -23549,7 +23549,7 @@ def api_wa_cotacao_fila_status(cid):
     
     # Desempacota etapa
     etapa_nome = item['etapa'] or ''
-    fracao = item.get('fracao') or 0.0
+    fracao = item['fracao'] if 'fracao' in item.keys() else 0.0
     
     import json
     resultado_obj = None
@@ -23582,7 +23582,8 @@ def api_wa_cotacao_fila_cancelar(cid):
         close_db(conn)
         return _wa_cors(jsonify({"ok": False}))
         
-    conn.execute("UPDATE cotacao_fila SET estado='cancelado' WHERE id=?", (cid,))
+    agora_txt = datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S')
+    conn.execute("UPDATE cotacao_fila SET estado='cancelado', terminado_em=? WHERE id=?", (agora_txt, cid))
     conn.commit()
     close_db(conn)
     return _wa_cors(jsonify({"ok": True}))
