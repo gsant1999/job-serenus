@@ -15618,6 +15618,24 @@ def api_propostas():
     return jsonify(saida)
 
 
+_BI_RATE_LIMIT = {}  # {api_key: [timestamp, ...]}
+_BI_RATE_JANELA_S = 60
+_BI_RATE_MAX = 30  # por chave, por janela — folgado pro uso normal (Power BI/Sheets pagina em loop)
+
+
+def _bi_rate_limit_ok(chave):
+    """Se a API_KEY_BI vazar, isto impede raspar a base inteira numa rajada —
+    não substitui rotacionar a chave, só encarece o ataque."""
+    agora = time.time()
+    hist = [t for t in _BI_RATE_LIMIT.get(chave, []) if agora - t < _BI_RATE_JANELA_S]
+    if len(hist) >= _BI_RATE_MAX:
+        _BI_RATE_LIMIT[chave] = hist
+        return False
+    hist.append(agora)
+    _BI_RATE_LIMIT[chave] = hist
+    return True
+
+
 @app.route('/api/bi/propostas')
 def api_bi_propostas():
     """Power BI endpoint — propostas com filtros, sem login. Requer API_KEY no header."""
@@ -15625,6 +15643,8 @@ def api_bi_propostas():
     expected_key = os.environ.get('API_KEY_BI', '')
     if not _token_bate(api_key, expected_key):
         return jsonify({"erro": "API_KEY inválida ou não configurada"}), 401
+    if not _bi_rate_limit_ok(api_key):
+        return jsonify({"erro": "Muitas requisições — aguarde um minuto"}), 429
 
     # Filtros opcionais
     data_inicio = request.args.get('data_inicio', '').strip()  # YYYY-MM-DD
@@ -15689,10 +15709,15 @@ def api_bi_comissoes():
     expected_key = os.environ.get('API_KEY_BI', '')
     if not _token_bate(api_key, expected_key):
         return jsonify({"erro": "API_KEY inválida ou não configurada"}), 401
+    if not _bi_rate_limit_ok(api_key):
+        return jsonify({"erro": "Muitas requisições — aguarde um minuto"}), 429
 
     f_competencia = request.args.get('competencia', '').strip()
     f_consultor = request.args.get('consultor', '').strip()
     f_status = request.args.get('status', '').strip()
+    pagina = max(int(request.args.get('pagina', 1) or 1), 1)
+    limit = min(max(int(request.args.get('limit', 200) or 200), 1), 500)  # max 500/página
+    offset = (pagina - 1) * limit
 
     conn = db()
     # JOIN parcelas + propostas (dados do negócio)
@@ -15761,10 +15786,15 @@ def api_bi_comissoes():
         else:
             rs['total_pendente'] = round(rs['total_pendente'] + linha['valor_comissao'], 2)
 
+    total_parcelas = len(detalhado)
     return jsonify({
         'gerado_em': datetime.now(TZ_SP).strftime('%d/%m/%Y %H:%M:%S'),
-        'total_parcelas': len(detalhado),
-        'detalhado': detalhado,
+        'total_parcelas': total_parcelas,
+        'pagina': pagina,
+        'limit': limit,
+        # 'detalhado' pagina (evita raspar tudo numa chamada só); 'resumo' é
+        # agregado, cobre sempre o total filtrado, não só a página atual.
+        'detalhado': detalhado[offset:offset + limit],
         'resumo': sorted(resumo.values(), key=lambda x: (x['consultor'], x['competencia'])),
     })
 
@@ -15782,6 +15812,11 @@ def api_bi_regras():
     expected_key = os.environ.get('API_KEY_BI', '')
     if not _token_bate(api_key, expected_key):
         return jsonify({"erro": "API_KEY inválida ou não configurada"}), 401
+    if not _bi_rate_limit_ok(api_key):
+        return jsonify({"erro": "Muitas requisições — aguarde um minuto"}), 429
+    pagina = max(int(request.args.get('pagina', 1) or 1), 1)
+    limit = min(max(int(request.args.get('limit', 500) or 500), 1), 500)
+    offset = (pagina - 1) * limit
 
     def g(r, k):
         return (r[k] if hasattr(r, 'keys') else None)
@@ -15836,8 +15871,12 @@ def api_bi_regras():
 
     return jsonify({
         'gerado_em': datetime.now(TZ_SP).strftime('%d/%m/%Y %H:%M:%S'),
-        'recebimento': {'colunas': rec_colunas, 'linhas': rec_linhas},
-        'repasse': {'colunas': rep_colunas, 'linhas': rep_linhas},
+        'pagina': pagina,
+        'limit': limit,
+        'recebimento': {'total_linhas': len(rec_linhas), 'colunas': rec_colunas,
+                         'linhas': rec_linhas[offset:offset + limit]},
+        'repasse': {'total_linhas': len(rep_linhas), 'colunas': rep_colunas,
+                    'linhas': rep_linhas[offset:offset + limit]},
     })
 
 
