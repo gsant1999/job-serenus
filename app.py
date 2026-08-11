@@ -2213,6 +2213,21 @@ def init_db():
             ultimo_uso TIMESTAMP,
             revogado_em TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS cotacao_fila (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id INTEGER NOT NULL,
+            sessao_id INTEGER,
+            pedido_json TEXT NOT NULL,
+            estado TEXT NOT NULL,
+            resultado_json TEXT,
+            erro TEXT,
+            etapa TEXT,
+            criado_em TIMESTAMP NOT NULL,
+            pegado_em TIMESTAMP,
+            terminado_em TIMESTAMP,
+            trabalhador_sessao INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS ix_cotacao_fila_estado ON cotacao_fila(estado, id);
         CREATE TABLE IF NOT EXISTS whatsapp_extensao_fila (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             lead_id INTEGER,
@@ -2815,6 +2830,7 @@ def init_db():
     
     # Novas colunas (agosto 2026):
     add_col('cotacao_salva', 'cidade', 'TEXT')
+    add_col('extensao_sessao', 'trabalhador_cotacao', 'INTEGER DEFAULT 0')
     add_col('cotacao_salva', 'modalidades', 'TEXT')
     add_col('crm_leads', 'auditado_em', 'TIMESTAMP')
     add_col('cotacao_tabela', 'administradora', 'TEXT')
