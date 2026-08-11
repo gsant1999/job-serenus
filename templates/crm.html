@@ -1552,7 +1552,10 @@ function buscarLeadsAgora(btn){
       if (d.ok) {
         if (d.importados > 0) { toast(d.importados + ' novo(s) lead(s) importado(s)!', 'ok'); setTimeout(()=>location.reload(), 900); }
         else { toast('Nenhum lead novo nas planilhas (já estavam todos no sistema).', 'ok'); }
-      } else { toast('Erro ao buscar leads.', 'err'); }
+      // 'ja_importando': a importação automática (a cada 15min, ou a rede de
+      // segurança por request) já está rodando — a mensagem específica diz
+      // isso em vez do genérico "erro", porque não é erro, é esperar um pouco.
+      } else { toast(d.mensagem || 'Erro ao buscar leads.', 'err'); }
     })
     .catch(() => { btn.disabled = false; btn.textContent = txt; toast('Erro de conexão.', 'err'); });
 }

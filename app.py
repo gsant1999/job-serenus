@@ -32864,7 +32864,26 @@ def _tempo_relativo(quando):
 def crm_importar_agora():
     """Dispara a importação de leads das planilhas imediatamente (botão no CRM).
     Substitui a necessidade de abrir o Apps Script do Google manualmente."""
-    importados, duplicados = _importar_leads_automatico()
+    # MESMO CADEADO DO PULL AUTOMATICO.
+    #
+    # O pull automatico (a cada 15min, ou por request com throttle de 10min)
+    # roda em thread separada e segura `_AUTO_PULL_LOCK` enquanto importa. Este
+    # botao chamava `_importar_leads_automatico()` direto, sem tocar no
+    # cadeado — se alguem clicasse enquanto o pull automatico estivesse no
+    # meio, as duas rodavam a mesma planilha ao mesmo tempo. O dedup e
+    # "SELECT depois INSERT", sem UNIQUE em telefone_norm: as duas podiam
+    # checar "nao existe" ao mesmo tempo e o mesmo lead entrava duas vezes.
+    #
+    # `blocking=False`: se o automatico ja esta rodando, este pedido nao
+    # espera nem dispara por cima — avisa e devolve, e o proprio automatico
+    # ja ia trazer o mesmo lead minutos depois de qualquer forma.
+    if not _AUTO_PULL_LOCK.acquire(blocking=False):
+        return jsonify({'ok': False, 'erro': 'ja_importando',
+                        'mensagem': 'Já existe uma importação em andamento. Aguarde alguns segundos e tente de novo.'}), 409
+    try:
+        importados, duplicados = _importar_leads_automatico()
+    finally:
+        _AUTO_PULL_LOCK.release()
     return jsonify({'ok': True, 'importados': importados, 'duplicados': duplicados})
 
 
