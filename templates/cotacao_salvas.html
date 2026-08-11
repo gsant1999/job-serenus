@@ -71,7 +71,7 @@
           <a class="b" href="/cotacao/{{ c.id }}/reabrir" style="border-color:rgba(250,204,21,.5);color:#b45309;" title="Cria uma nova cotação (novo link) com base nesta">Nova versão</a>
           {% if c.token %}<button class="b" onclick="copiarLink('{{ c.token }}')">Copiar link</button>{% endif %}
           {% if c.token and c.cliente_telefone %}<button class="b b-wpp" onclick="enviarWpp('{{ c.token }}', '{{ c.cliente_telefone }}', '{{ (c.cliente_nome or '')|replace("'", "") }}')">WhatsApp</button>{% endif %}
-          <button class="b" onclick="enviarEmail({{ c.id }}, '{{ (c.cliente_email or '')|replace("'", "") }}')">E-mail</button>
+          <button class="b" onclick="enviarEmail({{ c.id }}, '{{ (c.cliente_email or '')|replace("'", "") }}', this)">E-mail</button>
           <button class="b b-del" onclick="excluir({{ c.id }}, '{{ (c.cliente_nome or c.titulo)|replace("'", "") }}')">Excluir</button>
         </div>
       </td>
@@ -95,12 +95,17 @@ function enviarWpp(token, tel, nome){
   // Abre na aba do WhatsApp que ja esta carregada, com o texto pronto na caixa.
   if (!abrirConversaWhatsApp(tel, '', msg)) alert('Cliente sem telefone cadastrado.');
 }
-function enviarEmail(id, email){
+function enviarEmail(id, email, btn){
   var dest = email || window.prompt('E-mail do cliente:');
   if(!dest) return;
+  // Trava o botão durante o fetch — sem isso, um segundo clique antes da
+  // resposta manda dois e-mails pro mesmo cliente (mesmo padrão já usado
+  // em cotacao_documento.html pro feedback da cotação).
+  if (btn) { btn.disabled = true; btn.style.opacity = '.6'; }
   fetch('/cotacao/'+id+'/enviar-email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:dest})})
     .then(r=>r.json()).then(d=>{ alert(d.ok?('E-mail enviado para '+d.email):('Erro: '+(d.erro||''))); })
-    .catch(()=>alert('Erro de conexão.'));
+    .catch(()=>alert('Erro de conexão.'))
+    .finally(()=>{ if (btn) { btn.disabled = false; btn.style.opacity = ''; } });
 }
 function excluir(id, nome){
   if (!confirm('Excluir a cotação de "' + nome + '"?')) return;
