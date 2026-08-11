@@ -134,6 +134,12 @@
   .u-cpf { font-size:12px; color:var(--cinza); white-space:nowrap;
     font-variant-numeric:tabular-nums; }
 
+  /* A máquina que cota se anuncia. É estado, não ação — por isso etiqueta e
+     não botão, e por isso fica antes do que se pode fazer com ela. */
+  .ap-cota { display:inline-block; padding:3px 10px; border-radius:999px;
+    background:var(--verde-soft); color:var(--verde); font-size:11px;
+    font-weight:700; letter-spacing:.02em; white-space:nowrap; }
+
   /* ── AÇÕES: pareciam texto cinza, agora parecem clicáveis ──
      Fantasma até o hover, pra não competir com o nome da pessoa, mas com
      borda e fundo aparecendo no toque — o que responde tem que parecer que
@@ -261,12 +267,44 @@
         // --vermelho NÃO EXISTE neste projeto: a variável inválida caía no
         // cinza herdado e o botão de desconectar não parecia perigoso. A cor
         // de risco aqui é --erro, e ela tem versão nos dois temas.
+        // QUAL COMPUTADOR COTA PARA TODOS.
+        //
+        // Uma máquina fica ligada com a sessão do Painel e cota pelas outras.
+        // Quem NÃO tem o Painel aberto passa a cotar por ela em vez de receber
+        // "Painel fechado" — que era o que travava quem estava sem a aba.
+        //
+        // É marca à mão, e um por vez, de propósito: se qualquer extensão
+        // pudesse se declarar a que cota, uma consultora pegaria os pedidos das
+        // outras e travaria a fila sem erro nenhum na tela.
+        (s.trabalhador_cotacao
+          ? '<span class="ap-cota" title="Esta máquina cota pelas outras. ' +
+              'Ela precisa ficar ligada e com o Painel do Corretor aberto.">Cota para todos</span>' +
+            '<button type="button" class="u-acao" onclick="trabalhador(' + s.id + ', 0)">Tirar</button>'
+          : '<button type="button" class="u-acao" ' +
+              'title="Marca esta máquina como a que cota pelas outras. Só uma por vez." ' +
+              'onclick="trabalhador(' + s.id + ', 1)">Este é o computador que cota</button>') +
         '<button type="button" class="u-acao" style="color:var(--erro); font-weight:600;"' +
           ' onclick="desconectar(' + s.id + ', ' + JSON.stringify(esc(s.apelido || 'este aparelho')) + ')">' +
           'Desconectar</button>' +
       '</div>';
     }).join('');
   }
+
+  window.trabalhador = function (id, ligado) {
+    // Trocar de máquina é UM clique, e o servidor desmarca todas antes de
+    // marcar a nova — nunca existem duas. Duas máquinas cotando na mesma conta
+    // do Painel é exatamente o que este desenho existe pra evitar.
+    if (ligado && !confirm('Marcar este aparelho como o computador que cota?\n\n' +
+        'Ele precisa ficar LIGADO e com o Painel do Corretor aberto. Quem não tiver ' +
+        'o Painel aberto passa a cotar por ele.\n\nSó um computador por vez — ' +
+        'marcar este desmarca o anterior.')) return;
+    fetch('/admin/extensao/sessao/' + id + '/trabalhador', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ligado: !!ligado }),
+    }).then(function (r) { return r.json(); })
+      .then(function () { carregar(); })
+      .catch(function () { carregar(); });
+  };
 
   window.desconectar = function (id, apelido) {
     // Desconectar derruba alguém que pode estar no meio de um atendimento.

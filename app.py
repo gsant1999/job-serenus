@@ -5508,7 +5508,8 @@ def admin_extensao_sessoes():
     """Painel para gerenciar e revogar as sessões ativas da extensão."""
     conn = db()
     sessoes = conn.execute("""
-        SELECT s.id, s.usuario_id, s.criado_em, s.ultimo_uso, s.revogado_em, s.apelido, u.nome
+        SELECT s.id, s.usuario_id, s.criado_em, s.ultimo_uso, s.revogado_em, s.apelido, u.nome,
+               COALESCE(s.trabalhador_cotacao, 0) AS trabalhador_cotacao, s.trabalhador_sinal
         FROM extensao_sessao s
         JOIN usuarios u ON s.usuario_id = u.id
         ORDER BY (s.revogado_em IS NULL) DESC, s.ultimo_uso DESC
@@ -5525,7 +5526,8 @@ def api_admin_extensao_sessoes():
     conn = db()
     
     q = """
-        SELECT s.id, s.usuario_id, s.criado_em, s.ultimo_uso, s.revogado_em, s.apelido, u.nome
+        SELECT s.id, s.usuario_id, s.criado_em, s.ultimo_uso, s.revogado_em, s.apelido, u.nome,
+               COALESCE(s.trabalhador_cotacao, 0) AS trabalhador_cotacao, s.trabalhador_sinal
         FROM extensao_sessao s
         JOIN usuarios u ON s.usuario_id = u.id
     """
