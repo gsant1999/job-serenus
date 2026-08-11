@@ -2875,6 +2875,11 @@ def init_db():
     # sem rastro e sem re-tentativa (o Asaas nao reenvia porque a rota
     # sempre responde 200). NULL = sucesso normal; preenchido = o motivo.
     add_col('webhook_log', 'erro', 'TEXT')
+    # /cotacao/<id>/ajustar reescrevia planos_json inteiro sem controle de
+    # versao — duas abas ajustando a mesma cotacao, a segunda apagava o
+    # agravo da primeira em silencio (last-write-wins). Sobe a cada UPDATE;
+    # o front manda a versao que carregou e a rota recusa se nao bater.
+    add_col('cotacao_salva', 'versao', 'INTEGER DEFAULT 0')
     # Config do parceiro Affinity — específico do Serenus (e-mails/contato deles).
     # Não vai pra instância de cliente (SEED_DADOS_SERENUS=0).
     if SEED_DADOS_SERENUS:
@@ -32664,11 +32669,30 @@ def cotacao_ajustar(cid):
     if session.get('perfil') != 'admin' and c['corretor_id'] != session.get('user_id'):
         close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
     cd = dict(c)
+    corpo = request.json or {}
+    # DUAS ABAS AJUSTANDO A MESMA COTACAO: A SEGUNDA APAGAVA A PRIMEIRA.
+    #
+    # A rota reescrevia planos_json inteiro sem saber se alguem tinha
+    # gravado por cima entre a pessoa abrir a tela e clicar em salvar —
+    # last-write-wins, em silencio, sem aviso nenhum de que o agravo digitado
+    # na aba mais rapida tinha sumido.
+    #
+    # `versao_vista` e opcional de proposito: uma aba ja aberta ANTES deste
+    # deploy manda o pedido antigo, sem o campo — nao pode quebrar no meio
+    # de um agravo em andamento so porque o codigo mudou. So quando o campo
+    # vem preenchido e que a checagem vale.
+    versao_vista = corpo.get('versao')
+    versao_atual = int(cd.get('versao') or 0)
+    if versao_vista is not None and int(versao_vista) != versao_atual:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "versao_desatualizada",
+                        "mensagem": "Esta cotação foi alterada em outra aba/computador enquanto você editava. "
+                                    "Recarregue a página pra ver a versão mais recente antes de corrigir de novo."}), 409
     try:
         planos = json.loads(cd.get('planos_json') or '[]')
     except Exception:
         planos = []
-    ajustes = (request.json or {}).get('ajustes') or {}
+    ajustes = corpo.get('ajustes') or {}
     total_geral = 0.0
     for i, p in enumerate(planos):
         aj = ajustes.get(str(i)) or {}
@@ -32689,10 +32713,19 @@ def cotacao_ajustar(cid):
             tot += float(ln.get('subtotal') or 0)
         p['total'] = round(tot, 2)
         total_geral += tot
-    conn.execute("UPDATE cotacao_salva SET planos_json=?, total=? WHERE id=?",
-                 (json.dumps(planos), round(total_geral, 2), cid))
+    # WHERE id=? AND versao=? (nao so id=?): se duas requisicoes chegarem
+    # quase juntas, so a primeira encontra a linha com a versao esperada — a
+    # segunda ve rowcount=0 e sabe, sem ambiguidade, que perdeu a corrida.
+    r_upd = conn.execute(
+        "UPDATE cotacao_salva SET planos_json=?, total=?, versao=? WHERE id=? AND versao=?",
+        (json.dumps(planos), round(total_geral, 2), versao_atual + 1, cid, versao_atual))
+    if getattr(r_upd, 'rowcount', 1) == 0:
+        conn.rollback(); close_db(conn)
+        return jsonify({"ok": False, "erro": "versao_desatualizada",
+                        "mensagem": "Esta cotação foi alterada em outra aba/computador enquanto você editava. "
+                                    "Recarregue a página pra ver a versão mais recente antes de corrigir de novo."}), 409
     conn.commit(); close_db(conn)
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "versao": versao_atual + 1})
 
 
 # ── Legendas: gerenciamento de modelos ──────────────────────────────────────

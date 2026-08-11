@@ -136,7 +136,7 @@
   </div>
   {% if cot.token %}<button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="copiarLink()">Copiar link</button>{% endif %}
   <button class="btn-voltar" id="btn-editar" style="border-color:rgba(251,146,60,.7);color:#fb923c" onclick="toggleEditar()" title="Corrige um valor SÓ nesta cotação, sem trocar o link. Se o cliente já tem este link, ele verá o valor corrigido.">Corrigir valor (mesmo link)</button>
-  <button class="btn-img" id="btn-salvar-aj" style="display:none;background:#fb923c;color:#1c1c24" onclick="salvarAjustes({{ cot.id }})">Salvar correção</button>
+  <button class="btn-img" id="btn-salvar-aj" style="display:none;background:#fb923c;color:#1c1c24" onclick="salvarAjustes({{ cot.id }}, {{ cot.versao or 0 }})">Salvar correção</button>
   {% if cot.planos and cot.planos|length > 1 %}
   <div style="position:relative;display:inline-block;">
     <button class="btn-img" onclick="togglePlanoUnico()">Copiar plano</button>
@@ -515,7 +515,7 @@ function toggleEditar() {
   document.getElementById('btn-salvar-aj').style.display = on ? 'inline-block' : 'none';
 }
 function _numBR(s){ s=(s||'').replace(/[^\d,.-]/g,'').replace(/\./g,'').replace(',','.'); var n=parseFloat(s); return isNaN(n)?0:n; }
-function salvarAjustes(cid) {
+function salvarAjustes(cid, versao) {
   if (!confirm('Isso corrige o valor INDIVIDUAL (por vida) NESTA cotação — o sistema multiplica automaticamente pela quantidade de cada faixa, igual na cotação original. O link continua o mesmo; se o cliente já recebeu este link, ele vai ver o valor novo.\n\nPara criar uma cotação separada com link próprio, cancele e use "Nova cotação (link novo)".\n\nConfirmar correção?')) return;
   var ajustes = {};
   document.querySelectorAll('.preco-cell').forEach(function(c){
@@ -524,8 +524,18 @@ function salvarAjustes(cid) {
     if(!ajustes[p]) ajustes[p]={};
     ajustes[p][f] = _numBR(c.textContent);
   });
-  fetch('/cotacao/'+cid+'/ajustar', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ajustes:ajustes})})
-    .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); else _aviso('Não consegui corrigir: '+(d.erro||'motivo desconhecido'), true); })
+  // `versao`: a que esta tela carregou. Se outra aba/computador salvou um
+  // ajuste desta mesma cotação enquanto esta ficou aberta, a versão não bate
+  // mais e o servidor recusa em vez de um apagar o do outro em silêncio.
+  fetch('/cotacao/'+cid+'/ajustar', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ajustes:ajustes, versao:versao})})
+    .then(r=>r.json()).then(d=>{
+      if(d.ok) { location.reload(); return; }
+      if (d.erro === 'versao_desatualizada') {
+        if (confirm((d.mensagem || 'Esta cotação mudou em outro lugar.') + '\n\nRecarregar agora?')) location.reload();
+        return;
+      }
+      _aviso('Não consegui corrigir: '+(d.mensagem || d.erro||'motivo desconhecido'), true);
+    })
     .catch(()=>_aviso('Sem conexão com o JOB. Tente de novo.', true));
 }
 function copiarLegenda() {
