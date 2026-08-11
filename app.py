@@ -29305,10 +29305,9 @@ def api_cotacao_entidade_salvar():
 
 @app.route('/cotacao/bloco/entidades', methods=['GET'])
 @login_required
+@admin_required
 def cotacao_bloco_entidades():
     """Lista todas as entidades (para painel admin)."""
-    if session.get('perfil') != 'admin':
-        return jsonify({"ok": False, "erro": "Acesso negado"}), 403
         
     conn = db()
     try:
