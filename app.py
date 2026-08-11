@@ -7006,14 +7006,30 @@ def webhook_asaas():
             app.logger.warning("[WEBHOOK] ⚠️ evento_id vazio, ignorando")
             return jsonify({"ok": True, "msg": "evento_id vazio, ignorado"}), 200
         
-        # 3. VERIFICAR IDEMPOTÊNCIA (já processado?)
+        # 3. RESERVA O EVENTO (claim atômico via UNIQUE em evento_id).
+        #
+        # ANTES: um SELECT aqui checava "já processado?" e só no FINAL do
+        # processamento (passo 5) é que o INSERT marcava o evento como feito.
+        # Dois webhooks quase simultâneos do MESMO evento_id (reenvio do
+        # Asaas) passavam os dois pelo SELECT antes que qualquer um
+        # commitasse o INSERT — os dois processavam a mesma transferência em
+        # paralelo. A UPDATE de status é idempotente (não duplica dinheiro),
+        # mas a notificação ao consultor saía duas vezes.
+        #
+        # Reservar aqui, ANTES de qualquer efeito colateral, faz o UNIQUE do
+        # banco decidir atomicamente qual requisição "ganha" o evento — a
+        # outra recebe erro de UNIQUE na hora, sem ter processado nada.
         conn = db()
-        já_proc = conn.execute("SELECT 1 FROM webhook_log WHERE evento_id=?", (evento_id,)).fetchone()
-        if já_proc:
+        try:
+            conn.execute("INSERT INTO webhook_log (evento_id, evento) VALUES (?,?)", (evento_id, evento))
+            conn.commit()
+        except Exception:
+            try: conn.rollback()
+            except Exception: pass
             app.logger.info(f"[WEBHOOK] ⏭️  Evento duplicado (id={evento_id[:30]}), ignorando")
             close_db(conn)
             return jsonify({"ok": True, "msg": "duplicado, ignorado"}), 200
-        
+
         # 4. PROCESSAR EVENTOS DE TRANSFERÊNCIA
         if evento.startswith('TRANSFER_'):
             app.logger.info(f"[WEBHOOK] 🔄 Processando transferência: evento={evento}")
@@ -7062,9 +7078,9 @@ def webhook_asaas():
         
         elif evento.startswith('PAYMENT_'):
             app.logger.info(f"[WEBHOOK] 💳 Evento de cobrança: {evento} (implementação futura)")
-        
-        # 5. REGISTRAR WEBHOOK PROCESSADO
-        conn.execute("INSERT INTO webhook_log (evento_id, evento) VALUES (?,?)", (evento_id, evento))
+
+        # Evento já foi reservado no passo 3 — só falta commitar o que o
+        # processamento acima mudou (parcela/histórico).
         conn.commit()
         close_db(conn)
         
@@ -7081,12 +7097,22 @@ def webhook_asaas():
         # Grava aqui, mesmo sem saber o evento_id direito (JSON pode nem ter
         # chegado a parsear): um id sintetico com timestamp garante que o
         # UNIQUE em evento_id nao apague o registro por cima de outro.
+        #
+        # Se evento_id já existe, o passo 3 (reserva) já commitou essa linha
+        # antes do erro acontecer — UPDATE nela em vez de INSERT (que bateria
+        # no mesmo UNIQUE e caía neste except de novo, mascarando o erro real).
         try:
             conn_erro = db()
-            conn_erro.execute(
-                "INSERT INTO webhook_log (evento_id, evento, erro) VALUES (?,?,?)",
-                (evento_id or f"falha_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S%f')}",
-                 evento or '', str(e)[:500]))
+            if evento_id:
+                cur = conn_erro.execute("UPDATE webhook_log SET erro=? WHERE evento_id=?", (str(e)[:500], evento_id))
+                if not getattr(cur, 'rowcount', 0):
+                    conn_erro.execute(
+                        "INSERT INTO webhook_log (evento_id, evento, erro) VALUES (?,?,?)",
+                        (evento_id, evento or '', str(e)[:500]))
+            else:
+                conn_erro.execute(
+                    "INSERT INTO webhook_log (evento_id, evento, erro) VALUES (?,?,?)",
+                    (f"falha_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S%f')}", evento or '', str(e)[:500]))
             conn_erro.commit()
             close_db(conn_erro)
         except Exception:
