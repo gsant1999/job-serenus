@@ -5624,6 +5624,17 @@ def api_admin_extensao_sessoes():
         
     close_db(conn)
     
+    # trabalhador_cotacao E trabalhador_sinal PRECISAM SAIR DAQUI.
+    #
+    # A consulta ja os buscava e a tela ja sabia desenhar o selo "Cota para
+    # todos" — mas eles nao entravam no JSON, entao a tela nunca recebia o
+    # dado. Marcar a maquina gravava certo no banco e a tela continuava
+    # oferecendo "Este e o computador que cota", como se nada tivesse
+    # acontecido. Clicar de novo parecia a unica saida, e nao mudava nada.
+    #
+    # O sinal vai junto porque uma maquina marcada que parou de bater e
+    # exatamente o caso que precisa aparecer: a fila fica de pe sem ninguem
+    # atender, e sem esta informacao nao ha nada na tela que denuncie.
     return jsonify({
         "ok": True,
         "sessoes": [{
@@ -5631,7 +5642,9 @@ def api_admin_extensao_sessoes():
             "apelido": s["apelido"],
             "criado_em": _dt_iso(s["criado_em"]) if s["criado_em"] else None,
             "ultimo_uso": _dt_iso(s["ultimo_uso"]) if s["ultimo_uso"] else None,
-            "revogado_em": _dt_iso(s["revogado_em"]) if s["revogado_em"] else None
+            "revogado_em": _dt_iso(s["revogado_em"]) if s["revogado_em"] else None,
+            "trabalhador_cotacao": 1 if s["trabalhador_cotacao"] else 0,
+            "trabalhador_sinal": _dt_iso(s["trabalhador_sinal"]) if s["trabalhador_sinal"] else None
         } for s in sessoes]
     })
 
