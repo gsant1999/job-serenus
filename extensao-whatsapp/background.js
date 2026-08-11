@@ -226,7 +226,16 @@ function _anotarBatida(temPainel, r) {
       // maquina marcada" — que e uma informacao, nao uma falha.
       batidaResposta: !r ? 'sem resposta'
         : (r.erro ? String(r.erro)
-          : (r.ok === false ? 'nao sou a maquina marcada' : 'gravado')),
+          // "sem_aparelho" NAO e o mesmo que "nao marcada". A primeira quer
+          // dizer que o JOB nao sabe qual aparelho e este — quem entrou pela
+          // chave antiga, sem login, cai aqui — e nao se resolve marcando
+          // maquina nenhuma. Junte as duas e o diagnostico manda consertar a
+          // coisa errada, que foi o que aconteceu.
+          : (r.motivo === 'sem_aparelho'
+              ? 'o JOB nao sabe qual aparelho e este — falta entrar com e-mail e senha'
+            : (r.motivo === 'nao_marcada' || r.ok === false
+              ? 'este aparelho nao e o marcado pra cotar'
+              : 'gravado'))),
     });
   } catch (e) { /* diagnostico nao pode derrubar a batida */ }
 }
