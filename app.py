@@ -36012,10 +36012,9 @@ def admin_crm_retroalimentar_aprendizado():
 # ─── CRM CONFIG ───────────────────────────────────────────────────
 @app.route('/crm/transferir-em-massa', methods=['POST'])
 @login_required
+@admin_required
 def crm_transferir_em_massa():
     """Transferência em massa de leads (filtros) de um consultor para outro. Admin only."""
-    if session.get('perfil') != 'admin':
-        return jsonify({"ok": False, "erro": "Apenas administrador"}), 403
     d = request.json or {}
     consultor_de = d.get('consultor_de', '').strip()
     consultor_para = d.get('consultor_para', '').strip()
