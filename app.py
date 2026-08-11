@@ -32018,8 +32018,19 @@ def material_apoio_novo():
     falha_upload = False
     f = request.files.get('arquivo')
     if f and f.filename:
-        data = f.read()
+        # O `accept=".pdf,.png,..."` do &lt;input&gt; e so sugestao pro navegador —
+        # nao impede nada de fato, e quem manda o POST direto passa reto.
+        # `/anexos/&lt;nome&gt;` serve todo arquivo com `Content-Disposition: inline`
+        # (de proposito: contrato e comprovante precisam abrir no navegador,
+        # nao baixar). Um .svg/.html/.xml sobe com esse Content-Disposition e
+        # roda como pagina do proprio dominio pra quem abrir o link — a mesma
+        # lista aceita do lado do navegador, só que valendo de verdade aqui.
+        _EXT_MATERIAL_OK = {'.pdf', '.png', '.jpg', '.jpeg', '.xlsx', '.xls', '.csv', '.doc', '.docx'}
         ext = os.path.splitext(f.filename)[1].lower()
+        if ext not in _EXT_MATERIAL_OK:
+            return redirect('/material-apoio?erro=' + quote(
+                f'Tipo de arquivo não aceito ({ext or "sem extensão"}). Use PDF, imagem, planilha ou Word.'))
+        data = f.read()
         nome_gerado = _sanitizar_filename(f'material_{secrets.token_hex(4)}{ext}')
         try:
             upload_arquivo_r2(_io.BytesIO(data), f'material/{nome_gerado}')
