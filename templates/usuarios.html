@@ -304,7 +304,8 @@
               'title="Marca esta máquina como a que cota pelas outras. Só uma por vez." ' +
               'onclick="trabalhador(' + s.id + ', 1)">Este é o computador que cota</button>') +
         '<button type="button" class="u-acao" style="color:var(--erro); font-weight:600;"' +
-          ' onclick="desconectar(' + s.id + ', ' + argJs(s.apelido || 'este aparelho') + ')">' +
+          ' onclick="desconectar(' + s.id + ', ' + argJs(s.apelido || 'este aparelho') +
+            ', ' + (s.trabalhador_cotacao ? 1 : 0) + ')">' +
           'Desconectar</button>' +
       '</div>';
     }).join('');
@@ -326,7 +327,19 @@
       .catch(function () { carregar(); });
   };
 
-  window.desconectar = function (id, apelido) {
+  window.desconectar = function (id, apelido, cota) {
+    // ESTA E A MAQUINA QUE COTA PELAS OUTRAS? ENTAO O AVISO E OUTRO.
+    //
+    // Desconectar o trabalhador nao afeta uma pessoa: derruba a fila de
+    // cotacao das oito, e sem erro nenhum na tela — quem tentar cotar sem o
+    // Painel aberto simplesmente nao consegue, e ninguem liga uma coisa a
+    // outra. Isso aconteceu de verdade em 10/08, e custou uma noite.
+    //
+    // O aviso vem antes do outro e diz a consequencia, nao "tem certeza".
+    if (cota && !confirm('Este é o computador que COTA PELOS OUTROS.\n\n' +
+        'Desconectando ele, quem não estiver com o Painel do Corretor aberto ' +
+        'para de conseguir cotar — e a tela não vai explicar por quê.\n\n' +
+        'Só continue se você for marcar outro computador em seguida.')) return;
     // Desconectar derruba alguém que pode estar no meio de um atendimento.
     // A confirmação diz O QUE acontece, não só "tem certeza?".
     if (!confirm('Desconectar "' + apelido + '"?\n\nA extensão para de funcionar naquele computador ' +
