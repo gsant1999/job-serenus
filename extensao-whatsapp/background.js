@@ -216,6 +216,31 @@ function _trabalhadorVivo() {
 })();
 
 
+// Apaga a sessao morta e faz o estado da extensao contar a verdade.
+//
+// Uma vez so: com varias chamadas em voo, todas voltam 401 juntas e sem esta
+// trava a extensao limparia e avisaria N vezes seguidas.
+let _sessaoMorrendo = false;
+async function _sessaoMorreu() {
+  if (_sessaoMorrendo) return;
+  _sessaoMorrendo = true;
+  try {
+    await chrome.storage.local.remove(['extToken', 'extUsuario', 'extApelido']);
+    // O aviso vai pro icone, nao pra uma notificacao do sistema: ninguem
+    // precisa de um alarme, precisa de saber onde clicar. O icone da barra e
+    // exatamente onde a pessoa vai clicar pra resolver.
+    try {
+      await chrome.action.setBadgeText({ text: '!' });
+      await chrome.action.setBadgeBackgroundColor({ color: '#be123c' });
+      await chrome.action.setTitle({ title: 'JOB — este aparelho foi desconectado. Clique para entrar de novo.' });
+    } catch (e) { /* sem badge, o popup ainda mostra a tela de entrar */ }
+  } finally {
+    // Solta depois de um tempo: se a pessoa entrar de novo e for desconectada
+    // outra vez, o aviso tem que voltar a funcionar.
+    setTimeout(() => { _sessaoMorrendo = false; }, 30000);
+  }
+}
+
 async function chamarJob(caminho, metodo, corpo, timeoutMs, reqId, opts) {
   const _t0 = Date.now();
   const _anota = (ok) => { try { _anotarTempo(caminho.split('?')[0], Date.now() - _t0, ok); } catch (e) {} };
@@ -266,6 +291,24 @@ async function chamarJob(caminho, metodo, corpo, timeoutMs, reqId, opts) {
       let dados = null;
       try { dados = await resp.json(); } catch (e) { dados = null; }
       if (!resp.ok) {
+        // DESCONECTADO E DIFERENTE DE "DEU ERRO".
+        //
+        // O token mora aqui no Chrome. Quando um admin desconecta o aparelho
+        // pelo site, nada aqui muda: o popup seguia mostrando a pessoa logada,
+        // com nome e tudo, e a extensao so parava de funcionar em silencio.
+        // Foi assim que o Guilherme "entrou pelo popup" sem entrar — nao havia
+        // o que clicar, porque a tela nao estava pedindo login.
+        //
+        // O servidor agora diz `sessao_revogada` e so isso. Apagar o token
+        // aqui faz o popup voltar sozinho pra tela de entrar, que e a unica
+        // acao que resolve.
+        if (resp.status === 401 && dados && dados.erro === 'sessao_revogada') {
+          await _sessaoMorreu();
+          _anota(false);
+          return { ok: false, erro: 'Este aparelho foi desconectado. Entre de novo pelo ' +
+                                    'popup da extensao (clique no icone do JOB).',
+                   status: 401, sessaoRevogada: true };
+        }
         // Erro HTTP É uma resposta do servidor (chave errada, 404, 500) —
         // repetir não muda nada, então devolve na hora.
         _anota(false);
@@ -446,6 +489,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           // dos dois sozinho.
           usuarioId: (usu && usu.id) || '',
         });
+        // Entrou: some o "!" do icone. Aviso que fica depois de resolvido
+        // ensina a ignorar aviso.
+        _sessaoMorrendo = false;
+        try {
+          await chrome.action.setBadgeText({ text: '' });
+          await chrome.action.setTitle({ title: 'JOB' });
+        } catch (e) { /* o badge e enfeite; entrar ja e o que importa */ }
         sendResponse({ ok: true, usuario: usu });
       } catch (e) {
         sendResponse({ ok: false, erro: 'Não consegui falar com o JOB agora.' });
