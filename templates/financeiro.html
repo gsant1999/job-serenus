@@ -283,6 +283,7 @@
   <div class="mes-nav">
     <label style="font-size:12px; color:var(--cinza);">Competência</label>
     <input type="month" value="{{ mes }}" onchange="location.href='/financeiro?mes='+this.value">
+    <a class="btn-ghost" href="/financeiro/exportar?mes={{ mes }}{% if filtros.faixa %}&faixa={{ filtros.faixa }}{% endif %}{% if filtros.de %}&de={{ filtros.de }}{% endif %}{% if filtros.ate %}&ate={{ filtros.ate }}{% endif %}{% if filtros.centro %}&centro={{ filtros.centro|urlencode }}{% endif %}{% if filtros.status_lanc %}&status_lanc={{ filtros.status_lanc|urlencode }}{% endif %}{% if filtros.tipo_lanc %}&tipo_lanc={{ filtros.tipo_lanc|urlencode }}{% endif %}{% if filtros.meio %}&meio={{ filtros.meio }}{% endif %}" download>Exportar relatório</a>
   </div>
 </div>
 
@@ -551,7 +552,7 @@
       </div>
       {% if cal_livre %}
       <div style="font-size:11px; color:var(--cinza-2); margin:-4px 0 10px;">
-        Intervalo escolhido à mão: a lista abaixo <b>não está limitada à competência de {{ mes }}</b>.
+        Intervalo escolhido à mão: a lista segue somente o intervalo de vencimento informado.
       </div>
       {% endif %}
       {# O GRAFICO PASSA A RESPONDER.

@@ -14273,7 +14273,8 @@ def financeiro():
     f_de = (request.args.get('de') or '').strip()
     f_ate = (request.args.get('ate') or '').strip()
     _w, _p = _lanc_faixa_where(f_faixa, de=f_de, ate=f_ate)
-    # INTERVALO A MAO NAO SE LIMITA A COMPETENCIA DO MES.
+    # Intervalo manual substitui a competência; sem intervalo, competência é
+    # estritamente o mês do vencimento.
     #
     # O resto da tela e sempre "o mes X". Se o intervalo escolhido a mao
     # continuasse preso a isso, pedir 25/08 a 10/09 devolveria tela vazia — e
@@ -14292,12 +14293,14 @@ def financeiro():
     if f_status and f_status != 'Vencido':
         _w += " AND COALESCE(l.status,'Previsto') = ?"; _p.append(f_status)
 
+    _mes_where = "" if _cal_livre else " AND substr(COALESCE(l.data_vencimento,''),1,7)=?"
+    _mes_params = [] if _cal_livre else [mes]
     custos = conn.execute("""SELECT l.*, mp.nome AS meio_nome, mp.tipo AS meio_tipo, mp.banco AS meio_banco,
             mp.titular AS meio_titular, mp.final_cartao AS meio_final_cartao,
             mp.dia_vencimento_fatura AS meio_dia_vencimento
         FROM lancamentos l LEFT JOIN meios_pagamento mp ON mp.id = l.meio_pagamento_id
-        WHERE l.tipo IN ('custo','fixo') AND (? = '' OR l.data_competencia=?)""" + _w + " ORDER BY l.id DESC",
-        [('x' if _cal_livre else ''), mes] + _p).fetchall()
+        WHERE l.tipo IN ('custo','fixo')""" + _mes_where + _w + " ORDER BY l.id DESC",
+        _mes_params + _p).fetchall()
     custos = [dict(c) for c in custos]
     for c in custos:
         c['status_efetivo'] = _lanc_status_efetivo(c.get('status'), c.get('data_vencimento'))
@@ -14419,9 +14422,9 @@ def financeiro():
         for r in conn.execute("""SELECT substr(data_vencimento, 9, 2) dia,
                    COALESCE(SUM(valor),0) v, COUNT(*) n
             FROM lancamentos
-            WHERE tipo IN ('custo','fixo') AND (? = '' OR data_competencia=?)
+            WHERE tipo IN ('custo','fixo')""" + ("" if _cal_livre else " AND substr(COALESCE(data_vencimento,''),1,7)=?") + """
               AND data_vencimento IS NOT NULL AND data_vencimento <> ''""" + _cw + """
-            GROUP BY 1""", [('x' if _cal_livre else ''), mes] + _cp).fetchall():
+            GROUP BY 1""", ([] if _cal_livre else [mes]) + _cp).fetchall():
             if not (r['dia'] or '').isdigit():
                 continue
             d = int(r['dia'])
@@ -14478,6 +14481,44 @@ def financeiro():
         cal_livre=_cal_livre,
         filtros={'faixa': f_faixa, 'centro': f_centro, 'status_lanc': f_status,
                  'tipo_lanc': f_tipo_l, 'meio': f_meio, 'de': f_de, 'ate': f_ate})
+
+@app.route('/financeiro/exportar')
+@login_required
+@admin_required
+def financeiro_exportar():
+    """Exporta o mesmo recorte de custos/fixos exibido no Financeiro."""
+    import csv, io
+    mes = request.args.get('mes', competencia_atual())
+    fmt = (request.args.get('formato') or 'xlsx').lower()
+    faixa, de, ate = (request.args.get('faixa') or '').strip(), (request.args.get('de') or '').strip(), (request.args.get('ate') or '').strip()
+    centro, status, tipo, meio = [(request.args.get(k) or '').strip() for k in ('centro','status_lanc','tipo_lanc','meio')]
+    conn = db()
+    w, p = _lanc_faixa_where(faixa, coluna='l.data_vencimento', de=de, ate=ate)
+    livre = bool(faixa == 'personalizado' and (de or ate))
+    if not livre: w += " AND substr(COALESCE(l.data_vencimento,''),1,7)=?"; p.append(mes)
+    if centro: w += " AND COALESCE(l.centro_custo,'')=?"; p.append(centro)
+    if tipo: w += " AND COALESCE(l.tipo_lancamento,'')=?"; p.append(tipo)
+    if meio: w += " AND CAST(l.meio_pagamento_id AS TEXT)=?"; p.append(meio)
+    if status and status != 'Vencido': w += " AND COALESCE(l.status,'Previsto')=?"; p.append(status)
+    rows = [dict(r) for r in conn.execute("""SELECT l.*, mp.nome meio_nome FROM lancamentos l
+        LEFT JOIN meios_pagamento mp ON mp.id=l.meio_pagamento_id
+        WHERE l.tipo IN ('custo','fixo')""" + w + " ORDER BY l.data_vencimento, l.id", p).fetchall()]
+    for r in rows: r['status_efetivo'] = _lanc_status_efetivo(r.get('status'), r.get('data_vencimento'))
+    if status == 'Vencido': rows = [r for r in rows if r['status_efetivo'] == 'Vencido']
+    cab = ['Descrição','Centro de custo','Categoria','Emissão','Vencimento','Valor','Pago por','Fonte','Forma','Status']
+    def br(d): return f'{d[8:10]}/{d[5:7]}/{d[:4]}' if d and len(d)>=10 else ''
+    dados = [[r.get('descricao',''), r.get('centro_custo',''), r.get('categoria',''), br(r.get('data_emissao') or r.get('data_lancamento')), br(r.get('data_vencimento')), float(r.get('valor') or 0), r.get('pago_por',''), r.get('fonte_pagamento',''), r.get('meio_nome') or r.get('forma_pagamento',''), r.get('status_efetivo','')] for r in rows]
+    total = sum(x[5] for x in dados)
+    if fmt == 'csv':
+        out = io.StringIO(); wri = csv.writer(out, delimiter=';'); wri.writerow(cab); wri.writerows(dados); wri.writerow(['TOTAL','','','','',total]); close_db(conn)
+        return Response('\ufeff' + out.getvalue(), mimetype='text/csv', headers={'Content-Disposition': f'attachment; filename=financeiro_serenus_{mes}.csv'})
+    import openpyxl
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = 'Financeiro'; ws.append(cab)
+    for row in dados: ws.append(row)
+    ws.append(['TOTAL','','','','',total]);
+    for cell in ws['F'][1:]: cell.number_format = 'R$ #,##0.00'
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0); close_db(conn)
+    return send_file(buf, as_attachment=True, download_name=f'financeiro_serenus_{mes}.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 def _proximo_mes(competencia, n):
     """Soma n meses a uma competência 'YYYY-MM'. Retorna 'YYYY-MM'."""
