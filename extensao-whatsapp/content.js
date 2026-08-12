@@ -2920,6 +2920,11 @@
     // Sem ancora, acha a bolha pela GEOMETRIA, que e o que o proprio arquivo
     // diz nao mudar entre redesenhos: dentro da linha, o maior bloco que NAO
     // ocupa a linha inteira. Nao depende de nome de icone nenhum.
+    // Contabilizada em TR.perf.geo como a geometria do documento: isto le
+    // layout (clientWidth/Height + getComputedStyle) e roda dentro da extensao
+    // que estamos investigando por travamento. Medicao que nao aparece no
+    // Diagnostico e custo que ninguem consegue atribuir depois. Aviso do Codex.
+    const _g0 = performance.now();
     try {
       let area = 0;
       for (const e2 of row.querySelectorAll('div, span')) {
@@ -2930,6 +2935,7 @@
         if (a > area) { area = a; melhor = e2; }
       }
     } catch (e) { /* cai no return abaixo */ }
+    finally { TR.perf.geo += performance.now() - _g0; TR.perf.geoN++; }
     if (melhor) return melhor;
     // Ultimo recurso: a propria linha, marcada como SOLTO — igual ao documento.
     // Botao levemente fora do lugar e recuperavel; botao que nao existe, nao.
@@ -3112,8 +3118,20 @@
       row._jobTrSolto = false;
       const bolha = _trBolha(row);
       if (!bolha) continue;             // nao deveria mais acontecer; guarda mantida
+      // NO MODO SOLTO A GEOMETRIA NAO SERVE PRA DECIDIR O LADO.
+      //
+      // `_trLado` compara a bolha com a linha; no solto as duas SAO o mesmo
+      // elemento, entao a conta vira `0 > 0` — sempre falso, sempre 'lead'.
+      // Audio enviado pelo consultor sairia com a cor de recebido. Aviso do
+      // Codex, conferido na conta.
+      //
+      // O proprio id ja diz de quem e: o serializado comeca com `true_` quando
+      // a mensagem e minha. E mais confiavel que geometria, e nao custa layout.
+      const lado = row._jobTrSolto
+        ? (String(id).lastIndexOf('true_', 0) === 0 ? 'consultor' : 'lead')
+        : _trLado(bolha, row);
       const slot = document.createElement('div');
-      slot.className = 'job-tr-slot ' + (_trLado(bolha, row) === 'consultor' ? 'job-tr-dir' : 'job-tr-esq')
+      slot.className = 'job-tr-slot ' + (lado === 'consultor' ? 'job-tr-dir' : 'job-tr-esq')
                      + (row._jobTrSolto ? ' job-tr-solto' : '');
       slot.dataset.msg = id;
       // DENTRO da bolha: herda posicao, largura e cor de quem ja esta no lugar certo.
