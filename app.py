@@ -38504,6 +38504,62 @@ def crm_modelo_excluir(mid):
     return jsonify({"ok": True})
 
 
+@app.route('/crm/biblioteca/conteudos/excluir', methods=['POST'])
+@login_required
+def crm_biblioteca_conteudos_excluir():
+    """Exclui uma seleção explícita da página da Biblioteca.
+
+    A tela nunca manda "a pasta toda": só IDs que a pessoa marcou. Antes de
+    apagar, o servidor confere permissões e vínculos novamente — a página pode
+    ter ficado aberta enquanto outra pessoa alterava um funil.
+    """
+    dados = request.json or {}
+    brutos = dados.get('ids')
+    if not isinstance(brutos, list) or not brutos:
+        return _bib_erro('Selecione pelo menos um conteúdo para excluir.')
+    if len(brutos) > 60:
+        return _bib_erro('Exclua no máximo 60 conteúdos por vez.')
+    try:
+        ids = sorted({int(v) for v in brutos if int(v) > 0})
+    except (TypeError, ValueError):
+        return _bib_erro('A seleção contém um conteúdo inválido.')
+    if not ids:
+        return _bib_erro('Selecione pelo menos um conteúdo para excluir.')
+
+    conn = db()
+    marcadores = ','.join('?' for _ in ids)
+    itens = [dict(r) for r in conn.execute(
+        f"SELECT id,nome,dono_consultor_id FROM modelos_conteudo WHERE id IN ({marcadores})", tuple(ids)).fetchall()]
+    if len(itens) != len(ids):
+        close_db(conn)
+        return _bib_erro('Um dos conteúdos já não existe. Recarregue a lista antes de excluir.', 409)
+    uid, eh_gestor = session.get('user_id'), _bib_eh_gestor()
+    if any(not _bib_pode_gerir(i['dono_consultor_id'], uid, eh_gestor) for i in itens):
+        close_db(conn)
+        return _bib_erro('Você não tem acesso a um dos conteúdos selecionados.', 403)
+    usados_funil = conn.execute(
+        f"SELECT DISTINCT modelo_id FROM whatsapp_funil_passos WHERE modelo_id IN ({marcadores})", tuple(ids)).fetchall()
+    chaves_fluxo = tuple('upload_%d' % mid for mid in ids)
+    marc_fluxo = ','.join('?' for _ in chaves_fluxo)
+    usados_fluxo = conn.execute(
+        f"SELECT DISTINCT template FROM fluxo_passos WHERE template IN ({marc_fluxo})", chaves_fluxo).fetchall()
+    tem_vinculo = bool(usados_funil or usados_fluxo)
+    if tem_vinculo and not bool(dados.get('confirmar_vinculos')):
+        close_db(conn)
+        return _bib_erro('Há conteúdos usados em funis ou fluxos. Confirme essa consequência antes de excluir.', 409)
+    try:
+        conn.execute(f"DELETE FROM modelos_conteudo WHERE id IN ({marcadores})", tuple(ids))
+        conn.commit()
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        app.logger.warning(f"[BIBLIOTECA] exclusão em massa falhou: {e}")
+        close_db(conn)
+        return _bib_erro('Não foi possível excluir os conteúdos selecionados. Revise se algum está protegido por vínculo.')
+    close_db(conn)
+    return jsonify({'ok': True, 'excluidos': len(ids), 'tinha_vinculos': tem_vinculo})
+
+
 @app.route('/crm/modelos/<int:mid>/editar', methods=['POST'])
 @login_required
 @admin_required

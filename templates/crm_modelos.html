@@ -15,6 +15,12 @@
   .bib-lado-titulo { font-size:11px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--cinza-2); }
 
   /* Pasta fechada por padrão: com centenas de itens, tudo aberto é ruído. */
+  /* A base antiga tinha estilos genéricos para details usados em outros painéis.
+     A árvore precisa declarar seu próprio fluxo: filhos abertos ocupam espaço
+     real e jamais podem ficar sobrepostos às próximas pastas. */
+  .bib-no { display:block; height:auto; min-height:0; overflow:visible; }
+  .bib-no:not([open]) > .bib-filhas { display:none; }
+  .bib-no[open] > .bib-filhas { display:block; }
   .bib-no > summary { list-style:none; cursor:pointer; display:flex; align-items:center; gap:7px;
                       padding:7px 8px; border-radius:8px; font-size:13px; color:var(--texto);
                       transition:background .12s; }
@@ -75,6 +81,12 @@
   .bib-previa { font-size:12px; color:var(--cinza); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .bib-meta { font-size:11px; color:var(--cinza-2); margin-top:3px; display:flex; gap:10px; flex-wrap:wrap; }
   .bib-acoes { display:flex; align-items:center; gap:2px; flex-shrink:0; }
+  .bib-selecao { width:17px; height:17px; flex:0 0 auto; accent-color:var(--azul); cursor:pointer; }
+  .bib-selecao-barra { display:none; align-items:center; gap:10px; flex-wrap:wrap; margin:0 0 12px;
+                        padding:9px 11px; border:1px solid var(--borda-2); border-radius:10px; background:var(--panel-2); }
+  .bib-selecao-barra.aberta { display:flex; }
+  .bib-selecao-barra span { color:var(--cinza); font-size:12.5px; }
+  .bib-selecao-barra .bib-perigo { margin-left:auto; }
   .bib-icobtn { background:none; border:none; color:var(--cinza-2); cursor:pointer; padding:6px; border-radius:8px; line-height:0; }
   .bib-icobtn:hover { color:var(--texto); background:var(--panel-3); }
   .bib-icobtn:focus-visible { outline:2px solid var(--azul); outline-offset:1px; }
@@ -205,6 +217,13 @@
       <button class="bib-chip {{ 'on' if filtros.canal == 'sms' else '' }}" data-canal="sms">SMS</button>
       <button class="bib-chip {{ 'on' if filtros.canal == 'email' else '' }}" data-canal="email">E-mail</button>
     </div>
+    {% if pode_gerir %}
+    <div class="bib-selecao-barra" id="bib-selecao-barra" aria-live="polite">
+      <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer"><input class="bib-selecao" type="checkbox" id="bib-selecionar-pagina"> Selecionar esta página</label>
+      <span id="bib-selecao-resumo"></span>
+      <button class="btn-danger btn-sm bib-perigo" id="bib-excluir-selecionados">Excluir selecionados</button>
+    </div>
+    {% endif %}
     <div id="bib-conteudo"></div>
   </section>
 </div>
@@ -234,6 +253,25 @@ let BIB_ESTADO = {
   pagina: 1
 };
 let BIB_LISTAGEM = {{ listagem|tojson }};
+const BIB_ABERTAS = new Set();
+const BIB_SELECIONADOS = new Set();
+
+function bibAbrirCaminhoInicial(pastaId, nos) {
+  for (const no of nos || []) {
+    if (String(no.id) === String(pastaId)) {
+      BIB_ABERTAS.add(String(no.id));
+      return true;
+    }
+    if (bibAbrirCaminhoInicial(pastaId, no.filhas || [])) {
+      BIB_ABERTAS.add(String(no.id));
+      return true;
+    }
+  }
+  return false;
+}
+if (BIB_ESTADO.escopo === 'pasta' && BIB_ESTADO.pastaId) {
+  bibAbrirCaminhoInicial(BIB_ESTADO.pastaId, BIB_ARVORE);
+}
 
 function esc(t) { const d = document.createElement('div'); d.textContent = t == null ? '' : String(t); return d.innerHTML; }
 
@@ -268,7 +306,8 @@ function bibNoHtml(no, nivel) {
       '<span class="bib-no-nome">' + esc(no.nome) + '</span>' +
       '<span class="bib-no-n">' + (no.total || 0) + '</span></button>';
   }
-  return '<details class="bib-no ' + (nivel === 0 ? 'bib-raiz' : '') + '">' +
+  const aberta = BIB_ABERTAS.has(String(no.id)) ? ' open' : '';
+  return '<details class="bib-no ' + (nivel === 0 ? 'bib-raiz' : '') + '"' + aberta + '>' +
     '<summary class="' + (selecionada ? 'on' : '') + '" data-pasta="' + no.id + '" title="' +
       esc(no.nome + rotuloDono) + '">' +
       '<span class="bib-seta">' + BIB_ICO.seta + '</span>' +
@@ -285,13 +324,30 @@ function bibDesenharArvore() {
     return;
   }
   alvo.innerHTML = BIB_ARVORE.map((r) => bibNoHtml(r, 0)).join('');
-  // Clicar no nome de uma pasta com filhas seleciona a pasta; a seta abre.
+  // A seta só abre/recolhe. O nome seleciona e mantém a pasta aberta. Antes o
+  // redraw após a navegação esquecia o atributo open e a árvore "pulava".
   alvo.querySelectorAll('summary[data-pasta]').forEach((s) => {
     s.addEventListener('click', (ev) => {
-      const jaAberta = s.parentElement.open;
-      const soSelecionar = !ev.target.closest('.bib-seta') && !jaAberta;
-      if (soSelecionar) { /* deixa abrir e também seleciona */ }
+      const details = s.parentElement;
+      if (ev.target.closest('.bib-seta')) return;
+      ev.preventDefault();
+      details.open = true;
+      BIB_ABERTAS.add(String(s.dataset.pasta));
+      // Se foi uma subpasta, cada ancestral também precisa permanecer aberto
+      // depois do redesenho da lista.
+      let ancestral = details.parentElement ? details.parentElement.closest('details.bib-no') : null;
+      while (ancestral) {
+        ancestral.open = true;
+        const resumo = ancestral.querySelector(':scope > summary[data-pasta]');
+        if (resumo) BIB_ABERTAS.add(String(resumo.dataset.pasta));
+        ancestral = ancestral.parentElement ? ancestral.parentElement.closest('details.bib-no') : null;
+      }
       bibAbrirPasta(s.dataset.pasta);
+    });
+    s.parentElement.addEventListener('toggle', () => {
+      const id = String(s.dataset.pasta);
+      if (s.parentElement.open) BIB_ABERTAS.add(id);
+      else BIB_ABERTAS.delete(id);
     });
   });
   alvo.querySelectorAll('.bib-pasta-btn[data-pasta]').forEach((b) => {
@@ -343,6 +399,7 @@ async function bibCarregar() {
 }
 
 function bibAbrirPasta(pastaId) {
+  BIB_SELECIONADOS.clear();
   BIB_ESTADO.escopo = 'pasta';
   BIB_ESTADO.pastaId = pastaId;
   BIB_ESTADO.dono = null;
@@ -353,6 +410,7 @@ function bibAbrirPasta(pastaId) {
 }
 
 function bibAbrirEscopo(escopo, dono) {
+  BIB_SELECIONADOS.clear();
   BIB_ESTADO.escopo = escopo;
   BIB_ESTADO.dono = dono || null;
   BIB_ESTADO.pastaId = '';
@@ -365,6 +423,7 @@ document.getElementById('bib-canais').addEventListener('click', (ev) => {
   if (!b) return;
   document.querySelectorAll('#bib-canais .bib-chip').forEach((x) => x.classList.remove('on'));
   b.classList.add('on');
+  BIB_SELECIONADOS.clear();
   BIB_ESTADO.canal = b.dataset.canal;
   BIB_ESTADO.pagina = 1;
   bibCarregar();
@@ -375,6 +434,7 @@ document.getElementById('bib-busca').addEventListener('input', (ev) => {
   clearTimeout(_bibTimerBusca);
   const v = ev.target.value.trim();
   _bibTimerBusca = setTimeout(() => {
+    BIB_SELECIONADOS.clear();
     if (!v) { BIB_ESTADO.escopo = 'inicio'; BIB_ESTADO.busca = ''; bibCarregar(); return; }
     BIB_ESTADO.escopo = 'busca';
     BIB_ESTADO.busca = v;
@@ -396,12 +456,19 @@ function bibCaminhoHtml() {
   }
   if (BIB_ESTADO.escopo === 'favoritos') { c.innerHTML = '<b>Favoritos</b>'; return; }
   if (BIB_ESTADO.escopo === 'sem-localizacao') {
-    c.innerHTML = '<b>Sem localização</b><span>·</span>conteúdo que ainda não foi colocado numa pasta';
+    const dono = bibNomeDono(BIB_ESTADO.dono);
+    c.innerHTML = esc(dono) + ' <span>/</span> <b>Sem localização</b><span>·</span>conteúdo que ainda não foi colocado numa pasta';
     return;
   }
   const caminho = BIB_LISTAGEM.caminho || [];
   if (!caminho.length) { c.innerHTML = '<span>Escolha uma pasta à esquerda</span>'; return; }
   c.innerHTML = caminho.map((n, i) => (i === caminho.length - 1 ? '<b>' + esc(n) + '</b>' : esc(n) + ' <span>/</span> ')).join('');
+}
+
+function bibNomeDono(dono) {
+  const chave = String(dono == null || dono === '' ? 'compartilhado' : dono);
+  const raiz = BIB_ARVORE.find((r) => String(r.dono_id == null ? 'compartilhado' : r.dono_id) === chave);
+  return raiz ? raiz.nome : (chave === 'compartilhado' ? 'Compartilhado' : 'Proprietário');
 }
 
 function bibLinhaItem(it) {
@@ -417,6 +484,7 @@ function bibLinhaItem(it) {
   const caminho = it.pasta_caminho || [];
   const local = (caminho[0] === it.dono_nome ? caminho.slice(1) : caminho).join(' / ');
   return '<div class="bib-linha" data-id="' + it.id + '">' +
+    (BIB_PODE_GERIR && it.pode_gerir ? '<input class="bib-selecao" type="checkbox" data-selecionar="' + it.id + '" aria-label="Selecionar ' + esc(it.nome) + '"' + (BIB_SELECIONADOS.has(it.id) ? ' checked' : '') + '>' : '') +
     '<span class="bib-ico t-' + it.tipo + '" title="' + (BIB_ROTULO_CANAL[it.tipo] || it.tipo) + '">' + (BIB_ICO[it.tipo] || '') + '</span>' +
     '<div class="bib-corpo">' +
       '<div class="bib-nome">' + esc(it.nome) + tags.map((t) => '<span class="bib-tag">' + esc(t) + '</span>').join('') + '</div>' +
@@ -450,6 +518,7 @@ function bibDesenharLista() {
   const itens = BIB_LISTAGEM.itens || [];
   const funis = BIB_LISTAGEM.funis || [];
   if (BIB_ESTADO.escopo === 'inicio') {
+    bibAtualizarSelecao();
     alvo.innerHTML = '<div class="bib-lista"><div class="bib-vazio">' +
       '<b>Escolha uma pasta para ver o conteúdo</b>' +
       'As pastas começam fechadas de propósito: a biblioteca tem centenas de itens, e abrir tudo de uma vez atrapalha mais do que ajuda. ' +
@@ -458,6 +527,7 @@ function bibDesenharLista() {
     return;
   }
   if (!itens.length && !funis.length) {
+    bibAtualizarSelecao();
     alvo.innerHTML = '<div class="bib-lista"><div class="bib-vazio"><b>Nada aqui</b>' +
       (BIB_LISTAGEM.aviso ? esc(BIB_LISTAGEM.aviso) :
         (BIB_ESTADO.escopo === 'busca' ? 'Nenhum conteúdo bate com essa busca. Tente outra palavra do nome ou do texto.'
@@ -478,6 +548,7 @@ function bibDesenharLista() {
   }
   alvo.innerHTML = html;
   alvo.querySelectorAll('[data-pag]').forEach((b) => b.addEventListener('click', () => {
+    BIB_SELECIONADOS.clear();
     BIB_ESTADO.pagina += Number(b.dataset.pag);
     bibCarregar();
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -488,6 +559,27 @@ function bibDesenharLista() {
     if (b.dataset.acao === 'menu') return bibMenu(ev, itens.find((i) => i.id === id), 'conteudo');
     if (b.dataset.acao === 'menu-funil') return bibMenu(ev, funis.find((f) => f.id === id), 'funil');
   }));
+  alvo.querySelectorAll('[data-selecionar]').forEach((c) => c.addEventListener('change', () => {
+    const id = Number(c.dataset.selecionar);
+    if (c.checked) BIB_SELECIONADOS.add(id); else BIB_SELECIONADOS.delete(id);
+    bibAtualizarSelecao();
+  }));
+  bibAtualizarSelecao();
+}
+
+function bibAtualizarSelecao() {
+  const barra = document.getElementById('bib-selecao-barra');
+  if (!barra) return;
+  const exibidos = (BIB_LISTAGEM.itens || []).filter((i) => i.pode_gerir).map((i) => i.id);
+  const qtd = BIB_SELECIONADOS.size;
+  barra.classList.toggle('aberta', qtd > 0 || exibidos.length > 0 && BIB_ESTADO.escopo !== 'inicio');
+  const resumo = document.getElementById('bib-selecao-resumo');
+  if (resumo) resumo.textContent = qtd ? qtd + ' conteúdo(s) selecionado(s)' : 'Selecione o conteúdo que deseja excluir.';
+  const todos = document.getElementById('bib-selecionar-pagina');
+  if (todos) {
+    todos.checked = exibidos.length > 0 && exibidos.every((id) => BIB_SELECIONADOS.has(id));
+    todos.indeterminate = exibidos.some((id) => BIB_SELECIONADOS.has(id)) && !todos.checked;
+  }
 }
 
 // ─── Menu de ações ────────────────────────────────────────────────────────
@@ -583,13 +675,13 @@ function bibFolhaErro(msg) {
 }
 
 // Árvore de destino dentro da folha: as mesmas pastas, sem os itens.
-function bibDestinoHtml(soDoDono) {
+function bibDestinoHtml(soDoDono, selecionada) {
   function no(n, nivel) {
     if (n.virtual) return '';
     const filhas = (n.filhas || []).map((f) => no(f, nivel + 1)).join('');
     return '<div style="padding-left:' + (nivel * 12) + 'px">' +
       '<label style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:8px;cursor:pointer;font-size:13px">' +
-      '<input type="radio" name="bib-destino" value="' + n.id + '" style="width:auto;margin:0">' +
+      '<input type="radio" name="bib-destino" value="' + n.id + '" style="width:auto;margin:0"' + (String(n.id) === String(selecionada || '') ? ' checked' : '') + '>' +
       '<span>' + esc(n.nome) + '</span><span style="color:var(--cinza-2);font-size:11px">' + (n.total || 0) + '</span>' +
       '</label>' + filhas + '</div>';
   }
@@ -741,6 +833,34 @@ function bibFolhaExcluir(item) {
     ]);
 }
 
+function bibFolhaExcluirSelecionados() {
+  // A ação só alcança os itens ainda visíveis nesta página. A seleção já é
+  // limpa ao mudar de pasta, busca, canal ou página; esta defesa é a segunda
+  // barreira contra uma exclusão inesperada.
+  const itens = (BIB_LISTAGEM.itens || []).filter((it) => BIB_SELECIONADOS.has(it.id) && it.pode_gerir);
+  const ids = itens.map((it) => it.id);
+  if (!ids.length) return;
+  const comVinculo = itens.filter((it) => it.usos_funis || it.usos_fluxos);
+  const aviso = comVinculo.length
+    ? '<div class="bib-consequencia" style="border-color:rgba(244,63,94,.4)"><b>Atenção:</b> ' + comVinculo.length +
+      ' item(ns) são usados em funis ou fluxos. Excluir interrompe esses passos. Revise-os antes de confirmar.</div>'
+    : '<div class="bib-consequencia">Nenhum dos itens selecionados é usado em funis ou fluxos nesta página.</div>';
+  bibAbrirFolha('Excluir conteúdos selecionados',
+    'Esta ação exclui ' + ids.length + ' conteúdo(s) e não tem desfazer.',
+    '<div class="bib-consequencia"><b>Você vai excluir:</b><br>' + itens.map((it) => esc(it.nome)).join('<br>') + '</div>' + aviso,
+    [
+      { rotulo: 'Cancelar', aoClicar: bibFecharFolha },
+      { rotulo: 'Excluir ' + ids.length + ' conteúdo(s)', classe: 'btn btn-danger', aoClicar: (b) => bibComOcupado(b, 'Excluindo…', async () => {
+        const { dados } = await bibPost('/crm/biblioteca/conteudos/excluir', { ids: ids, confirmar_vinculos: comVinculo.length > 0 });
+        if (!dados.ok) return bibFolhaErro(dados.erro || 'Não foi possível excluir os conteúdos selecionados.');
+        BIB_SELECIONADOS.clear();
+        bibFecharFolha();
+        toast(dados.excluidos + ' conteúdo(s) excluído(s)', 'ok');
+        bibRecarregarTudo();
+      }) }
+    ]);
+}
+
 function bibFolhaEditar(item) {
   const ehEmail = item.tipo === 'email';
   const corpo = '<label class="campo" for="bib-ed-nome">Nome</label>' +
@@ -856,7 +976,7 @@ function bibFolhaNovoCanal(canal) {
       '<input type="file" id="bib-n-midia" accept="image/*,audio/*,video/*,application/pdf">' +
       '<div class="bib-consequencia">Com arquivo, o texto vai como legenda. Áudio sai como nota de voz.</div>';
   }
-  campos += '<label class="campo">Onde vai ficar</label>' + bibDestinoHtml(BIB_PODE_GERIR ? null : (BIB_USUARIO_ID || 'compartilhado'));
+  campos += '<label class="campo">Onde vai ficar</label>' + bibDestinoHtml(BIB_PODE_GERIR ? null : (BIB_USUARIO_ID || 'compartilhado'), pastaAtual);
   bibAbrirFolha('Novo ' + (BIB_ROTULO_CANAL[canal] || canal), 'O destino define quem enxerga: em Compartilhado, todo consultor vê na extensão.',
     campos, [
       { rotulo: 'Cancelar', aoClicar: bibFecharFolha },
@@ -864,7 +984,7 @@ function bibFolhaNovoCanal(canal) {
     ]);
   if (pastaAtual) {
     const alvo = document.querySelector('input[name="bib-destino"][value="' + pastaAtual + '"]');
-    if (alvo) { alvo.checked = true; alvo.scrollIntoView({ block: 'center' }); }
+    if (alvo) alvo.closest('label').scrollIntoView({ block: 'center' });
   }
 }
 
@@ -924,6 +1044,17 @@ function bibSalvarNovo(canal, botao) {
 }
 
 document.getElementById('bib-novo').addEventListener('click', bibFolhaNovo);
+
+const bibSelecionarPagina = document.getElementById('bib-selecionar-pagina');
+if (bibSelecionarPagina) bibSelecionarPagina.addEventListener('change', () => {
+  (BIB_LISTAGEM.itens || []).filter((it) => it.pode_gerir).forEach((it) => {
+    if (bibSelecionarPagina.checked) BIB_SELECIONADOS.add(it.id);
+    else BIB_SELECIONADOS.delete(it.id);
+  });
+  bibDesenharLista();
+});
+const bibExcluirSelecionados = document.getElementById('bib-excluir-selecionados');
+if (bibExcluirSelecionados) bibExcluirSelecionados.addEventListener('click', bibFolhaExcluirSelecionados);
 
 const btnNovaPasta = document.getElementById('bib-nova-pasta');
 if (btnNovaPasta) btnNovaPasta.addEventListener('click', () => {
