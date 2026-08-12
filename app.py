@@ -5094,7 +5094,7 @@ MODULOS = [
     {'key': 'crm_frios',     'label': 'CRM · Base Fria',      'prefixos': ['/crm/frios'],                         'admin': True},
     {'key': 'crm_fluxos',    'label': 'CRM · Fluxos',         'prefixos': ['/crm/fluxos'],                        'admin': True},
     {'key': 'crm_funis',     'label': 'CRM · Funis WhatsApp', 'prefixos': ['/crm/funis'],                         'admin': False},
-    {'key': 'crm_modelos',   'label': 'CRM · Modelos',        'prefixos': ['/crm/modelos'],                       'admin': False},
+    {'key': 'crm_modelos',   'label': 'CRM · Biblioteca',     'prefixos': ['/crm/modelos', '/crm/biblioteca'],    'admin': False},
     # Administração (gerenciais)
     {'key': 'usuarios',      'label': 'Usuários',             'prefixos': ['/usuarios', '/usuario/'],             'admin': True},
     {'key': 'score',         'label': 'Score de Utilização',  'prefixos': ['/score'],                             'admin': True},
@@ -38362,9 +38362,12 @@ def crm_importar_zapvoice():
 def crm_modelo_favorito(mid):
     """Marca/desmarca favorito de um modelo (qualquer tipo)."""
     conn = db()
-    m = conn.execute("SELECT favorito FROM modelos_conteudo WHERE id=?", (mid,)).fetchone()
+    m = conn.execute("SELECT favorito, dono_consultor_id FROM modelos_conteudo WHERE id=?", (mid,)).fetchone()
     if not m:
         close_db(conn); return jsonify({"ok": False, "erro": "Modelo não encontrado"}), 404
+    if not _bib_pode_gerir(m['dono_consultor_id'], session.get('user_id'), _bib_eh_gestor()):
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Você não tem acesso a este conteúdo"}), 403
     novo = 0 if m['favorito'] else 1
     conn.execute("UPDATE modelos_conteudo SET favorito=? WHERE id=?", (novo, mid))
     conn.commit(); close_db(conn)
@@ -38394,9 +38397,12 @@ def crm_modelo_midia(nome):
 @admin_required
 def crm_modelo_toggle(mid):
     conn = db()
-    m = conn.execute("SELECT ativo FROM modelos_conteudo WHERE id=?", (mid,)).fetchone()
+    m = conn.execute("SELECT ativo, dono_consultor_id FROM modelos_conteudo WHERE id=?", (mid,)).fetchone()
     if not m:
         close_db(conn); return jsonify({"ok": False, "erro": "Modelo não encontrado"}), 404
+    if not _bib_pode_gerir(m['dono_consultor_id'], session.get('user_id'), _bib_eh_gestor()):
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Você não tem acesso a este conteúdo"}), 403
     novo = 0 if m['ativo'] else 1
     conn.execute("UPDATE modelos_conteudo SET ativo=? WHERE id=?", (novo, mid))
     conn.commit(); close_db(conn)
@@ -38411,9 +38417,12 @@ def crm_modelo_excluir(mid):
     modelo passam a falhar no próximo envio com erro claro no log (em vez de
     apagar o passo do fluxo sozinho, que seria uma mudança silenciosa)."""
     conn = db()
-    m = conn.execute("SELECT id FROM modelos_conteudo WHERE id=?", (mid,)).fetchone()
+    m = conn.execute("SELECT id, dono_consultor_id FROM modelos_conteudo WHERE id=?", (mid,)).fetchone()
     if not m:
         close_db(conn); return jsonify({"ok": False, "erro": "Modelo não encontrado"}), 404
+    if not _bib_pode_gerir(m['dono_consultor_id'], session.get('user_id'), _bib_eh_gestor()):
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Você não tem acesso a este conteúdo"}), 403
     try:
         conn.execute("DELETE FROM modelos_conteudo WHERE id=?", (mid,))
         conn.commit()
@@ -38437,9 +38446,12 @@ def crm_modelo_editar(mid):
     nome = (request.form.get('nome') or '').strip()
     texto = request.form.get('corpo_texto')
     conn = db()
-    m = conn.execute("SELECT id FROM modelos_conteudo WHERE id=?", (mid,)).fetchone()
+    m = conn.execute("SELECT id, dono_consultor_id FROM modelos_conteudo WHERE id=?", (mid,)).fetchone()
     if not m:
         close_db(conn); return jsonify({"ok": False, "erro": "Modelo não encontrado"}), 404
+    if not _bib_pode_gerir(m['dono_consultor_id'], session.get('user_id'), _bib_eh_gestor()):
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Você não tem acesso a este conteúdo"}), 403
     sets, args = [], []
     if nome:
         sets.append("nome=?"); args.append(nome[:200])
@@ -38643,13 +38655,21 @@ def crm_modelo_mover_pasta(mid):
     d = request.json or {}
     pasta_id = d.get('pasta_id')
     conn = db()
-    if not conn.execute("SELECT id FROM modelos_conteudo WHERE id=?", (mid,)).fetchone():
+    atual = conn.execute("SELECT id, dono_consultor_id FROM modelos_conteudo WHERE id=?", (mid,)).fetchone()
+    if not atual:
         close_db(conn); return jsonify({"ok": False, "erro": "Modelo não encontrado"}), 404
+    eh_gestor = _bib_eh_gestor()
+    if not _bib_pode_gerir(atual['dono_consultor_id'], session.get('user_id'), eh_gestor):
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Você não tem acesso a este conteúdo"}), 403
     dono = None
     if pasta_id:
         if not conn.execute("SELECT id FROM pastas WHERE id=?", (pasta_id,)).fetchone():
             close_db(conn); return jsonify({"ok": False, "erro": "Pasta não encontrada"}), 400
         dono = _pasta_dono(conn, pasta_id)
+        if not eh_gestor and dono != session.get('user_id'):
+            close_db(conn)
+            return jsonify({"ok": False, "erro": "Você só pode usar as suas pastas"}), 403
     conn.execute("UPDATE modelos_conteudo SET pasta_id=?, dono_consultor_id=? WHERE id=?", (pasta_id or None, dono, mid))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
@@ -38662,13 +38682,21 @@ def crm_funil_mover_pasta(fid):
     d = request.json or {}
     pasta_id = d.get('pasta_id')
     conn = db()
-    if not conn.execute("SELECT id FROM whatsapp_funis WHERE id=?", (fid,)).fetchone():
+    atual = conn.execute("SELECT id, dono_consultor_id FROM whatsapp_funis WHERE id=?", (fid,)).fetchone()
+    if not atual:
         close_db(conn); return jsonify({"ok": False, "erro": "Funil não encontrado"}), 404
+    eh_gestor = _bib_eh_gestor()
+    if not _bib_pode_gerir(atual['dono_consultor_id'], session.get('user_id'), eh_gestor):
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Você não tem acesso a este funil"}), 403
     dono = None
     if pasta_id:
         if not conn.execute("SELECT id FROM pastas WHERE id=?", (pasta_id,)).fetchone():
             close_db(conn); return jsonify({"ok": False, "erro": "Pasta não encontrada"}), 400
         dono = _pasta_dono(conn, pasta_id)
+        if not eh_gestor and dono != session.get('user_id'):
+            close_db(conn)
+            return jsonify({"ok": False, "erro": "Você só pode usar as suas pastas"}), 403
     conn.execute("UPDATE whatsapp_funis SET pasta_id=?, dono_consultor_id=? WHERE id=?", (pasta_id or None, dono, fid))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
@@ -38812,6 +38840,667 @@ def crm_pastas_backfill_automatico():
     contagem['total_pastas'] = conn.execute("SELECT COUNT(*) n FROM pastas").fetchone()['n']
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "contagem": contagem})
+
+
+# ─── Biblioteca de Conteúdo: proprietário primeiro ──────────────────────────
+# A biblioteca é uma árvore de PROPRIETÁRIOS. Raiz = Compartilhado + uma
+# pasta-mãe por consultor; abaixo, subpastas livres. Em qualquer pasta convivem
+# WhatsApp, SMS e e-mail — canal é filtro, não organização (agrupar por canal
+# antes de agrupar por dono era o que deixava a tela antiga confusa).
+#
+# As quatro operações são diferentes de propósito:
+#   Mover      muda só a pasta. ID e dono ficam.
+#   Transferir muda dono e pasta. O ID fica.
+#   Copiar     cria item novo no destino. O original não muda.
+#   Duplicar   é copiar no mesmo lugar.
+# Fluxo aponta para conteúdo por `fluxo_passos.template = 'upload_<id>'`: manter
+# o ID em mover e transferir não é elegância, é o que impede o Fluxo de quebrar.
+# Por isso nenhuma dessas operações apaga e recria registro.
+
+_BIB_CANAIS = ('whatsapp', 'email', 'sms')
+_BIB_PERFIS_GESTOR = ('admin', 'supervisor', 'gestor_vendedor')
+_BIB_PREVIA_MAX = 180
+
+
+def _bib_eh_gestor(perfil=None):
+    return (perfil if perfil is not None else session.get('perfil')) in _BIB_PERFIS_GESTOR
+
+
+def _bib_donos_com_raiz(conn):
+    """Quem tem pasta-mãe própria: consultor ativo, mais quem já é dono de
+    conteúdo, funil ou pasta. Perfil administrativo não ganha pasta vazia só por
+    existir; mas quem já tem conteúdo no nome ganha, senão esse conteúdo ficaria
+    sem casa na árvore — e sumir da tela é exatamente o que não pode acontecer."""
+    donos = {u['id']: u['nome'] for u in conn.execute(
+        "SELECT id, nome FROM usuarios WHERE ativo=1 AND perfil='consultor'").fetchall()}
+    ids = set()
+    for sql in ("SELECT DISTINCT dono_consultor_id AS d FROM modelos_conteudo WHERE dono_consultor_id IS NOT NULL",
+                "SELECT DISTINCT dono_consultor_id AS d FROM whatsapp_funis WHERE dono_consultor_id IS NOT NULL",
+                "SELECT DISTINCT consultor_id AS d FROM pastas WHERE consultor_id IS NOT NULL"):
+        for r in conn.execute(sql).fetchall():
+            ids.add(r['d'])
+    faltando = [i for i in ids if i not in donos]
+    if faltando:
+        marcadores = ','.join('?' for _ in faltando)
+        for u in conn.execute(f"SELECT id, nome FROM usuarios WHERE id IN ({marcadores})",
+                              tuple(faltando)).fetchall():
+            donos[u['id']] = u['nome']
+    return donos
+
+
+def _bib_garantir_raizes(conn):
+    """Cria o que faltar de raiz e devolve {dono_id ou None: pasta_id}.
+    Idempotente: só insere o que não existe, e nunca mexe no que existe."""
+    raizes = {}
+    r = conn.execute("""SELECT id FROM pastas WHERE parent_id IS NULL AND consultor_id IS NULL
+        AND nome='Compartilhado' ORDER BY id LIMIT 1""").fetchone()
+    if r:
+        raizes[None] = r['id']
+    else:
+        cur = conn.cursor()
+        cur.execute("INSERT INTO pastas (nome, parent_id, consultor_id) VALUES ('Compartilhado',NULL,NULL)")
+        raizes[None] = _last_insert_id(cur)
+    # ORDER BY id DESC + sobrescrita do dict = fica valendo a raiz mais antiga
+    # se um dia nascer duplicada por corrida.
+    existentes = {p['consultor_id']: p['id'] for p in conn.execute(
+        """SELECT id, consultor_id FROM pastas
+           WHERE parent_id IS NULL AND consultor_id IS NOT NULL ORDER BY id DESC""").fetchall()}
+    for uid, nome in _bib_donos_com_raiz(conn).items():
+        if uid in existentes:
+            raizes[uid] = existentes[uid]
+            continue
+        cur = conn.cursor()
+        cur.execute("INSERT INTO pastas (nome, parent_id, consultor_id) VALUES (?,NULL,?)",
+                    ((nome or 'Consultor')[:120], uid))
+        raizes[uid] = _last_insert_id(cur)
+    return raizes
+
+
+def _bib_mapa_pastas(conn):
+    return {p['id']: dict(p) for p in conn.execute(
+        "SELECT id, nome, parent_id, consultor_id FROM pastas").fetchall()}
+
+
+def _bib_dono_pela_raiz(mapa, pasta_id):
+    """Dono de uma pasta = consultor_id da raiz dela. Igual ao _pasta_dono, mas
+    sem ida ao banco por nível (a tela pergunta isso para centenas de itens)."""
+    atual, visitados = pasta_id, set()
+    while atual and atual in mapa and atual not in visitados:
+        visitados.add(atual)
+        p = mapa[atual]
+        if not p['parent_id'] or p['parent_id'] not in mapa:
+            return p['consultor_id']
+        atual = p['parent_id']
+    return None
+
+
+def _bib_caminho(mapa, pasta_id):
+    """['Ana Consultora', 'Primeiro contato'] — do topo até a pasta."""
+    nomes, atual, visitados = [], pasta_id, set()
+    while atual and atual in mapa and atual not in visitados:
+        visitados.add(atual)
+        nomes.append(mapa[atual]['nome'])
+        atual = mapa[atual]['parent_id']
+    return list(reversed(nomes))
+
+
+def _bib_previa(item):
+    """Prévia curta e segura: e-mail mostra o assunto (nunca o HTML cru)."""
+    if item.get('tipo') == 'email':
+        base = (item.get('assunto') or '').strip() or '(sem assunto)'
+    else:
+        base = (item.get('corpo_texto') or '').strip()
+    base = re.sub(r'\s+', ' ', base)
+    return base[:_BIB_PREVIA_MAX] + ('…' if len(base) > _BIB_PREVIA_MAX else '')
+
+
+def _bib_arvore(conn, usuario_id, eh_gestor):
+    """Árvore inteira com contagem por canal. Consultor recebe só a pasta-mãe
+    dele — no site, conteúdo de colega e Compartilhado não aparecem."""
+    _bib_garantir_raizes(conn)
+    mapa = _bib_mapa_pastas(conn)
+    nomes_usuarios = {u['id']: u['nome'] for u in conn.execute(
+        "SELECT id, nome FROM usuarios").fetchall()}
+    por_pasta = {}
+    for r in conn.execute("""SELECT pasta_id, tipo, COUNT(*) AS n FROM modelos_conteudo
+        WHERE COALESCE(ativo,1)=1 GROUP BY pasta_id, tipo""").fetchall():
+        por_pasta.setdefault(r['pasta_id'], {})[r['tipo'] or 'outro'] = r['n']
+    funis_por_pasta = {r['pasta_id']: r['n'] for r in conn.execute(
+        """SELECT pasta_id, COUNT(*) AS n FROM whatsapp_funis
+           WHERE COALESCE(ativo,1)=1 GROUP BY pasta_id""").fetchall()}
+    # Sem pasta: não some da tela, aparece numa pasta virtual dentro do dono.
+    soltos = {}
+    for r in conn.execute("""SELECT dono_consultor_id AS d, tipo, COUNT(*) AS n
+        FROM modelos_conteudo WHERE pasta_id IS NULL AND COALESCE(ativo,1)=1
+        GROUP BY dono_consultor_id, tipo""").fetchall():
+        soltos.setdefault(r['d'], {})[r['tipo'] or 'outro'] = r['n']
+    funis_soltos = {r['d']: r['n'] for r in conn.execute(
+        """SELECT dono_consultor_id AS d, COUNT(*) AS n FROM whatsapp_funis
+           WHERE pasta_id IS NULL AND COALESCE(ativo,1)=1 GROUP BY dono_consultor_id""").fetchall()}
+
+    def _no(p):
+        itens = por_pasta.get(p['id'], {})
+        return {'id': p['id'], 'nome': p['nome'], 'parent_id': p['parent_id'],
+                'itens': {c: itens.get(c, 0) for c in _BIB_CANAIS},
+                'funis': funis_por_pasta.get(p['id'], 0), 'filhas': [], 'virtual': False}
+
+    nos = {pid: _no(p) for pid, p in mapa.items()}
+    raizes = []
+    for pid, p in mapa.items():
+        pai = p['parent_id']
+        if pai and pai in nos:
+            nos[pai]['filhas'].append(nos[pid])
+        else:
+            no = nos[pid]
+            no['dono_id'] = p['consultor_id']
+            no['dono_nome'] = nomes_usuarios.get(p['consultor_id']) or 'Compartilhado'
+            raizes.append(no)
+
+    for raiz in raizes:
+        dono = raiz.get('dono_id')
+        eh_compartilhado_principal = dono is None and raiz['nome'] == 'Compartilhado'
+        if dono in soltos or dono in funis_soltos:
+            if dono is not None or eh_compartilhado_principal:
+                itens = soltos.get(dono, {})
+                raiz['filhas'].append({
+                    'id': None, 'nome': 'Sem localização', 'parent_id': raiz['id'],
+                    'itens': {c: itens.get(c, 0) for c in _BIB_CANAIS},
+                    'funis': funis_soltos.get(dono, 0), 'filhas': [], 'virtual': True,
+                    'dono_id': dono})
+
+    def _ordenar(no):
+        no['filhas'].sort(key=lambda f: (1 if f['virtual'] else 0, (f['nome'] or '').lower()))
+        total = sum(no['itens'].values())
+        funis = no['funis']
+        for f in no['filhas']:
+            sub = _ordenar(f)
+            total += sub[0]
+            funis += sub[1]
+        no['total'] = total
+        no['total_funis'] = funis
+        return total, funis
+
+    for raiz in raizes:
+        _ordenar(raiz)
+
+    def _peso(r):
+        if r['dono_id'] is None:
+            return (0 if r['nome'] == 'Compartilhado' else 1, (r['nome'] or '').lower())
+        return (2, (r['dono_nome'] or '').lower())
+
+    raizes.sort(key=_peso)
+    if eh_gestor:
+        return raizes
+    return [r for r in raizes if r.get('dono_id') == usuario_id]
+
+
+def _bib_erro(msg, codigo=400):
+    return jsonify({'ok': False, 'erro': msg}), codigo
+
+
+def _bib_conteudo(conn, mid):
+    r = conn.execute("SELECT * FROM modelos_conteudo WHERE id=?", (mid,)).fetchone()
+    return dict(r) if r else None
+
+
+def _bib_pode_gerir(dono_item, usuario_id, eh_gestor):
+    """Gestor administra tudo. Consultor, só o que é dele — nem o compartilhado,
+    que no site nem aparece pra ele."""
+    return bool(eh_gestor or (dono_item is not None and dono_item == usuario_id))
+
+
+def _bib_destino(conn, pasta_id, usuario_id, eh_gestor):
+    """Valida a pasta destino e devolve (pasta_id, dono_da_pasta, erro)."""
+    if pasta_id in (None, '', 0, '0'):
+        return None, None, 'Escolha a pasta de destino'
+    try:
+        pasta_id = int(pasta_id)
+    except (TypeError, ValueError):
+        return None, None, 'Pasta de destino inválida'
+    if not conn.execute("SELECT id FROM pastas WHERE id=?", (pasta_id,)).fetchone():
+        return None, None, 'Essa pasta não existe mais'
+    dono = _pasta_dono(conn, pasta_id)
+    if not eh_gestor and dono != usuario_id:
+        return None, None, 'Você só pode usar as suas pastas'
+    return pasta_id, dono, None
+
+
+def _bib_dono_pedido(conn, valor, eh_gestor):
+    """'compartilhado' ou id de usuário -> (dono_id, erro). Só gestor troca dono."""
+    if not eh_gestor:
+        return None, 'Só o gestor pode transferir conteúdo para outro proprietário'
+    if valor in (None, '', 'compartilhado'):
+        return None, None
+    try:
+        dono = int(valor)
+    except (TypeError, ValueError):
+        return None, 'Proprietário de destino inválido'
+    if not conn.execute("SELECT id FROM usuarios WHERE id=?", (dono,)).fetchone():
+        return None, 'Proprietário de destino não encontrado'
+    return dono, None
+
+
+def _bib_raiz_do_dono(conn, dono):
+    raizes = _bib_garantir_raizes(conn)
+    return raizes.get(dono) or raizes.get(None)
+
+
+def _bib_copiar_conteudo(conn, origem, pasta_id, dono, usuario_id, sufixo_copia=True):
+    """Cria um conteúdo novo a partir de outro, em qualquer canal.
+
+    A mídia é reaproveitada de propósito: o arquivo nunca é editado no lugar
+    (toda troca de mídia sobe um arquivo com nome novo), então duplicar o blob
+    só gastaria espaço para guardar bytes idênticos."""
+    nome = (_nome_copia_disponivel(conn, 'modelos_conteudo', origem['nome'], dono)
+            if sufixo_copia else (origem['nome'] or 'Sem nome')[:200])
+    cur = conn.cursor()
+    cur.execute("""INSERT INTO modelos_conteudo
+        (tipo, nome, assunto, corpo_html, corpo_texto, variante, ativo, criado_por,
+         midia_arquivo, midia_tipo, categoria, favorito, vezes_usado, pasta_id, dono_consultor_id)
+        VALUES (?,?,?,?,?,?,1,?,?,?,?,0,0,?,?)""",
+        (origem['tipo'], nome, origem.get('assunto'), origem.get('corpo_html'),
+         origem.get('corpo_texto'), origem.get('variante'), usuario_id,
+         origem.get('midia_arquivo'), origem.get('midia_tipo'), origem.get('categoria'),
+         pasta_id, dono))
+    return _last_insert_id(cur)
+
+
+@app.route('/crm/biblioteca/arvore')
+@login_required
+def crm_biblioteca_arvore():
+    """Árvore de proprietários e pastas, com contagem por canal."""
+    conn = db()
+    eh_gestor = _bib_eh_gestor()
+    arvore = _bib_arvore(conn, session.get('user_id'), eh_gestor)
+    conn.commit()   # as raízes que faltavam foram criadas aqui
+    close_db(conn)
+    return jsonify({'ok': True, 'raizes': arvore, 'pode_gerir': eh_gestor})
+
+
+@app.route('/crm/biblioteca/itens')
+@login_required
+def crm_biblioteca_itens():
+    """Conteúdo de uma pasta (ou de uma busca), já filtrado pelo servidor.
+
+    Paginado porque a biblioteca real tem centenas de itens e a extensão e a
+    tela não podem depender de baixar tudo para depois esconder no navegador."""
+    uid = session.get('user_id')
+    eh_gestor = _bib_eh_gestor()
+    escopo = (request.args.get('escopo') or 'pasta').strip()
+    canal = (request.args.get('canal') or 'todos').strip()
+    busca = (request.args.get('busca') or '').strip().lower()
+    try:
+        pagina = max(1, int(request.args.get('pagina') or 1))
+    except (TypeError, ValueError):
+        pagina = 1
+    por_pagina = 60
+    conn = db()
+    mapa = _bib_mapa_pastas(conn)
+
+    onde, params = ["COALESCE(m.ativo,1)=1"], []
+    if canal in _BIB_CANAIS:
+        onde.append("m.tipo=?")
+        params.append(canal)
+    if not eh_gestor:
+        onde.append("m.dono_consultor_id=?")
+        params.append(uid)
+
+    dono_pedido = request.args.get('dono')
+    if escopo == 'busca':
+        if len(busca) < 2:
+            close_db(conn)
+            return jsonify({'ok': True, 'itens': [], 'funis': [], 'total': 0, 'pagina': 1,
+                            'aviso': 'Digite pelo menos duas letras para buscar'})
+        onde.append("(LOWER(m.nome) LIKE ? OR LOWER(COALESCE(m.corpo_texto,'')) LIKE ? "
+                    "OR LOWER(COALESCE(m.assunto,'')) LIKE ?)")
+        params += ['%%%s%%' % busca] * 3
+    elif escopo == 'favoritos':
+        onde.append("COALESCE(m.favorito,0)=1")
+    elif escopo == 'sem-localizacao':
+        onde.append("m.pasta_id IS NULL")
+        if eh_gestor:
+            if dono_pedido in (None, '', 'compartilhado'):
+                onde.append("m.dono_consultor_id IS NULL")
+            else:
+                try:
+                    onde.append("m.dono_consultor_id=?")
+                    params.append(int(dono_pedido))
+                except (TypeError, ValueError):
+                    close_db(conn)
+                    return _bib_erro('Proprietário inválido')
+    else:
+        try:
+            pasta_id = int(request.args.get('pasta_id') or 0)
+        except (TypeError, ValueError):
+            pasta_id = 0
+        if not pasta_id or pasta_id not in mapa:
+            close_db(conn)
+            return jsonify({'ok': True, 'itens': [], 'funis': [], 'total': 0, 'pagina': 1})
+        if not eh_gestor and _bib_dono_pela_raiz(mapa, pasta_id) != uid:
+            close_db(conn)
+            return _bib_erro('Essa pasta não é sua', 403)
+        onde.append("m.pasta_id=?")
+        params.append(pasta_id)
+
+    filtro = ' AND '.join(onde)
+    total = conn.execute(
+        f"SELECT COUNT(*) AS n FROM modelos_conteudo m WHERE {filtro}", tuple(params)).fetchone()['n']
+    linhas = conn.execute(f"""SELECT m.*, u.nome AS dono_nome FROM modelos_conteudo m
+        LEFT JOIN usuarios u ON u.id = m.dono_consultor_id
+        WHERE {filtro}
+        ORDER BY COALESCE(m.favorito,0) DESC, LOWER(m.nome)
+        LIMIT ? OFFSET ?""", tuple(params) + (por_pagina, (pagina - 1) * por_pagina)).fetchall()
+    itens = [dict(l) for l in linhas]
+
+    # Vínculos: "usado em N funis / N fluxos". Só dos itens desta página.
+    ids = [i['id'] for i in itens]
+    usos_funil, usos_fluxo = {}, {}
+    if ids:
+        marcadores = ','.join('?' for _ in ids)
+        for r in conn.execute(f"""SELECT p.modelo_id AS mid, COUNT(DISTINCT p.funil_id) AS n
+            FROM whatsapp_funil_passos p JOIN whatsapp_funis f ON f.id=p.funil_id
+            WHERE p.modelo_id IN ({marcadores}) AND COALESCE(f.ativo,1)=1
+            GROUP BY p.modelo_id""", tuple(ids)).fetchall():
+            usos_funil[r['mid']] = r['n']
+        chaves = ['upload_%d' % i for i in ids]
+        marcadores_t = ','.join('?' for _ in chaves)
+        for r in conn.execute(f"""SELECT template, COUNT(DISTINCT fluxo_id) AS n
+            FROM fluxo_passos WHERE template IN ({marcadores_t})
+            GROUP BY template""", tuple(chaves)).fetchall():
+            try:
+                usos_fluxo[int(str(r['template']).split('_', 1)[1])] = r['n']
+            except (ValueError, IndexError):
+                pass
+
+    saida = []
+    for i in itens:
+        caminho = _bib_caminho(mapa, i.get('pasta_id')) if i.get('pasta_id') else []
+        saida.append({
+            'id': i['id'], 'tipo': i['tipo'], 'nome': i['nome'],
+            'previa': _bib_previa(i), 'assunto': i.get('assunto') or '',
+            'midia_tipo': i.get('midia_tipo') or '', 'variante': i.get('variante') or '',
+            'midia_url': ('/crm/modelos/midia/%s' % i['midia_arquivo']) if i.get('midia_arquivo') else None,
+            'dono_id': i.get('dono_consultor_id'),
+            'dono_nome': i.get('dono_nome') or 'Compartilhado',
+            'pasta_id': i.get('pasta_id'), 'pasta_caminho': caminho or ['Sem localização'],
+            'favorito': bool(i.get('favorito')), 'ativo': bool(i.get('ativo', 1)),
+            'vezes_usado': i.get('vezes_usado') or 0,
+            'usos_funis': usos_funil.get(i['id'], 0), 'usos_fluxos': usos_fluxo.get(i['id'], 0),
+            'pode_gerir': _bib_pode_gerir(i.get('dono_consultor_id'), uid, eh_gestor),
+        })
+
+    funis = []
+    if escopo == 'pasta' and canal in ('todos', 'whatsapp'):
+        onde_f, params_f = ["COALESCE(f.ativo,1)=1", "f.pasta_id=?"], [int(request.args.get('pasta_id') or 0)]
+        if not eh_gestor:
+            onde_f.append("f.dono_consultor_id=?")
+            params_f.append(uid)
+        for f in conn.execute(f"""SELECT f.id, f.nome, f.dono_consultor_id, u.nome AS dono_nome,
+                COALESCE(f.favorito,0) AS favorito,
+                (SELECT COUNT(*) FROM whatsapp_funil_passos p WHERE p.funil_id=f.id) AS passos
+            FROM whatsapp_funis f LEFT JOIN usuarios u ON u.id=f.dono_consultor_id
+            WHERE {' AND '.join(onde_f)} ORDER BY LOWER(f.nome)""", tuple(params_f)).fetchall():
+            fd = dict(f)
+            funis.append({'id': fd['id'], 'nome': fd['nome'], 'passos': fd['passos'],
+                          'dono_id': fd['dono_consultor_id'],
+                          'dono_nome': fd.get('dono_nome') or 'Compartilhado',
+                          'favorito': bool(fd['favorito']),
+                          'pode_gerir': _bib_pode_gerir(fd['dono_consultor_id'], uid, eh_gestor)})
+    close_db(conn)
+    return jsonify({'ok': True, 'itens': saida, 'funis': funis, 'total': total,
+                    'pagina': pagina, 'por_pagina': por_pagina})
+
+
+@app.route('/crm/biblioteca/conteudo/<int:mid>/mover', methods=['POST'])
+@login_required
+def crm_biblioteca_conteudo_mover(mid):
+    """Muda só a pasta. ID e dono ficam — Funil e Fluxo seguem valendo."""
+    d = request.json or {}
+    uid = session.get('user_id')
+    eh_gestor = _bib_eh_gestor()
+    conn = db()
+    item = _bib_conteudo(conn, mid)
+    if not item:
+        close_db(conn); return _bib_erro('Conteúdo não encontrado', 404)
+    if not _bib_pode_gerir(item.get('dono_consultor_id'), uid, eh_gestor):
+        close_db(conn); return _bib_erro('Você não tem acesso a este conteúdo', 403)
+    pasta_id, dono_pasta, erro = _bib_destino(conn, d.get('pasta_id'), uid, eh_gestor)
+    if erro:
+        close_db(conn); return _bib_erro(erro)
+    if dono_pasta != item.get('dono_consultor_id'):
+        close_db(conn)
+        return _bib_erro('Essa pasta é de outro proprietário. Use Transferir para mudar de dono.')
+    conn.execute("UPDATE modelos_conteudo SET pasta_id=? WHERE id=?", (pasta_id, mid))
+    conn.commit(); close_db(conn)
+    return jsonify({'ok': True, 'id': mid})
+
+
+@app.route('/crm/biblioteca/conteudo/<int:mid>/transferir', methods=['POST'])
+@login_required
+def crm_biblioteca_conteudo_transferir(mid):
+    """Muda dono e pasta mantendo o ID: quem usa esse conteúdo continua usando."""
+    d = request.json or {}
+    uid = session.get('user_id')
+    eh_gestor = _bib_eh_gestor()
+    conn = db()
+    item = _bib_conteudo(conn, mid)
+    if not item:
+        close_db(conn); return _bib_erro('Conteúdo não encontrado', 404)
+    if not _bib_pode_gerir(item.get('dono_consultor_id'), uid, eh_gestor):
+        close_db(conn); return _bib_erro('Você não tem acesso a este conteúdo', 403)
+    dono, erro = _bib_dono_pedido(conn, d.get('dono'), eh_gestor)
+    if erro:
+        close_db(conn); return _bib_erro(erro, 403 if not eh_gestor else 400)
+    if d.get('pasta_id'):
+        pasta_id, dono_pasta, erro = _bib_destino(conn, d.get('pasta_id'), uid, eh_gestor)
+        if erro:
+            close_db(conn); return _bib_erro(erro)
+        if dono_pasta != dono:
+            close_db(conn)
+            return _bib_erro('A pasta escolhida não pertence ao proprietário de destino')
+    else:
+        pasta_id = _bib_raiz_do_dono(conn, dono)
+    conn.execute("UPDATE modelos_conteudo SET pasta_id=?, dono_consultor_id=? WHERE id=?",
+                 (pasta_id, dono, mid))
+    conn.commit(); close_db(conn)
+    return jsonify({'ok': True, 'id': mid})
+
+
+@app.route('/crm/biblioteca/conteudo/<int:mid>/copiar', methods=['POST'])
+@login_required
+def crm_biblioteca_conteudo_copiar(mid):
+    """Cria um conteúdo novo no destino. O original não muda de lugar nem de
+    dono, e nenhum Funil ou Fluxo passa a apontar para a cópia."""
+    d = request.json or {}
+    uid = session.get('user_id')
+    eh_gestor = _bib_eh_gestor()
+    conn = db()
+    item = _bib_conteudo(conn, mid)
+    if not item:
+        close_db(conn); return _bib_erro('Conteúdo não encontrado', 404)
+    if not _bib_pode_gerir(item.get('dono_consultor_id'), uid, eh_gestor):
+        close_db(conn); return _bib_erro('Você não tem acesso a este conteúdo', 403)
+    pasta_id, dono_pasta, erro = _bib_destino(conn, d.get('pasta_id'), uid, eh_gestor)
+    if erro:
+        close_db(conn); return _bib_erro(erro)
+    novo = _bib_copiar_conteudo(conn, item, pasta_id, dono_pasta, uid)
+    conn.commit(); close_db(conn)
+    return jsonify({'ok': True, 'id': novo})
+
+
+@app.route('/crm/biblioteca/conteudo/<int:mid>/duplicar', methods=['POST'])
+@login_required
+def crm_biblioteca_conteudo_duplicar(mid):
+    """Cópia no mesmo lugar — mesma pasta, mesmo dono."""
+    uid = session.get('user_id')
+    eh_gestor = _bib_eh_gestor()
+    conn = db()
+    item = _bib_conteudo(conn, mid)
+    if not item:
+        close_db(conn); return _bib_erro('Conteúdo não encontrado', 404)
+    if not _bib_pode_gerir(item.get('dono_consultor_id'), uid, eh_gestor):
+        close_db(conn); return _bib_erro('Você não tem acesso a este conteúdo', 403)
+    novo = _bib_copiar_conteudo(conn, item, item.get('pasta_id'),
+                                item.get('dono_consultor_id'), uid)
+    conn.commit(); close_db(conn)
+    return jsonify({'ok': True, 'id': novo})
+
+
+def _bib_dependencias_funil(conn, fid, dono_destino):
+    """Passos do funil que apontam para conteúdo de outro dono.
+
+    Conteúdo compartilhado (sem dono) não entra: todo mundo enxerga. Um funil
+    que sobrar apontando para conteúdo de terceiro é um funil que a extensão
+    esconde e que falha no meio da sequência — por isso a transferência para
+    antes de acontecer e pergunta o que fazer."""
+    pendentes = []
+    for r in conn.execute("""SELECT DISTINCT m.id, m.nome, m.dono_consultor_id, u.nome AS dono_nome
+        FROM whatsapp_funil_passos p
+        JOIN modelos_conteudo m ON m.id = p.modelo_id
+        LEFT JOIN usuarios u ON u.id = m.dono_consultor_id
+        WHERE p.funil_id=? AND m.dono_consultor_id IS NOT NULL
+        ORDER BY m.nome""", (fid,)).fetchall():
+        if r['dono_consultor_id'] != dono_destino:
+            pendentes.append({'id': r['id'], 'nome': r['nome'],
+                              'dono_nome': r['dono_nome'] or 'Compartilhado'})
+    return pendentes
+
+
+def _bib_resolver_dependencias(conn, fid, pendentes, pasta_id, dono, usuario_id, politica):
+    """'transferir' muda o dono das mensagens (some da biblioteca de quem tinha);
+    'copiar' cria cópias no destino e reaponta só os passos deste funil."""
+    if politica == 'transferir':
+        for dep in pendentes:
+            conn.execute("UPDATE modelos_conteudo SET pasta_id=?, dono_consultor_id=? WHERE id=?",
+                         (pasta_id, dono, dep['id']))
+        return None
+    if politica == 'copiar':
+        for dep in pendentes:
+            origem = _bib_conteudo(conn, dep['id'])
+            if not origem:
+                continue
+            novo = _bib_copiar_conteudo(conn, origem, pasta_id, dono, usuario_id)
+            conn.execute("UPDATE whatsapp_funil_passos SET modelo_id=? WHERE funil_id=? AND modelo_id=?",
+                         (novo, fid, dep['id']))
+        return None
+    return 'Escolha o que fazer com as mensagens de outro proprietário'
+
+
+@app.route('/crm/biblioteca/funil/<int:fid>/mover', methods=['POST'])
+@login_required
+def crm_biblioteca_funil_mover(fid):
+    d = request.json or {}
+    uid = session.get('user_id')
+    eh_gestor = _bib_eh_gestor()
+    conn = db()
+    f = conn.execute("SELECT id, nome, dono_consultor_id, pasta_id FROM whatsapp_funis WHERE id=?",
+                     (fid,)).fetchone()
+    if not f:
+        close_db(conn); return _bib_erro('Funil não encontrado', 404)
+    f = dict(f)
+    if not _bib_pode_gerir(f['dono_consultor_id'], uid, eh_gestor):
+        close_db(conn); return _bib_erro('Você não tem acesso a este funil', 403)
+    pasta_id, dono_pasta, erro = _bib_destino(conn, d.get('pasta_id'), uid, eh_gestor)
+    if erro:
+        close_db(conn); return _bib_erro(erro)
+    if dono_pasta != f['dono_consultor_id']:
+        close_db(conn)
+        return _bib_erro('Essa pasta é de outro proprietário. Use Transferir para mudar de dono.')
+    conn.execute("UPDATE whatsapp_funis SET pasta_id=? WHERE id=?", (pasta_id, fid))
+    conn.commit(); close_db(conn)
+    return jsonify({'ok': True, 'id': fid})
+
+
+@app.route('/crm/biblioteca/funil/<int:fid>/transferir', methods=['POST'])
+@login_required
+def crm_biblioteca_funil_transferir(fid):
+    """Transfere o funil e resolve as mensagens de que ele depende.
+
+    Sem escolher a política, um funil com passo de outro dono devolve 409 com a
+    lista — nunca é transferido pela metade."""
+    d = request.json or {}
+    uid = session.get('user_id')
+    eh_gestor = _bib_eh_gestor()
+    conn = db()
+    f = conn.execute("SELECT id, nome, dono_consultor_id FROM whatsapp_funis WHERE id=?", (fid,)).fetchone()
+    if not f:
+        close_db(conn); return _bib_erro('Funil não encontrado', 404)
+    f = dict(f)
+    if not _bib_pode_gerir(f['dono_consultor_id'], uid, eh_gestor):
+        close_db(conn); return _bib_erro('Você não tem acesso a este funil', 403)
+    dono, erro = _bib_dono_pedido(conn, d.get('dono'), eh_gestor)
+    if erro:
+        close_db(conn); return _bib_erro(erro, 403 if not eh_gestor else 400)
+    if d.get('pasta_id'):
+        pasta_id, dono_pasta, erro = _bib_destino(conn, d.get('pasta_id'), uid, eh_gestor)
+        if erro:
+            close_db(conn); return _bib_erro(erro)
+        if dono_pasta != dono:
+            close_db(conn)
+            return _bib_erro('A pasta escolhida não pertence ao proprietário de destino')
+    else:
+        pasta_id = _bib_raiz_do_dono(conn, dono)
+    pendentes = _bib_dependencias_funil(conn, fid, dono)
+    politica = (d.get('dependencias') or '').strip()
+    if pendentes:
+        if politica not in ('transferir', 'copiar'):
+            close_db(conn)
+            return jsonify({'ok': False, 'precisa_decidir': True,
+                            'erro': 'Este funil usa mensagens de outro proprietário',
+                            'dependencias': pendentes}), 409
+        erro = _bib_resolver_dependencias(conn, fid, pendentes, pasta_id, dono, uid, politica)
+        if erro:
+            close_db(conn); return _bib_erro(erro)
+    conn.execute("UPDATE whatsapp_funis SET pasta_id=?, dono_consultor_id=? WHERE id=?",
+                 (pasta_id, dono, fid))
+    conn.commit(); close_db(conn)
+    return jsonify({'ok': True, 'id': fid, 'dependencias_resolvidas': len(pendentes)})
+
+
+@app.route('/crm/biblioteca/funil/<int:fid>/copiar', methods=['POST'])
+@login_required
+def crm_biblioteca_funil_copiar(fid):
+    """Copia o funil para outra pasta. O original fica onde está.
+
+    Se a cópia vai para outro proprietário e a sequência usa mensagens que ele
+    não enxerga, as mensagens são copiadas junto — copiar um funil que nasce
+    quebrado não ajudaria ninguém."""
+    d = request.json or {}
+    uid = session.get('user_id')
+    eh_gestor = _bib_eh_gestor()
+    conn = db()
+    f = conn.execute("SELECT * FROM whatsapp_funis WHERE id=?", (fid,)).fetchone()
+    if not f:
+        close_db(conn); return _bib_erro('Funil não encontrado', 404)
+    f = dict(f)
+    if not _bib_pode_gerir(f['dono_consultor_id'], uid, eh_gestor):
+        close_db(conn); return _bib_erro('Você não tem acesso a este funil', 403)
+    pasta_id, dono, erro = _bib_destino(conn, d.get('pasta_id'), uid, eh_gestor)
+    if erro:
+        close_db(conn); return _bib_erro(erro)
+    passos = [dict(p) for p in conn.execute(
+        """SELECT ordem, modelo_id, delay_segundos FROM whatsapp_funil_passos
+           WHERE funil_id=? ORDER BY ordem, id""", (fid,)).fetchall()]
+    nome = _nome_copia_disponivel(conn, 'whatsapp_funis', f['nome'], dono)
+    cur = conn.cursor()
+    cur.execute("""INSERT INTO whatsapp_funis
+        (nome, categoria, favorito, ativo, vezes_disparado, criado_por, pasta_id, dono_consultor_id)
+        VALUES (?,?,0,1,0,?,?,?)""",
+        (nome, f.get('categoria'), uid, pasta_id, dono))
+    novo_fid = _last_insert_id(cur)
+    copias = {}
+    for p in passos:
+        modelo_id = p['modelo_id']
+        origem = _bib_conteudo(conn, modelo_id)
+        if origem and origem.get('dono_consultor_id') is not None \
+                and origem['dono_consultor_id'] != dono:
+            if modelo_id not in copias:
+                copias[modelo_id] = _bib_copiar_conteudo(conn, origem, pasta_id, dono, uid)
+            modelo_id = copias[modelo_id]
+        conn.execute("""INSERT INTO whatsapp_funil_passos (funil_id, ordem, modelo_id, delay_segundos)
+            VALUES (?,?,?,?)""", (novo_fid, p['ordem'], modelo_id, p['delay_segundos']))
+    conn.commit(); close_db(conn)
+    return jsonify({'ok': True, 'id': novo_fid, 'mensagens_copiadas': len(copias)})
 
 
 # ─── Funis de WhatsApp (sequências de disparo) ──────────────────────────────

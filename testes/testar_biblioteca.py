@@ -284,6 +284,197 @@ ok([p['modelo_id'] for p in passos_funil] == [DADOS['wa_ana'], DADOS['wa_ana_aud
    '8c. os passos do funil continuam apontando para os mesmos conteudos')
 
 print('')
+print('── 9. Arvore proprietario-primeiro ─────────────────────────────────────')
+r = c_admin.get('/crm/biblioteca/arvore')
+ok(r.status_code == 200, '9a. a arvore responde', 'status=%d' % r.status_code)
+arv = (r.get_json() or {}).get('raizes') or []
+nomes_raiz = [x['nome'] for x in arv]
+ok(nomes_raiz and nomes_raiz[0] == 'Compartilhado', '9b. Compartilhado vem primeiro', nomes_raiz)
+ok('Ana Consultora' in nomes_raiz and 'Bruno Consultor' in nomes_raiz,
+   '9c. cada consultor tem pasta-mae', nomes_raiz)
+raiz_ana_no = [x for x in arv if x['nome'] == 'Ana Consultora'][0]
+filhas_ana = [f['nome'] for f in raiz_ana_no['filhas']]
+ok('Primeiro contato' in filhas_ana and 'Pos-venda' in filhas_ana,
+   '9d. as subpastas aparecem em arvore', filhas_ana)
+raiz_comp_no = [x for x in arv if x['nome'] == 'Compartilhado'][0]
+ok(any(f['nome'] == 'Sem localização' and f['virtual'] for f in raiz_comp_no['filhas']),
+   '9e. item legado aparece em Sem localizacao (nao some)')
+ok(raiz_ana_no['total'] >= 4, '9f. a contagem sobe pela subarvore', raiz_ana_no['total'])
+r = c_ana.get('/crm/biblioteca/arvore')
+arv_ana = (r.get_json() or {}).get('raizes') or []
+ok([x['nome'] for x in arv_ana] == ['Ana Consultora'],
+   '9g. consultor no site so ve a propria pasta-mae', [x['nome'] for x in arv_ana])
+
+print('')
+print('── 10. Listagem por pasta, canal e busca ───────────────────────────────')
+# O e-mail foi para a raiz no teste 7; volta pra subpasta pela rota nova (que
+# tambem prova que mover um e-mail funciona, nao so mensagem de WhatsApp).
+r = c_admin.post('/crm/biblioteca/conteudo/%d/mover' % DADOS['email_comp'],
+                 json={'pasta_id': DADOS['sub_comp']})
+ok(r.status_code == 200, '10. e-mail volta para a subpasta compartilhada', r.get_json())
+r = c_admin.get('/crm/biblioteca/itens?pasta_id=%d' % DADOS['sub_comp'])
+corpo = r.get_json() or {}
+tipos = sorted({i['tipo'] for i in corpo.get('itens', [])})
+ok(tipos == ['email', 'sms', 'whatsapp'], '10a. os tres canais convivem na mesma pasta', tipos)
+r = c_admin.get('/crm/biblioteca/itens?pasta_id=%d&canal=sms' % DADOS['sub_comp'])
+so_sms = [i['nome'] for i in (r.get_json() or {}).get('itens', [])]
+ok(so_sms == ['SMS de reforco'], '10b. o filtro de canal funciona no servidor', so_sms)
+r = c_admin.get('/crm/biblioteca/itens?escopo=busca&busca=renovacao')
+achados = [i['nome'] for i in (r.get_json() or {}).get('itens', [])]
+ok('E-mail de renovacao' in achados, '10c. busca global acha e-mail pelo nome', achados)
+r = c_admin.get('/crm/biblioteca/itens?escopo=sem-localizacao&dono=compartilhado')
+achados = [i['nome'] for i in (r.get_json() or {}).get('itens', [])]
+ok('Legado sem pasta' in achados, '10d. da pra abrir Sem localizacao e ver o legado', achados)
+r = c_ana.get('/crm/biblioteca/itens?pasta_id=%d' % DADOS['raiz_bruno'])
+ok(r.status_code == 403, '10e. consultor nao lista a pasta do colega', 'status=%d' % r.status_code)
+r = c_ana.get('/crm/biblioteca/itens?escopo=busca&busca=renovacao')
+achados = [i['nome'] for i in (r.get_json() or {}).get('itens', [])]
+ok(achados == [], '10f. consultor nao alcanca o compartilhado pela busca do site', achados)
+r = c_admin.get('/crm/biblioteca/itens?pasta_id=%d' % DADOS['sub_comp'])
+email_item = [i for i in (r.get_json() or {}).get('itens', []) if i['tipo'] == 'email']
+ok(email_item and email_item[0]['usos_fluxos'] == 1,
+   '10g. o item mostra em quantos fluxos e usado',
+   email_item[0]['usos_fluxos'] if email_item else 'sem item')
+ok(email_item and '<html>' not in email_item[0]['previa'],
+   '10h. a previa de e-mail mostra o assunto, nao o HTML cru')
+
+print('')
+print('── 11. Mover: muda a pasta, preserva ID, dono e vinculos ───────────────')
+antes_dono = None
+conn = A.db()
+antes_dono = conn.execute("SELECT dono_consultor_id FROM modelos_conteudo WHERE id=?",
+                          (DADOS['wa_ana'],)).fetchone()['dono_consultor_id']
+A.close_db(conn)
+r = c_admin.post('/crm/biblioteca/conteudo/%d/mover' % DADOS['wa_ana'],
+                 json={'pasta_id': DADOS['sub_ana2']})
+ok(r.status_code == 200, '11a. gestor move dentro do mesmo proprietario', r.get_json())
+conn = A.db()
+dep = dict(conn.execute("SELECT pasta_id, dono_consultor_id FROM modelos_conteudo WHERE id=?",
+                        (DADOS['wa_ana'],)).fetchone())
+passos_ana = [p['modelo_id'] for p in conn.execute(
+    "SELECT modelo_id FROM whatsapp_funil_passos WHERE funil_id=? ORDER BY ordem",
+    (DADOS['funil_ana'],)).fetchall()]
+A.close_db(conn)
+ok(dep['pasta_id'] == DADOS['sub_ana2'], '11b. a pasta mudou')
+ok(dep['dono_consultor_id'] == antes_dono, '11c. o dono NAO mudou ao mover')
+ok(DADOS['wa_ana'] in passos_ana, '11d. o passo do funil continua apontando para o mesmo ID')
+r = c_admin.post('/crm/biblioteca/conteudo/%d/mover' % DADOS['wa_ana'],
+                 json={'pasta_id': DADOS['raiz_bruno']})
+ok(r.status_code == 400 and 'Transferir' in (r.get_json() or {}).get('erro', ''),
+   '11e. mover para outro proprietario e recusado com instrucao', r.get_json())
+r = c_ana.post('/crm/biblioteca/conteudo/%d/mover' % DADOS['wa_bruno'],
+               json={'pasta_id': DADOS['sub_ana']})
+ok(r.status_code == 403, '11f. consultor nao move conteudo do colega', 'status=%d' % r.status_code)
+
+print('')
+print('── 12. Transferir: muda dono e pasta, preserva ID ──────────────────────')
+r = c_admin.post('/crm/biblioteca/conteudo/%d/transferir' % DADOS['sms_ana'],
+                 json={'dono': 'compartilhado', 'pasta_id': DADOS['sub_comp']})
+ok(r.status_code == 200, '12a. gestor transfere um SMS para Compartilhado', r.get_json())
+conn = A.db()
+dep = dict(conn.execute("SELECT id, pasta_id, dono_consultor_id, corpo_texto "
+                        "FROM modelos_conteudo WHERE id=?", (DADOS['sms_ana'],)).fetchone())
+A.close_db(conn)
+ok(dep['id'] == DADOS['sms_ana'], '12b. o ID nao mudou')
+ok(dep['dono_consultor_id'] is None, '12c. o dono virou Compartilhado')
+ok(dep['pasta_id'] == DADOS['sub_comp'], '12d. a pasta e a do destino')
+ok(dep['corpo_texto'] == 'Lembrete da Ana', '12e. o texto continua intacto')
+r = c_ana.post('/crm/biblioteca/conteudo/%d/transferir' % DADOS['wa_ana'],
+               json={'dono': DADOS['bruno']})
+ok(r.status_code == 403, '12f. consultor nao transfere para outro dono', 'status=%d' % r.status_code)
+r = c_admin.post('/crm/biblioteca/conteudo/%d/transferir' % DADOS['email_ana'],
+                 json={'dono': DADOS['bruno'], 'pasta_id': DADOS['sub_ana']})
+ok(r.status_code == 400, '12g. pasta que nao e do destino e recusada', r.get_json())
+
+print('')
+print('── 13. Copiar e duplicar criam item novo ───────────────────────────────')
+conn = A.db()
+antes_total = conn.execute("SELECT COUNT(*) AS n FROM modelos_conteudo").fetchone()['n']
+A.close_db(conn)
+r = c_admin.post('/crm/biblioteca/conteudo/%d/copiar' % DADOS['email_comp'],
+                 json={'pasta_id': DADOS['sub_ana']})
+copia_email = (r.get_json() or {}).get('id')
+ok(r.status_code == 200 and copia_email != DADOS['email_comp'],
+   '13a. copiar um e-mail cria ID novo', r.get_json())
+r = c_admin.post('/crm/biblioteca/conteudo/%d/duplicar' % DADOS['wa_comp'], json={})
+dup = (r.get_json() or {}).get('id')
+ok(r.status_code == 200 and dup != DADOS['wa_comp'], '13b. duplicar cria ID novo', r.get_json())
+conn = A.db()
+c1 = dict(conn.execute("SELECT * FROM modelos_conteudo WHERE id=?", (copia_email,)).fetchone())
+c2 = dict(conn.execute("SELECT * FROM modelos_conteudo WHERE id=?", (dup,)).fetchone())
+orig = dict(conn.execute("SELECT * FROM modelos_conteudo WHERE id=?", (DADOS['wa_comp'],)).fetchone())
+depois_total = conn.execute("SELECT COUNT(*) AS n FROM modelos_conteudo").fetchone()['n']
+A.close_db(conn)
+ok(c1['tipo'] == 'email' and c1['corpo_html'] == '<html><body>Ola {{nome}}</body></html>',
+   '13c. a copia de e-mail leva o HTML junto')
+ok(c1['dono_consultor_id'] == DADOS['ana'], '13d. a copia assume o dono do destino')
+ok(c2['pasta_id'] == orig['pasta_id'] and c2['dono_consultor_id'] == orig['dono_consultor_id'],
+   '13e. duplicar fica no mesmo lugar')
+ok(c2['midia_arquivo'] == orig['midia_arquivo'],
+   '13f. a duplicata reaproveita o arquivo de midia')
+ok(depois_total == antes_total + 2, '13g. copiar/duplicar somam exatamente 2 itens novos',
+   '%d -> %d' % (antes_total, depois_total))
+
+print('')
+print('── 14. Funil: transferir valida as dependencias ────────────────────────')
+r = c_admin.post('/crm/biblioteca/funil/%d/transferir' % DADOS['funil_misto'],
+                 json={'dono': DADOS['bruno']})
+corpo = r.get_json() or {}
+ok(r.status_code == 409 and corpo.get('precisa_decidir'),
+   '14a. funil com passo de outro dono nao e transferido em silencio', corpo)
+deps = [d['nome'] for d in corpo.get('dependencias', [])]
+ok('Ana - primeiro contato' in deps, '14b. a lista diz qual mensagem trava', deps)
+r = c_admin.post('/crm/biblioteca/funil/%d/transferir' % DADOS['funil_misto'],
+                 json={'dono': DADOS['bruno'], 'dependencias': 'copiar'})
+ok(r.status_code == 200, '14c. copiar as dependencias resolve', r.get_json())
+conn = A.db()
+f = dict(conn.execute("SELECT dono_consultor_id FROM whatsapp_funis WHERE id=?",
+                      (DADOS['funil_misto'],)).fetchone())
+passos = [dict(p) for p in conn.execute("""SELECT p.ordem, p.modelo_id, m.dono_consultor_id AS dono
+    FROM whatsapp_funil_passos p JOIN modelos_conteudo m ON m.id=p.modelo_id
+    WHERE p.funil_id=? ORDER BY p.ordem""", (DADOS['funil_misto'],)).fetchall()]
+original_ana = dict(conn.execute("SELECT dono_consultor_id, pasta_id FROM modelos_conteudo WHERE id=?",
+                                 (DADOS['wa_ana'],)).fetchone())
+A.close_db(conn)
+ok(f['dono_consultor_id'] == DADOS['bruno'], '14d. o funil ficou com o novo dono')
+ok(all(p['dono'] in (None, DADOS['bruno']) for p in passos),
+   '14e. todo passo aponta para conteudo que o novo dono enxerga',
+   [(p['ordem'], p['dono']) for p in passos])
+ok(original_ana['dono_consultor_id'] == DADOS['ana'],
+   '14f. copiar as dependencias nao tirou o original da Ana')
+
+print('')
+print('── 15. Fluxo continua resolvendo depois de tudo ────────────────────────')
+conn = A.db()
+passos_fluxo = [dict(p) for p in conn.execute(
+    "SELECT * FROM fluxo_passos WHERE fluxo_id=? ORDER BY ordem", (DADOS['fluxo'],)).fetchall()]
+res_email = A._fluxo_executar_passo(conn, passos_fluxo[0], lead_sem_contato)
+res_sms = A._fluxo_executar_passo(conn, passos_fluxo[1], lead_sem_contato)
+A.close_db(conn)
+ok(res_email[2] == DADOS['email_comp'] and 'nao existe mais' not in (res_email[1] or ''),
+   '15a. o passo de e-mail continua achando o modelo original', res_email[1])
+ok(res_sms[2] == DADOS['sms_comp'] and 'nao existe mais' not in (res_sms[1] or ''),
+   '15b. o passo de SMS continua achando o modelo original', res_sms[1])
+
+print('')
+print('── 16. Escrita antiga passou a checar o dono ───────────────────────────')
+r = c_ana.post('/crm/modelos/%d/excluir' % DADOS['wa_bruno'])
+ok(r.status_code == 403, '16a. consultor nao exclui conteudo do colega pelo site',
+   'status=%d' % r.status_code)
+r = c_ana.post('/crm/modelos/%d/editar' % DADOS['wa_bruno'], data={'nome': 'Sequestrado'})
+ok(r.status_code == 403, '16b. consultor nao edita conteudo do colega pelo site',
+   'status=%d' % r.status_code)
+r = c_ana.post('/crm/modelos/%d/toggle' % DADOS['wa_bruno'])
+ok(r.status_code == 403, '16c. consultor nao desativa conteudo do colega',
+   'status=%d' % r.status_code)
+conn = A.db()
+bruno_ok = dict(conn.execute("SELECT nome, ativo FROM modelos_conteudo WHERE id=?",
+                             (DADOS['wa_bruno'],)).fetchone())
+A.close_db(conn)
+ok(bruno_ok['nome'] == 'Bruno - retomada' and bruno_ok['ativo'] == 1,
+   '16d. o conteudo do Bruno ficou intacto depois das tentativas')
+
+print('')
 if falhas:
     print('%d verificacao(oes) falharam:' % len(falhas))
     for f in falhas:
