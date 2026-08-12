@@ -1913,6 +1913,10 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-tr-slot {
   display: block; margin: 6px 0 1px; padding-top: 6px;
   border-top: 1px solid rgba(255,255,255,.09);
+  /* Texto longo nao pode participar do tamanho intrinseco da bolha e abrir a
+     conversa de ponta a ponta. 380px preserva a largura normal do player; em
+     telas menores o proprio pai continua sendo o limite. */
+  width: 100%; max-width: 380px; min-width: 0; box-sizing: border-box;
 }
 /* SEM BOLHA IDENTIFICADA — o bloco nasce pendurado na linha inteira.
    Acontece quando a ancora de audio nao e encontrada (o WhatsApp troca o nome
@@ -1947,7 +1951,8 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 /* O texto nao ganha caixa propria: ele E a bolha agora. So o rotulo separa. */
 .job-tr-texto {
   position: relative; font-size: 13.2px; line-height: 1.45;
-  padding: 0 22px 0 0; white-space: pre-wrap; word-break: break-word;
+  padding: 0 22px 0 0; white-space: pre-wrap;
+  overflow-wrap: anywhere; word-break: break-word; min-width: 0;
   user-select: text; color: inherit;
 }
 .job-tr-tag {
