@@ -221,6 +221,19 @@
   let _contextoMorto = false;
   const _idsLoops = [];
   function _registrarLoop(id) { _idsLoops.push(id); return id; }
+  // Diferente de uma pausa curta dentro de uma ação em andamento, estes são
+  // agendamentos de fundo. Eles precisam pertencer à geração atual: recarregar
+  // a extensão não pode deixar uma geração morta acordando minutos depois para
+  // consultar API, ler conversas ou iniciar outra rotina.
+  const _idsTimeouts = new Set();
+  function _registrarTimeout(fn, ms) {
+    const id = setTimeout(() => {
+      _idsTimeouts.delete(id);
+      fn();
+    }, ms);
+    _idsTimeouts.add(id);
+    return id;
+  }
 
   // ── TETO DE MEMÓRIA DOS CACHES ────────────────────────────────────────────
   //
@@ -350,6 +363,8 @@
   function _pararLoops() {
     _idsLoops.forEach((id) => { try { clearInterval(id); } catch (e) {} });
     _idsLoops.length = 0;
+    _idsTimeouts.forEach((id) => { try { clearTimeout(id); } catch (e) {} });
+    _idsTimeouts.clear();
     _limparGeracao();
   }
   let _avisoContextoMostrado = false;
@@ -4223,14 +4238,14 @@
   function canarioIniciar() {
     // 40 s depois de carregar: o WhatsApp precisa ter subido o store, e a
     // primeira meia dezena de segundos ja e disputada demais.
-    setTimeout(() => { canarioRodar('na abertura'); }, 40000);
+    _registrarTimeout(() => { canarioRodar('na abertura'); }, 40000);
     // De 6 em 6 horas. Nao e monitoramento de segundo a segundo — e detectar
     // uma atualizacao do WhatsApp no mesmo dia, em vez de na semana seguinte.
     _registrarLoop(setInterval(() => { canarioRodar('rodada periodica'); }, 6 * 60 * 60 * 1000));
   }
 
   function trIniciar() {
-    setTimeout(() => {
+    _registrarTimeout(() => {
       trInjetar();
       const main = document.querySelector('#main') || document.body;
       // Passa adiante SO os nos adicionados — e a informacao que o proprio
@@ -4312,7 +4327,7 @@
           // tela. Cinco e nao zero: o injetor acabou de rodar e as bolhas ainda
           // estao entrando. Perguntar cedo demais acusaria quebra em conversa
           // que esta so carregando — alarme falso ensina a ignorar alarme.
-          setTimeout(() => {
+          _registrarTimeout(() => {
             try { _conferirBlocosDaConversa(); } catch (e) {}
           }, 5000);
         }
@@ -4651,6 +4666,7 @@
     if (!_jobGateTentar('varredura_auto')) return VAR.placar;
     VAR.rodando = true;
     VAR.ultimaRodada = Date.now();
+    let leiturasNestaRodada = 0;
     try {
       const lista = await _pedirPonte('listar_conversas_dia', { horas: VAR.HORAS }, 40000);
       const conversas = (lista && lista.conversas) || [];
@@ -4672,12 +4688,24 @@
           VAR.placar.analisadas += 1;
         } catch (e) {
           VAR.placar.erros += 1;
+        } finally {
+          // Mesmo uma leitura que termina em erro pode ter feito a wa-js
+          // carregar histórico. Conta a tentativa para a válvula de RAM; o
+          // reload só acontece entre rodadas e com a aba fora de foco.
+          leiturasNestaRodada += 1;
         }
         await new Promise((r) => setTimeout(r, VAR.PAUSA_ENTRE_MS));
       }
     } finally {
       VAR.rodando = false;
       _jobGateSoltar();
+    }
+    // A válvula existia apenas na fila manual. A varredura automática também
+    // lê histórico pela mesma wa-js e, portanto, precisa da mesma proteção.
+    // Não liga a varredura: ela continua obedecendo `pode_rodar` no servidor.
+    if (leiturasNestaRodada) {
+      _lidosNestaSessao += leiturasNestaRodada;
+      await _talvezRecarregarPraLiberarRam();
     }
     return VAR.placar;
   }
@@ -4842,6 +4870,7 @@
   // Por isso pode rodar sozinho — o que era caro (analisar) continua sendo
   // decisão de quem manda, na tela de varredura.
   const _SINC_CADA_MS = 24 * 60 * 60 * 1000;
+  let _sincLidReagendada = false;
 
   async function _sincLidAuto() {
     try {
@@ -4854,33 +4883,51 @@
       const ultimo = Number(guardado[chave] || 0);
       if (Date.now() - ultimo < _SINC_CADA_MS) return;
 
-      const r = await _pedirPonte('listar_todas_conversas', { teto: 2000 }, 60000);
-      const convs = (r && r.conversas) || [];
-      if (!convs.length) return;
-      let ligados = 0;
-      for (let i = 0; i < convs.length; i += 200) {
-        const resp = await _safeSendMessage({ type: 'vincular_chats',
-                                              conversas: convs.slice(i, i + 200) }).catch(() => null);
-        if (resp && resp.ok) ligados += resp.ligados || 0;
-        // Respiro entre lotes: são POSTs grandes, e não há pressa nenhuma aqui.
-        await new Promise((x) => setTimeout(x, 1500));
+      // Esta leitura percorre até 2.000 conversas. Ela não pode disputar a
+      // mesma wa-js com envio ou varredura: além de pesar, concorrência aqui
+      // deixa o cliente do WhatsApp reter histórico desnecessariamente.
+      if (!_jobGateTentar('sinc_lid_auto')) {
+        if (!_sincLidReagendada) {
+          _sincLidReagendada = true;
+          _registrarTimeout(() => {
+            _sincLidReagendada = false;
+            _sincLidAuto();
+          }, 5 * 60 * 1000);
+        }
+        return;
       }
-      // Marca DEPOIS de terminar: se cair no meio, tenta de novo na próxima
-      // abertura em vez de esperar 24h com o trabalho pela metade.
-      try { await chrome.storage.local.set({ [chave]: Date.now() }); } catch (e) {}
-      if (ligados) console.log('[JOB] @lid: ' + ligados + ' conversa(s) ligadas ao lead.');
+
+      try {
+        const r = await _pedirPonte('listar_todas_conversas', { teto: 2000 }, 60000);
+        const convs = (r && r.conversas) || [];
+        if (!convs.length) return;
+        let ligados = 0;
+        for (let i = 0; i < convs.length; i += 200) {
+          const resp = await _safeSendMessage({ type: 'vincular_chats',
+                                                conversas: convs.slice(i, i + 200) }).catch(() => null);
+          if (resp && resp.ok) ligados += resp.ligados || 0;
+          // Respiro entre lotes: são POSTs grandes, e não há pressa nenhuma aqui.
+          await new Promise((x) => setTimeout(x, 1500));
+        }
+        // Marca DEPOIS de terminar: se cair no meio, tenta de novo na próxima
+        // abertura em vez de esperar 24h com o trabalho pela metade.
+        try { await chrome.storage.local.set({ [chave]: Date.now() }); } catch (e) {}
+        if (ligados) console.log('[JOB] @lid: ' + ligados + ' conversa(s) ligadas ao lead.');
+      } finally {
+        _jobGateSoltar();
+      }
     } catch (e) { /* silencioso de proposito: e manutencao, nao tarefa do consultor */ }
   }
 
   function varreduraIniciar() {
     // 4 minutos pra primeira checagem e 5 em 5 depois. A checagem em si é um GET
     // de config; se estiver desligada (o padrão), o custo é isso e mais nada.
-    setTimeout(() => { varreduraRodar(false); }, 240000);
+    _registrarTimeout(() => { varreduraRodar(false); }, 240000);
     _registrarLoop(setInterval(() => { varreduraRodar(false); }, 5 * 60 * 1000));
     // O vínculo roda ANTES da varredura (90s), porque a varredura por leads
     // depende dele. E fora do horário comercial também: ligar identidade não
     // incomoda ninguém e não gasta IA.
-    setTimeout(() => { _sincLidAuto(); }, 90000);
+    _registrarTimeout(() => { _sincLidAuto(); }, 90000);
     _registrarLoop(setInterval(() => { _sincLidAuto(); }, 6 * 60 * 60 * 1000));
   }
 
@@ -9174,7 +9221,7 @@
 
   function filaVarreduraIniciar() {
     // Comeca depois da extensao assentar; o relogio real e o proximaEm.
-    setTimeout(() => { filaVarreduraTick(); }, 60000);
+    _registrarTimeout(() => { filaVarreduraTick(); }, 60000);
     _registrarLoop(setInterval(() => { filaVarreduraTick(); }, 15000));
     _retomarSeFoiReloadDeMemoria();
   }
@@ -9193,7 +9240,7 @@
       await chrome.storage.local.set({ jobReloadMemoria: false });
       // A wa-js precisa assentar antes de qualquer leitura — sem esta espera a
       // primeira conversa depois do reload volta vazia (falha_mensagens).
-      setTimeout(() => { filaVarreduraTick(); }, 20000);
+      _registrarTimeout(() => { filaVarreduraTick(); }, 20000);
       console.log('[JOB] retomando a fila depois de liberar memória.');
     } catch (e) { /* sem storage: o tick normal de 60s assume */ }
   }
@@ -9204,6 +9251,11 @@
     const dica = (t) => { const e = document.getElementById('job-sinc-dica'); if (e) e.textContent = t; };
     b.addEventListener('click', async () => {
       b.disabled = true; const r0 = b.textContent; b.textContent = 'Lendo conversas…';
+      if (!_jobGateTentar('sinc_lid_manual')) {
+        dica('O JOB está terminando outra tarefa no WhatsApp. Tente de novo em alguns segundos.');
+        b.disabled = false; b.textContent = r0;
+        return;
+      }
       try {
         const r = await _pedirPonte('listar_todas_conversas', { teto: 2000 }, 60000);
         const convs = (r && r.conversas) || [];
@@ -9228,7 +9280,10 @@
              'Abra o CRM pra ver os @lid nos cards.');
       } catch (e) {
         dica('Não deu: ' + ((e && e.message) || e));
-      } finally { b.disabled = false; b.textContent = 'Sincronizar @lid de todas as conversas'; }
+      } finally {
+        _jobGateSoltar();
+        b.disabled = false; b.textContent = 'Sincronizar @lid de todas as conversas';
+      }
     });
   }
 
@@ -12869,7 +12924,7 @@
     }
   }
   
-  setTimeout(carregarDicionarioCacaDocs, 5000);
+  _registrarTimeout(carregarDicionarioCacaDocs, 5000);
 
   function analisarCacaDocumentos(chatId, texto) {
     if (!texto) return;
@@ -13005,7 +13060,7 @@
       } catch (e) { /* próxima rodada tenta de novo */ }
     }
   }
-  setTimeout(checarCampanhaAguardando, 8000);
+  _registrarTimeout(checarCampanhaAguardando, 8000);
   _registrarLoop(setInterval(checarCampanhaAguardando, 60000));
 
   // ── Bate ponto pro painel de aptidão do disparo: versão, número do WhatsApp
@@ -13020,12 +13075,12 @@
       await chrome.runtime.sendMessage({ type: 'presenca', usuario_id: usuarioId, versao, numero, wpp_ok: !!numero });
     } catch (e) { /* próxima batida tenta de novo */ }
   }
-  setTimeout(baterPontoDisparo, 6000);
+  _registrarTimeout(baterPontoDisparo, 6000);
   _registrarLoop(setInterval(baterPontoDisparo, 60000));
 
   // Inbox de leads novos: busca a cada 45s (mesmo com a seção fechada, pra o
   // badge do trilho avisar) + tick visual do tempo.
-  setTimeout(buscarInbox, 9000);
+  _registrarTimeout(buscarInbox, 9000);
   _registrarLoop(setInterval(buscarInbox, 45000));
   ligarLoopInbox();
 
@@ -13079,7 +13134,7 @@
 
   // Primeira tentativa bem depois de abrir: os primeiros minutos do WhatsApp
   // ja sao disputados, e isto nao tem pressa nenhuma.
-  setTimeout(varreduraDeFundo, 4 * 60 * 1000);
+  _registrarTimeout(varreduraDeFundo, 4 * 60 * 1000);
   _registrarLoop(setInterval(() => {
     // Intervalo irregular: um relogio certinho de 22 em 22 minutos, todo dia,
     // e um padrao. Somar um tanto aleatorio nao custa nada e tira o padrao.
