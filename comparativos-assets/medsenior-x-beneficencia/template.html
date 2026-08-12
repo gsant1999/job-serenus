@@ -13,7 +13,6 @@
     --bene:#B03A34; --bene-fundo:#FAEEEC; --bene-linha:#E7C7C3; --bene-barra:#C9564F;
     --med:#0D6B38;  --med-fundo:#EAF3EC;  --med-linha:#B5D4BE;  --med-barra:#2E8C4E;
     --lima:#95BF3C;
-    --atencao:#8A5600; --atencao-fundo:#FBF2DE; --atencao-linha:#E3CEA1;
     --display:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,"Times New Roman",serif;
     --corpo:"Seravek","Gill Sans Nova",Avenir,"Lucida Grande","Segoe UI",system-ui,-apple-system,sans-serif;
   }
@@ -204,19 +203,6 @@
   td.onde { color:var(--tinta-2); font-size:18px; }
   tbody tr:nth-child(even) td { background:var(--papel-2); }
 
-  /* ---------- atencao ---------- */
-  .conferir { background:var(--atencao-fundo); border:2px solid var(--atencao-linha);
-              border-radius:6px; padding:32px; }
-  .conferir h2 { border-bottom-color:var(--atencao); color:var(--atencao); margin-bottom:8px; }
-  ol.checagens { margin:26px 0 0; padding:0; list-style:none; counter-reset:item;
-                 display:flex; flex-direction:column; gap:26px; }
-  ol.checagens li { counter-increment:item; padding-left:58px; position:relative; }
-  ol.checagens li::before { content:counter(item); position:absolute; left:0; top:0;
-    width:42px; height:42px; border-radius:50%; background:var(--atencao); color:var(--branco);
-    font-family:var(--display); font-size:22px; font-weight:600;
-    display:flex; align-items:center; justify-content:center; }
-  ol.checagens h3 { font-size:21px; font-weight:700; margin:7px 0; line-height:1.35; }
-  ol.checagens p { margin:0; font-size:19px; line-height:1.55; color:var(--tinta-2); }
 
   .assinatura { margin-top:64px; padding-top:28px; border-top:2px solid var(--linha);
                 display:flex; align-items:flex-start; justify-content:space-between;
@@ -295,8 +281,6 @@
       display:block; font-size:7.5pt; color:var(--tinta-3);
       border-bottom:.75pt solid var(--linha); padding-bottom:2mm; margin-bottom:7mm;
     }
-    /* na caixa de atencao o cabecalho ficaria preso dentro da moldura */
-    .conferir::before { display:none; }
 
     /* ---------- ritmo das secoes ---------- */
     section { margin-bottom:0; break-before:page; break-inside:auto; }
@@ -376,13 +360,6 @@
     section > ul.lugares { display:block; columns:2; column-gap:9mm; }
     section > ul.lugares li { break-inside:avoid; margin-bottom:3.4mm; }
 
-    /* ---------- pontos a confirmar ---------- */
-    .conferir { padding:7mm; border-width:1.5pt; break-inside:avoid; }
-    ol.checagens { gap:5mm; margin-top:5mm; }
-    ol.checagens li { padding-left:12mm; break-inside:avoid; }
-    ol.checagens li::before { width:8mm; height:8mm; font-size:11pt; }
-    ol.checagens h3 { font-size:11pt; margin:1mm 0 1.5mm; }
-    ol.checagens p { font-size:9pt; }
 
     /* fecha o documento com a marca e a procedencia */
     .assinatura { display:flex; margin-top:8mm; padding-top:4mm;
@@ -644,26 +621,6 @@
     <ul class="lugares">
       __CLINICAS__
     </ul>
-  </section>
-
-  <section class="conferir">
-    <h2>Antes de assinar, confirme três pontos</h2>
-    <p class="subtitulo">Nenhum deles está no guia médico, e todos mudam a conta final.</p>
-
-    <ol class="checagens">
-      <li>
-        <h3>Este plano é de enfermaria</h3>
-        <p>O Campinas 1 tem acomodação em <strong>enfermaria</strong>, que é o quarto compartilhado na internação. Se o seu plano de hoje é de apartamento individual, peça também o preço da versão da MedSênior com apartamento antes de fechar.</p>
-      </li>
-      <li>
-        <h3>As carências precisam ser negociadas</h3>
-        <p>Trocar de operadora pode fazer os prazos de espera recomeçarem do zero, inclusive para cirurgias e internações. Dá para pedir redução de carência na proposta, mas quem concede é a operadora, caso a caso. <strong>Só assine depois que a redução estiver aprovada por escrito.</strong></p>
-      </li>
-      <li>
-        <h3>Confira os seus médicos na lista</h3>
-        <p>Separe os nomes dos médicos que você consulta com frequência e procure na tabela desta página. Se dois ou três dos principais não estiverem lá, vale conversar sobre isso antes de qualquer assinatura.</p>
-      </li>
-    </ol>
   </section>
 
   <div class="assinatura">

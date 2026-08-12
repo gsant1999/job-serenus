@@ -51,17 +51,22 @@ emoji, no padrão do material do cliente.
 > A Beneficência tem mais opção em otorrino e em psicologia. Se o senhor faz
 > acompanhamento nessas duas áreas, é o ponto que a gente precisa pesar junto.
 >
-> *Três coisas para acertar antes de assinar*
->
-> A acomodação deste plano é enfermaria. Se hoje o senhor tem apartamento, eu
-> trago o valor da versão com apartamento.
->
-> As carências precisam de redução aprovada pela operadora, para não recomeçar do
-> zero. Não prometa antes de ter por escrito.
->
-> E confirmar na lista os médicos que o senhor consulta com frequência.
->
 > Material completo: [LINK]
+
+---
+
+## Três condições que não estão no material, e são conversa sua
+
+O comparativo trata de rede médica. Estas três não entram no papel de propósito,
+para não virar promessa por escrito, mas precisam ser ditas na conversa antes de
+o cliente assinar:
+
+1. **A acomodação do Campinas 1 é enfermaria**, quarto compartilhado. Se ele tem
+   apartamento hoje, leve o valor da versão com apartamento junto.
+2. **A carência recomeça, salvo redução concedida pela operadora**, caso a caso.
+   Não prometa prazo antes de ter a aprovação em mãos.
+3. **Os médicos dele podem não estar na lista dos 24.** Peça os nomes e confira
+   antes, não depois.
 
 ---
 
