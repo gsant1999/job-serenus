@@ -23644,20 +23644,27 @@ def api_whatsapp_extensao_modelos():
     where = "m.tipo='whatsapp' AND m.ativo=1 AND (m.dono_consultor_id = ? OR m.dono_consultor_id IS NULL)"
     params = [uid]
     rows = conn.execute(f"""SELECT m.id, m.nome, m.corpo_texto, m.variante, m.midia_arquivo, m.midia_tipo,
-        m.categoria, m.favorito, m.vezes_usado, m.dono_consultor_id, u.nome AS dono_nome
+        m.categoria, m.favorito, m.vezes_usado, m.dono_consultor_id, m.pasta_id, u.nome AS dono_nome
         FROM modelos_conteudo m LEFT JOIN usuarios u ON u.id = m.dono_consultor_id
         WHERE {where}
         ORDER BY favorito DESC, (u.nome IS NULL), u.nome, (m.categoria IS NULL), m.categoria, m.nome""", params).fetchall()
+    # A extensão precisa do NOME da pasta, não da árvore: manda o caminho já
+    # pronto, sem a pasta-mãe (que a extensão já mostra como Minha biblioteca /
+    # Compartilhado). Uma consulta à tabela de pastas, não uma por item.
+    mapa_pastas = _bib_mapa_pastas(conn)
     close_db(conn)
     modelos = []
     for m in rows:
         md = dict(m)
+        caminho = _bib_caminho(mapa_pastas, md.get('pasta_id'))[1:] if md.get('pasta_id') else []
         modelos.append({
             "id": md['id'], "nome": md['nome'], "texto": md['corpo_texto'] or '',
             "variante": md['variante'], "midia_tipo": md['midia_tipo'],
             "categoria": md.get('categoria') or '', "favorito": bool(md.get('favorito')),
             "vezes_usado": md.get('vezes_usado') or 0,
             "dono_nome": md.get('dono_nome') or 'Compartilhado',
+            "compartilhado": md.get('dono_consultor_id') is None,
+            "pasta": ' / '.join(caminho),
             "pode_editar": True,
             "midia_url": (f"{_SITE_BASE_URL}/crm/modelos/midia/{md['midia_arquivo']}" if md['midia_arquivo'] else None),
         })
@@ -23843,10 +23850,11 @@ def api_whatsapp_extensao_funis():
     )"""
     params_f = [uid, uid]
     funis = conn.execute(f"""SELECT f.id, f.nome, f.categoria, f.favorito, f.vezes_disparado,
-            f.dono_consultor_id, u.nome AS dono_nome
+            f.dono_consultor_id, f.pasta_id, u.nome AS dono_nome
         FROM whatsapp_funis f LEFT JOIN usuarios u ON u.id = f.dono_consultor_id
         WHERE {where_f}
         ORDER BY favorito DESC, (u.nome IS NULL), u.nome, (f.categoria IS NULL), f.categoria, f.nome""", params_f).fetchall()
+    mapa_pastas = _bib_mapa_pastas(conn)
     # Puxa TODOS os passos de uma vez (join com o modelo) e agrupa por funil —
     # evita N+1 e mantém a ordem definida no builder.
     passos = conn.execute("""SELECT p.id AS passo_id, p.funil_id, p.ordem, p.delay_segundos,
@@ -23870,11 +23878,14 @@ def api_whatsapp_extensao_funis():
     out = []
     for f in funis:
         fd = dict(f)
+        caminho = _bib_caminho(mapa_pastas, fd.get('pasta_id'))[1:] if fd.get('pasta_id') else []
         out.append({
             "id": fd['id'], "nome": fd['nome'],
             "categoria": fd.get('categoria') or '', "favorito": bool(fd.get('favorito')),
             "vezes_disparado": fd.get('vezes_disparado') or 0,
             "dono_nome": fd.get('dono_nome') or 'Compartilhado',
+            "compartilhado": fd.get('dono_consultor_id') is None,
+            "pasta": ' / '.join(caminho),
             "pode_editar": True,
             "passos": por_funil.get(fd['id'], []),
         })

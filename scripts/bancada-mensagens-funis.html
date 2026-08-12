@@ -154,8 +154,61 @@
           <div class="job-novo-acoes"><button class="job-mini-btn">Gravar áudio</button><button class="job-mini-btn">Anexar arquivo</button></div>
           <div class="job-grav-status"></div><button class="job-salvar-modelo">Salvar mensagem</button>
         </div>
-        <div class="bancada-modelo"><span>T</span><div><b>Boas-vindas</b><small>Abertura · texto</small></div></div>
-        <div class="bancada-modelo"><span>A</span><div><b>Apresentação pessoal</b><small>Abertura · áudio</small></div></div>
+        <!-- Biblioteca com as classes DE VERDADE (job-pasta / job-subpasta /
+             job-modelo-card): duas raízes, Minha biblioteca e Compartilhado,
+             fechadas ao abrir a tela, e dentro delas as pastas do JOB. -->
+        <div class="job-sec">Mensagens salvas</div>
+        <details class="job-pasta" open>
+          <summary class="job-pasta-nome">Minha biblioteca <span>(2)</span></summary>
+          <div class="job-pasta-conteudo">
+            <details class="job-subpasta">
+              <summary class="job-subpasta-nome">Primeiro contato <span>(2)</span></summary>
+              <div class="job-subpasta-conteudo">
+                <div class="job-modelo-tipo">Texto <span>(1)</span></div>
+                <div class="job-modelo-card">
+                  <div class="job-modelo-topo">
+                    <div class="job-modelo-nome"><span class="job-tipo-ico"><span class="job-tico tico-texto">T</span></span> Boas-vindas</div>
+                    <button class="job-modelo-fav" title="Marcar como favorito">*</button>
+                  </div>
+                  <div class="job-modelo-preview">Olá, tudo bem? Sou da Serenus, corretora de planos de saúde.</div>
+                  <div class="job-modelo-acoes">
+                    <button class="job-modelo-enviar">Enviar texto</button>
+                    <button class="job-modelo-copiar">Copiar</button>
+                    <button class="job-modelo-duplicar">Duplicar</button>
+                    <button class="job-modelo-excluir" title="Excluir">×</button>
+                  </div>
+                </div>
+                <div class="job-modelo-tipo">Áudio <span>(1)</span></div>
+                <div class="job-modelo-card">
+                  <div class="job-modelo-topo">
+                    <div class="job-modelo-nome"><span class="job-tipo-ico"><span class="job-tico tico-audio">A</span></span> Apresentação pessoal</div>
+                    <button class="job-modelo-fav ativo" title="Tirar dos favoritos">*</button>
+                  </div>
+                  <div class="job-modelo-preview">Áudio de 18 segundos com a apresentação.</div>
+                  <div class="job-modelo-acoes">
+                    <button class="job-modelo-enviar">Enviar áudio</button>
+                    <button class="job-modelo-copiar">Copiar</button>
+                    <button class="job-modelo-duplicar">Duplicar</button>
+                    <button class="job-modelo-excluir" title="Excluir">×</button>
+                  </div>
+                </div>
+              </div>
+            </details>
+          </div>
+        </details>
+        <details class="job-pasta">
+          <summary class="job-pasta-nome">Compartilhado <span>(14)</span></summary>
+          <div class="job-pasta-conteudo">
+            <details class="job-subpasta">
+              <summary class="job-subpasta-nome">Operadoras / Amil <span>(9)</span></summary>
+              <div class="job-subpasta-conteudo"></div>
+            </details>
+            <details class="job-subpasta">
+              <summary class="job-subpasta-nome">Campanhas <span>(5)</span></summary>
+              <div class="job-subpasta-conteudo"></div>
+            </details>
+          </div>
+        </details>
       </div>
     </section>
   </main>

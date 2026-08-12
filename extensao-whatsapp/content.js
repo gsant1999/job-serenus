@@ -4570,11 +4570,12 @@
       const cx = document.getElementById('job-dev-tempos');
       if (cx && t && t.ok && t.rotas && t.rotas.length) {
         cx.innerHTML = '<div class="job-dev-sub">Últimas ' + t.amostras +
-          ' chamadas ao JOB (mediana · pior)</div>' +
+          ' chamadas ao JOB (mediana · p95 · pior)</div>' +
           t.rotas.slice(0, 8).map((r) =>
             '<div class="job-dev-linha' + (r.pior > 4000 ? ' ruim' : '') + '">' +
             '<span>' + esc(r.rota.replace('/api/whatsapp/', '')) + ' <i>×' + r.n + '</i></span>' +
-            '<b>' + r.mediana + 'ms · ' + r.pior + 'ms</b></div>').join('');
+            '<b>' + r.mediana + 'ms · ' + (r.p95 == null ? '—' : r.p95 + 'ms') +
+            ' · ' + r.pior + 'ms</b></div>').join('');
       } else if (cx) {
         cx.innerHTML = '<div class="job-dev-sub">Nenhuma chamada ao JOB ainda nesta sessão.</div>';
       }
@@ -10048,7 +10049,8 @@
     const q = _waBusca;
     return (m.nome || '').toLowerCase().indexOf(q) >= 0
       || (m.texto || '').toLowerCase().indexOf(q) >= 0
-      || (m.categoria || '').toLowerCase().indexOf(q) >= 0;
+      || (m.categoria || '').toLowerCase().indexOf(q) >= 0
+      || (m.pasta || '').toLowerCase().indexOf(q) >= 0;
   }
 
   // ── Prévia de mídia dentro do painel: NÃO dá pra usar <img src="url do JOB">
@@ -10182,28 +10184,46 @@
     });
     return html;
   }
-  // Sub-pastas manuais dentro do consultor (categoria — ex: Amil, Carência, Rede).
-  // "Geral" pros sem sub-pasta. Dentro de cada uma, agrupa por tipo.
-  function _blocoPorCategoria(itens) {
-    const porCat = new Map();
+  // ── A BIBLIOTECA AQUI TEM DUAS RAÍZES: "Minha biblioteca" e "Compartilhado".
+  //    É a mesma organização do site (dono primeiro, canal depois), sem trazer
+  //    a administração pesada pra dentro do WhatsApp: aqui é achar, conferir e
+  //    mandar. Conteúdo de colega não chega nem na resposta do servidor.
+  function _raizDoModelo(m) { return m.compartilhado ? 'Compartilhado' : 'Minha biblioteca'; }
+
+  // `pasta` é o caminho de verdade, já pronto do JOB (sem a pasta-mãe, que é a
+  // raiz aqui). Enquanto sobrar conteúdo antigo sem pasta, a categoria — que
+  // era a pasta de antes — segue valendo de nome: assim nada muda de lugar na
+  // tela da consultora antes de o gestor organizar.
+  function _pastaDoItem(m) {
+    return ((m.pasta || '').trim()) || ((m.categoria || '').trim());
+  }
+
+  // Busca ou filtro ligado abre as pastas: resultado escondido dentro de pasta
+  // fechada é o mesmo que resultado nenhum.
+  function _abrirPorFiltro() { return !!(_waBusca || _waFiltro !== 'todos'); }
+
+  function _blocoPorPasta(itens, prefixo, forcarAberto) {
+    const porPasta = new Map();
     itens.forEach((m) => {
-      const cat = ((m.categoria || '').trim()) || 'Geral';
-      if (!porCat.has(cat)) porCat.set(cat, []);
-      porCat.get(cat).push(m);
+      const cam = _pastaDoItem(m);
+      if (!porPasta.has(cam)) porPasta.set(cam, []);
+      porPasta.get(cam).push(m);
     });
-    const cats = [...porCat.keys()].sort((a, b) =>
-      a === 'Geral' ? 1 : (b === 'Geral' ? -1 : a.localeCompare(b)));
-    // Uma sub-pasta só (Geral) = não precisa da caixa, mostra direto por tipo.
-    if (cats.length === 1) return _blocoPorTipo(porCat.get(cats[0]));
+    const nomes = [...porPasta.keys()].sort((a, b) =>
+      (a === '' ? 1 : (b === '' ? -1 : a.localeCompare(b))));
     let html = '';
-    cats.forEach((cat) => {
-      const key = 'modelos:sub:' + cat;
-      html += '<details class="job-subpasta" data-pasta-key="' + esc(key) + '"' + (_pastaAberta(key) ? ' open' : '') + '><summary class="job-subpasta-nome">' +
-        esc(cat) + ' <span>(' + porCat.get(cat).length + ')</span></summary>' +
-        '<div class="job-subpasta-conteudo">' + _blocoPorTipo(porCat.get(cat)) + '</div></details>';
+    nomes.forEach((cam) => {
+      const itensPasta = porPasta.get(cam);
+      if (!cam) { html += _blocoPorTipo(itensPasta); return; }   // solto na raiz
+      const key = prefixo + ':pasta:' + cam;
+      html += '<details class="job-subpasta" data-pasta-key="' + esc(key) + '"' +
+        ((forcarAberto || _pastaAberta(key)) ? ' open' : '') + '><summary class="job-subpasta-nome">' +
+        esc(cam) + ' <span>(' + itensPasta.length + ')</span></summary>' +
+        '<div class="job-subpasta-conteudo">' + _blocoPorTipo(itensPasta) + '</div></details>';
     });
     return html;
   }
+
   function renderListaModelos(modelos) {
     const filtrados = modelos.filter(modeloPassaFiltro);
     if (!filtrados.length) {
@@ -10212,26 +10232,20 @@
         : _vazio('Nenhuma mensagem salva',
             'Aqui ficam suas frases, áudios e imagens prontos — os que você repete todo dia. Use Nova mensagem para salvar o primeiro.');
     }
-    // Modelo do desenho do Guilherme: PASTA = consultor, DENTRO agrupado por TIPO
-    // (áudio/texto/PDF/imagem). Gestor vê a pasta de cada consultor (recolhível);
-    // consultor comum vê direto os tipos (é tudo dele). Nada de árvore/categoria.
-    if (_gestorModo) {
-      const porDono = new Map();
-      filtrados.forEach((m) => {
-        const d = (m.dono_nome || 'Compartilhado');
-        if (!porDono.has(d)) porDono.set(d, []);
-        porDono.get(d).push(m);
-      });
-      let out = '';
-      porDono.forEach((itens, dono) => {
-        const key = 'modelos:dono:' + dono;
-        out += '<details class="job-pasta" data-pasta-key="' + esc(key) + '"' + (_pastaAberta(key) ? ' open' : '') + '><summary class="job-pasta-nome">' +
-          esc(dono) + ' <span>(' + itens.length + ')</span></summary>' +
-          '<div class="job-pasta-conteudo">' + _blocoPorCategoria(itens) + '</div></details>';
-      });
-      return out;
-    }
-    return _blocoPorCategoria(filtrados);
+    const forcarAberto = _abrirPorFiltro();
+    const porRaiz = new Map([['Minha biblioteca', []], ['Compartilhado', []]]);
+    filtrados.forEach((m) => porRaiz.get(_raizDoModelo(m)).push(m));
+    let out = '';
+    porRaiz.forEach((itens, raiz) => {
+      if (!itens.length) return;
+      const key = 'modelos:raiz:' + raiz;
+      out += '<details class="job-pasta" data-pasta-key="' + esc(key) + '"' +
+        ((forcarAberto || _pastaAberta(key)) ? ' open' : '') + '><summary class="job-pasta-nome">' +
+        esc(raiz) + ' <span>(' + itens.length + ')</span></summary>' +
+        '<div class="job-pasta-conteudo">' + _blocoPorPasta(itens, 'modelos:' + raiz, forcarAberto) +
+        '</div></details>';
+    });
+    return out;
   }
 
   function renderModelos(modelos) {
@@ -11002,7 +11016,8 @@
     if (_fnSoFav && !f.favorito) return false;
     if (!_fnBusca) return true;
     return (f.nome || '').toLowerCase().indexOf(_fnBusca) >= 0
-      || (f.categoria || '').toLowerCase().indexOf(_fnBusca) >= 0;
+      || (f.categoria || '').toLowerCase().indexOf(_fnBusca) >= 0
+      || (f.pasta || '').toLowerCase().indexOf(_fnBusca) >= 0;
   }
 
   var _FUNIS_SUB = 'Sequências prontas: cada passo sai na hora certa, na conversa que está aberta.';
@@ -11030,21 +11045,38 @@
     }
     const vis = funis.filter(funilPassaFiltro);
     if (!vis.length) return _vazioFiltro('funil', 'job-limpar-f-funil');
-    // Gestor: pasta por consultor (recolhível), igual aos modelos. Funil é uma
-    // sequência multi-tipo, então não tem sub-nível de tipo — só a pasta.
-    if (!_gestorModo) return vis.map(cardFunil).join('');
-    const grupos = new Map();
-    vis.forEach((f) => {
-      const chave = f.dono_nome || 'Compartilhado';
-      if (!grupos.has(chave)) grupos.set(chave, []);
-      grupos.get(chave).push(f);
-    });
+    // Mesmas duas raízes das mensagens — Minha biblioteca e Compartilhado —, e
+    // dentro delas as pastas do JOB. Funil é sequência multi-tipo, então não
+    // tem o sub-nível de tipo que as mensagens têm.
+    const forcarAberto = !!(_fnBusca || _fnSoFav);
+    const porRaiz = new Map([['Minha biblioteca', []], ['Compartilhado', []]]);
+    vis.forEach((f) => porRaiz.get(f.compartilhado ? 'Compartilhado' : 'Minha biblioteca').push(f));
     let out = '';
-    grupos.forEach((itens, dono) => {
-      const key = 'funis:dono:' + dono;
-      out += '<details class="job-pasta" data-pasta-key="' + esc(key) + '"' + (_pastaAberta(key) ? ' open' : '') + '><summary class="job-pasta-nome">' +
-        esc(dono) + ' <span>(' + itens.length + ')</span></summary>' +
-        '<div class="job-pasta-conteudo">' + itens.map(cardFunil).join('') + '</div></details>';
+    porRaiz.forEach((itens, raiz) => {
+      if (!itens.length) return;
+      const key = 'funis:raiz:' + raiz;
+      const porPasta = new Map();
+      itens.forEach((f) => {
+        const cam = ((f.pasta || '').trim()) || ((f.categoria || '').trim());
+        if (!porPasta.has(cam)) porPasta.set(cam, []);
+        porPasta.get(cam).push(f);
+      });
+      const nomes = [...porPasta.keys()].sort((a, b) =>
+        (a === '' ? 1 : (b === '' ? -1 : a.localeCompare(b))));
+      let dentro = '';
+      nomes.forEach((cam) => {
+        const doGrupo = porPasta.get(cam);
+        if (!cam) { dentro += doGrupo.map(cardFunil).join(''); return; }
+        const chave = 'funis:' + raiz + ':pasta:' + cam;
+        dentro += '<details class="job-subpasta" data-pasta-key="' + esc(chave) + '"' +
+          ((forcarAberto || _pastaAberta(chave)) ? ' open' : '') + '><summary class="job-subpasta-nome">' +
+          esc(cam) + ' <span>(' + doGrupo.length + ')</span></summary>' +
+          '<div class="job-subpasta-conteudo">' + doGrupo.map(cardFunil).join('') + '</div></details>';
+      });
+      out += '<details class="job-pasta" data-pasta-key="' + esc(key) + '"' +
+        ((forcarAberto || _pastaAberta(key)) ? ' open' : '') + '><summary class="job-pasta-nome">' +
+        esc(raiz) + ' <span>(' + itens.length + ')</span></summary>' +
+        '<div class="job-pasta-conteudo">' + dentro + '</div></details>';
     });
     return out;
   }

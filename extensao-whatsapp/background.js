@@ -66,11 +66,14 @@ function _resumoTempos() {
   _TEMPOS.forEach((t) => {
     (porRota[t.caminho] = porRota[t.caminho] || []).push(t.ms);
   });
-  // Mediana e o pior caso. Média esconde justamente a chamada que travou —
+  // Mediana, p95 e o pior caso. Média esconde justamente a chamada que travou —
   // dez de 200ms e uma de 9s dão média de 1s, que não descreve nem uma nem outra.
+  // O p95 é o que dá pra comparar entre duas versões: o pior caso isolado pode
+  // ser a máquina que entrou em suspensão no meio da chamada.
   return Object.keys(porRota).map((c) => {
     const v = porRota[c].slice().sort((a, b) => a - b);
-    return { rota: c, n: v.length, mediana: v[Math.floor(v.length / 2)], pior: v[v.length - 1] };
+    const p95 = v[Math.min(v.length - 1, Math.ceil(v.length * 0.95) - 1)];
+    return { rota: c, n: v.length, mediana: v[Math.floor(v.length / 2)], p95: p95, pior: v[v.length - 1] };
   }).sort((a, b) => b.pior - a.pior);
 }
 

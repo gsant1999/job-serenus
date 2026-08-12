@@ -486,6 +486,45 @@ ok(bruno_ok['nome'] == 'Bruno - retomada' and bruno_ok['ativo'] == 1,
    '16d. o conteudo do Bruno ficou intacto depois das tentativas')
 
 print('')
+print('── 17. Extensao recebe pasta e proprietario, e so o que pode ver ───────')
+r = ext_get('/api/whatsapp/extensao/modelos', DADOS['ana'])
+mods = (r.get_json() or {}).get('modelos', [])
+ok(all('pasta' in m and 'compartilhado' in m for m in mods),
+   '17a. todo item vem com pasta e com a marca de compartilhado')
+por_nome = {m['nome']: m for m in mods}
+ok(por_nome.get('Compartilhado - tabela Amil', {}).get('compartilhado') is True,
+   '17b. o item do acervo comum vem marcado como compartilhado')
+ok(por_nome.get('Compartilhado - tabela Amil', {}).get('pasta') == 'Operadoras',
+   '17c. a pasta vem sem a pasta-mae (a extensao ja mostra a raiz)',
+   por_nome.get('Compartilhado - tabela Amil', {}).get('pasta'))
+meus = [m for m in mods if not m['compartilhado']]
+ok(all(m['dono_nome'] == 'Ana Consultora' for m in meus),
+   '17d. tudo que nao e compartilhado e da propria consultora',
+   sorted({m['dono_nome'] for m in meus}))
+r = ext_get('/api/whatsapp/extensao/funis', DADOS['ana'])
+fs = (r.get_json() or {}).get('funis', [])
+ok(all('pasta' in f and 'compartilhado' in f for f in fs),
+   '17e. os funis tambem trazem pasta e proprietario')
+
+print('')
+print('── 18. Peso e tempo da carga da extensao (medido, nao estimado) ────────')
+import json as _json
+import time as _time
+amostras = []
+for _ in range(15):
+    t0 = _time.perf_counter()
+    r = ext_get('/api/whatsapp/extensao/modelos', DADOS['ana'])
+    amostras.append((_time.perf_counter() - t0) * 1000)
+amostras.sort()
+mediana = amostras[len(amostras) // 2]
+p95 = amostras[min(len(amostras) - 1, int(len(amostras) * 0.95))]
+corpo = r.get_data()
+n_itens = len(_json.loads(corpo).get('modelos', []))
+print('MEDIDO mediana=%.0fms  p95=%.0fms  resposta=%.1fKB  itens=%d  (%.0f bytes/item)'
+      % (mediana, p95, len(corpo) / 1024, n_itens, len(corpo) / max(1, n_itens)))
+ok(n_itens > 0, '18a. a extensao continua recebendo a biblioteca')
+
+print('')
 if falhas:
     print('%d verificacao(oes) falharam:' % len(falhas))
     for f in falhas:
