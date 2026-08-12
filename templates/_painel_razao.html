@@ -1,0 +1,75 @@
+{# Painel do razão de comissão. Incluído no Financeiro E no Fluxo de Caixa, com
+   os MESMOS números, porque vem da mesma função (_fin_visao).
+
+   Antes cada tela somava da sua própria consulta e mostrava valores diferentes
+   pro mesmo dinheiro. Duas verdades sobre o mesmo dinheiro é o mesmo que nenhuma.
+
+   COR: verde é só para dinheiro que ENTROU ou vai entrar. Obrigação a pagar
+   (bruto do gestor, retenção, líquido para PIX) usa a cor de saída. Pintar de
+   verde o que a empresa deve faz a tela parecer melhor do que o caixa está. #}
+{% if fin_visao %}
+<div class="pr-box">
+  <div class="pr-cab">
+    <div>
+      <div class="pr-titulo">Comissão da Affinity: do apurado ao pago</div>
+      <div class="pr-sub">
+        Mesma fonte no Financeiro e no Fluxo de Caixa. Cada valor é um estado diferente do
+        dinheiro — não são versões do mesmo número.
+      </div>
+    </div>
+    <a href="/comissoes/conciliacao" class="pr-link">Abrir conciliação</a>
+  </div>
+
+  <div class="pr-linha">
+    <div class="pr-card">
+      <span class="pr-lbl">Bruto esperado<i class="ajuda-i" title="O que a régua de recebimento congelada em cada venda diz que a operadora deveria pagar no total. É previsão, não é apuração.">i</i></span>
+      <b class="pr-v">{{ fin_visao.bruto_esperado|moeda }}</b>
+    </div>
+    <div class="pr-card">
+      <span class="pr-lbl">Apurado pela Affinity<i class="ajuda-i" title="Soma dos extratos importados. A Affinity emitiu o extrato e diz que vai pagar isto. Ainda não é dinheiro na conta.">i</i></span>
+      <b class="pr-v">{{ fin_visao.apurado_affinity|moeda }}</b>
+      {% if fin_visao.tarifas %}<span class="pr-nota">tarifas: {{ (-fin_visao.tarifas)|moeda }}</span>{% endif %}
+    </div>
+    <div class="pr-card pr-entrada">
+      <span class="pr-lbl">Entrada confirmada<i class="ajuda-i" title="Só entra aqui o que teve identificador de transação no Asaas ou confirmação humana registrada com usuário, data e observação. Valor e data parecidos não confirmam nada.">i</i></span>
+      <b class="pr-v">{{ fin_visao.entrada_confirmada|moeda }}</b>
+      {% if fin_visao.aguardando_entrada %}
+      <span class="pr-nota">aguardando: {{ fin_visao.aguardando_entrada|moeda }}</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="pr-linha">
+    <div class="pr-card pr-saida">
+      <span class="pr-lbl">Bruto do gestor<i class="ajuda-i" title="A parte do gestor que vendeu, antes de qualquer retenção, segundo a régua congelada na venda. É obrigação a pagar, não receita.">i</i></span>
+      <b class="pr-v">{{ fin_visao.bruto_gestor|moeda }}</b>
+    </div>
+    <div class="pr-card pr-saida">
+      <span class="pr-lbl">Retenção<i class="ajuda-i" title="Total retido, somando o que é responsabilidade do gestor e o que é da Serenus. Retenção sem alíquota informada não entra nesta conta — ela bloqueia a venda em vez de virar zero.">i</i></span>
+      <b class="pr-v">{{ fin_visao.retencao_total|moeda }}</b>
+      <span class="pr-nota">gestor {{ fin_visao.retencao_gestor|moeda }} · Serenus {{ fin_visao.retencao_serenus|moeda }}</span>
+    </div>
+    <div class="pr-card pr-saida">
+      <span class="pr-lbl">Líquido para PIX<i class="ajuda-i" title="O que o gestor recebe de fato, já descontada a retenção de responsabilidade dele. Só sai do caixa depois da entrada confirmada e da liberação.">i</i></span>
+      <b class="pr-v">{{ fin_visao.liquido_pix_gestor|moeda }}</b>
+    </div>
+    <div class="pr-card pr-entrada">
+      <span class="pr-lbl">Saldo Serenus<i class="ajuda-i" title="Recebido menos o bruto do gestor e menos as retenções de responsabilidade da empresa. É o que sobra antes das despesas.">i</i></span>
+      <b class="pr-v">{{ fin_visao.saldo_serenus|moeda }}</b>
+    </div>
+  </div>
+
+  {% if fin_visao.sem_regra or fin_visao.linhas_sem_vinculo %}
+  <div class="pr-pendencia">
+    {% if fin_visao.sem_regra %}
+    <div>{{ fin_visao.sem_regra }} venda(s) de gestor estão fora destes números porque a regra
+      delas está incompleta. <a href="/comissoes/regra-gestor">Configurar</a></div>
+    {% endif %}
+    {% if fin_visao.linhas_sem_vinculo %}
+    <div>{{ fin_visao.linhas_sem_vinculo }} linha(s) de extrato sem venda apontada, esperando
+      revisão. <a href="/comissoes/conciliacao?estado=sem_vinculo">Abrir fila</a></div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}

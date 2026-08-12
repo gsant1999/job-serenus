@@ -150,6 +150,21 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True  # Sem acesso JS (protege de XSS)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # Proteção CSRF
 app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 7  # 7 dias (sistema financeiro)
 
+# ─── MODO DE TESTE EXPLÍCITO (JOB_MODO_TESTE=1) ───────────────────────────────
+# Desliga TUDO que escreve no banco sozinho: APScheduler (backup, import de leads,
+# lembretes, fluxos, conversões) e o auto-pull por requisição.
+#
+# Existe porque o teste de invariância da pré-conferência — o que prova que ler um
+# extrato não move dinheiro — tirava a foto do banco enquanto o importador de
+# leads gravava em thread de fundo. O teste acusava a prévia de um estrago que não
+# era dela, e um teste que acusa errado é pior que teste nenhum: ensina a ignorar.
+#
+# Só liga por variável de ambiente. Produção nunca define JOB_MODO_TESTE, então o
+# comportamento no Railway é byte a byte o mesmo de antes desta linha existir.
+MODO_TESTE = os.environ.get('JOB_MODO_TESTE', '').strip().lower() in ('1', 'true', 'sim', 'yes')
+if MODO_TESTE:
+    print("[MODO_TESTE] Agendadores e auto-pull desligados (JOB_MODO_TESTE ativo).")
+
 # ─── CAPTURA GLOBAL DE ERROS (para diagnóstico de 500) ────────────────────────
 # Guarda os últimos erros em memória para inspeção rápida via /admin/ultimo-erro,
 # e loga o traceback completo no Railway (aparece em "View Logs").
@@ -4045,6 +4060,204 @@ def init_db():
             except Exception: pass
         print(f"[WATCHLIST] criação pulada: {e}")
 
+    # ─── CONCILIAÇÃO DA AFFINITY E RAZÃO FINANCEIRO ────────────────────────────
+    # Criadas aqui (idempotente, os dois bancos no mesmo lugar) pra não mexer nos
+    # 2 blocos gigantes de schema — mesmo motivo da watchlist acima.
+    #
+    # affinity_conciliacao: UMA LINHA POR LINHA DE EXTRATO IMPORTADA. É o registro
+    # do que a Affinity apurou, com a venda a que ela pertence. Append-only na
+    # importação: o mesmo código de comissão nunca entra duas vezes (chave_idem é
+    # UNIQUE), e importar de novo não altera linha existente. As únicas colunas
+    # que mudam depois são as de vínculo manual e de confirmação de entrada — e
+    # cada uma delas exige usuário, data e observação, e deixa evento no razão.
+    #
+    # fin_evento: O RAZÃO. Append-only de verdade — nada aqui é alterado nem
+    # apagado. Cada fato financeiro é uma linha com estado, papel, valor e sinal.
+    # Financeiro e Fluxo de Caixa leem daqui, então as duas telas param de
+    # discordar por consultarem tabelas diferentes.
+    # chave_idem é o que torna a operação idempotente: rodar duas vezes o mesmo
+    # fato não duplica dinheiro, porque a segunda gravação bate na UNIQUE.
+    try:
+        if is_pg:
+            conn.execute("""CREATE TABLE IF NOT EXISTS affinity_conciliacao (
+                id SERIAL PRIMARY KEY,
+                chave_idem TEXT UNIQUE NOT NULL,
+                codigo_comissao TEXT, arquivo TEXT, arquivo_hash TEXT,
+                cadastro_cod TEXT, cadastro_nome TEXT,
+                geracao TEXT, previsao TEXT, data_pagamento_informada TEXT, nf_situacao TEXT,
+                linha_ordem INTEGER DEFAULT 0,
+                operadora TEXT, cliente TEXT, numero_proposta TEXT, parcela_extrato INTEGER,
+                tipo TEXT DEFAULT 'normal', percentual REAL DEFAULT 0,
+                bruto REAL DEFAULT 0, liquido REAL DEFAULT 0,
+                total_bruto_extrato REAL DEFAULT 0, total_liquido_extrato REAL DEFAULT 0,
+                debitos_extrato REAL DEFAULT 0,
+                conf_ancora TEXT, conf_impresso REAL, conf_lido REAL, conf_diferenca REAL,
+                leitura_fechada INTEGER DEFAULT 0,
+                proposta_id INTEGER, parcela_id INTEGER,
+                vinculo_criterio TEXT, vinculo_por TEXT, vinculo_em TEXT, vinculo_observacao TEXT,
+                estado TEXT DEFAULT 'apurado_affinity',
+                entrada_ref TEXT, entrada_forma TEXT, entrada_por TEXT, entrada_em TEXT,
+                entrada_observacao TEXT,
+                extrato_id INTEGER, extrato_item_id INTEGER,
+                importado_por INTEGER, importado_por_nome TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em TIMESTAMP)""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS fin_evento (
+                id SERIAL PRIMARY KEY,
+                chave_idem TEXT UNIQUE NOT NULL,
+                estado TEXT NOT NULL, papel TEXT DEFAULT 'serenus',
+                proposta_id INTEGER, parcela_id INTEGER, conciliacao_id INTEGER,
+                fracao INTEGER,
+                competencia TEXT, data_evento TEXT,
+                valor REAL DEFAULT 0, sinal INTEGER DEFAULT 1,
+                origem TEXT, origem_ref TEXT, descricao TEXT,
+                usuario_id INTEGER, usuario_nome TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+        else:
+            conn.execute("""CREATE TABLE IF NOT EXISTS affinity_conciliacao (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chave_idem TEXT UNIQUE NOT NULL,
+                codigo_comissao TEXT, arquivo TEXT, arquivo_hash TEXT,
+                cadastro_cod TEXT, cadastro_nome TEXT,
+                geracao TEXT, previsao TEXT, data_pagamento_informada TEXT, nf_situacao TEXT,
+                linha_ordem INTEGER DEFAULT 0,
+                operadora TEXT, cliente TEXT, numero_proposta TEXT, parcela_extrato INTEGER,
+                tipo TEXT DEFAULT 'normal', percentual REAL DEFAULT 0,
+                bruto REAL DEFAULT 0, liquido REAL DEFAULT 0,
+                total_bruto_extrato REAL DEFAULT 0, total_liquido_extrato REAL DEFAULT 0,
+                debitos_extrato REAL DEFAULT 0,
+                conf_ancora TEXT, conf_impresso REAL, conf_lido REAL, conf_diferenca REAL,
+                leitura_fechada INTEGER DEFAULT 0,
+                proposta_id INTEGER, parcela_id INTEGER,
+                vinculo_criterio TEXT, vinculo_por TEXT, vinculo_em TEXT, vinculo_observacao TEXT,
+                estado TEXT DEFAULT 'apurado_affinity',
+                entrada_ref TEXT, entrada_forma TEXT, entrada_por TEXT, entrada_em TEXT,
+                entrada_observacao TEXT,
+                extrato_id INTEGER, extrato_item_id INTEGER,
+                importado_por INTEGER, importado_por_nome TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em TIMESTAMP)""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS fin_evento (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chave_idem TEXT UNIQUE NOT NULL,
+                estado TEXT NOT NULL, papel TEXT DEFAULT 'serenus',
+                proposta_id INTEGER, parcela_id INTEGER, conciliacao_id INTEGER,
+                fracao INTEGER,
+                competencia TEXT, data_evento TEXT,
+                valor REAL DEFAULT 0, sinal INTEGER DEFAULT 1,
+                origem TEXT, origem_ref TEXT, descricao TEXT,
+                usuario_id INTEGER, usuario_nome TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+        for idx in ("CREATE INDEX IF NOT EXISTS idx_afy_conc_prop ON affinity_conciliacao(proposta_id)",
+                    "CREATE INDEX IF NOT EXISTS idx_afy_conc_cod ON affinity_conciliacao(codigo_comissao)",
+                    "CREATE INDEX IF NOT EXISTS idx_afy_conc_est ON affinity_conciliacao(estado)",
+                    "CREATE INDEX IF NOT EXISTS idx_fin_ev_prop ON fin_evento(proposta_id)",
+                    "CREATE INDEX IF NOT EXISTS idx_fin_ev_comp ON fin_evento(competencia)",
+                    "CREATE INDEX IF NOT EXISTS idx_fin_ev_est ON fin_evento(estado)"):
+            conn.execute(idx)
+        conn.commit()
+    except Exception as e:
+        if is_pg:
+            try: conn.rollback()
+            except Exception: pass
+        print(f"[CONCILIACAO] criação pulada: {e}")
+
+    # ─── REGRA DO GESTOR/ADMIN VENDEDOR ────────────────────────────────────────
+    # A regra é COMERCIAL: por operadora + variação + plano. Nunca por pessoa.
+    # Duplicar por pessoa faria a mesma venda valer coisas diferentes conforme
+    # quem vendeu, e cada admin novo exigiria recadastrar tudo de novo.
+    #
+    # São TRÊS coisas separadas de propósito, porque são três perguntas distintas:
+    #
+    #   gestor_regra.fracoes_json  — RÉGUA DE RECEBIMENTO: cada fração que a
+    #     operadora/Affinity paga, com percentual e mês/evento. É a régua DELAS.
+    #   gestor_regra.gestor_json   — RÉGUA DO GESTOR: quanto de CADA fração
+    #     recebida pertence ao gestor. É a régua NOSSA, e é outra conta.
+    #   gestor_retencao            — RETENÇÃO: tipo, percentual, base de cálculo,
+    #     responsável, vigência e observação.
+    #
+    # Misturar as três num percentual só foi o que produziu o legado
+    # 'gestor_vendedor', que entrega 100% de toda a comissão numa parcela: ele
+    # não sabe dizer o que é fração da operadora, o que é do gestor e o que é
+    # imposto — então não sabe dizer o que sobra pra Serenus.
+    #
+    # gestor_retencao.percentual é NULLABLE de propósito: alíquota não informada
+    # tem que ser DIFERENTE de alíquota zero. Zero é uma decisão; NULL é a
+    # ausência dela, e ausência bloqueia em vez de calcular errado em silêncio.
+    #
+    # proposta_regra_snapshot é IMUTÁVEL: só INSERT. Mudar a regra amanhã não
+    # pode mudar o que foi combinado numa venda de ontem.
+    try:
+        if is_pg:
+            conn.execute("""CREATE TABLE IF NOT EXISTS gestor_regra (
+                id SERIAL PRIMARY KEY,
+                operadora TEXT NOT NULL, obs TEXT DEFAULT '', plano TEXT NOT NULL,
+                fracoes_json TEXT, gestor_json TEXT,
+                confirmada INTEGER DEFAULT 0,
+                observacao TEXT, ativo INTEGER DEFAULT 1,
+                vigencia_inicio TEXT, vigencia_fim TEXT,
+                criado_por TEXT, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                atualizado_por TEXT, atualizado_em TIMESTAMP,
+                UNIQUE(operadora, obs, plano))""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS gestor_retencao (
+                id SERIAL PRIMARY KEY,
+                regra_id INTEGER NOT NULL,
+                tipo TEXT NOT NULL, nome TEXT,
+                percentual REAL,
+                base_calculo TEXT DEFAULT 'bruto_gestor',
+                responsavel TEXT DEFAULT 'gestor',
+                vigencia_inicio TEXT, vigencia_fim TEXT, observacao TEXT,
+                ativo INTEGER DEFAULT 1,
+                criado_por TEXT, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS proposta_regra_snapshot (
+                id SERIAL PRIMARY KEY,
+                proposta_id INTEGER NOT NULL UNIQUE,
+                regra_id INTEGER,
+                operadora TEXT, obs TEXT, plano TEXT,
+                fracoes_json TEXT, gestor_json TEXT, retencoes_json TEXT,
+                completa INTEGER DEFAULT 0, falta_json TEXT,
+                usuario_id INTEGER, usuario_nome TEXT,
+                congelado_por TEXT, congelado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+        else:
+            conn.execute("""CREATE TABLE IF NOT EXISTS gestor_regra (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                operadora TEXT NOT NULL, obs TEXT DEFAULT '', plano TEXT NOT NULL,
+                fracoes_json TEXT, gestor_json TEXT,
+                confirmada INTEGER DEFAULT 0,
+                observacao TEXT, ativo INTEGER DEFAULT 1,
+                vigencia_inicio TEXT, vigencia_fim TEXT,
+                criado_por TEXT, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                atualizado_por TEXT, atualizado_em TIMESTAMP,
+                UNIQUE(operadora, obs, plano))""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS gestor_retencao (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                regra_id INTEGER NOT NULL,
+                tipo TEXT NOT NULL, nome TEXT,
+                percentual REAL,
+                base_calculo TEXT DEFAULT 'bruto_gestor',
+                responsavel TEXT DEFAULT 'gestor',
+                vigencia_inicio TEXT, vigencia_fim TEXT, observacao TEXT,
+                ativo INTEGER DEFAULT 1,
+                criado_por TEXT, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS proposta_regra_snapshot (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                proposta_id INTEGER NOT NULL UNIQUE,
+                regra_id INTEGER,
+                operadora TEXT, obs TEXT, plano TEXT,
+                fracoes_json TEXT, gestor_json TEXT, retencoes_json TEXT,
+                completa INTEGER DEFAULT 0, falta_json TEXT,
+                usuario_id INTEGER, usuario_nome TEXT,
+                congelado_por TEXT, congelado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+        for idx in ("CREATE INDEX IF NOT EXISTS idx_gregra_op ON gestor_regra(operadora, plano)",
+                    "CREATE INDEX IF NOT EXISTS idx_gret_regra ON gestor_retencao(regra_id)"):
+            conn.execute(idx)
+        conn.commit()
+    except Exception as e:
+        if is_pg:
+            try: conn.rollback()
+            except Exception: pass
+        print(f"[REGRA-GESTOR] criação pulada: {e}")
+
     # ─── REGISTRO DE NOMES DE OPERADORA: preenche a tabela 'operadoras' com o
     # display único de TODA operadora que já existe em recebimento, repasse_corretor
     # ou nas propostas — assim o registro de nomes fica completo e nenhum nome
@@ -4289,6 +4502,11 @@ def init_db():
     # fallback), mas ficava em branco no cadastro ("—" na tela de Usuários) e
     # frágil pra manter. Aqui só preenche o que estava em branco — não mexe em
     # perfil de ninguém. ───
+    # 12/08/2026: essa decisão foi revista. A comissão de gestor passou a vir da
+    # REGRA DO GESTOR (por operadora/variação/plano, em gestor_regra), e cadastro
+    # novo de gestor não recebe mais regime de consultor. Esta migração fica onde
+    # está e não é revertida: ela já rodou em produção, e reverter recalcularia
+    # histórico — coisa que este sistema não faz sozinho.
     try:
         conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
         conn.commit()
@@ -4709,6 +4927,368 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
         'consultor': consultor, 'liquido': liquido,
         'aviso': ' · '.join(avisos),
     }
+
+
+# ═══════════ MOTOR DE REGRA DO GESTOR/ADMIN VENDEDOR ═══════════
+# Todo admin e todo gestor pode vender. O que muda de venda pra venda é a
+# OPERADORA, a variação e o plano — não a pessoa. Por isso a regra é comercial e
+# mora em gestor_regra, e não num campo do usuário.
+#
+# O legado 'gestor_vendedor' continua no arquivo e continua sendo lido, mas só
+# para HISTÓRICO. Ele entrega 100% de toda a comissão numa parcela só, o que
+# não é o combinado: ele não distingue fração da operadora, parte do gestor e
+# retenção, então também não sabe dizer o que sobra para a Serenus. Não
+# recalculamos nada com ele — proposta antiga fica como está.
+#
+# QUATRO CONTAS SEPARADAS, nesta ordem:
+#   1. régua de recebimento — quanto e quando a operadora/Affinity paga;
+#   2. régua do gestor      — quanto de cada fração recebida é do gestor;
+#   3. retenção             — o que sai do bruto do gestor, e de quem é a conta;
+#   4. saldo Serenus        — recebido menos bruto do gestor, menos as retenções
+#                             de responsabilidade da empresa, menos despesas.
+_GESTOR_PERFIS = ('admin', 'supervisor', 'gestor_vendedor')
+_RETENCAO_BASES = ('bruto_gestor', 'fracao_recebida')
+_RETENCAO_RESPONSAVEIS = ('gestor', 'serenus')
+
+
+def _gestor_regra_buscar(conn, operadora, plano):
+    """Acha a regra por operadora + variação + plano. Devolve (regra, retencoes).
+
+    Cai para a regra sem variação (obs vazio) quando a exata não existe — mesmo
+    comportamento das tabelas de recebimento e repasse, pra não obrigar a
+    cadastrar toda variação quando a regra é a mesma."""
+    op_nome, op_obs = _split_operadora(operadora)
+    try:
+        r = conn.execute("""SELECT * FROM gestor_regra
+                            WHERE operadora=? AND obs=? AND plano=? AND COALESCE(ativo,1)=1""",
+                         (op_nome, op_obs, plano)).fetchone()
+        if not r:
+            r = conn.execute("""SELECT * FROM gestor_regra
+                                WHERE operadora=? AND plano=? AND COALESCE(ativo,1)=1
+                                ORDER BY (obs='') DESC LIMIT 1""", (op_nome, plano)).fetchone()
+        if not r:
+            return None, []
+        ret = [dict(x) for x in conn.execute(
+            """SELECT * FROM gestor_retencao WHERE regra_id=? AND COALESCE(ativo,1)=1
+               ORDER BY id""", (r['id'],)).fetchall()]
+        return dict(r), ret
+    except Exception:
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+        return None, []
+
+
+def _gestor_regra_faltas(regra, retencoes):
+    """O que falta pra regra estar COMPLETA. Lista de frases prontas pra tela.
+
+    Regra incompleta não é erro de digitação — é uma pergunta comercial ainda sem
+    resposta. Por isso a lista diz o que perguntar, e não 'campo inválido'."""
+    falta = []
+    if not regra:
+        return ['A régua de recebimento desta operadora, variação e plano não está cadastrada.']
+    try:
+        fracoes = json.loads(regra.get('fracoes_json') or '[]')
+    except Exception:
+        fracoes = []
+    try:
+        gestor = json.loads(regra.get('gestor_json') or '[]')
+    except Exception:
+        gestor = []
+    if not fracoes:
+        falta.append('Falta a régua de recebimento: quantas frações a operadora paga, '
+                     'com que percentual e em que mês ou evento.')
+    for f in fracoes:
+        if f.get('percentual') is None:
+            falta.append(f"Fração {f.get('ordem', '?')} da régua de recebimento está sem percentual.")
+        if not (f.get('evento') or f.get('mes')):
+            falta.append(f"Fração {f.get('ordem', '?')} está sem mês ou evento definido.")
+    if not gestor:
+        falta.append('Falta a régua do gestor: quanto de cada fração recebida pertence a ele.')
+    elif len(gestor) != len(fracoes):
+        falta.append(f'A régua do gestor tem {len(gestor)} fração(ões) e a de recebimento tem '
+                     f'{len(fracoes)}. As duas precisam falar das mesmas frações.')
+    for g in gestor:
+        if g.get('percentual_gestor') is None:
+            falta.append(f"Fração {g.get('ordem', '?')} da régua do gestor está sem percentual.")
+    if not regra.get('confirmada'):
+        falta.append('A régua foi montada mas ninguém confirmou. A sugestão de 100% na primeira '
+                     'fração é sugestão — precisa de confirmação de quem responde pelo comercial.')
+    for r in retencoes:
+        # NULL é ausência de decisão; 0 é uma decisão. A diferença é o ponto.
+        if r.get('percentual') is None:
+            falta.append(f"A retenção '{r.get('nome') or r.get('tipo')}' está sem alíquota informada. "
+                         f"O JOB não inventa alíquota.")
+        if r.get('base_calculo') not in _RETENCAO_BASES:
+            falta.append(f"A retenção '{r.get('nome') or r.get('tipo')}' está sem base de cálculo.")
+        if r.get('responsavel') not in _RETENCAO_RESPONSAVEIS:
+            falta.append(f"A retenção '{r.get('nome') or r.get('tipo')}' está sem responsável "
+                         f"(quem paga: o gestor ou a Serenus).")
+    return falta
+
+
+def _gestor_calcular(snapshot, total_corretora):
+    """Abre a conta fração a fração a partir do snapshot congelado na proposta.
+
+    Devolve por fração: quanto se espera receber, quanto é bruto do gestor,
+    quanto é retenção (separada por responsável), quanto sai líquido pro PIX do
+    gestor e quanto sobra de saldo Serenus.
+
+    Não calcula nada quando a regra está incompleta: devolver número com regra
+    pela metade é pior que não devolver, porque número na tela vira decisão."""
+    vazio = {'completa': False, 'fracoes': [], 'total_recebido': 0.0, 'total_bruto_gestor': 0.0,
+             'total_retencao_gestor': 0.0, 'total_retencao_serenus': 0.0,
+             'total_liquido_gestor': 0.0, 'total_saldo_serenus': 0.0}
+    if not snapshot or not snapshot.get('completa'):
+        return vazio
+    try:
+        fracoes = json.loads(snapshot.get('fracoes_json') or '[]')
+        gestor = json.loads(snapshot.get('gestor_json') or '[]')
+        retencoes = json.loads(snapshot.get('retencoes_json') or '[]')
+    except Exception:
+        return vazio
+    gpor = {int(g.get('ordem', 0)): g for g in gestor}
+    base = float(total_corretora or 0)
+    linhas = []
+    for f in fracoes:
+        ordem = int(f.get('ordem', 0))
+        pct_receb = float(f.get('percentual') or 0)
+        recebido = round(base * pct_receb / 100.0, 2)
+        pct_gestor = float((gpor.get(ordem) or {}).get('percentual_gestor') or 0)
+        bruto_gestor = round(recebido * pct_gestor / 100.0, 2)
+        ret_gestor, ret_serenus, det = 0.0, 0.0, []
+        for r in retencoes:
+            pct = r.get('percentual')
+            if pct is None:
+                continue
+            alvo = bruto_gestor if r.get('base_calculo') == 'bruto_gestor' else recebido
+            v = round(alvo * float(pct) / 100.0, 2)
+            if r.get('responsavel') == 'serenus':
+                ret_serenus += v
+            else:
+                ret_gestor += v
+            det.append({'nome': r.get('nome') or r.get('tipo'), 'percentual': float(pct),
+                        'base': r.get('base_calculo'), 'responsavel': r.get('responsavel'),
+                        'valor': v})
+        liquido_gestor = round(bruto_gestor - ret_gestor, 2)
+        saldo_serenus = round(recebido - bruto_gestor - ret_serenus, 2)
+        linhas.append({
+            'ordem': ordem, 'evento': f.get('evento') or '', 'mes': f.get('mes'),
+            'percentual_recebimento': pct_receb, 'recebido': recebido,
+            'percentual_gestor': pct_gestor, 'bruto_gestor': bruto_gestor,
+            'retencao_gestor': round(ret_gestor, 2), 'retencao_serenus': round(ret_serenus, 2),
+            'retencoes': det,
+            'liquido_gestor': liquido_gestor, 'saldo_serenus': saldo_serenus,
+        })
+    som = lambda k: round(sum(l[k] for l in linhas), 2)
+    return {'completa': True, 'fracoes': linhas,
+            'total_recebido': som('recebido'), 'total_bruto_gestor': som('bruto_gestor'),
+            'total_retencao_gestor': som('retencao_gestor'),
+            'total_retencao_serenus': som('retencao_serenus'),
+            'total_liquido_gestor': som('liquido_gestor'),
+            'total_saldo_serenus': som('saldo_serenus')}
+
+
+def _gestor_e_vendedor(conn, usuario_id):
+    """O usuário desta venda é gestor/admin vendendo? Pergunta ao PERFIL, não a um
+    campo de regime — todo admin e todo gestor pode vender, e forçar
+    'sem_lead_sem_fixo' no cadastro deles era o que fazia a venda de um gestor
+    cair na régua de consultor sem ninguém escolher isso."""
+    if not usuario_id:
+        return False
+    try:
+        u = conn.execute("SELECT perfil FROM usuarios WHERE id=?", (usuario_id,)).fetchone()
+        return bool(u and (u['perfil'] or '') in _GESTOR_PERFIS)
+    except Exception:
+        return False
+
+
+def _gestor_congelar_snapshot(conn, proposta_id, operadora, plano, usuario_id, usuario_nome):
+    """Congela a regra vigente NA PROPOSTA. Só INSERT: snapshot existente nunca é
+    reescrito.
+
+    É o que impede que mudar a regra amanhã mude o que foi combinado ontem. Sem
+    isso, corrigir um percentual reescreveria silenciosamente a comissão de todas
+    as vendas passadas — e ninguém consegue explicar pro consultor por que o
+    valor da venda dele mudou sozinho."""
+    ja = conn.execute("SELECT id FROM proposta_regra_snapshot WHERE proposta_id=?",
+                      (proposta_id,)).fetchone()
+    if ja:
+        return False
+    regra, retencoes = _gestor_regra_buscar(conn, operadora, plano)
+    falta = _gestor_regra_faltas(regra, retencoes)
+    op_nome, op_obs = _split_operadora(operadora)
+    conn.execute("""INSERT INTO proposta_regra_snapshot
+        (proposta_id, regra_id, operadora, obs, plano, fracoes_json, gestor_json,
+         retencoes_json, completa, falta_json, usuario_id, usuario_nome, congelado_por, congelado_em)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (proposta_id, (regra or {}).get('id'), op_nome, op_obs, plano,
+         (regra or {}).get('fracoes_json') or '[]', (regra or {}).get('gestor_json') or '[]',
+         json.dumps(retencoes, ensure_ascii=False, default=str),
+         0 if falta else 1, json.dumps(falta, ensure_ascii=False),
+         usuario_id, usuario_nome, usuario_nome, _agora_sp()))
+    return True
+
+
+def _gestor_snapshot(conn, proposta_id):
+    try:
+        r = conn.execute("SELECT * FROM proposta_regra_snapshot WHERE proposta_id=?",
+                         (proposta_id,)).fetchone()
+        return dict(r) if r else None
+    except Exception:
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+        return None
+
+
+def _gestor_bloqueio(conn, proposta_id):
+    """O que está travado nesta venda por falta de regra, e por quê.
+
+    Devolve {'bloqueia': bool, 'falta': [...], 'operadora': ..., 'plano': ...,
+    'link': ...}. O link é a ação direta: abre a configuração exata que falta, em
+    vez de mandar a pessoa procurar no menu qual das telas de comissão é a certa.
+
+    Venda de consultor não passa por aqui: a regra do gestor não se aplica a ela,
+    e bloquear o que não depende dessa regra pararia o sistema inteiro."""
+    vazio = {'bloqueia': False, 'falta': [], 'operadora': '', 'plano': '', 'link': '',
+             'eh_gestor': False}
+    p = conn.execute("""SELECT id, usuario_id, adm_operadora, modalidade, tipo_pessoa, status
+                        FROM propostas WHERE id=?""", (proposta_id,)).fetchone()
+    if not p:
+        return vazio
+    if not _gestor_e_vendedor(conn, p['usuario_id']):
+        return vazio
+    plano = _plano_from_modalidade(p['modalidade'], p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else '')
+    operadora = p['adm_operadora'] or ''
+    snap = _gestor_snapshot(conn, proposta_id)
+    if snap:
+        try:
+            falta = json.loads(snap.get('falta_json') or '[]')
+        except Exception:
+            falta = []
+        completa = bool(snap.get('completa'))
+    else:
+        regra, retencoes = _gestor_regra_buscar(conn, operadora, plano)
+        falta = _gestor_regra_faltas(regra, retencoes)
+        completa = not falta
+    op_nome, op_obs = _split_operadora(operadora)
+    from urllib.parse import urlencode as _ue
+    link = '/comissoes/regra-gestor?' + _ue({'operadora': op_nome, 'obs': op_obs, 'plano': plano})
+    return {'bloqueia': not completa, 'falta': falta, 'operadora': operadora or '(sem operadora)',
+            'plano': plano, 'link': link, 'eh_gestor': True,
+            'tem_snapshot': bool(snap)}
+
+
+def _fin_visao(conn, competencia=''):
+    """LEITURA ÚNICA DO DINHEIRO DE COMISSÃO. Financeiro e Fluxo de Caixa chamam
+    esta função, e só ela — as duas telas discordavam porque cada uma somava de
+    uma tabela diferente, e duas verdades sobre o mesmo dinheiro é o mesmo que
+    nenhuma.
+
+    Lê do razão (fin_evento) e da conciliação. Não duplica lançamento: o razão é
+    append-only e cada fato tem chave única, então somar aqui não pode contar
+    duas vezes o que foi importado duas vezes — porque não foi.
+
+    As colunas são as sete perguntas que a operação faz, nesta ordem:
+      bruto esperado      — o que a régua diz que deveria vir;
+      apurado Affinity    — o que ela emitiu extrato dizendo que vai pagar;
+      entrada confirmada  — o que se provou que entrou na conta;
+      bruto do gestor     — a parte dele, antes de retenção;
+      retenção            — o que sai, com responsável definido;
+      líquido para PIX    — o que ele recebe de fato;
+      saldo Serenus       — o que sobra pra empresa.
+    """
+    onde, params = '', []
+    if competencia:
+        onde, params = 'WHERE competencia = ?', [competencia]
+
+    def _soma(estado, papel=None, sinal=None):
+        sql = f"""SELECT COALESCE(SUM(valor),0) v FROM fin_evento
+                  {onde}{' AND' if onde else 'WHERE'} estado = ?"""
+        p = list(params) + [estado]
+        if papel:
+            sql += " AND papel = ?"; p.append(papel)
+        if sinal is not None:
+            sql += " AND sinal = ?"; p.append(sinal)
+        try:
+            return round(float(conn.execute(sql, p).fetchone()['v'] or 0), 2)
+        except Exception:
+            return 0.0
+
+    visao = {
+        'competencia': competencia,
+        'apurado_affinity': round(_soma('apurado_affinity', 'affinity', 1), 2),
+        'tarifas': round(_soma('apurado_affinity', 'tarifa', -1), 2),
+        'entrada_confirmada': round(_soma('entrada_confirmada'), 2),
+        'bruto_esperado': 0.0, 'bruto_gestor': 0.0, 'retencao_gestor': 0.0,
+        'retencao_serenus': 0.0, 'liquido_pix_gestor': 0.0, 'saldo_serenus': 0.0,
+        'vendas_gestor': 0, 'sem_regra': 0,
+    }
+    # Bruto esperado e a conta do gestor vêm do snapshot congelado de cada venda:
+    # é o que foi COMBINADO, não o que a régua de hoje diria.
+    try:
+        sql = """SELECT s.*, COALESCE(p.comissao_total_corretora,0) comissao
+                 FROM proposta_regra_snapshot s
+                 JOIN propostas p ON p.id = s.proposta_id
+                 WHERE COALESCE(p.status,'') <> 'Excluída' AND COALESCE(p.estornada,0)=0"""
+        for s in conn.execute(sql).fetchall():
+            snap = dict(s)
+            visao['vendas_gestor'] += 1
+            if not snap.get('completa'):
+                visao['sem_regra'] += 1
+                continue
+            r = _gestor_calcular(snap, snap['comissao'])
+            visao['bruto_esperado'] += r['total_recebido']
+            visao['bruto_gestor'] += r['total_bruto_gestor']
+            visao['retencao_gestor'] += r['total_retencao_gestor']
+            visao['retencao_serenus'] += r['total_retencao_serenus']
+            visao['liquido_pix_gestor'] += r['total_liquido_gestor']
+            visao['saldo_serenus'] += r['total_saldo_serenus']
+    except Exception:
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+    for k in ('bruto_esperado', 'bruto_gestor', 'retencao_gestor', 'retencao_serenus',
+              'liquido_pix_gestor', 'saldo_serenus'):
+        visao[k] = round(visao[k], 2)
+    visao['retencao_total'] = round(visao['retencao_gestor'] + visao['retencao_serenus'], 2)
+    # A diferença entre apurado e confirmado é a pergunta que a tela precisa
+    # fazer sozinha: quanto a Affinity disse que paga e ainda não apareceu.
+    visao['aguardando_entrada'] = round(visao['apurado_affinity'] - visao['entrada_confirmada'], 2)
+    try:
+        visao['linhas_sem_vinculo'] = conn.execute(
+            "SELECT COUNT(*) c FROM affinity_conciliacao WHERE estado='sem_vinculo'").fetchone()['c']
+    except Exception:
+        visao['linhas_sem_vinculo'] = 0
+    return visao
+
+
+def _gestor_regras_faltando(conn, limite=400):
+    """Resumo das vendas de gestor travadas por regra incompleta, agrupado por
+    operadora/variação/plano — que é o que precisa ser cadastrado.
+
+    Agrupado e não uma linha por venda de propósito: 40 vendas travadas pela MESMA
+    operadora são um cadastro faltando, não 40 problemas. Listar 40 esconde que é
+    um só."""
+    grupos = {}
+    try:
+        propostas = conn.execute("""SELECT id FROM propostas
+                                    WHERE COALESCE(status,'') <> 'Excluída'
+                                      AND COALESCE(estornada,0)=0
+                                    ORDER BY id DESC LIMIT ?""", (limite,)).fetchall()
+    except Exception:
+        return []
+    for p in propostas:
+        b = _gestor_bloqueio(conn, p['id'])
+        if not b['bloqueia']:
+            continue
+        chave = (b['operadora'], b['plano'])
+        g = grupos.setdefault(chave, {'operadora': b['operadora'], 'plano': b['plano'],
+                                      'vendas': 0, 'falta': b['falta'][:2], 'link': b['link'],
+                                      'exemplo': p['id']})
+        g['vendas'] += 1
+    return sorted(grupos.values(), key=lambda x: -x['vendas'])
 
 
 def gerar_parcelas(proposta_id, vigencia, c, dia_vencimento=None, status_override=None):
@@ -6967,6 +7547,12 @@ def _pagar_parcela_asaas_core(conn, pid, operador_nome):
         return False, "Só é possível pagar parcelas liberadas para o corretor"
     if parc['asaas_transfer_id']:
         return False, "Esta parcela já tem um pagamento Asaas iniciado"
+    # ÚLTIMA TRAVA ANTES DO PIX. A liberação já checa a regra, mas o PIX é o
+    # ponto sem volta: se a regra ficou incompleta DEPOIS de liberar (retenção
+    # desativada, regra apagada), o dinheiro não pode sair mesmo assim.
+    travado = _bloqueio_parcela_gestor(conn, pid)
+    if travado:
+        return False, travado
 
     consultor = conn.execute("SELECT chave_pix, nome FROM usuarios WHERE id=?", (parc['usuario_id'],)).fetchone()
     chave_pix = (consultor['chave_pix'] if consultor else '') or ''
@@ -9126,6 +9712,19 @@ def salvar_proposta():
                 VALUES (?,?,?,?,?,?,?,?,?,?,'comissao')""", (parc['proposta_id'],parc['numero'],parc['percentual'],
                                           parc['valor'],parc['valor_corretora'],parc['perc_cliente'],
                                           parc['data_prevista'],parc['status'],parc['competencia'],parc['mensalidade_ref']))
+        # CONGELA A REGRA DO GESTOR NA VENDA. Feito aqui, no nascimento da
+        # proposta, e nunca depois: a regra que vale é a do dia em que a venda
+        # foi combinada. Mudar a régua no mês que vem não pode reescrever o que
+        # já foi acordado — e o snapshot é o único jeito de provar qual era.
+        # Regra incompleta NÃO impede cadastrar: a venda existe, ela só não gera
+        # financeiro nem libera PIX até a configuração ficar de pé.
+        try:
+            _gestor_congelar_snapshot(conn, proposta_id, operadora,
+                                      _plano_from_modalidade(d.get('modalidade', ''),
+                                                             d.get('tipo_pessoa', '')),
+                                      session.get('user_id'), session.get('nome'))
+        except Exception as e:
+            app.logger.warning(f"[REGRA-GESTOR] snapshot da proposta {proposta_id} pulado: {e}")
         conn.commit(); close_db(conn)
         try:
             quem = session.get('nome') or c.get('consultor') or 'Consultor'
@@ -9292,10 +9891,23 @@ def ver_proposta(pid):
             try: solic_pendente['alteracoes_parsed'] = json.loads(row['alteracoes']) if row['alteracoes'] else {}
             except Exception: solic_pendente['alteracoes_parsed'] = {}
 
+    # Regra do gestor desta venda: aparece na própria proposta, com a operadora e
+    # o plano exatos e o link direto pra configuração que falta. Aviso genérico
+    # ("configure as comissões") faz a pessoa procurar; este diz onde ir.
+    conn3 = db()
+    bloqueio_gestor = _gestor_bloqueio(conn3, pid)
+    conta_gestor = None
+    if bloqueio_gestor.get('eh_gestor') and not bloqueio_gestor['bloqueia']:
+        conta_gestor = _gestor_calcular(_gestor_snapshot(conn3, pid),
+                                        p.get('comissao_total_corretora') if isinstance(p, dict)
+                                        else p['comissao_total_corretora'])
+    close_db(conn3)
+
     return render_template('detalhe.html', p=p, parcelas=parcelas, regime=regime, extras=extras_view,
                            campos_secoes=campos_secoes, valores_edit=valores_edit,
                            solic_pendente=solic_pendente, comissao_aviso=comissao_aviso,
                            lead_crm=lead_crm, lead_wa=lead_wa,
+                           bloqueio_gestor=bloqueio_gestor, conta_gestor=conta_gestor,
                            etiquetas_sugeridas=_etiquetas_do_momento(p, lead_crm))
 
 @app.route('/proposta/<int:pid>/consultor', methods=['POST'])
@@ -11607,6 +12219,28 @@ def _notificar_parcela_consultor(conn, pid, verbo, origem=''):
 
 
 # ─── ROTAS DE PARCELAS (FLUXO DE CAIXA) ─────────────────────────────────────────
+def _bloqueio_parcela_gestor(conn, pid):
+    """A regra do gestor desta venda está completa? Devolve a frase do bloqueio,
+    ou '' quando pode seguir.
+
+    Liberar e pagar são os dois momentos em que o dinheiro sai de verdade. Sem
+    régua, retenção e responsável cadastrados, ninguém sabe QUANTO é do gestor e
+    QUANTO é imposto — e pagar antes de saber é pagar errado com data marcada
+    para descobrir."""
+    try:
+        p = conn.execute("SELECT proposta_id FROM parcelas WHERE id=?", (pid,)).fetchone()
+    except Exception:
+        return ''
+    if not p:
+        return ''
+    b = _gestor_bloqueio(conn, p['proposta_id'])
+    if not b['bloqueia']:
+        return ''
+    return (f"A regra de comissão do gestor para {b['operadora']} / {b['plano']} está incompleta. "
+            f"{b['falta'][0] if b['falta'] else ''} Configure em Regra do gestor antes de liberar "
+            f"ou pagar esta parcela.")
+
+
 @app.route('/parcela/<int:pid>/status', methods=['POST'])
 @login_required
 @admin_required
@@ -11614,6 +12248,11 @@ def parcela_status(pid):
     """Mudança manual de status (select do admin)."""
     novo = request.form.get('status')
     conn = db()
+    if novo in ('Liberado para o corretor', 'Pago ao corretor'):
+        travado = _bloqueio_parcela_gestor(conn, pid)
+        if travado:
+            close_db(conn)
+            return jsonify({"ok": False, "erro": travado, "regra_incompleta": True}), 400
     extra = ""
     if novo == 'Liberado para o corretor':
         conn.execute("UPDATE parcelas SET status=?,confirmado_gestor=1,data_confirmacao_gestor=? WHERE id=?",
@@ -11640,6 +12279,11 @@ def parcela_acao(pid):
     """Avança a parcela um passo no fluxo, com confirmação do gestor."""
     acao = request.form.get('acao')
     conn = db()
+    if acao in ('liberar', 'pagar'):
+        travado = _bloqueio_parcela_gestor(conn, pid)
+        if travado:
+            close_db(conn)
+            return jsonify({"ok": False, "msg": travado, "regra_incompleta": True}), 400
     agora = datetime.now(TZ_SP).isoformat()
     if acao == 'receber':
         conn.execute("UPDATE parcelas SET status='Recebido e não repassado' WHERE id=?", (pid,))
@@ -11781,10 +12425,13 @@ def fluxo_caixa():
             WHERE pa.status='Pago ao corretor' AND {_AVIVA} ORDER BY pa.id DESC LIMIT 30
         """).fetchall()
 
+        regras_faltando = _gestor_regras_faltando(conn)
+        fin_visao = _fin_visao(conn)
         close_db(conn)
         return render_template('fluxo_caixa.html', ciclo=ciclo, totais=totais,
                                antecipacoes=antecipacoes, lote=lote,
                                recebidos=recebidos, pagos=pagos,
+                               regras_faltando=regras_faltando, fin_visao=fin_visao,
                                status_fluxo=STATUS_FLUXO)
     else:
         # Visão do consultor. Mesmo filtro: sem ele, o consultor via (e
@@ -13170,15 +13817,17 @@ def usuario_novo():
     cpf = d.get('cpf','').strip()
     conn = db()
     try:
-        # Regime de comissão: consultor usa o que foi escolhido no form; qualquer
-        # outro perfil (admin/supervisor/gestor_vendedor) grava explicitamente
-        # 'sem_lead_sem_fixo' — não deixa em branco. Em branco funcionava por
-        # coincidência (vários pontos do código tratam '' como esse fallback),
-        # mas é frágil e a tela de Usuários mostrava "—" em vez do regime real
-        # que estava sendo aplicado nas vendas desse gestor.
+        # Regime de comissão: consultor usa o que foi escolhido no form.
+        # Admin, supervisor e gestor vendedor NÃO usam regime de consultor — a
+        # comissão deles vem da REGRA DO GESTOR, que é por operadora, variação e
+        # plano (ver _gestor_regra_buscar). Gravar 'sem_lead_sem_fixo' neles era
+        # o que fazia a venda de um gestor cair na régua de consultor sem
+        # ninguém ter escolhido isso, e ainda mostrava na tela um regime que não
+        # era o aplicado. Fica em branco de propósito: em branco aqui quer dizer
+        # "não é por regime, é por regra comercial".
         conn.execute("""INSERT INTO usuarios (nome,email,perfil,regime_base,token_setup,token_expira,cpf)
             VALUES (?,?,?,?,?,?,?)""",(nome,email,d.get('perfil','consultor'),
-            (d.get('regime_base','sem_lead_sem_fixo') if d.get('perfil','consultor')=='consultor' else 'sem_lead_sem_fixo'),token,expira,cpf or None))
+            (d.get('regime_base','sem_lead_sem_fixo') if d.get('perfil','consultor')=='consultor' else ''),token,expira,cpf or None))
         conn.commit()
     except sqlite3.IntegrityError:
         flash('E-mail já cadastrado.'); close_db(conn); return redirect(url_for('usuarios'))
@@ -13267,12 +13916,12 @@ def usuario_editar(uid):
         modulos_val = json.dumps(marcados)
     funil_atendimento_id = (d.get('funil_atendimento_id', '') or '').strip()
     funil_atendimento_id = int(funil_atendimento_id) if funil_atendimento_id.isdigit() else None
-    # Regime de comissão: consultor usa o que veio do form; qualquer outro
-    # perfil (admin/supervisor/gestor_vendedor) grava explicitamente
-    # 'sem_lead_sem_fixo' — mesmo motivo do usuario_novo acima (ver comentário lá).
+    # Regime de comissão: consultor usa o que veio do form; admin, supervisor e
+    # gestor vendedor ficam SEM regime — a comissão deles vem da regra do gestor,
+    # por operadora/variação/plano. Mesmo motivo do usuario_novo acima.
     conn.execute("""UPDATE usuarios SET nome=?,email=?,perfil=?,regime_base=?,ativo=?,valor_fixo=?,chave_pix=?,foto=?,cpf=?,telefone=?,waspeed_token=?,modulos=?,funil_atendimento_id=? WHERE id=?""",
         (d['nome'],d['email'].lower(),d['perfil'],
-         (d['regime_base'] if d['perfil']=='consultor' else 'sem_lead_sem_fixo'),ativo,fnum('valor_fixo'),d.get('chave_pix',''),foto_nome,d.get('cpf','') or None,
+         (d['regime_base'] if d['perfil']=='consultor' else ''),ativo,fnum('valor_fixo'),d.get('chave_pix',''),foto_nome,d.get('cpf','') or None,
          d.get('telefone','').strip(),d.get('waspeed_token','').strip() or None,modulos_val,funil_atendimento_id,uid))
     conn.commit(); close_db(conn)
     return redirect(url_for('usuarios'))
@@ -14497,6 +15146,11 @@ def financeiro():
     # usaria conexao fechada e a tela caia inteira.
     conferencia = _conferencia_mes(conn, mes)
     previsao = _previsao_meses(conn, mes)
+    regras_faltando = _gestor_regras_faltando(conn)
+    # MESMA função que o Fluxo de Caixa chama, de propósito: enquanto cada tela
+    # somava da sua própria consulta, as duas mostravam números diferentes pro
+    # mesmo dinheiro e não havia como saber qual estava certa.
+    fin_visao = _fin_visao(conn)
     close_db(conn)
 
     # O ROTULO ACOMPANHA O NUMERO. Um total que muda de valor sem dizer de que
@@ -14527,7 +15181,8 @@ def financeiro():
         saldo=saldo, dre=dre, saldo_socios=saldo_socios_lista, lancamento_focus=lancamento_focus,
         centros_custo=CENTROS_CUSTO, tipos_lancamento=TIPOS_LANCAMENTO,
         canais_midia=CANAIS_MIDIA, status_lancamento=STATUS_LANCAMENTO,
-        conferencia=conferencia, previsao=previsao,
+        conferencia=conferencia, previsao=previsao, regras_faltando=regras_faltando,
+        fin_visao=fin_visao,
         calendario=calendario, cal_total=cal_total, cal_rotulo=_cal_rotulo,
         cal_livre=_cal_livre,
         filtros={'faixa': f_faixa, 'centro': f_centro, 'status_lanc': f_status,
@@ -14537,10 +15192,23 @@ def financeiro():
 @login_required
 @admin_required
 def financeiro_exportar():
-    """Exporta o mesmo recorte de custos/fixos exibido no Financeiro."""
+    """Exporta o recorte do Financeiro, dizendo por escrito QUAL recorte é.
+
+    A tela tem mais de uma seção financeira (custos e fixos de um lado, comissão
+    da Affinity de outro) e o arquivo só trazia a primeira, sem dizer isso em
+    lugar nenhum. Quem abria a planilha via um total que não batia com o da tela
+    e não tinha como saber por quê — o número estava certo para um recorte que o
+    arquivo não declarava.
+
+    Agora: o XLSX traz as DUAS seções, uma por aba, e o CSV — que não tem aba —
+    traz a seção pedida com o escopo escrito na primeira linha e os filtros
+    aplicados logo abaixo. O total de cada aba é o total daquela seção na tela."""
     import csv, io
     mes = request.args.get('mes', competencia_atual())
     fmt = (request.args.get('formato') or 'xlsx').lower()
+    secao = (request.args.get('secao') or 'custos').strip().lower()
+    if secao not in ('custos', 'comissao'):
+        secao = 'custos'
     faixa, de, ate = (request.args.get('faixa') or '').strip(), (request.args.get('de') or '').strip(), (request.args.get('ate') or '').strip()
     centro, status, tipo, meio = [(request.args.get(k) or '').strip() for k in ('centro','status_lanc','tipo_lanc','meio')]
     conn = db()
@@ -14560,20 +15228,96 @@ def financeiro_exportar():
     def br(d): return f'{d[8:10]}/{d[5:7]}/{d[:4]}' if d and len(d)>=10 else ''
     dados = [[r.get('descricao',''), r.get('centro_custo',''), r.get('categoria',''), br(r.get('data_emissao') or r.get('data_lancamento')), br(r.get('data_vencimento')), float(r.get('valor') or 0), r.get('pago_por',''), r.get('fonte_pagamento',''), r.get('meio_nome') or r.get('forma_pagamento',''), r.get('status_efetivo','')] for r in rows]
     total = sum(x[5] for x in dados)
+
+    # ESCOPO POR ESCRITO. O que está e o que NÃO está no arquivo, junto do
+    # arquivo. Sem isso, um total que não bate com a tela vira desconfiança na
+    # tela inteira — e o problema quase sempre era só um filtro não declarado.
+    filtros_txt = []
+    if livre:
+        _de_txt = de or 'o começo'
+        _ate_txt = ate or 'hoje'
+        filtros_txt.append(f"vencimento de {_de_txt} a {_ate_txt}")
+    else:
+        filtros_txt.append(f"vencimento na competência {mes}")
+    if faixa and not livre: filtros_txt.append(f"faixa {faixa}")
+    if centro: filtros_txt.append(f"centro de custo {centro}")
+    if tipo: filtros_txt.append(f"tipo {tipo}")
+    if meio: filtros_txt.append(f"meio de pagamento {meio}")
+    if status: filtros_txt.append(f"status {status}")
+    escopo_custos = 'Seção: custos e fixos. Filtros: ' + '; '.join(filtros_txt) + '.'
+
+    # Seção 2: a comissão. Vem do razão, a MESMA fonte do painel da tela — o
+    # arquivo não pode contar uma história diferente da que a tela contou.
+    visao = _fin_visao(conn)
+    cab_com = ['Indicador', 'Valor', 'O que é']
+    dados_com = [
+        ['Bruto esperado', visao['bruto_esperado'],
+         'O que a régua congelada em cada venda diz que deveria vir. Previsão.'],
+        ['Apurado pela Affinity', visao['apurado_affinity'],
+         'Extratos importados. Ela diz que vai pagar. Ainda não é dinheiro na conta.'],
+        ['Tarifas e débitos', visao['tarifas'],
+         'Descontos do próprio extrato, como a tarifa por pagamento. Saída.'],
+        ['Entrada confirmada', visao['entrada_confirmada'],
+         'Provado por identificador Asaas ou confirmação humana registrada.'],
+        ['Aguardando entrada', visao['aguardando_entrada'],
+         'Apurado que ainda não apareceu como entrada confirmada.'],
+        ['Bruto do gestor', visao['bruto_gestor'],
+         'Parte do gestor antes de retenção. Obrigação a pagar.'],
+        ['Retenção do gestor', visao['retencao_gestor'], 'Retenção de responsabilidade do gestor.'],
+        ['Retenção da Serenus', visao['retencao_serenus'], 'Retenção de responsabilidade da empresa.'],
+        ['Líquido para PIX do gestor', visao['liquido_pix_gestor'],
+         'O que o gestor recebe de fato. Só sai após entrada confirmada e liberação.'],
+        ['Saldo Serenus', visao['saldo_serenus'],
+         'Recebido menos bruto do gestor e retenções da empresa.'],
+    ]
+    escopo_com = ('Seção: comissão da Affinity, lida do razão financeiro. '
+                  f"Vendas de gestor com regra completa. {visao['sem_regra']} venda(s) ficaram de "
+                  f"fora por regra incompleta; {visao['linhas_sem_vinculo']} linha(s) de extrato "
+                  'ainda sem venda apontada.')
+
+    def moeda_csv(v):
+        return 'R$ ' + f'{v:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.')
+
     if fmt == 'csv':
-        def moeda_csv(v):
-            return 'R$ ' + f'{v:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.')
-        out = io.StringIO(); wri = csv.writer(out, delimiter=';'); wri.writerow(cab)
-        for linha in dados: wri.writerow(linha[:5] + [moeda_csv(linha[5])] + linha[6:])
-        wri.writerow(['TOTAL','','','','',moeda_csv(total)]); close_db(conn)
-        return Response('\ufeff' + out.getvalue(), mimetype='text/csv', headers={'Content-Disposition': f'attachment; filename=financeiro_serenus_{mes}.csv'})
+        # CSV não tem aba: exporta UMA seção e diz qual, na primeira linha.
+        out = io.StringIO(); wri = csv.writer(out, delimiter=';')
+        if secao == 'comissao':
+            wri.writerow([escopo_com]); wri.writerow([])
+            wri.writerow(cab_com)
+            for linha in dados_com:
+                wri.writerow([linha[0], moeda_csv(linha[1]), linha[2]])
+        else:
+            wri.writerow([escopo_custos]); wri.writerow([])
+            wri.writerow(cab)
+            for linha in dados: wri.writerow(linha[:5] + [moeda_csv(linha[5])] + linha[6:])
+            wri.writerow(['TOTAL', '', '', '', '', moeda_csv(total)])
+            wri.writerow([])
+            wri.writerow(['Este arquivo traz só a seção de custos e fixos. '
+                          'Para a comissão da Affinity, exporte com secao=comissao '
+                          'ou use o XLSX, que traz as duas abas.'])
+        close_db(conn)
+        return Response('\ufeff' + out.getvalue(), mimetype='text/csv',
+                        headers={'Content-Disposition':
+                                 f'attachment; filename=financeiro_serenus_{secao}_{mes}.csv'})
+
     import openpyxl
-    wb = openpyxl.Workbook(); ws = wb.active; ws.title = 'Financeiro'; ws.append(cab)
+    wb = openpyxl.Workbook()
+    ws = wb.active; ws.title = 'Custos e fixos'
+    ws.append([escopo_custos]); ws.append([])
+    ws.append(cab)
     for row in dados: ws.append(row)
-    ws.append(['TOTAL','','','','',total]);
-    for cell in ws['F'][1:]: cell.number_format = 'R$ #,##0.00'
+    ws.append(['TOTAL', '', '', '', '', total])
+    for cell in ws['F'][3:]:
+        cell.number_format = 'R$ #,##0.00'
+    ws2 = wb.create_sheet('Comissao Affinity')
+    ws2.append([escopo_com]); ws2.append([])
+    ws2.append(cab_com)
+    for row in dados_com: ws2.append(row)
+    for cell in ws2['B'][3:]:
+        cell.number_format = 'R$ #,##0.00'
     buf = io.BytesIO(); wb.save(buf); buf.seek(0); close_db(conn)
-    return send_file(buf, as_attachment=True, download_name=f'financeiro_serenus_{mes}.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    return send_file(buf, as_attachment=True, download_name=f'financeiro_serenus_{mes}.xlsx',
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 def _proximo_mes(competencia, n):
     """Soma n meses a uma competência 'YYYY-MM'. Retorna 'YYYY-MM'."""
@@ -14698,6 +15442,32 @@ def fechamento_pagar():
     return jsonify({"ok": True, **resultado})
 
 
+def _venc_parcela(data_iso, i):
+    """Vencimento da parcela i (0-based) a partir do vencimento da primeira.
+
+    POLÍTICA DO DIA 29, 30 E 31, que é a única parte não óbvia disto:
+    o vencimento cai no MESMO DIA do mês seguinte; quando esse dia não existe
+    naquele mês, cai no ÚLTIMO DIA VÁLIDO dele. Vencimento dia 31 em janeiro vira
+    28 (ou 29) em fevereiro e volta pra 31 em março.
+
+    Volta pra 31, e não fica preso em 28, porque a conta é sempre feita a partir
+    da data ORIGINAL — nunca a partir da parcela anterior. Encadear a partir da
+    anterior faria a data escorregar mês a mês (31/01, 28/02, 28/03, 28/04...) e
+    em seis parcelas o vencimento teria andado três dias sozinho.
+
+    Vencimento em branco continua em branco: inventar data de vencimento para um
+    lançamento que não tem é pior que não ter."""
+    if not data_iso or len(data_iso) < 10:
+        return data_iso
+    if not i:
+        return data_iso
+    try:
+        base = datetime.strptime(data_iso[:10], '%Y-%m-%d').date()
+    except ValueError:
+        return data_iso
+    return (base + relativedelta(months=i)).strftime('%Y-%m-%d')
+
+
 @app.route('/lancamento/salvar', methods=['POST'])
 @login_required
 @admin_required
@@ -14744,6 +15514,12 @@ def lancamento_salvar():
         # Última parcela absorve a diferença de arredondamento
         valor_i = round(valor_total - valor_parcela * (num_parcelas - 1), 2) if i == num_parcelas - 1 else valor_parcela
         competencia_i = _proximo_mes(competencia_base, i) if competencia_base else competencia_atual()
+        # VENCIMENTO ANDA COM A PARCELA. Antes as N parcelas nasciam com a MESMA
+        # data de vencimento: a competência avançava mês a mês e o vencimento
+        # ficava parado, então uma compra em 6x aparecia como seis contas
+        # vencendo no mesmo dia — e o Financeiro, que passou a ordenar e somar
+        # por vencimento, mostrava seis meses de despesa caindo num mês só.
+        data_vencimento_i = _venc_parcela(data_vencimento, i)
         desc_i = f"{descricao} ({i+1}/{num_parcelas})" if num_parcelas > 1 else descricao
         # Centro de custo / tipo / canal: só aceita o que está na lista fechada.
         # Valor livre aqui viraria "Midia", "mídia" e "MÍDIA" como três centros
@@ -14770,7 +15546,7 @@ def lancamento_salvar():
              centro_custo,tipo_lancamento,canal_midia)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (tipo, d.get('categoria', ''), desc_i, valor_i, competencia_i,
-             data_emissao or competencia_i, data_emissao or None, data_vencimento or None,
+             data_emissao or competencia_i, data_emissao or None, data_vencimento_i or None,
              d.get('socio', ''), 1 if d.get('recorrente') else 0, _status_ini,
              (d.get('pago_por') or '').strip(), (d.get('fonte_pagamento') or '').strip(),
              forma_pagamento, meio_pagamento_id,
@@ -25855,9 +26631,18 @@ _EXT_RX_ITEM = re.compile(
     + (_EXT_DIN % 'bruto') + r'\s+' + (_EXT_DIN % 'taxa') + r'\s+(?P<pct_adm>[\d,]+)%\s+'
     + (_EXT_DIN % 'desp') + r'\s+' + (_EXT_DIN % 'iss') + r'\s+' + (_EXT_DIN % 'liquido') + r'\s*$')
 
+#    O colchete que fecha a operadora pode FALTAR: quando o nome do cliente é
+#    longo, a coluna estoura e o SisWeb corta o texto no meio ('- [Porto Seguro
+#    R$ 942,69'). Era o caso do extrato 1374214, em que a segunda linha sumia e o
+#    JOB lia R$ 1.706,16 no lugar de R$ 2.648,85 — sem erro nenhum na tela, porque
+#    a linha que faltava não existia para reclamar.
+#    Por isso `\]?` e não `\]`: o fechamento é opcional, mas NADA MAIS afrouxa —
+#    a linha continua exigindo o prefixo [tipo][Parc #n][pct%], o 'Prop. <número>'
+#    e os seis valores monetários até o fim da linha. Uma linha inválida não passa
+#    a caber; só a linha válida que vinha cortada volta a ser lida.
 _EXT_RX_CREDITO = re.compile(
     r'^\[(?P<tipo>[^\]]+)\]\[Parc\s*#?(?P<parc>\d{1,3})\]\[(?P<pct>[\d,]+)%\]\s*'
-    r'Prop\.\s*(?P<proposta>\d{4,20})\s*-\s*(?P<cliente>.+?)\s*-\s*\[(?P<operadora>[^\]]+)\]\s+'
+    r'Prop\.\s*(?P<proposta>\d{4,20})\s*-\s*(?P<cliente>.+?)\s*-\s*\[(?P<operadora>[^\]]+?)(?P<fecha>\])?\s+'
     + (_EXT_DIN % 'bruto') + r'\s+' + (_EXT_DIN % 'taxa') + r'\s+(?P<pct_adm>[\d,]+)%\s+'
     + (_EXT_DIN % 'desp') + r'\s+' + (_EXT_DIN % 'iss') + r'\s+' + (_EXT_DIN % 'liquido') + r'\s*$')
 
@@ -25968,6 +26753,10 @@ def ler_extrato_affinity(caminho_ou_bytes, nome_arquivo=''):
                 'bruto': _ext_num(d['bruto']), 'taxa': _ext_num(d['taxa']),
                 'desp_adm': _ext_num(d['desp']), 'iss': _ext_num(d['iss']),
                 'liquido': _ext_num(d['liquido']), 'tipo': d['tipo'].strip()[:40],
+                # Sem o colchete de fechamento, o nome da operadora veio cortado
+                # pelo próprio PDF. O valor está inteiro; o nome, não. Quem
+                # confere precisa saber a diferença.
+                'operadora_truncada': not d.get('fecha'),
             })
 
     # Debito: a linha 'Total de Créditos e Débitos' fecha creditos MENOS debitos,
@@ -25991,8 +26780,8 @@ def ler_extrato_affinity(caminho_ou_bytes, nome_arquivo=''):
     cab['total_bruto'] = round(sum(i['bruto'] for i in itens), 2)
     cab['total_liquido'] = round(sum(i['liquido'] for i in itens), 2)
 
-    # Conferencia pelo VALOR DA NOTA FISCAL: e o unico total presente em TODOS os
-    # formatos (tabela por operadora, antecipacao, e os dois misturados).
+    # Conferencia pelo VALOR DA NOTA FISCAL: e o total presente em todo extrato
+    # que gerou nota — tabela por operadora, antecipacao, e os dois misturados.
     impresso = None
     mm = re.search(r'VALOR DA NOTA FISCAL:\s*R\$ ?([\d.,]+)', plano)
     if mm:
@@ -26008,11 +26797,56 @@ def ler_extrato_affinity(caminho_ou_bytes, nome_arquivo=''):
             if impresso is not None:
                 break
     cab['total_impresso'] = impresso
-    if impresso is None:
-        avisos.append('Não achei o total impresso no PDF — não deu pra conferir a leitura.')
-    elif abs(impresso - cab['total_bruto']) > 0.01:
-        avisos.append(f"A soma das linhas lidas (R$ {cab['total_bruto']:.2f}) não bate com o total "
-                      f"impresso no extrato (R$ {impresso:.2f}). Alguma linha escapou do leitor.")
+
+    # Extrato transferido nao emite nota: nao tem 'VALOR DA NOTA FISCAL' nenhum, e
+    # exigir esse rotulo o marcaria como leitura falha para sempre. Nele o total
+    # que da pra conferir e o LIQUIDO da linha 'Total de Créditos e Débitos' — o
+    # ultimo valor dela, que ja e creditos menos debitos.
+    # Esse total so serve como ancora quando NAO ha nota: em extrato com tabela
+    # por operadora ele vale so o bloco de creditos (fica -4,00, so a tarifa),
+    # entao compara-lo com o liquido inteiro reprovaria leitura correta.
+    tcd = None
+    for l in linhas:
+        if l.startswith('Total de Créditos e Débitos'):
+            vals = re.findall(r'-?R\$ ?[-\d.,]+', l)
+            if vals:
+                tcd = _ext_num(vals[-1])
+            break
+    liquido_lido = round(cab['total_liquido'] + cab['debitos'], 2)
+
+    # LEITURA FECHADA: a soma das linhas lidas bate com o total impresso pelo
+    # proprio extrato. E a unica prova de que nenhuma linha escapou do leitor —
+    # linha perdida nao aparece na tela para reclamar de si mesma. O extrato 1374214
+    # perdia R$ 942,69 em silencio, e so a conferencia contra o impresso pegaria.
+    if impresso is not None:
+        cab['conf_ancora'] = 'nota_fiscal'
+        cab['conf_impresso'] = impresso
+        cab['conf_lido'] = cab['total_bruto']
+    elif tcd is not None:
+        cab['conf_ancora'] = 'creditos_debitos'
+        cab['conf_impresso'] = tcd
+        cab['conf_lido'] = liquido_lido
+    else:
+        cab['conf_ancora'] = ''
+        cab['conf_impresso'] = None
+        cab['conf_lido'] = cab['total_bruto']
+    cab['conf_diferenca'] = (None if cab['conf_impresso'] is None
+                             else round(cab['conf_lido'] - cab['conf_impresso'], 2))
+    cab['leitura_fechada'] = bool(cab['conf_diferenca'] is not None
+                                  and abs(cab['conf_diferenca']) < 0.01)
+
+    if cab['conf_impresso'] is None:
+        avisos.append('Não achei nenhum total impresso no PDF — não deu pra conferir se a leitura '
+                      'pegou todas as linhas. Confira o arquivo à mão antes de importar.')
+    elif not cab['leitura_fechada']:
+        rotulo = ('total impresso no extrato' if cab['conf_ancora'] == 'nota_fiscal'
+                  else 'total de créditos e débitos do extrato')
+        avisos.append(f"A leitura não fechou: somei R$ {cab['conf_lido']:.2f} e o {rotulo} diz "
+                      f"R$ {cab['conf_impresso']:.2f} (diferença de R$ {cab['conf_diferenca']:.2f}). "
+                      f"Alguma linha escapou do leitor — não importe este arquivo assim.")
+    if any(i.get('operadora_truncada') for i in itens):
+        avisos.append('O PDF cortou o nome de pelo menos uma operadora. O valor foi lido inteiro; '
+                      'só o nome ficou pela metade.')
     if not itens:
         avisos.append('Nenhuma linha de venda reconhecida neste PDF.')
     return cab, itens, avisos
@@ -26201,12 +27035,20 @@ def midia_puxar():
 @login_required
 @admin_required
 def comissao_extrato():
-    """Importa o extrato de comissao da Affinity (PDF) e mostra a conferencia.
+    """LEGADO: importa um extrato da Affinity por vez, gravando na hora.
 
-    O extrato E o dinheiro que entrou — a Affinity paga o que esta nele. O JOB
-    nao corrige o valor: ele mostra ONDE divergiu do calculo proprio e deixa
-    classificar se o erro foi nosso (cadastro) ou dela. Sem isso, uma diferenca
-    some no meio do mes e ninguem nunca descobre quem errou."""
+    Continua no ar porque os extratos ja importados vivem aqui e a tela de
+    detalhe deles depende desta lista. Para lote novo, o caminho e a
+    pre-conferencia — ela mostra o lote inteiro antes de qualquer gravacao.
+
+    O que o extrato E: o valor que a Affinity APUROU e informa que vai pagar. Nao
+    e prova de entrada no banco. Dizer 'dinheiro que entrou' era o erro que fazia
+    a tela parecer conciliacao bancaria sem nunca ter olhado o banco — extrato
+    pode ser transferido para outro extrato, pago em data diferente da previsao,
+    ou ser antecipacao sobre parcela que ainda nem venceu.
+
+    O JOB nao corrige o valor: ele mostra ONDE divergiu do calculo proprio e
+    deixa classificar se o erro foi nosso (cadastro) ou dela."""
     conn = db()
     avisos, erro = [], None
     if request.method == 'POST':
@@ -26224,6 +27066,22 @@ def comissao_extrato():
                     erro = f'Este extrato já foi importado (código {cod}).'
                 elif not itens:
                     erro = 'Não reconheci nenhuma linha de venda neste PDF.'
+                elif not cab.get('leitura_fechada'):
+                    # TRAVA: leitura pela metade nao entra. Era exatamente assim
+                    # que o extrato 1374214 teria entrado valendo R$ 1.706,16 em
+                    # vez de R$ 2.648,85 — com aviso amarelo na tela, gravado do
+                    # mesmo jeito, e ninguem olhando o aviso depois de gravado.
+                    dif = cab.get('conf_diferenca')
+                    if cab.get('conf_impresso') is None:
+                        erro = ('Não achei nenhum total impresso neste PDF, então não dá pra provar '
+                                'que a leitura pegou todas as linhas. Confira o arquivo à mão — '
+                                'importar sem essa prova pode lançar comissão pela metade.')
+                    else:
+                        erro = (f'A leitura não fechou com o extrato: somei R$ {cab.get("conf_lido", 0):.2f} '
+                                f'e o próprio PDF diz R$ {cab.get("conf_impresso", 0):.2f} '
+                                f'(diferença de R$ {dif:.2f}). Alguma linha escapou do leitor, então '
+                                f'importar agora lançaria comissão errada. Use a pré-conferência para ver '
+                                f'o que foi lido antes de decidir.')
                 else:
                     cur = conn.execute("""INSERT INTO comissao_extrato
                         (codigo_comissao, cadastro_cod, cadastro_nome, assistente, geracao, previsao,
@@ -26336,6 +27194,1159 @@ def comissao_extrato_motivo(iid):
         return jsonify({"ok": False, "erro": "Motivo inválido"}), 400
     conn = db()
     conn.execute("UPDATE comissao_extrato_item SET divergencia_motivo=? WHERE id=?", (motivo, iid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+# ═══════ PRE-CONFERENCIA EM LOTE DO EXTRATO DA AFFINITY (SEM EFEITO) ═══════
+# Esta parte do modulo LE E COMPARA. Nao grava nada: nenhum INSERT, nenhum
+# UPDATE, nenhuma proposta, parcela, recebimento, repasse, lancamento ou PIX.
+#
+# Por que separada do importador: o importador de hoje decide e grava no mesmo
+# movimento. Com dezenas de extratos na mesa isso significa descobrir o erro
+# depois que ele ja virou dinheiro. A previa inverte a ordem — primeiro se olha o
+# lote inteiro, depois se decide o que fazer com ele.
+#
+# O QUE O EXTRATO E: o valor que a Affinity APUROU e diz que vai pagar. Nao e
+# prova de entrada no banco. Extrato pode estar previsto, transferido para outro
+# extrato, ou pago em data diferente da previsao. A confirmacao de que o dinheiro
+# chegou vem da conciliacao bancaria (Asaas), nunca do PDF.
+#
+# O que a previa NUNCA faz, mesmo quando pareceria obvio:
+#  - casar por nome havendo mais de um candidato. Ambiguidade e RESULTADO, nao
+#    empate a ser desempatado no chute — quem olha a tela precisa saber a
+#    diferenca entre "nao existe" e "existe demais";
+#  - tratar extrato transferido ou estorno de efeito liquido zero como entrada.
+#    Contaria o mesmo dinheiro duas vezes: no extrato que estornou e no que
+#    recebeu a transferencia;
+#  - apontar parcela a partir de casamento por nome. Precisao falsa aponta
+#    dinheiro pro lugar errado com cara de certeza.
+_EXT_RX_PAGAMENTO = re.compile(r'Pagamento efetuado em\s*(\d{2}/\d{2}/\d{4})', re.I)
+_EXT_RX_TRANSFERIDO = re.compile(r'transferido para (?:o\s+)?extrato\s*n?[º°o.]*\s*(\d+)', re.I)
+_EXT_LOTE_MAX = 60
+
+
+def _ext_data_pagamento(cab):
+    """Data em que a Affinity DIZ que pagou.
+
+    Ela nao tem campo proprio: vem no fim da linha da situacao da nota fiscal
+    ('Nota Fiscal nao recebida. Pagamento efetuado em 03/07/2026 - TED'). E
+    previsao nao serve de substituto — extrato transferido tem previsao e nunca
+    foi pago a ninguem.
+
+    Mesmo com data, isto continua sendo o que a Affinity INFORMA. Entrada
+    confirmada e outra coisa, e mora na conciliacao."""
+    m = _EXT_RX_PAGAMENTO.search(cab.get('nf_situacao') or '')
+    return m.group(1) if m else ''
+
+
+def _ext_tipo_item(it):
+    """Normaliza o rotulo que a Affinity poe entre colchetes na linha de credito
+    ('[Antecipação]', '[Estorno indevido]'). Linha da tabela por operadora nao
+    tem rotulo nenhum — essa e a venda normal."""
+    t = (it.get('tipo') or '').strip().lower()
+    if not t:
+        return 'normal'
+    if 'estorno' in t:
+        return 'estorno'
+    if 'antecip' in t:
+        return 'antecipação'
+    if 'transfer' in t:
+        return 'transferência'
+    return t[:20]
+
+
+def _ext_classificar_extrato(cab, itens):
+    """Diz O QUE e este extrato antes de perguntar quanto ele vale.
+
+    A pergunta que essa funcao responde e "isso e valor apurado a receber?".
+    Extrato transferido para outro numero e extrato de estorno que zera contra a
+    propria antecipacao NAO sao: sao ajuste contabil. Soma-los no total apurado
+    inflaria o mes com dinheiro que nunca vai chegar duas vezes.
+
+    Antecipacao TAMBEM nao e entrada bancaria confirmada — ela e adiantamento
+    sobre parcela futura. Por isso vem marcada em separado, e nao misturada na
+    venda normal."""
+    liquido = round(float(cab.get('total_liquido') or 0) + float(cab.get('debitos') or 0), 2)
+    tipos = []
+    for it in itens:
+        t = _ext_tipo_item(it)
+        if t not in tipos:
+            tipos.append(t)
+    mt = _EXT_RX_TRANSFERIDO.search(cab.get('nf_situacao') or '')
+    transferido_para = mt.group(1) if mt else ''
+    if transferido_para and 'transferência' not in tipos:
+        tipos.append('transferência')
+    tem_estorno = 'estorno' in tipos
+    # Efeito liquido zero e o teste que pega o caso real: o estorno entra como
+    # credito e a antecipacao correspondente sai como debito do mesmo valor.
+    zerado = abs(liquido) < 0.01 and abs(float(cab.get('total_bruto') or 0)) < 0.01
+    ajuste = bool(transferido_para or (tem_estorno and zerado) or (tem_estorno and not liquido))
+    return {
+        'tipos': tipos or ['normal'],
+        'tipo_txt': ' + '.join(tipos) if tipos else 'normal',
+        'transferido_para': transferido_para,
+        'tem_estorno': tem_estorno,
+        'tem_antecipacao': 'antecipação' in tipos,
+        'tem_normal': 'normal' in tipos,
+        'liquido_esperado': liquido,
+        'ajuste': ajuste,
+        'zerado': zerado,
+    }
+
+
+def _ext_casar_previa(conn, item):
+    """Casamento SO PARA CONFERIR. Nao grava e nao decide sozinho.
+
+    Devolve (proposta, criterio, ambiguo, candidatos). A diferenca pro casador do
+    importador e que aqui a ambiguidade e um resultado visivel, com a contagem de
+    candidatos junto — nao um silencio que a tela leria como 'sem venda no JOB'.
+
+    Numero de proposta e o unico criterio SEGURO: o nome do cliente vem truncado
+    no PDF e as vezes com CNPJ colado na frente. Nome so casa quando existe
+    exatamente UM candidato, e ainda assim entra marcado como casamento fraco."""
+    num = (item.get('numero_proposta') or '').strip()
+    if num:
+        p = conn.execute("""SELECT * FROM propostas
+                            WHERE REPLACE(REPLACE(COALESCE(numero_proposta,''),'.',''),'-','') = ?
+                              AND COALESCE(status,'') <> 'Excluída'
+                            ORDER BY id DESC LIMIT 2""", (num,)).fetchall()
+        if len(p) == 1:
+            return p[0], 'numero_proposta', False, 1
+        if len(p) > 1:
+            # Duas vendas com o mesmo numero e problema de cadastro nosso. Nao da
+            # pra escolher uma: escolher errado paga o consultor errado.
+            return None, '', True, len(p)
+    nome = re.sub(r'^[\d.\-/]+\s*', '', (item.get('cliente') or '')).strip()
+    if len(nome) >= 10:
+        cand = conn.execute("""SELECT * FROM propostas
+                               WHERE UPPER(COALESCE(razao_social,'')) LIKE ?
+                                 AND COALESCE(status,'') <> 'Excluída'
+                               ORDER BY id DESC LIMIT 3""", (nome.upper() + '%',)).fetchall()
+        if len(cand) == 1:
+            return cand[0], 'razao_social', False, 1
+        if len(cand) > 1:
+            return None, '', True, len(cand)
+    return None, '', False, 0
+
+
+def _ext_parcela_exata(conn, proposta_id, numero, criterio):
+    """Aponta a parcela SO quando o casamento veio pelo numero da proposta.
+
+    Vindo de casamento por nome, apontar parcela seria dar aparencia de precisao
+    a um palpite. E quando a proposta tem duas parcelas com o mesmo numero, a
+    previa prefere nao apontar nenhuma a apontar a errada."""
+    if criterio != 'numero_proposta' or not proposta_id or not numero:
+        return None
+    try:
+        n = int(numero)
+    except (TypeError, ValueError):
+        return None
+    r = conn.execute("""SELECT id, numero, valor, status, data_prevista
+                        FROM parcelas WHERE proposta_id=? AND numero=?
+                        ORDER BY id LIMIT 2""", (proposta_id, n)).fetchall()
+    return dict(r[0]) if len(r) == 1 else None
+
+
+def _ext_conferir_lote(conn, arquivos):
+    """Le uma lista de (nome, bytes) e devolve a analise linha a linha, SEM GRAVAR.
+
+    Separada da rota de proposito: a importacao controlada (que grava) precisa
+    conferir exatamente o mesmo que a previa mostrou. Duas leituras diferentes
+    para a mesma decisao e como ter dois relogios — nunca se sabe qual esta certo."""
+    linhas = []
+    for nome, dados in arquivos:
+        # Hash do arquivo: guarda QUAL PDF gerou aquele lançamento. Nome de
+        # arquivo se repete e se renomeia; o conteúdo, não.
+        arquivo_hash = hashlib.sha256(dados).hexdigest()[:32] if dados else ''
+        try:
+            cab, itens, avisos = ler_extrato_affinity(dados, nome)
+        except Exception as e:
+            app.logger.exception('[EXTRATO-PREVIA] falha ao ler %s', nome)
+            linhas.append({'arquivo': nome, 'arquivo_hash': arquivo_hash,
+                           'falhou': True, 'erro_leitura': str(e)[:180],
+                           'codigo': '', 'itens': [], 'avisos': [], 'situacao': 'nao_fechou',
+                           'precisa_revisao': True, 'tipo_txt': '—', 'n_itens': 0, 'tipos': [],
+                           'total_bruto': 0.0, 'total_liquido': 0.0, 'debitos': 0.0,
+                           'liquido_esperado': 0.0, 'total_impresso': None,
+                           'leitura_fechada': False, 'conf_ancora': '', 'conf_impresso': None,
+                           'conf_lido': 0.0, 'conf_diferenca': None,
+                           'cadastro_cod': '', 'cadastro_nome': '', 'geracao': '',
+                           'previsao': '', 'data_pagamento': '', 'nf_situacao': '',
+                           'transferido_para': '', 'ajuste': False, 'sem_proposta': 0,
+                           'ambiguos': 0, 'divergentes': 0, 'casados': 0, 'fracos': 0,
+                           'com_parcela': 0})
+            continue
+        cls = _ext_classificar_extrato(cab, itens)
+        det = []
+        for it in itens:
+            p, criterio, ambiguo, cand = _ext_casar_previa(conn, it)
+            esperado = float(p['comissao_total_corretora'] or 0) if p else None
+            # O JOB guarda a comissao TOTAL da venda. Comparar contra ela
+            # so faz sentido quando a linha do extrato vale 100% — numa
+            # regua de parcelas (1,2,3,5%...) a linha de 15% "divergiria"
+            # sempre, e 15 divergencias falsas escondem a de verdade.
+            # A comparacao parcela a parcela depende da regua de
+            # recebimento, que nao existe ainda: ate la, nao se compara.
+            pct = float(it.get('percentual') or 0)
+            comparavel = pct >= 99.99
+            div = (round(float(it.get('bruto') or 0) - esperado, 2)
+                   if (esperado is not None and comparavel) else None)
+            parc = _ext_parcela_exata(conn, p['id'] if p else None, it.get('parcela'), criterio)
+            det.append({
+                'operadora': it.get('operadora') or '—',
+                'operadora_truncada': bool(it.get('operadora_truncada')),
+                'cliente': it.get('cliente') or '',
+                'numero_proposta': it.get('numero_proposta') or '',
+                'parcela': it.get('parcela'),
+                'percentual': pct,
+                'comparavel': comparavel,
+                'bruto': float(it.get('bruto') or 0),
+                'liquido': float(it.get('liquido') or 0),
+                'tipo': _ext_tipo_item(it),
+                'proposta_id': p['id'] if p else None,
+                'razao_social': (p['razao_social'] if p else '') or '',
+                'consultor': (p['consultor'] if p else '') or '',
+                'criterio': criterio,
+                'seguro': criterio == 'numero_proposta',
+                'ambiguo': ambiguo,
+                'candidatos': cand,
+                'parcela_id': (parc or {}).get('id'),
+                'parcela_status': (parc or {}).get('status') or '',
+                'parcela_valor': (parc or {}).get('valor'),
+                'job_esperado': esperado,
+                'divergencia': div,
+            })
+        l = {
+            'arquivo': nome, 'arquivo_hash': arquivo_hash,
+            'falhou': False, 'erro_leitura': '',
+            'codigo': cab.get('codigo_comissao') or '',
+            'cadastro_cod': cab.get('cadastro_cod') or '',
+            'cadastro_nome': cab.get('cadastro_nome') or '',
+            'geracao': cab.get('geracao') or '',
+            'previsao': cab.get('previsao') or '',
+            'data_pagamento': _ext_data_pagamento(cab),
+            'nf_situacao': cab.get('nf_situacao') or '',
+            'total_bruto': float(cab.get('total_bruto') or 0),
+            'total_liquido': float(cab.get('total_liquido') or 0),
+            'debitos': float(cab.get('debitos') or 0),
+            'total_impresso': cab.get('total_impresso'),
+            'leitura_fechada': bool(cab.get('leitura_fechada')),
+            'conf_ancora': cab.get('conf_ancora') or '',
+            'conf_impresso': cab.get('conf_impresso'),
+            'conf_lido': cab.get('conf_lido'),
+            'conf_diferenca': cab.get('conf_diferenca'),
+            'liquido_esperado': cls['liquido_esperado'],
+            'tipo_txt': cls['tipo_txt'], 'tipos': cls['tipos'],
+            'transferido_para': cls['transferido_para'],
+            'ajuste': cls['ajuste'],
+            'itens': det, 'n_itens': len(det), 'avisos': list(avisos),
+            'sem_proposta': sum(1 for d in det if not d['proposta_id'] and not d['ambiguo']),
+            'ambiguos': sum(1 for d in det if d['ambiguo']),
+            'casados': sum(1 for d in det if d['proposta_id']),
+            'fracos': sum(1 for d in det if d['criterio'] == 'razao_social'),
+            'com_parcela': sum(1 for d in det if d['parcela_id']),
+            'divergentes': sum(1 for d in det
+                               if d['divergencia'] is not None and abs(d['divergencia']) >= 0.01),
+        }
+        # 'Revisar' e o balde do que nao tem nome proprio: extrato sem codigo ou
+        # sem nenhuma linha reconhecida. Leitura que nao fechou tem situacao
+        # propria, porque a acao e outra — ali nao adianta revisar o casamento,
+        # o arquivo inteiro esta lido pela metade.
+        l['precisa_revisao'] = bool(not l['codigo'] or not det)
+        linhas.append(l)
+
+    # Duplicidade por codigo: dentro do proprio lote e contra o que ja
+    # foi importado. As duas contam — subir de novo o mesmo extrato paga
+    # duas vezes, e o lote com o arquivo repetido dobraria o total aqui.
+    vistos = {}
+    for l in linhas:
+        if l['codigo']:
+            vistos.setdefault(l['codigo'], []).append(l)
+    ja = set()
+    codigos = [c for c in vistos if c]
+    if codigos:
+        marcas = ','.join('?' for _ in codigos)
+        # As DUAS tabelas: o importador antigo grava em comissao_extrato e a
+        # importacao controlada em affinity_conciliacao. Olhar so uma faria o
+        # extrato ja importado num caminho parecer novo no outro — e pagar duas
+        # vezes e exatamente o que a duplicidade existe pra impedir.
+        for tabela in ('comissao_extrato', 'affinity_conciliacao'):
+            try:
+                ja |= {str(r['codigo_comissao']) for r in conn.execute(
+                    f"SELECT DISTINCT codigo_comissao FROM {tabela} "
+                    f"WHERE codigo_comissao IN ({marcas})", codigos).fetchall()}
+            except Exception:
+                # Banco antigo, antes da migracao: seguir com o que existe.
+                pass
+    for cod, grupo in vistos.items():
+        for l in grupo:
+            l['dup_lote'] = len(grupo) > 1
+            l['dup_banco'] = cod in ja
+            l['duplicado'] = l['dup_lote'] or l['dup_banco']
+    for l in linhas:
+        l.setdefault('dup_lote', False)
+        l.setdefault('dup_banco', False)
+        l.setdefault('duplicado', False)
+        # A ordem importa e e a ordem da gravidade.
+        # 1) Leitura que nao fechou vem antes de tudo: o arquivo esta lido pela
+        #    metade e qualquer conclusao tirada dele esta errada por construcao.
+        # 2) Duplicado, porque nada abaixo dele deve ser lancado.
+        # 3) Ajuste, porque um extrato que nao e entrada nao precisa ter proposta
+        #    casada pra estar certo.
+        if not l['leitura_fechada']:
+            l['situacao'] = 'nao_fechou'
+        elif l['duplicado']:
+            l['situacao'] = 'duplicado'
+        elif l['ajuste']:
+            l['situacao'] = 'ajuste'
+        elif l['precisa_revisao']:
+            l['situacao'] = 'revisar'
+        elif l['sem_proposta']:
+            l['situacao'] = 'sem_proposta'
+        elif l['ambiguos']:
+            l['situacao'] = 'ambiguo'
+        elif l['divergentes']:
+            l['situacao'] = 'divergente'
+        else:
+            l['situacao'] = 'pronto'
+    linhas.sort(key=lambda x: (x['codigo'] or 'zzzz'))
+    return linhas
+
+
+def _ext_resumo_lote(linhas):
+    """Totais da conferencia. 'Apurado' nao soma duplicado nem ajuste: um seria
+    dinheiro contado duas vezes, o outro nunca foi dinheiro novo."""
+    def _soma(campo, filtro=None):
+        return round(sum(l.get(campo) or 0 for l in linhas if (filtro is None or filtro(l))), 2)
+    conta = lambda s: sum(1 for l in linhas if l.get('situacao') == s)
+    resumo = {
+        'arquivos': len(linhas),
+        'itens': sum(l.get('n_itens') or 0 for l in linhas),
+        'bruto': _soma('total_bruto'),
+        'debitos': _soma('debitos'),
+        'liquido_esperado': _soma('liquido_esperado'),
+        'apurado': _soma('liquido_esperado',
+                         lambda l: l.get('leitura_fechada') and not l.get('duplicado')
+                         and not l.get('ajuste')),
+        'prontos': conta('pronto'),
+        'nao_fecharam': conta('nao_fechou'),
+        'duplicados': conta('duplicado'),
+        'sem_proposta': conta('sem_proposta'),
+        'ambiguos': conta('ambiguo'),
+        'ajustes': conta('ajuste'),
+        'divergentes': conta('divergente'),
+        'revisar': conta('revisar'),
+        'casados': sum(l.get('casados') or 0 for l in linhas),
+        'com_parcela': sum(l.get('com_parcela') or 0 for l in linhas),
+        'fracos': sum(l.get('fracos') or 0 for l in linhas),
+        'itens_sem_proposta': sum(l.get('sem_proposta') or 0 for l in linhas),
+        'itens_ambiguos': sum(l.get('ambiguos') or 0 for l in linhas),
+        'itens_divergentes': sum(l.get('divergentes') or 0 for l in linhas),
+    }
+    # Axioma e Serenus sao bolsos de donos diferentes: somar junto esconde de quem
+    # e o dinheiro (a Axioma esta sendo encerrada e o total dela nao e da Serenus).
+    por_cadastro = {}
+    for l in linhas:
+        c = l.get('cadastro_cod') or '—'
+        d = por_cadastro.setdefault(c, {'cod': c, 'nome': (l.get('cadastro_nome') or '')[:40],
+                                        'arquivos': 0, 'itens': 0, 'bruto': 0.0, 'apurado': 0.0})
+        d['arquivos'] += 1
+        d['itens'] += l.get('n_itens') or 0
+        d['bruto'] += l.get('total_bruto') or 0
+        if l.get('leitura_fechada') and not l.get('duplicado') and not l.get('ajuste'):
+            d['apurado'] += l.get('liquido_esperado') or 0
+    for d in por_cadastro.values():
+        d['bruto'] = round(d['bruto'], 2)
+        d['apurado'] = round(d['apurado'], 2)
+    return resumo, sorted(por_cadastro.values(), key=lambda x: -x['apurado'])
+
+
+@app.route('/comissoes/extrato/lote/previsualizar', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def comissao_extrato_lote_previa():
+    """PRE-CONFERENCIA: le varios extratos de uma vez e nao grava nada.
+
+    A tela responde tres perguntas antes de qualquer dinheiro se mover: quanto o
+    lote diz que a Affinity apurou, quanto disso o JOB consegue apontar para uma
+    venda, e o que precisa de olho humano antes de virar lancamento."""
+    conn = db()
+    erro, linhas = None, []
+    if request.method == 'POST':
+        arquivos = [a for a in request.files.getlist('pdfs') if a and a.filename]
+        if not arquivos:
+            erro = 'Escolha pelo menos um PDF de extrato.'
+        elif len(arquivos) > _EXT_LOTE_MAX:
+            erro = (f'São {len(arquivos)} arquivos de uma vez. O limite por conferência é '
+                    f'{_EXT_LOTE_MAX} — divida em duas levas.')
+        else:
+            linhas = _ext_conferir_lote(conn, [(a.filename, a.read()) for a in arquivos])
+    close_db(conn)
+    resumo, por_cadastro = _ext_resumo_lote(linhas)
+    return render_template('comissao_extrato_previa.html', linhas=linhas, resumo=resumo,
+                           por_cadastro=por_cadastro, erro=erro, limite=_EXT_LOTE_MAX)
+
+
+# ═══════ IMPORTACAO CONTROLADA E CONCILIACAO (APPEND-ONLY) ═══════
+# A previa mostra. Esta parte GRAVA — e por isso ela grava pouco, num lugar so, e
+# nunca por cima de nada.
+#
+# O que ela NAO toca, por decisao e nao por esquecimento: propostas, parcelas,
+# recebimento, repasse_corretor, lancamentos. Importar extrato nao pode mudar
+# status financeiro de venda nenhuma. Se pudesse, um PDF da Affinity mandaria em
+# parcela ja paga, ja conciliada, ja com PIX — e nao ha desfazer para isso.
+#
+# ESTADOS, e por que sao seis e nao um flag de "pago":
+#   previsto           — a regua diz que vai vir. Ninguem apurou nada ainda.
+#   apurado_affinity   — a Affinity emitiu extrato e diz que vai pagar isto.
+#   entrada_confirmada — o dinheiro chegou na conta. So por identificador Asaas
+#                        ou confirmacao humana com usuario, data e observacao.
+#   liberado_repasse   — a Serenus liberou o valor do gestor/consultor.
+#   pix_iniciado       — a transferencia foi disparada e ainda pode falhar.
+#   pago               — o Asaas confirmou.
+# Colapsar isso em "recebido" foi o que fez a tela dizer que extrato e dinheiro
+# que entrou. Sao coisas diferentes e a diferenca custa dinheiro.
+_AFY_ESTADOS = ('previsto', 'apurado_affinity', 'entrada_confirmada',
+                'liberado_repasse', 'pix_iniciado', 'pago')
+_AFY_ESTADO_LABEL = {
+    'previsto': 'Previsto',
+    'apurado_affinity': 'Apurado pela Affinity',
+    'entrada_confirmada': 'Entrada confirmada',
+    'liberado_repasse': 'Liberado para repasse',
+    'pix_iniciado': 'PIX iniciado',
+    'pago': 'Pago',
+    'ajuste_sem_efeito': 'Ajuste sem efeito',
+    'sem_vinculo': 'Sem venda vinculada',
+}
+
+
+def _fin_competencia(data_br):
+    """'05/08/2026' -> '2026-08'. Sem data, devolve vazio — inventar competencia
+    joga dinheiro num mes que ninguem escolheu."""
+    m = re.match(r'^(\d{2})/(\d{2})/(\d{4})$', (data_br or '').strip())
+    return f'{m.group(3)}-{m.group(2)}' if m else ''
+
+
+def _fin_registrar(conn, chave_idem, estado, valor, **kw):
+    """Grava um fato no razao. IDEMPOTENTE: a chave e UNIQUE, entao rodar duas
+    vezes a mesma importacao nao duplica dinheiro — a segunda passada bate na
+    restricao e nao insere.
+
+    Devolve True se inseriu, False se ja existia. Nunca faz UPDATE: o razao e
+    append-only. Corrigir um fato e registrar o fato contrario, nao apagar o
+    primeiro — apagar destroi a prova de que houve correcao."""
+    ja = conn.execute("SELECT id FROM fin_evento WHERE chave_idem=?", (chave_idem,)).fetchone()
+    if ja:
+        return False
+    conn.execute("""INSERT INTO fin_evento
+        (chave_idem, estado, papel, proposta_id, parcela_id, conciliacao_id, fracao,
+         competencia, data_evento, valor, sinal, origem, origem_ref, descricao,
+         usuario_id, usuario_nome, criado_em)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (chave_idem, estado, kw.get('papel', 'serenus'), kw.get('proposta_id'),
+         kw.get('parcela_id'), kw.get('conciliacao_id'), kw.get('fracao'),
+         kw.get('competencia', ''), kw.get('data_evento', ''), round(float(valor or 0), 2),
+         int(kw.get('sinal', 1)), kw.get('origem', ''), str(kw.get('origem_ref', ''))[:120],
+         str(kw.get('descricao', ''))[:300], kw.get('usuario_id'),
+         str(kw.get('usuario_nome', ''))[:80], _agora_sp()))
+    return True
+
+
+def _afy_importar_lote(conn, linhas, usuario_id, usuario_nome):
+    """Importa APENAS o que esta pronto, e diz em voz alta o que deixou de fora.
+
+    Pronto quer dizer as tres coisas juntas:
+      1. leitura fechada — a soma bate com o total impresso no proprio PDF;
+      2. codigo novo — extrato ja importado nao entra de novo;
+      3. arquivo integro — nao falhou na leitura.
+
+    Casamento com a venda NAO e condicao de importar, e sim de contar como
+    conciliado. Item sem venda entra mesmo assim, com proposta em branco, e cai
+    na fila de revisao. Deixar de fora seria pior: o dinheiro existe no extrato e
+    sumiria da conta do mes por nao ter onde encostar.
+
+    Casamento por NOME nunca e aplicado aqui, mesmo com candidato unico. Na
+    previa ele e sugestao visivel; na gravacao ele viraria vinculo com cara de
+    fato. Nome so vira vinculo por confirmacao humana, na fila de revisao."""
+    res = {'extratos': 0, 'itens': 0, 'vinculados': 0, 'sem_vinculo': 0, 'ajustes': 0,
+           'ignorados': [], 'ja_importados': 0, 'valor': 0.0}
+    for l in linhas:
+        cod = l.get('codigo') or ''
+        if l.get('falhou'):
+            res['ignorados'].append((l['arquivo'], 'não consegui ler o arquivo'))
+            continue
+        if not l.get('leitura_fechada'):
+            res['ignorados'].append((l['arquivo'], 'a leitura não fechou com o total impresso'))
+            continue
+        if not cod:
+            res['ignorados'].append((l['arquivo'], 'o PDF não traz código de comissão'))
+            continue
+        if l.get('dup_banco'):
+            res['ja_importados'] += 1
+            res['ignorados'].append((l['arquivo'], f'o código {cod} já foi importado antes'))
+            continue
+        if not l.get('itens'):
+            res['ignorados'].append((l['arquivo'], 'nenhuma linha de venda reconhecida'))
+            continue
+
+        ajuste = bool(l.get('ajuste'))
+        competencia = _fin_competencia(l.get('data_pagamento') or l.get('previsao') or '')
+        importou_algo = False
+        for ordem, it in enumerate(l['itens']):
+            # A chave e o codigo do extrato + a posicao da linha nele. Dois
+            # extratos diferentes com a mesma venda sao dois fatos diferentes
+            # (parcelas distintas); a mesma linha do mesmo extrato e um so.
+            chave = f"afy:{cod}:{ordem}"
+            if conn.execute("SELECT id FROM affinity_conciliacao WHERE chave_idem=?",
+                            (chave,)).fetchone():
+                continue
+            seguro = it.get('criterio') == 'numero_proposta'
+            estado = ('ajuste_sem_efeito' if ajuste
+                      else ('apurado_affinity' if seguro else 'sem_vinculo'))
+            cur = conn.execute("""INSERT INTO affinity_conciliacao
+                (chave_idem, codigo_comissao, arquivo, arquivo_hash, cadastro_cod, cadastro_nome,
+                 geracao, previsao, data_pagamento_informada, nf_situacao, linha_ordem,
+                 operadora, cliente, numero_proposta, parcela_extrato, tipo, percentual,
+                 bruto, liquido, total_bruto_extrato, total_liquido_extrato, debitos_extrato,
+                 conf_ancora, conf_impresso, conf_lido, conf_diferenca, leitura_fechada,
+                 proposta_id, parcela_id, vinculo_criterio, vinculo_por, vinculo_em,
+                 estado, importado_por, importado_por_nome, criado_em)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (chave, cod, l.get('arquivo'), l.get('arquivo_hash') or '',
+                 l.get('cadastro_cod'), l.get('cadastro_nome'), l.get('geracao'),
+                 l.get('previsao'), l.get('data_pagamento'), l.get('nf_situacao'), ordem,
+                 it.get('operadora'), it.get('cliente'), it.get('numero_proposta'),
+                 it.get('parcela'), it.get('tipo'), it.get('percentual'),
+                 it.get('bruto'), it.get('liquido'), l.get('total_bruto'),
+                 l.get('total_liquido'), l.get('debitos'), l.get('conf_ancora'),
+                 l.get('conf_impresso'), l.get('conf_lido'), l.get('conf_diferenca'),
+                 1 if l.get('leitura_fechada') else 0,
+                 it.get('proposta_id') if seguro else None,
+                 it.get('parcela_id') if seguro else None,
+                 'numero_proposta' if seguro else None,
+                 usuario_nome if seguro else None, _agora_sp() if seguro else None,
+                 estado, usuario_id, usuario_nome, _agora_sp()))
+            cid = _last_insert_id(cur)
+            importou_algo = True
+            res['itens'] += 1
+            if ajuste:
+                res['ajustes'] += 1
+            elif seguro:
+                res['vinculados'] += 1
+            else:
+                res['sem_vinculo'] += 1
+            # Ajuste NAO vira evento de dinheiro: o estorno e a antecipacao que
+            # ele cancela se anulam, e lancar os dois contaria o mesmo dinheiro
+            # duas vezes — uma no extrato que estornou, outra no que recebeu.
+            if not ajuste:
+                _fin_registrar(conn, f"{chave}:apurado", 'apurado_affinity',
+                               it.get('liquido'), papel='affinity',
+                               proposta_id=it.get('proposta_id') if seguro else None,
+                               parcela_id=it.get('parcela_id') if seguro else None,
+                               conciliacao_id=cid, competencia=competencia,
+                               data_evento=l.get('data_pagamento') or l.get('previsao') or '',
+                               sinal=1, origem='affinity_pdf', origem_ref=cod,
+                               descricao=f"Extrato {cod} — {(it.get('cliente') or '')[:60]}",
+                               usuario_id=usuario_id, usuario_nome=usuario_nome)
+                res['valor'] += float(it.get('liquido') or 0)
+        if importou_algo:
+            res['extratos'] += 1
+            # Tarifa e demais debitos do extrato: saida, uma vez por extrato.
+            if not ajuste and float(l.get('debitos') or 0):
+                _fin_registrar(conn, f"afy:{cod}:debito", 'apurado_affinity',
+                               abs(float(l.get('debitos') or 0)), papel='tarifa',
+                               competencia=competencia,
+                               data_evento=l.get('data_pagamento') or l.get('previsao') or '',
+                               sinal=-1, origem='affinity_pdf', origem_ref=cod,
+                               descricao=f"Débitos e tarifas do extrato {cod}",
+                               usuario_id=usuario_id, usuario_nome=usuario_nome)
+                res['valor'] -= abs(float(l.get('debitos') or 0))
+    res['valor'] = round(res['valor'], 2)
+    return res
+
+
+@app.route('/comissoes/extrato/lote/importar', methods=['POST'])
+@login_required
+@admin_required
+def comissao_extrato_lote_importar():
+    """IMPORTA os itens prontos do lote. Grava so em affinity_conciliacao e
+    fin_evento — proposta, parcela e status financeiro ficam intactos.
+
+    Os arquivos sobem de novo de proposito. A previa nao guarda o lote em lugar
+    nenhum (essa e a garantia de que ela nao grava), entao guardar o resultado
+    dela para importar depois exigiria uma area temporaria que envelhece e mente:
+    a venda pode ter sido cadastrada entre a conferencia e a importacao. Reler os
+    mesmos arquivos custa segundos e conclui sobre o banco de agora."""
+    conn = db()
+    arquivos = [a for a in request.files.getlist('pdfs') if a and a.filename]
+    if not arquivos:
+        close_db(conn)
+        return render_template('comissao_extrato_previa.html', linhas=[],
+                               resumo=_ext_resumo_lote([])[0], por_cadastro=[],
+                               erro='Escolha os mesmos PDFs que você conferiu para importar.',
+                               limite=_EXT_LOTE_MAX)
+    if len(arquivos) > _EXT_LOTE_MAX:
+        close_db(conn)
+        return render_template('comissao_extrato_previa.html', linhas=[],
+                               resumo=_ext_resumo_lote([])[0], por_cadastro=[],
+                               erro=f'Limite de {_EXT_LOTE_MAX} arquivos por vez.',
+                               limite=_EXT_LOTE_MAX)
+    linhas = _ext_conferir_lote(conn, [(a.filename, a.read()) for a in arquivos])
+    try:
+        res = _afy_importar_lote(conn, linhas, session.get('user_id'), session.get('nome'))
+        conn.commit()
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        close_db(conn)
+        app.logger.exception('[AFFINITY-IMPORT] falha')
+        resumo, por_cadastro = _ext_resumo_lote(linhas)
+        return render_template('comissao_extrato_previa.html', linhas=linhas, resumo=resumo,
+                               por_cadastro=por_cadastro, limite=_EXT_LOTE_MAX,
+                               erro=f'Não importei nada: {e}')
+    close_db(conn)
+    session['afy_import_res'] = res
+    return redirect('/comissoes/conciliacao')
+
+
+def _afy_sugestoes(conn, c):
+    """Candidatos POR NOME para um item sem vinculo. Sugestao, nunca vinculo.
+
+    Devolve lista — inclusive quando ha varios. Ambiguidade tem que aparecer:
+    esconder o segundo candidato faria o primeiro parecer certo."""
+    nome = re.sub(r'^[\d.\-/]+\s*', '', (c.get('cliente') or '')).strip()
+    if len(nome) < 10:
+        return []
+    return [dict(r) for r in conn.execute(
+        """SELECT id, numero_proposta, razao_social, consultor, adm_operadora,
+                  COALESCE(comissao_total_corretora,0) comissao, status
+           FROM propostas
+           WHERE UPPER(COALESCE(razao_social,'')) LIKE ?
+             AND COALESCE(status,'') <> 'Excluída'
+           ORDER BY id DESC LIMIT 5""", (nome.upper() + '%',)).fetchall()]
+
+
+@app.route('/comissoes/conciliacao')
+@login_required
+@admin_required
+def comissao_conciliacao():
+    """FILA DE REVISAO E RAZAO DA AFFINITY.
+
+    Responde, na ordem: o que a Affinity apurou, o que disso ja tem venda, o que
+    esta esperando alguem apontar a venda, e o que ja foi confirmado como entrada
+    no banco. Cada estado tem uma acao propria — quem abre a tela nao precisa
+    adivinhar o que fazer com a linha."""
+    filtro = (request.args.get('estado') or 'sem_vinculo').strip()
+    conn = db()
+    onde, params = '', []
+    if filtro and filtro != 'todos':
+        onde, params = 'WHERE c.estado = ?', [filtro]
+    itens = [dict(r) for r in conn.execute(f"""
+        SELECT c.*, p.razao_social, p.consultor, p.adm_operadora,
+               COALESCE(p.comissao_total_corretora,0) job_comissao
+        FROM affinity_conciliacao c
+        LEFT JOIN propostas p ON p.id = c.proposta_id
+        {onde}
+        ORDER BY c.codigo_comissao DESC, c.linha_ordem LIMIT 400""", params).fetchall()]
+    for c in itens:
+        c['sugestoes'] = _afy_sugestoes(conn, c) if c['estado'] == 'sem_vinculo' else []
+        c['estado_label'] = _AFY_ESTADO_LABEL.get(c['estado'], c['estado'])
+    contagem = {r['estado']: r['n'] for r in conn.execute(
+        "SELECT estado, COUNT(*) n FROM affinity_conciliacao GROUP BY estado").fetchall()}
+    tot = conn.execute("""SELECT COUNT(*) n, COALESCE(SUM(liquido),0) v
+                          FROM affinity_conciliacao
+                          WHERE estado NOT IN ('ajuste_sem_efeito')""").fetchone()
+    confirmado = conn.execute("""SELECT COALESCE(SUM(liquido),0) v FROM affinity_conciliacao
+                                 WHERE estado='entrada_confirmada'""").fetchone()
+    close_db(conn)
+    resumo = {
+        'linhas': tot['n'] or 0,
+        'apurado': round(float(tot['v'] or 0), 2),
+        'entrada_confirmada': round(float(confirmado['v'] or 0), 2),
+        'contagem': contagem,
+        'total': sum(contagem.values()),
+    }
+    res = session.pop('afy_import_res', None)
+    return render_template('comissao_conciliacao.html', itens=itens, resumo=resumo,
+                           filtro=filtro, res=res, labels=_AFY_ESTADO_LABEL)
+
+
+@app.route('/comissoes/regra-gestor')
+@login_required
+@admin_required
+def regra_gestor():
+    """CONFIGURAÇÃO DA REGRA DO GESTOR. Uma regra por operadora, variação e plano.
+
+    A tela sugere 100% ao gestor na primeira fração e 0% nas demais, porque é o
+    combinado ('a primeira mensalidade é do gestor, descontada a retenção'). Mas
+    sugestão não salva sozinha: enquanto ninguém confirmar, a regra fica
+    incompleta e o financeiro daquela operadora continua travado. Sugerir e
+    aplicar são coisas diferentes — aplicar sem confirmar é inventar."""
+    conn = db()
+    op_sel = (request.args.get('operadora') or '').strip()
+    obs_sel = (request.args.get('obs') or '').strip()
+    plano_sel = (request.args.get('plano') or 'PME').strip().upper()
+    regras = []
+    for r in conn.execute("SELECT * FROM gestor_regra ORDER BY operadora, obs, plano").fetchall():
+        d = dict(r)
+        ret = [dict(x) for x in conn.execute(
+            "SELECT * FROM gestor_retencao WHERE regra_id=? AND COALESCE(ativo,1)=1 ORDER BY id",
+            (d['id'],)).fetchall()]
+        d['retencoes'] = ret
+        d['falta'] = _gestor_regra_faltas(d, ret)
+        d['display'] = _op_display(d['operadora'], d['obs'])
+        try:
+            d['fracoes'] = json.loads(d.get('fracoes_json') or '[]')
+            d['gestor'] = json.loads(d.get('gestor_json') or '[]')
+        except Exception:
+            d['fracoes'], d['gestor'] = [], []
+        regras.append(d)
+    operadoras = _operadoras_lista(conn)
+    # Vendas de gestor sem regra completa: o motivo de a tela existir.
+    pendentes = []
+    for p in conn.execute("""SELECT p.id, p.razao_social, p.adm_operadora, p.modalidade,
+                                    p.tipo_pessoa, p.consultor, p.status
+                             FROM propostas p
+                             WHERE COALESCE(p.status,'') <> 'Excluída'
+                             ORDER BY p.id DESC LIMIT 300""").fetchall():
+        b = _gestor_bloqueio(conn, p['id'])
+        if b['bloqueia']:
+            pendentes.append({'id': p['id'], 'razao_social': p['razao_social'],
+                              'operadora': b['operadora'], 'plano': b['plano'],
+                              'consultor': p['consultor'], 'falta': b['falta'][:2]})
+    close_db(conn)
+    return render_template('regra_gestor.html', regras=regras, operadoras=operadoras,
+                           op_sel=op_sel, obs_sel=obs_sel, plano_sel=plano_sel,
+                           pendentes=pendentes[:40], bases=_RETENCAO_BASES,
+                           responsaveis=_RETENCAO_RESPONSAVEIS)
+
+
+@app.route('/comissoes/regra-gestor/salvar', methods=['POST'])
+@login_required
+@admin_required
+def regra_gestor_salvar():
+    """Grava a régua de recebimento e a régua do gestor.
+
+    Percentual em branco entra como NULL, não como zero: 'ainda não sei' e 'é
+    zero' são respostas diferentes, e só a primeira deve travar o financeiro."""
+    d = request.json or {}
+    op = (d.get('operadora') or '').strip()
+    obs = (d.get('obs') or '').strip()
+    plano = (d.get('plano') or '').strip().upper()
+    if not op or plano not in ('PME', 'PF', 'ADESAO'):
+        return jsonify({"ok": False, "erro": "Escolha a operadora e o plano."}), 400
+
+    def _pct(v):
+        if v is None or str(v).strip() == '':
+            return None
+        try:
+            return round(float(str(v).replace(',', '.')), 4)
+        except (TypeError, ValueError):
+            return None
+
+    fracoes, gestor = [], []
+    for i, f in enumerate(d.get('fracoes') or [], start=1):
+        fracoes.append({'ordem': i, 'percentual': _pct(f.get('percentual')),
+                        'evento': (f.get('evento') or '').strip()[:60],
+                        'mes': (f.get('mes') if str(f.get('mes') or '').strip() else None)})
+        gestor.append({'ordem': i, 'percentual_gestor': _pct(f.get('percentual_gestor'))})
+    if not fracoes:
+        return jsonify({"ok": False, "erro": "Cadastre pelo menos uma fração de recebimento."}), 400
+    confirmada = 1 if d.get('confirmada') else 0
+    conn = db()
+    agora = _agora_sp()
+    ja = conn.execute("SELECT id FROM gestor_regra WHERE operadora=? AND obs=? AND plano=?",
+                      (op, obs, plano)).fetchone()
+    if ja:
+        conn.execute("""UPDATE gestor_regra SET fracoes_json=?, gestor_json=?, confirmada=?,
+                        observacao=?, vigencia_inicio=?, vigencia_fim=?, ativo=1,
+                        atualizado_por=?, atualizado_em=? WHERE id=?""",
+                     (json.dumps(fracoes, ensure_ascii=False), json.dumps(gestor, ensure_ascii=False),
+                      confirmada, (d.get('observacao') or '')[:400],
+                      (d.get('vigencia_inicio') or '')[:10], (d.get('vigencia_fim') or '')[:10],
+                      session.get('nome'), agora, ja['id']))
+        rid = ja['id']
+    else:
+        cur = conn.execute("""INSERT INTO gestor_regra
+            (operadora, obs, plano, fracoes_json, gestor_json, confirmada, observacao,
+             vigencia_inicio, vigencia_fim, ativo, criado_por, criado_em, atualizado_por, atualizado_em)
+            VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?,?)""",
+            (op, obs, plano, json.dumps(fracoes, ensure_ascii=False),
+             json.dumps(gestor, ensure_ascii=False), confirmada, (d.get('observacao') or '')[:400],
+             (d.get('vigencia_inicio') or '')[:10], (d.get('vigencia_fim') or '')[:10],
+             session.get('nome'), agora, session.get('nome'), agora))
+        rid = _last_insert_id(cur)
+    conn.commit()
+    regra = dict(conn.execute("SELECT * FROM gestor_regra WHERE id=?", (rid,)).fetchone())
+    ret = [dict(x) for x in conn.execute(
+        "SELECT * FROM gestor_retencao WHERE regra_id=? AND COALESCE(ativo,1)=1", (rid,)).fetchall()]
+    falta = _gestor_regra_faltas(regra, ret)
+    close_db(conn)
+    return jsonify({"ok": True, "id": rid, "falta": falta})
+
+
+@app.route('/comissoes/regra-gestor/simular')
+@login_required
+@admin_required
+def regra_gestor_simular():
+    """SIMULADOR HISTÓRICO. Não escreve nada — em lugar nenhum.
+
+    Mostra, para cada venda de gestor já cadastrada: a regra que a regra de hoje
+    sugeriria, os valores atuais, os valores simulados e a diferença entre eles.
+
+    Existe porque a alternativa seria migrar o histórico de uma vez, e migrar o
+    histórico de comissão sem alguém olhar linha a linha é como recalcular o
+    salário de todo mundo com a fórmula nova e avisar depois. O que o simulador
+    responde é 'quanto mudaria?' — e essa pergunta tem que ter resposta antes de
+    qualquer botão de aplicar aparecer."""
+    conn = db()
+    limite = min(int(request.args.get('limite', 200) or 200), 500)
+    linhas = []
+    for p in conn.execute("""SELECT id, razao_social, consultor, usuario_id, adm_operadora,
+                                    modalidade, tipo_pessoa, status,
+                                    COALESCE(comissao_total_corretora,0) comissao,
+                                    COALESCE(comissao_consultor,0) atual_consultor,
+                                    COALESCE(comissao_corretora_liquida,0) atual_liquido
+                             FROM propostas
+                             WHERE COALESCE(status,'') <> 'Excluída' AND COALESCE(estornada,0)=0
+                             ORDER BY id DESC LIMIT ?""", (limite,)).fetchall():
+        if not _gestor_e_vendedor(conn, p['usuario_id']):
+            continue
+        plano = _plano_from_modalidade(p['modalidade'], p['tipo_pessoa'])
+        regra, retencoes = _gestor_regra_buscar(conn, p['adm_operadora'] or '', plano)
+        falta = _gestor_regra_faltas(regra, retencoes)
+        simulado = {}
+        if not falta:
+            # Snapshot "de mentira", só para simular: a regra de HOJE aplicada à
+            # venda de ontem. Não é gravado e não vira snapshot da proposta.
+            simulado = _gestor_calcular({
+                'completa': 1, 'fracoes_json': regra['fracoes_json'],
+                'gestor_json': regra['gestor_json'],
+                'retencoes_json': json.dumps(retencoes, ensure_ascii=False, default=str),
+            }, p['comissao'])
+        # Congelada quando a parcela já andou: pago, conciliado ou com PIX.
+        travas = _historico_travas(conn, p['id'])
+        linhas.append({
+            'id': p['id'], 'razao_social': p['razao_social'], 'consultor': p['consultor'],
+            'operadora': p['adm_operadora'] or '(sem operadora)', 'plano': plano,
+            'comissao': round(float(p['comissao'] or 0), 2),
+            'atual_consultor': round(float(p['atual_consultor'] or 0), 2),
+            'atual_liquido': round(float(p['atual_liquido'] or 0), 2),
+            'tem_snapshot': bool(_gestor_snapshot(conn, p['id'])),
+            'falta': falta,
+            'simulado': simulado,
+            'sim_gestor': round(simulado.get('total_liquido_gestor', 0.0), 2) if simulado else None,
+            'sim_serenus': round(simulado.get('total_saldo_serenus', 0.0), 2) if simulado else None,
+            'diferenca_gestor': (round(simulado.get('total_liquido_gestor', 0.0)
+                                       - float(p['atual_consultor'] or 0), 2) if simulado else None),
+            'travas': travas,
+            'aplicavel': bool(simulado and not travas),
+        })
+    close_db(conn)
+    total = {
+        'vendas': len(linhas),
+        'aplicaveis': sum(1 for l in linhas if l['aplicavel']),
+        'travadas': sum(1 for l in linhas if l['travas']),
+        'sem_regra': sum(1 for l in linhas if l['falta']),
+        'atual': round(sum(l['atual_consultor'] for l in linhas), 2),
+        'simulado': round(sum(l['sim_gestor'] or 0 for l in linhas), 2),
+    }
+    total['diferenca'] = round(total['simulado'] - total['atual'], 2)
+    return render_template('regra_gestor_simulador.html', linhas=linhas, total=total)
+
+
+def _historico_travas(conn, proposta_id):
+    """O que impede reescrever o histórico DESTA venda. Lista de frases.
+
+    Parcela paga, conciliada ou com PIX iniciado não se toca: o dinheiro já
+    andou, e mudar o número depois só faz o sistema discordar do extrato
+    bancário — que é a fonte que ninguém pode editar."""
+    travas = []
+    try:
+        for pa in conn.execute("""SELECT id, numero, status, asaas_transfer_id
+                                  FROM parcelas WHERE proposta_id=?""", (proposta_id,)).fetchall():
+            if (pa['status'] or '') == 'Pago ao corretor':
+                travas.append(f'Parcela {pa["numero"]} já foi paga ao corretor.')
+            if pa['asaas_transfer_id']:
+                travas.append(f'Parcela {pa["numero"]} tem PIX iniciado no Asaas.')
+    except Exception:
+        pass
+    try:
+        n = conn.execute("""SELECT COUNT(*) c FROM affinity_conciliacao
+                            WHERE proposta_id=? AND estado='entrada_confirmada'""",
+                         (proposta_id,)).fetchone()['c']
+        if n:
+            travas.append(f'{n} linha(s) de extrato já foram conciliadas como entrada confirmada.')
+    except Exception:
+        pass
+    return travas
+
+
+@app.route('/comissoes/regra-gestor/aplicar-historico', methods=['POST'])
+@login_required
+@admin_required
+def regra_gestor_aplicar_historico():
+    """Aplica a regra de hoje a vendas ANTIGAS — só nas escolhidas, uma a uma.
+
+    Três coisas antes de qualquer escrita, e nenhuma delas é opcional:
+      1. seleção explícita: não existe 'aplicar em tudo';
+      2. backup do estado anterior, gravado antes da mudança;
+      3. log com quem, quando e o que mudou.
+
+    E as travas: parcela paga, conciliada ou com PIX iniciado é recusada, mesmo
+    que tenha sido escolhida. Escolher não destrava.
+
+    O que muda: apenas o SNAPSHOT da proposta. Valor de parcela, status
+    financeiro e lançamento não são reescritos por esta rota — recalcular
+    dinheiro que já foi combinado é o que este sistema não faz sozinho."""
+    d = request.json or {}
+    ids = [int(x) for x in (d.get('propostas') or []) if str(x).isdigit()]
+    confirmacao = (d.get('confirmacao') or '').strip().upper()
+    if not ids:
+        return jsonify({"ok": False, "erro": "Escolha ao menos uma venda."}), 400
+    if confirmacao != 'APLICAR':
+        return jsonify({"ok": False, "erro": 'Digite APLICAR para confirmar. Esta ação reescreve '
+                                             'a regra congelada das vendas escolhidas.'}), 400
+    conn = db()
+    aplicadas, recusadas = [], []
+    for pid in ids:
+        p = conn.execute("""SELECT id, razao_social, usuario_id, adm_operadora, modalidade,
+                                   tipo_pessoa FROM propostas WHERE id=?""", (pid,)).fetchone()
+        if not p:
+            recusadas.append((pid, 'venda não encontrada'))
+            continue
+        if not _gestor_e_vendedor(conn, p['usuario_id']):
+            recusadas.append((pid, 'não é venda de gestor'))
+            continue
+        travas = _historico_travas(conn, pid)
+        if travas:
+            recusadas.append((pid, travas[0]))
+            continue
+        plano = _plano_from_modalidade(p['modalidade'], p['tipo_pessoa'])
+        regra, retencoes = _gestor_regra_buscar(conn, p['adm_operadora'] or '', plano)
+        falta = _gestor_regra_faltas(regra, retencoes)
+        if falta:
+            recusadas.append((pid, falta[0]))
+            continue
+        antigo = _gestor_snapshot(conn, pid)
+        # BACKUP antes de escrever: o snapshot anterior vira histórico da
+        # proposta, em texto, e não some. Sem isso, "voltar atrás" seria
+        # reconstruir de memória.
+        conn.execute("""INSERT INTO historico_proposta
+            (proposta_id, usuario_nome, campo, valor_antes, valor_depois, criado_em)
+            VALUES (?,?,?,?,?,?)""",
+            (pid, session.get('nome'), 'Regra do gestor (aplicação histórica)',
+             json.dumps(antigo or {}, ensure_ascii=False, default=str)[:3000],
+             json.dumps({'regra_id': regra['id'], 'fracoes': regra['fracoes_json'],
+                         'gestor': regra['gestor_json']}, ensure_ascii=False)[:3000],
+             _agora_sp()))
+        conn.execute("DELETE FROM proposta_regra_snapshot WHERE proposta_id=?", (pid,))
+        op_nome, op_obs = _split_operadora(p['adm_operadora'] or '')
+        conn.execute("""INSERT INTO proposta_regra_snapshot
+            (proposta_id, regra_id, operadora, obs, plano, fracoes_json, gestor_json,
+             retencoes_json, completa, falta_json, usuario_id, usuario_nome,
+             congelado_por, congelado_em)
+            VALUES (?,?,?,?,?,?,?,?,1,'[]',?,?,?,?)""",
+            (pid, regra['id'], op_nome, op_obs, plano, regra['fracoes_json'],
+             regra['gestor_json'], json.dumps(retencoes, ensure_ascii=False, default=str),
+             p['usuario_id'], session.get('nome'),
+             f"{session.get('nome')} (aplicação histórica)", _agora_sp()))
+        _fin_registrar(conn, f"hist:regra:{pid}:{regra['id']}", 'previsto', 0.0,
+                       papel='serenus', proposta_id=pid, origem='aplicacao_historica',
+                       origem_ref=str(regra['id']),
+                       descricao=f"Regra do gestor aplicada ao histórico por {session.get('nome')}",
+                       usuario_id=session.get('user_id'), usuario_nome=session.get('nome'))
+        aplicadas.append(pid)
+    conn.commit(); close_db(conn)
+    app.logger.info("[REGRA-GESTOR] aplicação histórica por %s: %s aplicada(s), %s recusada(s)",
+                    session.get('nome'), len(aplicadas), len(recusadas))
+    return jsonify({"ok": True, "aplicadas": aplicadas, "recusadas": recusadas})
+
+
+@app.route('/comissoes/regra-gestor/retencao', methods=['POST'])
+@login_required
+@admin_required
+def regra_gestor_retencao():
+    """Cadastra uma retenção. Alíquota em branco fica NULL e trava o financeiro
+    até alguém informar — o JOB não inventa alíquota de imposto."""
+    d = request.json or {}
+    try:
+        rid = int(d.get('regra_id') or 0)
+    except (TypeError, ValueError):
+        rid = 0
+    tipo = (d.get('tipo') or '').strip()[:40]
+    if not rid or not tipo:
+        return jsonify({"ok": False, "erro": "Informe a regra e o tipo da retenção."}), 400
+    base = (d.get('base_calculo') or '').strip()
+    resp = (d.get('responsavel') or '').strip()
+    if base not in _RETENCAO_BASES:
+        return jsonify({"ok": False, "erro": "Escolha a base de cálculo."}), 400
+    if resp not in _RETENCAO_RESPONSAVEIS:
+        return jsonify({"ok": False, "erro": "Escolha quem paga esta retenção."}), 400
+    pct = d.get('percentual')
+    if pct is None or str(pct).strip() == '':
+        pct = None
+    else:
+        try:
+            pct = round(float(str(pct).replace(',', '.')), 4)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "erro": "Alíquota inválida."}), 400
+    conn = db()
+    conn.execute("""INSERT INTO gestor_retencao
+        (regra_id, tipo, nome, percentual, base_calculo, responsavel,
+         vigencia_inicio, vigencia_fim, observacao, ativo, criado_por, criado_em)
+        VALUES (?,?,?,?,?,?,?,?,?,1,?,?)""",
+        (rid, tipo, (d.get('nome') or tipo)[:60], pct, base, resp,
+         (d.get('vigencia_inicio') or '')[:10], (d.get('vigencia_fim') or '')[:10],
+         (d.get('observacao') or '')[:400], session.get('nome'), _agora_sp()))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "sem_aliquota": pct is None})
+
+
+@app.route('/comissoes/regra-gestor/retencao/<int:rid>/remover', methods=['POST'])
+@login_required
+@admin_required
+def regra_gestor_retencao_remover(rid):
+    """Desativa a retenção (não apaga): snapshot antigo continua explicável."""
+    conn = db()
+    conn.execute("UPDATE gestor_retencao SET ativo=0 WHERE id=?", (rid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/comissoes/conciliacao/buscar')
+@login_required
+@admin_required
+def comissao_conciliacao_buscar():
+    """Busca de venda para o vinculo manual. Por numero ou por razao social."""
+    q = (request.args.get('q') or '').strip()
+    if len(q) < 3:
+        return jsonify({"ok": True, "propostas": []})
+    conn = db()
+    like = f'%{q.upper()}%'
+    num = re.sub(r'[^\d]', '', q)
+    rows = conn.execute("""SELECT id, numero_proposta, razao_social, consultor, adm_operadora,
+                                  COALESCE(comissao_total_corretora,0) comissao, status, vigencia
+                           FROM propostas
+                           WHERE (UPPER(COALESCE(razao_social,'')) LIKE ?
+                                  OR (? <> '' AND REPLACE(REPLACE(COALESCE(numero_proposta,''),'.',''),'-','') LIKE ?))
+                             AND COALESCE(status,'') <> 'Excluída'
+                           ORDER BY id DESC LIMIT 20""", (like, num, f'%{num}%')).fetchall()
+    close_db(conn)
+    return jsonify({"ok": True, "propostas": [dict(r) for r in rows]})
+
+
+@app.route('/comissoes/conciliacao/<int:cid>/vincular', methods=['POST'])
+@login_required
+@admin_required
+def comissao_conciliacao_vincular(cid):
+    """VINCULO MANUAL AUDITADO: aponta a venda de um item que o número não casou.
+
+    Exige observacao porque o vinculo manual e um julgamento de alguem, e daqui a
+    tres meses a pergunta vai ser 'por que essa linha foi parar nessa venda?'.
+    Sem o porque escrito, a resposta e 'ninguem lembra'."""
+    d = request.json or {}
+    try:
+        pid = int(d.get('proposta_id') or 0)
+    except (TypeError, ValueError):
+        pid = 0
+    obs = (d.get('observacao') or '').strip()
+    if not pid:
+        return jsonify({"ok": False, "erro": "Escolha a venda."}), 400
+    if len(obs) < 5:
+        return jsonify({"ok": False, "erro": "Escreva por que esta linha é desta venda "
+                                             "(no mínimo 5 caracteres)."}), 400
+    conn = db()
+    c = conn.execute("SELECT * FROM affinity_conciliacao WHERE id=?", (cid,)).fetchone()
+    if not c:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Item não encontrado."}), 404
+    if c['proposta_id']:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Este item já está vinculado. Vínculo não se "
+                                             "sobrescreve — abra um chamado se estiver errado."}), 400
+    if c['estado'] == 'ajuste_sem_efeito':
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Ajuste de efeito zero não se vincula a venda: "
+                                             "ele não é dinheiro novo."}), 400
+    p = conn.execute("SELECT id, razao_social FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Venda não encontrada."}), 404
+    agora = _agora_sp()
+    conn.execute("""UPDATE affinity_conciliacao
+                    SET proposta_id=?, vinculo_criterio='manual', vinculo_por=?, vinculo_em=?,
+                        vinculo_observacao=?, estado='apurado_affinity', atualizado_em=?
+                    WHERE id=?""",
+                 (pid, session.get('nome'), agora, obs[:400], agora, cid))
+    _fin_registrar(conn, f"afy:vinculo:{cid}", 'apurado_affinity', c['liquido'],
+                   papel='affinity', proposta_id=pid, conciliacao_id=cid,
+                   competencia=_fin_competencia(c['data_pagamento_informada'] or c['previsao']),
+                   data_evento=c['data_pagamento_informada'] or c['previsao'] or '',
+                   sinal=1, origem='vinculo_manual', origem_ref=c['codigo_comissao'],
+                   descricao=f"Vínculo manual: {obs[:150]}",
+                   usuario_id=session.get('user_id'), usuario_nome=session.get('nome'))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "razao_social": p['razao_social']})
+
+
+@app.route('/comissoes/conciliacao/<int:cid>/confirmar-entrada', methods=['POST'])
+@login_required
+@admin_required
+def comissao_conciliacao_confirmar_entrada(cid):
+    """CONFIRMA QUE O DINHEIRO ENTROU. E o unico lugar do sistema que pode dizer
+    isso, e ele exige prova.
+
+    Prova e uma das duas: identificador da transacao no Asaas, ou uma pessoa
+    assinando embaixo com observacao. Valor e data parecidos NAO servem e nao ha
+    caminho aqui que os aceite — dois extratos do mesmo mes com o mesmo valor
+    existem, e casar por semelhanca marcaria o errado como recebido, deixando o
+    certo esperando para sempre."""
+    d = request.json or {}
+    ref = (d.get('asaas_id') or '').strip()
+    obs = (d.get('observacao') or '').strip()
+    humana = bool(d.get('confirmacao_humana'))
+    if not ref and not humana:
+        return jsonify({"ok": False, "erro": "Informe o identificador da transação no Asaas "
+                                             "ou confirme manualmente com uma observação."}), 400
+    if not ref and len(obs) < 5:
+        return jsonify({"ok": False, "erro": "Confirmação manual exige observação dizendo como "
+                                             "você conferiu a entrada."}), 400
+    conn = db()
+    c = conn.execute("SELECT * FROM affinity_conciliacao WHERE id=?", (cid,)).fetchone()
+    if not c:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Item não encontrado."}), 404
+    if c['estado'] == 'ajuste_sem_efeito':
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Ajuste de efeito zero não tem entrada para "
+                                             "confirmar."}), 400
+    if c['estado'] == 'entrada_confirmada':
+        # Idempotente: repetir a confirmacao nao duplica evento nem grita.
+        close_db(conn)
+        return jsonify({"ok": True, "ja": True})
+    if not c['proposta_id']:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Aponte a venda antes de confirmar a entrada. "
+                                             "Dinheiro confirmado sem dono não vira repasse."}), 400
+    agora = _agora_sp()
+    conn.execute("""UPDATE affinity_conciliacao
+                    SET estado='entrada_confirmada', entrada_ref=?, entrada_forma=?,
+                        entrada_por=?, entrada_em=?, entrada_observacao=?, atualizado_em=?
+                    WHERE id=?""",
+                 (ref[:120], 'asaas' if ref else 'humana', session.get('nome'), agora,
+                  obs[:400], agora, cid))
+    _fin_registrar(conn, f"afy:entrada:{cid}", 'entrada_confirmada', c['liquido'],
+                   papel='serenus', proposta_id=c['proposta_id'], parcela_id=c['parcela_id'],
+                   conciliacao_id=cid,
+                   competencia=_fin_competencia(c['data_pagamento_informada'] or c['previsao']),
+                   data_evento=c['data_pagamento_informada'] or c['previsao'] or '',
+                   sinal=1, origem='asaas' if ref else 'confirmacao_humana',
+                   origem_ref=ref or c['codigo_comissao'],
+                   descricao=(f"Entrada confirmada por Asaas {ref}" if ref
+                              else f"Entrada confirmada manualmente: {obs[:150]}"),
+                   usuario_id=session.get('user_id'), usuario_nome=session.get('nome'))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
@@ -40388,6 +42399,8 @@ def _enviar_conversoes_automatico():
 
 def _auto_pull_leads_throttled():
     global _ULTIMO_AUTO_PULL
+    if MODO_TESTE:
+        return
     try:
         agora = time.time()
         if agora - _ULTIMO_AUTO_PULL < _AUTO_PULL_INTERVALO:
@@ -40438,6 +42451,12 @@ def _iniciar_scheduler_backup():
     """Liga agendador de backup automático JSON (22:00 SP todo dia)."""
     global _SCHEDULER_INICIADO
     if _SCHEDULER_INICIADO:
+        return
+    if MODO_TESTE:
+        # Ver MODO_TESTE no topo do arquivo: teste não pode disputar o banco com
+        # job de fundo. Marca como iniciado para não tentar de novo a cada request.
+        _SCHEDULER_INICIADO = True
+        app.logger.info("[SCHEDULER] desligado por JOB_MODO_TESTE")
         return
     try:
         from apscheduler.schedulers.background import BackgroundScheduler

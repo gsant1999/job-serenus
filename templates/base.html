@@ -879,6 +879,59 @@
              line-height:1; cursor:help; vertical-align:middle; margin-left:5px;
              flex:0 0 auto; user-select:none; }
   .ajuda-i:hover { border-color:var(--azul); color:var(--azul); }
+
+  /* Alerta de regra de comissão do gestor incompleta. Fica no base porque
+     aparece em três telas (proposta, Financeiro, Fluxo de Caixa) e tem que ser
+     reconhecivelmente o MESMO aviso nas três — estilo diferente em cada uma
+     faria parecer três problemas. */
+  .rg-alerta { background:rgba(250,204,21,.08); border:1px solid rgba(250,204,21,.35);
+               border-left:3px solid var(--amarelo); border-radius:12px;
+               padding:14px 16px; margin-bottom:16px; }
+  .rg-alerta-titulo { font-family:'Sora',sans-serif; font-size:13.5px; font-weight:700;
+                      color:var(--amarelo); margin-bottom:6px; }
+  .rg-alerta-txt { font-size:12px; color:var(--texto); line-height:1.6; margin:0 0 10px; }
+  .rg-alerta-tab { width:100%; border-collapse:collapse; font-size:12px; }
+  .rg-alerta-tab th { text-align:left; color:var(--cinza-2); font-size:9.5px;
+                      text-transform:uppercase; letter-spacing:.4px; font-weight:600;
+                      padding:0 8px 6px; border-bottom:1px solid var(--borda); }
+  .rg-alerta-tab td { padding:8px; border-bottom:1px solid var(--borda); vertical-align:top;
+                      color:var(--texto); }
+  .rg-alerta-tab td.num, .rg-alerta-tab th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .rg-alerta-tab tr:last-child td { border-bottom:none; }
+  .rg-alerta-btn { display:inline-block; padding:5px 11px; border-radius:8px; font-size:11.5px;
+                   font-weight:600; background:var(--amarelo); color:#161a20;
+                   text-decoration:none; white-space:nowrap; }
+  .rg-alerta-btn:hover { filter:brightness(1.08); }
+
+  /* Painel do razão de comissão (_painel_razao.html). Vive no base pelo mesmo
+     motivo do alerta acima: aparece no Financeiro e no Fluxo de Caixa e tem que
+     ser reconhecivelmente o mesmo painel nas duas. */
+  .pr-box { background:var(--panel); border:1px solid var(--borda); border-radius:14px;
+            padding:16px 18px; margin-bottom:18px; }
+  .pr-cab { display:flex; justify-content:space-between; align-items:flex-start; gap:14px;
+            flex-wrap:wrap; margin-bottom:12px; }
+  .pr-titulo { font-family:'Sora',sans-serif; font-size:13.5px; font-weight:600; color:var(--texto); }
+  .pr-sub { font-size:11.5px; color:var(--cinza); line-height:1.55; margin-top:3px; max-width:640px; }
+  .pr-link { font-size:11.5px; font-weight:600; color:var(--azul); text-decoration:none; white-space:nowrap; }
+  .pr-link:hover { text-decoration:underline; }
+  .pr-linha { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+  .pr-card { flex:1 1 165px; background:var(--panel-2); border:1px solid var(--borda);
+             border-left:3px solid var(--borda-2); border-radius:10px; padding:11px 13px; }
+  /* Verde SÓ para dinheiro que entra. Obrigação a pagar usa a cor de saída — o
+     mesmo critério já aplicado no resto do Financeiro. */
+  .pr-card.pr-entrada { border-left-color:var(--verde); }
+  .pr-card.pr-entrada .pr-v { color:var(--verde); }
+  .pr-card.pr-saida { border-left-color:var(--erro); }
+  .pr-card.pr-saida .pr-v { color:var(--erro); }
+  .pr-lbl { display:flex; align-items:center; font-size:9.5px; font-weight:700; letter-spacing:.5px;
+            text-transform:uppercase; color:var(--cinza-2); margin-bottom:5px; }
+  .pr-v { display:block; font-size:17px; font-weight:700; font-variant-numeric:tabular-nums;
+          color:var(--texto); }
+  .pr-nota { display:block; font-size:10.5px; color:var(--cinza); margin-top:3px; }
+  .pr-pendencia { background:rgba(250,204,21,.08); border:1px solid rgba(250,204,21,.28);
+                  border-radius:10px; padding:10px 12px; font-size:11.5px; color:var(--texto);
+                  line-height:1.75; }
+  .pr-pendencia a { color:var(--amarelo); font-weight:600; text-decoration:underline; }
 </style>
 {% block content %}{% endblock %}
 </div>

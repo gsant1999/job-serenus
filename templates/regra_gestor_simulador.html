@@ -1,0 +1,172 @@
+{% extends 'base.html' %}
+{% block title %}Simulador da regra do gestor{% endblock %}
+{% block head %}
+<style>
+  .panel-box { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 20px; margin-bottom:16px; }
+  .panel-box h2 { font-family:'Sora',sans-serif; font-size:14px; font-weight:600; color:var(--texto); margin:0 0 6px; }
+  .panel-box .vazio { color:var(--cinza-2); font-size:12px; padding:8px 0; }
+  .sm-sub { font-size:12px; color:var(--cinza); margin:0 0 14px; line-height:1.6; }
+  table.pnl-tab { width:100%; border-collapse:collapse; font-size:12.5px; }
+  table.pnl-tab th { text-align:left; color:var(--cinza-2); font-size:10px; text-transform:uppercase; letter-spacing:.5px; font-weight:600; padding:0 10px 10px; border-bottom:1px solid var(--borda); }
+  table.pnl-tab td { padding:10px; border-bottom:1px solid var(--borda); color:var(--texto); vertical-align:top; }
+  table.pnl-tab td.num, table.pnl-tab th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .pill { display:inline-block; padding:2px 9px; border-radius:20px; font-size:11px; font-weight:600; white-space:nowrap; }
+  .pill-verde { background:var(--verde-soft); color:var(--verde); }
+  .pill-erro { background:rgba(244,63,94,.12); color:var(--erro); }
+  .pill-cinza { background:rgba(125,133,150,.14); color:var(--cinza); }
+  .pill-amarelo { background:rgba(250,204,21,.14); color:var(--amarelo); }
+  .sm-num-linha { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .sm-num { flex:1 1 160px; background:var(--panel-2); border:1px solid var(--borda); border-radius:10px; padding:12px 14px; }
+  .sm-num b { display:block; font-size:19px; font-variant-numeric:tabular-nums; }
+  .sm-num span { display:block; font-size:10px; color:var(--cinza); margin-top:3px; }
+  .sm-nada { background:var(--panel-2); border:1px solid var(--borda); border-left:3px solid var(--verde);
+             border-radius:10px; padding:12px 14px; font-size:12.5px; color:var(--texto);
+             line-height:1.65; margin-bottom:16px; }
+  .sm-nada a { color:var(--verde); text-decoration:underline; }
+  .sm-dif-pos { color:var(--verde); font-weight:700; }
+  .sm-dif-neg { color:var(--erro); font-weight:700; }
+  .sm-linha2 { font-size:11px; color:var(--cinza); margin-top:3px; line-height:1.5; }
+  .sm-acoes { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:14px; }
+  .sm-msg { font-size:12px; margin-top:8px; }
+  .sm-msg.erro { color:var(--erro); }
+  .sm-msg.ok { color:var(--verde); }
+  #smTab a { color:var(--azul); text-decoration:none; font-weight:600; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Simulador da regra do gestor</h1>
+    <div class="sub">O que mudaria nas vendas já cadastradas se a regra de hoje valesse para elas.</div>
+  </div>
+  <div><a href="/comissoes/regra-gestor" class="btn-outline">Voltar à regra</a></div>
+</div>
+
+<div class="page">
+
+  <div class="sm-nada">
+    <b>Esta tela não muda nada sozinha.</b> Ela lê as vendas, aplica a regra atual em memória e
+    mostra a diferença. Nada é gravado até você marcar vendas específicas e confirmar. Não existe
+    "aplicar em tudo": migrar comissão em massa sem alguém olhar linha a linha é recalcular o que
+    já foi combinado com as pessoas e avisar depois.
+  </div>
+
+  <div class="sm-num-linha">
+    <div class="sm-num"><b>{{ total.vendas }}</b><span>vendas de gestor</span></div>
+    <div class="sm-num"><b>{{ total.aplicaveis }}</b><span>podem receber a regra<i class="ajuda-i" title="Têm regra completa cadastrada e nenhuma parcela paga, conciliada ou com PIX iniciado.">i</i></span></div>
+    <div class="sm-num"><b>{{ total.travadas }}</b><span>travadas (dinheiro já andou)<i class="ajuda-i" title="Parcela paga, conciliada como entrada confirmada ou com PIX iniciado. O histórico dessas não se reescreve: o extrato bancário não pode ser editado para acompanhar.">i</i></span></div>
+    <div class="sm-num"><b>{{ total.sem_regra }}</b><span>sem regra cadastrada</span></div>
+    <div class="sm-num"><b class="{{ 'sm-dif-pos' if total.diferenca > 0 else ('sm-dif-neg' if total.diferenca < 0 else '') }}">{{ total.diferenca|moeda }}</b><span>diferença total simulada<i class="ajuda-i" title="Soma do líquido simulado do gestor menos a comissão de consultor gravada hoje nessas vendas. Positivo significa que a regra nova pagaria mais.">i</i></span></div>
+  </div>
+
+  <div class="panel-box">
+    <h2>Venda a venda</h2>
+    <p class="sm-sub">
+      "Atual" é o que está gravado na venda hoje. "Simulado" é o que a regra atual da operadora
+      produziria. A diferença entre os dois é a pergunta que precisa de resposta antes de qualquer
+      aplicação — e a resposta pode muito bem ser "não aplicar".
+    </p>
+    {% if not linhas %}
+      <div class="vazio">Nenhuma venda de gestor encontrada.</div>
+    {% else %}
+    <table class="pnl-tab" id="smTab">
+      <thead>
+        <tr>
+          <th style="width:34px;"></th>
+          <th>Venda</th>
+          <th>Operadora e plano</th>
+          <th class="num">Comissão da venda</th>
+          <th class="num">Atual (consultor)</th>
+          <th class="num">Simulado (gestor)</th>
+          <th class="num">Diferença</th>
+          <th>Situação</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for l in linhas %}
+        <tr>
+          <td>
+            {% if l.aplicavel %}<input type="checkbox" class="sm-sel" value="{{ l.id }}">{% endif %}
+          </td>
+          <td><a href="/proposta/{{ l.id }}">{{ (l.razao_social or '')[:36] }}</a>
+            <div class="sm-linha2">{{ l.consultor }}</div></td>
+          <td>{{ l.operadora }}<div class="sm-linha2">{{ l.plano }}</div></td>
+          <td class="num">{{ l.comissao|moeda }}</td>
+          <td class="num">{{ l.atual_consultor|moeda }}</td>
+          <td class="num">{% if l.sim_gestor is not none %}{{ l.sim_gestor|moeda }}{% else %}—{% endif %}</td>
+          <td class="num">
+            {% if l.diferenca_gestor is not none %}
+            <span class="{{ 'sm-dif-pos' if l.diferenca_gestor > 0 else ('sm-dif-neg' if l.diferenca_gestor < 0 else '') }}">{{ l.diferenca_gestor|moeda }}</span>
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            {% if l.travas %}
+              <span class="pill pill-erro">travada</span>
+              {% for t in l.travas[:2] %}<div class="sm-linha2">{{ t }}</div>{% endfor %}
+            {% elif l.falta %}
+              <span class="pill pill-amarelo">sem regra</span>
+              <div class="sm-linha2">{{ l.falta[0] }}</div>
+            {% else %}
+              <span class="pill pill-verde">pode aplicar</span>
+              {% if l.sim_serenus is not none %}<div class="sm-linha2">saldo Serenus simulado: {{ l.sim_serenus|moeda }}</div>{% endif %}
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="sm-acoes">
+      <button type="button" class="btn-outline" id="smAplicar">Aplicar nas vendas marcadas</button>
+      <span class="sm-linha2" id="smCont">nenhuma marcada</span>
+    </div>
+    <div class="sm-msg" id="smMsg"></div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+function marcadas(){
+  return Array.prototype.filter.call(document.querySelectorAll('.sm-sel'), function(c){ return c.checked; })
+    .map(function(c){ return c.value; });
+}
+function atualizarContagem(){
+  var n = marcadas().length;
+  document.getElementById('smCont').textContent =
+    n ? (n + (n === 1 ? ' venda marcada' : ' vendas marcadas')) : 'nenhuma marcada';
+}
+document.querySelectorAll('.sm-sel').forEach(function(c){
+  c.addEventListener('change', atualizarContagem);
+});
+var bt = document.getElementById('smAplicar');
+if (bt) bt.addEventListener('click', function(){
+  var ids = marcadas();
+  var msg = document.getElementById('smMsg');
+  if (!ids.length) { msg.textContent = 'Marque as vendas primeiro.'; msg.className = 'sm-msg erro'; return; }
+  // Digitar APLICAR e não só clicar OK: a ação reescreve a regra congelada de
+  // vendas que já existem, e um clique acidental não deve conseguir fazer isso.
+  var conf = prompt('Isto reescreve a regra congelada de ' + ids.length + ' venda(s).\n' +
+                    'O estado anterior fica guardado no histórico de cada proposta.\n\n' +
+                    'Digite APLICAR para confirmar:');
+  if (conf === null) return;
+  bt.disabled = true;
+  fetch('/comissoes/regra-gestor/aplicar-historico', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({propostas: ids, confirmacao: conf})
+  }).then(function(r){ return r.json(); }).then(function(d){
+    bt.disabled = false;
+    if (!d.ok) { msg.textContent = d.erro || 'Não consegui aplicar.'; msg.className = 'sm-msg erro'; return; }
+    var txt = d.aplicadas.length + ' venda(s) atualizada(s).';
+    if (d.recusadas && d.recusadas.length) {
+      txt += ' ' + d.recusadas.length + ' recusada(s): ' +
+             d.recusadas.map(function(x){ return x[0] + ' (' + x[1] + ')'; }).join('; ');
+    }
+    msg.textContent = txt + ' Recarregando...';
+    msg.className = 'sm-msg ok';
+    setTimeout(function(){ location.reload(); }, 2200);
+  });
+});
+atualizarContagem();
+</script>
+{% endblock %}

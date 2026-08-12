@@ -4,7 +4,11 @@
 <div class="topbar">
   <div>
     <h1>Extratos de comissão</h1>
-    <div class="sub">O que a Affinity pagou, linha por linha, casado com a venda no JOB.</div>
+    <div class="sub">O que a Affinity apurou, linha por linha, casado com a venda no JOB.</div>
+  </div>
+  <div>
+    <a href="/comissoes/conciliacao" class="btn-outline">Conciliação</a>
+    <a href="/comissoes/extrato/lote/previsualizar" class="btn">Conferir um lote sem gravar</a>
   </div>
 </div>
 
@@ -12,12 +16,28 @@
   {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
   {% for a in avisos %}<div class="alerta atencao">{{ a }}</div>{% endfor %}
 
+  {# O óbvio dito na tela: este importador grava na hora, um arquivo por vez.
+     Quem tem lote na mesa deve passar pela pré-conferência antes. #}
+  <div class="alerta atencao" style="line-height:1.6;">
+    <b>Este importador é o modo antigo</b> e grava assim que você clica, um arquivo por vez.
+    Para vários extratos, use a <a href="/comissoes/extrato/lote/previsualizar">pré-conferência</a>:
+    ela lê o lote inteiro, mostra o que entraria e não grava nada.
+  </div>
+
   <div class="panel-box">
-    <h2>Importar extrato<i class="ajuda-i" title="O PDF da Affinity é lido direto, sem IA. Cada linha vira um registro casado com a venda pelo número da proposta. O mesmo extrato não entra duas vezes: o código da comissão é único.">i</i></h2>
-    <p class="sub">O extrato é o dinheiro que entrou — a Affinity paga o que está nele. O JOB não corrige o valor: mostra onde divergiu do cálculo dele, pra você classificar se o erro foi nosso ou dela.</p>
+    <h2>Importar um extrato (modo antigo)<i class="ajuda-i" title="O PDF da Affinity é lido direto, sem IA. Cada linha vira um registro casado com a venda pelo número da proposta. O mesmo extrato não entra duas vezes: o código da comissão é único. Arquivo cuja leitura não fecha com o total impresso no próprio PDF é recusado.">i</i></h2>
+    <p class="sub">
+      O extrato é o valor que a Affinity <b>apurou</b> e informa que vai pagar — não é prova de que o
+      dinheiro entrou na conta.<i class="ajuda-i" title="Extrato pode estar previsto, ter sido transferido para outro extrato, ser antecipação sobre parcela futura, ou ser pago em data diferente da previsão. A confirmação de entrada vem da conciliação bancária, nunca do PDF.">i</i>
+      O JOB não corrige o valor: mostra onde divergiu do cálculo dele, pra você classificar se o erro foi nosso ou dela.
+    </p>
+    <p class="sub">
+      Arquivo cuja leitura não fechar com o total impresso no próprio PDF é recusado — importar pela
+      metade lançaria comissão errada em silêncio.
+    </p>
     <form method="post" enctype="multipart/form-data" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
       <input type="file" name="pdf" accept="application/pdf" required>
-      <button type="submit" class="btn">Ler e importar</button>
+      <button type="submit" class="btn-outline">Ler e importar este arquivo</button>
     </form>
   </div>
 
