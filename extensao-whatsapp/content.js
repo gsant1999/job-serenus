@@ -4692,30 +4692,48 @@
     // solto imediatamente e a analise do fim leva SO OS IDS. Depois de cada
     // volta deste laco, nao existe base64 vivo em lugar nenhum.
     const _pausa = (ms) => new Promise((res) => setTimeout(res, ms));
-    let _loteFalhou = 0;
     for (let i = 0; i < semCache.length; i += 3) {
       const ids = semCache.slice(i, i + 3);
       let r = null;
+      let lote = [];
+      let pendentes = [];
+      // Comeca supondo que nenhum id foi resolvido. Cada transcricao com texto
+      // tira o proprio id daqui; o que sobrar no finally e falha de VERDADE —
+      // inclui download ausente, resposta parcial e provedor que devolveu vazio.
+      const semTexto = new Set(ids);
       try {
         // Lotes pequenos: baixar 30 audios de uma vez e o que trava a maquina.
         r = await _pedirPonte('baixar_audios_ids', { ids }, 90000);
-        const lote = (r && r.audios) || [];
-        if (!lote.length) { _loteFalhou++; continue; }
+        lote = (r && Array.isArray(r.audios)) ? r.audios : [];
+        if (!lote.length) continue;
         // Uma tentativa a mais so pro lote: antes, audio que nao transcrevia
         // aqui ainda tinha uma segunda chance porque o base64 seguia junto pra
         // analise. Agora nao segue — entao a chance extra vem aqui, e continua
         // custando um lote de memoria, nao a conversa inteira.
         let tr = await _safeSendMessage({ type: 'transcrever_audios', audios: lote }).catch(() => null);
-        if (!tr || !tr.ok) {
+        const marcarResolvidos = (resp) => {
+          const textos = (resp && resp.ok && resp.transcricoes) || {};
+          for (const a of lote) {
+            const mid = a && a.msg_id;
+            if (mid && String(textos[mid] || '').trim()) semTexto.delete(mid);
+          }
+        };
+        marcarResolvidos(tr);
+        // `ok:true` significa que a ROTA respondeu, nao que cada audio ganhou
+        // texto: o servidor representa falha individual por `transcricoes[id]
+        // === ''`. Retenta somente os que continuaram vazios.
+        pendentes = lote.filter((a) => a && semTexto.has(a.msg_id));
+        if (pendentes.length) {
           await _pausa(800);
-          tr = await _safeSendMessage({ type: 'transcrever_audios', audios: lote }).catch(() => null);
+          tr = await _safeSendMessage({ type: 'transcrever_audios', audios: pendentes }).catch(() => null);
+          marcarResolvidos(tr);
         }
-        if (!tr || !tr.ok) _loteFalhou++;
-      } catch (e) {
-        _loteFalhou++;
-      } finally {
+      } catch (e) { /* o Set conserva os ids que nao foram resolvidos */ }
+      finally {
         // Solta as referencias ANTES da pausa: e nesta janela ociosa que o
         // coletor tem chance de recolher os base64 deste lote.
+        pendentes.length = 0;
+        lote.length = 0;
         try { if (r && Array.isArray(r.audios)) r.audios.length = 0; } catch (e2) {}
         r = null;
       }
@@ -4755,7 +4773,10 @@
         usuario_id: usuarioId || null,
         mensagens: conv.mensagens || [],
         audios: payloadAudios,
-        audios_sem_transcricao: _loteFalhou,
+        // Reusa o contrato que o servidor ja mostra no resultado: ele compara
+        // quantos existiam com quantos ids encontraram texto no cache. Campo
+        // novo e ignorado esconderia a falha em vez de explica-la.
+        audios_encontrados: audios.length,
         ultima_msg_id: conv.ultima_msg_id || meta.ultima_msg_id || '',
         ultima_msg_em: meta.ultima_msg_em || 0,
       },
