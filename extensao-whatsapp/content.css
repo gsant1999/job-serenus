@@ -607,10 +607,22 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-ultima-analise .job-analisar-btn { display: block; width: 100%; }
 
 /* ── Seção Mensagens: formulário de novo modelo ── */
+.job-mensagem-criar { width:100%; min-height:44px; margin:0 0 12px; border:1px solid var(--job-acento); border-radius:11px;
+  background:color-mix(in srgb,var(--job-acento) 11%,var(--job-bg1)); color:var(--job-acento); font:600 12.5px var(--job-ui);
+  cursor:pointer; display:flex; align-items:center; justify-content:center; gap:7px; }
+.job-mensagem-criar:hover { background:color-mix(in srgb,var(--job-acento) 17%,var(--job-bg1)); }
 .job-novo-modelo { margin-top: 2px;
   background: var(--job-bg2); border: 1px solid var(--job-bg3); border-radius: 12px;
   padding: 12px; margin-bottom: 16px;
 }
+.job-novo-modelo-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:12px; }
+.job-novo-modelo-head > div { min-width:0; display:flex; flex-direction:column; gap:2px; }
+.job-novo-modelo-head b { color:var(--job-txt); font-size:13px; font-weight:680; }
+.job-novo-modelo-head span { color:var(--job-txt-fraco); font-size:10px; line-height:1.4; }
+.job-novo-modelo-head button { width:36px; height:36px; flex:0 0 auto; border:1px solid var(--job-borda); border-radius:9px;
+  background:var(--job-bg1); color:var(--job-txt-fraco); font-size:20px; line-height:1; cursor:pointer; }
+.job-novo-modelo > label { display:block; margin:8px 0 5px; color:var(--job-txt-fraco); font-size:10.5px; font-weight:650; }
+.job-novo-modelo > label span { color:var(--job-txt-fraco2); font-weight:450; }
 .job-inp {
   width: 100%; box-sizing: border-box; background: var(--job-bg1); border: 1px solid var(--job-bg3);
   border-radius: 8px; padding: 9px 10px; font-size: 12.5px; color: var(--job-txt);
@@ -642,6 +654,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 }
 .job-salvar-modelo:hover:not(:disabled) { background: #17b88a; }
 .job-salvar-modelo:disabled { opacity: .6; cursor: default; }
+@media (prefers-reduced-motion:reduce) { .job-mensagem-criar { transition:none; } }
 .job-modelo-excluir {
   background: transparent; color: var(--job-danger); border: 1px solid rgba(251, 113, 133, .35);
   border-radius: 8px; padding: 6px 10px; font-size: 14px; font-weight: 500; cursor: pointer; flex: 0 0 auto;

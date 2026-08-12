@@ -1261,6 +1261,12 @@
       funil: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
       estrela: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
       olho: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
+      mais: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+      voltar: '<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>',
+      cima: '<polyline points="18 15 12 9 6 15"/>',
+      baixo: '<polyline points="6 9 12 15 18 9"/>',
+      lixo: '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+      lapis: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4z"/>',
     }[nome] || '';
     const s = px || 14;
     // Mesmo traço dos ícones do trilho: 1.7 em vez de 2. Nos tamanhos que a
@@ -9903,6 +9909,7 @@
   let _gestorModo = false; // gestor/admin: vê a biblioteca de todos, agrupada por consultor
   let _gravador = null, _gravChunks = [], _gravTimer = null, _gravInicio = 0;
   let _midiaAnexada = null; // {blob, nome, mime, tipo, dur}
+  let _novoModeloAberto = false;
 
   async function buscarModelos(forcar) {
     if (!forcar && _modelosCache && (Date.now() - _modelosCache.ts) < MODELOS_CACHE_MS) {
@@ -9943,10 +9950,14 @@
         '<button class="job-midia-x" id="job-midia-descartar" title="Remover">×</button></div>';
     }
     return '<div class="job-novo-modelo">' +
-      '<div class="job-sec" style="margin-top:0">Novo modelo</div>' +
-      '<input class="job-inp" id="job-novo-nome" placeholder="Nome (ex: Boas-vindas)">' +
-      '<input class="job-inp" id="job-novo-categoria" list="job-cats" placeholder="Pasta (opcional — ex: Amil, Carência, Rede)">' +
+      '<div class="job-novo-modelo-head"><div><b>Nova mensagem</b><span>Salve uma vez para reutilizar em qualquer conversa.</span></div>' +
+        '<button id="job-novo-cancelar" aria-label="Fechar nova mensagem">×</button></div>' +
+      '<label for="job-novo-nome">Nome da mensagem</label>' +
+      '<input class="job-inp" id="job-novo-nome" placeholder="Ex: Boas-vindas">' +
+      '<label for="job-novo-categoria">Pasta <span>opcional</span></label>' +
+      '<input class="job-inp" id="job-novo-categoria" list="job-cats" placeholder="Ex: Amil, Carência ou Rede">' +
       '<datalist id="job-cats">' + categoriasExistentes().map((c) => '<option value="' + esc(c) + '">').join('') + '</datalist>' +
+      '<label for="job-novo-texto">Mensagem</label>' +
       '<textarea class="job-inp job-inp-txt" id="job-novo-texto" placeholder="Texto da mensagem…"></textarea>' +
       '<div class="job-novo-acoes">' +
         '<button class="job-mini-btn" id="job-gravar-btn">' + _svgIco('audio', 12) + ' Gravar áudio</button>' +
@@ -9955,7 +9966,7 @@
       '</div>' +
       '<div id="job-grav-status" class="job-grav-status"></div>' +
       midiaChip +
-      '<button class="job-salvar-modelo" id="job-salvar-modelo-btn">Salvar modelo</button>' +
+      '<button class="job-salvar-modelo" id="job-salvar-modelo-btn">Salvar mensagem</button>' +
       '<div id="job-salvar-status" class="job-grav-status"></div>' +
       '</div>';
   }
@@ -10145,7 +10156,7 @@
       return (_waBusca || _waFiltro !== 'todos')
         ? _vazioFiltro('mensagem', 'job-limpar-f-modelo')
         : _vazio('Nenhuma mensagem salva',
-            'Aqui ficam suas frases, áudios e imagens prontos — os que você repete todo dia. Salve o primeiro no formulário acima e ele fica a um clique na conversa.');
+            'Aqui ficam suas frases, áudios e imagens prontos — os que você repete todo dia. Use Nova mensagem para salvar o primeiro.');
     }
     // Modelo do desenho do Guilherme: PASTA = consultor, DENTRO agrupado por TIPO
     // (áudio/texto/PDF/imagem). Gestor vê a pasta de cada consultor (recolhível);
@@ -10182,12 +10193,14 @@
     }).join('');
     const _qtd = (modelos && modelos.length) || 0;
     return _secHead('Mensagens', 'Suas frases, áudios e imagens prontos — mande na conversa aberta sem digitar de novo.', _qtd || '') +
-      renderFormularioNovo() +
+      (_novoModeloAberto
+        ? renderFormularioNovo()
+        : '<button class="job-mensagem-criar" id="job-mensagem-criar">' + _svgIco('mais', 14) + ' Nova mensagem</button>') +
       '<div class="job-biblioteca-controles">' +
-        '<input class="job-inp" id="job-busca-modelo" placeholder="Buscar modelo…" value="' + esc(_waBusca) + '">' +
+        '<input class="job-inp" id="job-busca-modelo" placeholder="Buscar mensagem…" value="' + esc(_waBusca) + '">' +
         '<div class="job-fchips">' + chips + '</div>' +
       '</div>' +
-      '<div class="job-sec">Modelos salvos</div>' +
+      '<div class="job-sec">Mensagens salvas</div>' +
       '<div id="job-modelos-lista">' + renderListaModelos(modelos) + '</div>';
   }
 
@@ -10237,6 +10250,19 @@
   }
 
   function ligarAcoesModelos() {
+    const criar = document.getElementById('job-mensagem-criar');
+    if (criar) criar.addEventListener('click', () => {
+      _novoModeloAberto = !_novoModeloAberto;
+      redesenharMensagens();
+      const nome = document.getElementById('job-novo-nome');
+      if (nome) nome.focus();
+    });
+    const cancelarNovo = document.getElementById('job-novo-cancelar');
+    if (cancelarNovo) cancelarNovo.addEventListener('click', () => {
+      _novoModeloAberto = false;
+      _midiaAnexada = null;
+      redesenharMensagens();
+    });
     _ligarLimparFiltroModelo();
     const g = document.getElementById('job-gravar-btn');
     if (g) g.addEventListener('click', toggleGravacao);
@@ -10333,12 +10359,15 @@
   function redesenharMensagens() {
     const nomeAtual = (document.getElementById('job-novo-nome') || {}).value || '';
     const textoAtual = (document.getElementById('job-novo-texto') || {}).value || '';
+    const categoriaAtual = (document.getElementById('job-novo-categoria') || {}).value || '';
     setCorpoSecaoMensagens(renderModelos(_modelosCache ? _modelosCache.modelos : []));
     ligarAcoesModelos();
     const n = document.getElementById('job-novo-nome');
     const t = document.getElementById('job-novo-texto');
+    const c = document.getElementById('job-novo-categoria');
     if (n) n.value = nomeAtual;
     if (t) t.value = textoAtual;
+    if (c) c.value = categoriaAtual;
   }
 
   function blobParaBase64(blob) {
@@ -10375,6 +10404,7 @@
         return;
       }
       _midiaAnexada = null;
+      _novoModeloAberto = false;
       await buscarModelos(true); // recarrega a lista com o novo
       if (_secaoAtiva === 'mensagens') { setCorpoSecaoMensagens(renderModelos(_modelosCache.modelos)); ligarAcoesModelos(); }
     } catch (e) {
@@ -10389,7 +10419,7 @@
       texto: 'Ele sai da sua biblioteca em todos os aparelhos. Não dá pra desfazer.',
       ok: 'Excluir', perigo: true })) return;
     const resp = await chrome.runtime.sendMessage({ type: 'excluir_modelo', id });
-    if (!resp || !resp.ok) { alert((resp && resp.erro) || 'Erro ao excluir'); return; }
+    if (!resp || !resp.ok) { _dizerNoRodape((resp && resp.erro) || 'Não consegui excluir a mensagem.'); return; }
     await buscarModelos(true);
     if (_secaoAtiva === 'mensagens') { setCorpoSecaoMensagens(renderModelos(_modelosCache.modelos)); ligarAcoesModelos(); }
   }
