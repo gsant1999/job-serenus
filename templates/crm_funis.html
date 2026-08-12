@@ -3,108 +3,119 @@
 
 {% block head %}
 <style>
-  .fn-wrap { display:grid; grid-template-columns:340px 1fr; gap:22px; align-items:start; max-width:1180px; }
-  @media (max-width:900px){ .fn-wrap { grid-template-columns:1fr; } }
+  .fn-page { max-width:1240px; }
+  .fn-top-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+  .fn-primary, .fn-secondary, .fn-quiet, .fn-icon { font-family:inherit; cursor:pointer; }
+  .fn-primary { min-height:42px; padding:9px 16px; border:0; border-radius:10px; background:var(--verde); color:#052e24; font-size:12.5px; font-weight:750; }
+  .fn-primary:disabled { opacity:.5; cursor:default; }
+  .fn-secondary { min-height:42px; padding:9px 14px; border:1px solid var(--borda); border-radius:10px; background:var(--panel-2); color:var(--texto); font-size:12px; font-weight:650; }
+  .fn-quiet { min-height:38px; padding:7px 10px; border:0; border-radius:9px; background:transparent; color:var(--cinza); font-size:11.5px; font-weight:650; }
+  .fn-quiet:hover { color:var(--texto); background:var(--panel-2); }
+  .fn-icon { width:40px; height:40px; border:1px solid var(--borda); border-radius:10px; background:var(--panel-2); color:var(--cinza); display:inline-flex; align-items:center; justify-content:center; }
+  .fn-icon:hover { color:var(--texto); border-color:var(--borda-2); }
+  .fn-icon.perigo:hover { color:#e11d48; border-color:rgba(225,29,72,.35); }
+  .fn-icon svg, .fn-primary svg, .fn-secondary svg { width:16px; height:16px; }
+  .fn-focus:focus-visible, .fn-primary:focus-visible, .fn-secondary:focus-visible, .fn-quiet:focus-visible, .fn-icon:focus-visible,
+  .fn-item:focus-visible, .fn-pick-item:focus-visible { outline:3px solid color-mix(in srgb, var(--azul) 48%, transparent); outline-offset:2px; }
 
-  /* Coluna esquerda: lista de funis */
-  .fn-col { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:16px; }
-  .fn-col-topo { display:flex; gap:8px; margin-bottom:12px; flex-direction:column; }
-  .fn-busca { flex:1; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:8px 11px; font-size:12.5px; color:var(--texto); }
-  .fn-busca:focus { outline:none; border-color:var(--azul); }
-  .fn-pasta-sel { width:100%; box-sizing:border-box; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px;
-                  padding:8px 11px; font-size:12.5px; color:var(--texto); font-family:inherit; }
-  .fn-pasta-sel:focus { outline:none; border-color:var(--azul); }
-  .fn-pasta-nova { background:none; border:none; color:var(--azul); font-size:11.5px; font-weight:600; cursor:pointer; padding:2px 0; text-align:left; }
-  .fn-pasta-nova:hover { text-decoration:underline; }
-  .fn-b-pasta { display:flex; align-items:center; gap:8px; padding:0 18px 14px; }
-  .fn-b-pasta select { flex:1; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:7px 10px; font-size:11.5px; color:var(--texto); font-family:inherit; }
-  .fn-lista { display:flex; flex-direction:column; gap:10px; max-height:70vh; overflow-y:auto; }
-  .fn-item { text-align:left; width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:11px; padding:13px 14px; cursor:pointer; transition:.12s; position:relative; display:flex; align-items:center; gap:10px; }
-  .fn-item:hover { border-color:var(--borda-2); }
-  .fn-item.sel { border-color:transparent; }
-  .fn-item.sel::before { content:""; position:absolute; left:0; top:8px; bottom:8px; width:3px; border-radius:0 3px 3px 0; background:var(--grad-frio); }
-  .fn-item-ico { width:30px; height:30px; flex-shrink:0; border-radius:8px; background:var(--verde-soft); color:var(--verde); display:flex; align-items:center; justify-content:center; }
-  .fn-item-ico svg { width:15px; height:15px; }
-  .fn-item-info { flex:1; min-width:0; }
-  .fn-item-nome { font-size:12.5px; font-weight:700; color:var(--texto); line-height:1.3; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
-  .fn-item-sub { font-size:10.5px; color:var(--cinza); margin-top:2px; font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .fn-star { flex-shrink:0; font-size:14px; color:var(--cinza-2); align-self:flex-start; }
-  .fn-star.on { color:#f5c518; }
-  .fn-vazio { text-align:center; color:var(--cinza-2); font-size:12px; padding:24px 8px; }
+  .fn-layout { display:grid; grid-template-columns:minmax(280px, 330px) minmax(0, 1fr); gap:20px; align-items:start; }
+  .fn-library, .fn-composer { border:1px solid var(--borda); border-radius:16px; background:var(--panel); box-shadow:0 10px 30px rgba(0,0,0,.06); }
+  .fn-library { position:sticky; top:18px; padding:14px; }
+  .fn-library-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
+  .fn-library-head h2 { margin:0; font-family:'Sora',sans-serif; font-size:14px; color:var(--texto); }
+  .fn-count { min-width:26px; padding:4px 7px; border-radius:999px; background:var(--verde-soft); color:var(--verde); font-size:10.5px; font-weight:800; text-align:center; }
+  .fn-library-controls { display:grid; gap:8px; margin-bottom:12px; }
+  .fn-input, .fn-select { width:100%; min-height:42px; box-sizing:border-box; border:1px solid var(--borda); border-radius:10px; background:var(--panel-2); color:var(--texto); padding:9px 11px; font:500 12.5px inherit; }
+  .fn-input:focus, .fn-select:focus { outline:none; border-color:var(--azul); box-shadow:0 0 0 3px color-mix(in srgb, var(--azul) 13%, transparent); }
+  .fn-list { display:flex; flex-direction:column; gap:7px; max-height:calc(100vh - 320px); overflow:auto; padding-right:2px; }
+  .fn-item { width:100%; border:1px solid transparent; border-radius:12px; background:transparent; color:var(--texto); padding:11px; display:flex; align-items:center; gap:10px; text-align:left; cursor:pointer; transition:background .18s ease, border-color .18s ease; }
+  .fn-item:hover { background:var(--panel-2); }
+  .fn-item.sel { background:var(--panel-2); border-color:var(--borda-2); }
+  .fn-item-mark { width:30px; height:30px; flex:0 0 auto; border-radius:9px; background:var(--verde-soft); color:var(--verde); display:flex; align-items:center; justify-content:center; }
+  .fn-item-mark svg { width:15px; height:15px; }
+  .fn-item-copy { min-width:0; flex:1; }
+  .fn-item-name { display:block; font-size:12px; font-weight:720; line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .fn-item-meta { display:block; margin-top:3px; color:var(--cinza); font-size:10px; font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .fn-item-fav { color:var(--cinza-2); display:flex; }
+  .fn-item-fav.on { color:#c89400; }
+  .fn-item-fav svg { width:14px; height:14px; }
+  .fn-list-empty { padding:26px 14px; text-align:center; color:var(--cinza); font-size:12px; line-height:1.5; }
 
-  /* Coluna direita: builder */
-  .fn-builder { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:0; overflow:hidden; }
-  .fn-b-head { display:flex; align-items:center; gap:10px; padding:16px 18px; border-bottom:1px solid var(--borda); }
-  .fn-b-nome { font-family:'Sora',sans-serif; font-size:16px; font-weight:700; color:var(--texto); flex:1; }
-  .fn-b-cat { font-size:11px; color:var(--cinza); font-weight:600; }
-  .fn-b-acao { background:var(--panel-2); border:1px solid var(--borda); color:var(--cinza); border-radius:8px; width:34px; height:34px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; }
-  .fn-b-acao:hover { color:var(--texto); border-color:var(--borda-2); }
-  .fn-b-acao svg { width:16px; height:16px; }
-  .fn-b-acao.perigo:hover { color:#f43f5e; border-color:rgba(244,63,94,.4); }
-  .fn-b-acao.star.on { color:#f5c518; }
+  .fn-composer { overflow:hidden; min-height:560px; }
+  .fn-composer-head { display:flex; align-items:center; gap:10px; padding:16px 18px; border-bottom:1px solid var(--borda); }
+  .fn-composer-title { min-width:0; flex:1; }
+  .fn-composer-title h2 { margin:0; font-family:'Sora',sans-serif; color:var(--texto); font-size:16px; }
+  .fn-composer-title p { margin:3px 0 0; color:var(--cinza); font-size:10.5px; }
+  .fn-form { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(180px,.8fr); gap:12px; padding:16px 18px 4px; }
+  .fn-field { min-width:0; }
+  .fn-field label, .fn-picker label { display:block; margin:0 0 6px; color:var(--cinza); font-size:10.5px; font-weight:700; }
+  .fn-field label span { color:var(--cinza-2); font-weight:500; }
+  .fn-seq-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; padding:18px 18px 4px; }
+  .fn-seq-head h3 { margin:0; color:var(--texto); font-size:13px; }
+  .fn-seq-meta { color:var(--cinza); font-size:10.5px; font-variant-numeric:tabular-nums; }
+  .fn-timeline { padding:0 18px 4px; }
+  .fn-step-block { position:relative; }
+  .fn-delay { height:38px; display:flex; align-items:center; gap:7px; padding-left:20px; color:var(--cinza); }
+  .fn-delay-line { width:1px; align-self:stretch; background:var(--borda); }
+  .fn-delay label { margin-left:3px; font-size:10px; font-weight:650; }
+  .fn-delay select { min-width:82px; height:29px; border:1px solid var(--borda); border-radius:999px; background:var(--panel-2); color:var(--texto); padding:3px 25px 3px 9px; font:650 10.5px inherit; font-variant-numeric:tabular-nums; }
+  .fn-step { min-height:72px; display:flex; align-items:center; gap:11px; border:1px solid var(--borda); border-radius:13px; background:var(--panel-2); padding:10px 11px; }
+  .fn-step-order { width:22px; height:22px; flex:0 0 auto; border-radius:50%; background:var(--panel-3); color:var(--cinza); display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:800; }
+  .fn-step-icon, .fn-pick-icon { width:34px; height:34px; flex:0 0 auto; border-radius:9px; background:var(--panel); display:flex; align-items:center; justify-content:center; color:var(--azul); }
+  .fn-step-icon svg, .fn-pick-icon svg { width:16px; height:16px; }
+  .t-audio { color:var(--roxo); } .t-imagem { color:var(--verde); } .t-video { color:#b86b00; } .t-documento { color:#c18b00; }
+  .fn-step-copy { min-width:0; flex:1; }
+  .fn-step-name { color:var(--texto); font-size:12.5px; font-weight:720; }
+  .fn-step-preview { margin-top:4px; color:var(--cinza); font-size:10.5px; line-height:1.35; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .fn-step-actions { display:flex; gap:5px; flex:0 0 auto; }
+  .fn-step-actions button { width:36px; height:36px; border:0; border-radius:9px; background:transparent; color:var(--cinza-2); cursor:pointer; display:flex; align-items:center; justify-content:center; }
+  .fn-step-actions button:hover:not(:disabled) { background:var(--panel-3); color:var(--texto); }
+  .fn-step-actions button:disabled { opacity:.25; cursor:default; }
+  .fn-step-actions button.perigo:hover { color:#e11d48; }
+  .fn-step-actions svg { width:15px; height:15px; }
+  .fn-seq-empty { margin:12px 0; padding:28px 18px; border:1px dashed var(--borda); border-radius:13px; background:var(--panel-2); text-align:center; }
+  .fn-seq-empty b { display:block; color:var(--texto); font-size:13px; }
+  .fn-seq-empty span { display:block; max-width:48ch; margin:6px auto 0; color:var(--cinza); font-size:11px; line-height:1.5; }
+  .fn-add-area { padding:12px 18px 18px; }
+  .fn-add-toggle { width:100%; min-height:46px; border:1px dashed var(--borda-2); border-radius:12px; background:var(--panel-2); color:var(--azul); font:700 12.5px inherit; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:7px; }
+  .fn-add-toggle svg { width:16px; height:16px; flex:0 0 auto; }
+  .fn-add-toggle:hover { border-color:var(--azul); }
+  .fn-picker { margin-top:9px; padding:13px; border:1px solid var(--borda); border-radius:13px; background:var(--panel-2); }
+  .fn-picker-list { max-height:310px; overflow:auto; border:1px solid var(--borda); border-radius:11px; background:var(--panel); }
+  .fn-pick-item { width:100%; min-height:52px; padding:8px 10px; border:0; border-bottom:1px solid var(--borda); background:transparent; color:var(--texto); display:flex; align-items:center; gap:10px; text-align:left; cursor:pointer; }
+  .fn-pick-item:last-child { border-bottom:0; }
+  .fn-pick-item:hover { background:var(--panel-2); }
+  .fn-pick-copy { min-width:0; flex:1; }
+  .fn-pick-copy b { display:block; font-size:11.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .fn-pick-copy span { display:block; margin-top:2px; color:var(--cinza); font-size:9.5px; }
+  .fn-picker-empty { padding:20px; color:var(--cinza); text-align:center; font-size:11px; }
+  .fn-composer-foot { position:sticky; bottom:0; z-index:4; display:flex; align-items:center; gap:8px; padding:12px 18px; border-top:1px solid var(--borda); background:color-mix(in srgb,var(--panel) 94%,transparent); backdrop-filter:blur(12px); }
+  .fn-status { min-width:0; flex:1; color:var(--cinza); font-size:11px; line-height:1.35; }
+  .fn-status.ok { color:var(--verde); } .fn-status.erro { color:#e11d48; }
 
-  .fn-passos { padding:14px 18px; display:flex; flex-direction:column; gap:10px; }
-  .fn-passo { display:flex; align-items:center; gap:12px; background:var(--panel-2); border:1px solid var(--borda);
-              border-left:3px solid transparent; border-radius:11px; padding:13px 14px; }
-  .fn-passo.t-texto { border-left-color:var(--azul); }
-  .fn-passo.t-audio { border-left-color:var(--roxo); }
-  .fn-passo.t-imagem { border-left-color:var(--verde); }
-  .fn-passo.t-video { border-left-color:#f59e0b; }
-  .fn-passo.t-documento { border-left-color:var(--amarelo); }
-  .fn-passo-ord { width:20px; height:20px; flex-shrink:0; border-radius:50%; background:var(--panel-3); color:var(--cinza); font-size:10.5px; font-weight:800; display:flex; align-items:center; justify-content:center; font-variant-numeric:tabular-nums; }
-  .fn-passo-ico { width:32px; height:32px; flex-shrink:0; border-radius:9px; display:flex; align-items:center; justify-content:center; }
-  .fn-passo-ico svg { width:16px; height:16px; }
-  .fn-passo-ico.t-texto { background:rgba(59,130,246,.14); color:var(--azul); }
-  .fn-passo-ico.t-audio { background:rgba(139,92,246,.16); color:var(--roxo); }
-  .fn-passo-ico.t-imagem { background:var(--verde-soft); color:var(--verde); }
-  .fn-passo-ico.t-video { background:rgba(245,158,11,.14); color:#f59e0b; }
-  .fn-passo-ico.t-documento { background:rgba(250,204,21,.16); color:var(--amarelo); }
-  .fn-passo-corpo { flex:1; min-width:0; }
-  .fn-passo-nome { font-size:12.5px; font-weight:700; color:var(--texto); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .fn-passo-quando { font-size:11px; color:var(--cinza); margin-top:3px; display:flex; align-items:center; gap:5px; }
-  .fn-passo-quando svg { width:12px; height:12px; opacity:.7; flex-shrink:0; }
-  /* input.fn-delay-inp com seletor composto: o base.html tem input[type=number]
-     global com width:100% que ganharia da classe sozinha (já estourou o layout). */
-  .fn-passo-quando input.fn-delay-inp { width:58px; background:var(--panel-3); border:1px solid var(--borda); border-radius:6px; padding:3px 6px; font-size:11px; color:var(--texto); text-align:center; font-variant-numeric:tabular-nums; box-shadow:none; }
-  .fn-passo-acoes { display:flex; gap:4px; flex-shrink:0; }
-  .fn-mini { background:none; border:none; color:var(--cinza-2); cursor:pointer; width:26px; height:26px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; }
-  .fn-mini:hover { color:var(--texto); background:var(--panel-3); }
-  .fn-mini:disabled { opacity:.3; cursor:default; }
-  .fn-mini.perigo:hover { color:#f43f5e; }
-  .fn-mini svg { width:15px; height:15px; }
+  .fn-dialog-bg { display:none; position:fixed; inset:0; z-index:500; background:rgba(4,10,18,.52); align-items:center; justify-content:center; padding:20px; }
+  .fn-dialog-bg.aberto { display:flex; }
+  .fn-dialog { width:min(440px,100%); border:1px solid var(--borda); border-radius:16px; background:var(--panel); box-shadow:0 24px 70px rgba(0,0,0,.32); padding:20px; }
+  .fn-dialog h3 { margin:0; color:var(--texto); font-family:'Sora',sans-serif; font-size:15px; }
+  .fn-dialog p { margin:7px 0 16px; color:var(--cinza); font-size:12px; line-height:1.5; }
+  .fn-dialog-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:14px; }
 
-  .fn-add { margin:2px 18px 18px; }
-  .fn-add-btn { width:100%; background:var(--panel-2); border:1px dashed var(--borda-2); color:var(--cinza); border-radius:11px; padding:12px; font-size:13px; font-weight:600; cursor:pointer; }
-  .fn-add-btn:hover { color:var(--texto); border-color:var(--azul); }
-  .fn-picker { background:var(--panel-2); border:1px solid var(--borda); border-radius:11px; padding:14px; margin:2px 18px 18px; }
-  .fn-picker label { display:block; font-size:10.5px; font-weight:700; color:var(--cinza); text-transform:uppercase; letter-spacing:.4px; margin:0 0 5px; }
-  .fn-picker select, .fn-picker input { width:100%; box-sizing:border-box; background:var(--panel-3); border:1px solid var(--borda); border-radius:8px; padding:9px 11px; font-size:12.5px; color:var(--texto); margin-bottom:11px; font-family:inherit; }
-  .fn-picker-linha { display:flex; gap:10px; }
-  .fn-picker-linha > div { flex:1; }
-  .fn-picker-acoes { display:flex; justify-content:flex-end; gap:8px; }
-  .fn-pk-combo { position:relative; }
-  .fn-pk-lista { position:absolute; top:calc(100% - 8px); left:0; right:0; z-index:60; background:var(--panel); border:1px solid var(--borda-2); border-radius:10px; max-height:280px; overflow-y:auto; box-shadow:0 14px 40px rgba(0,0,0,.45); }
-  .fn-pk-item { display:flex; align-items:center; gap:9px; width:100%; text-align:left; background:none; border:none; border-bottom:1px solid var(--borda); padding:8px 11px; cursor:pointer; }
-  .fn-pk-item:hover { background:var(--panel-2); }
-  .fn-pk-item:last-child { border-bottom:none; }
-  .fn-pk-nome { flex:1; min-width:0; font-size:12.5px; font-weight:600; color:var(--texto); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .fn-pk-cat { flex-shrink:0; font-size:10px; font-weight:700; color:var(--cinza-2); }
-  .fn-pk-vazio { padding:14px; font-size:12px; color:var(--cinza-2); text-align:center; }
-
-  .fn-empty { text-align:center; color:var(--cinza-2); padding:60px 20px; }
-  .fn-empty svg { width:44px; height:44px; opacity:.35; margin-bottom:12px; }
-  .fn-empty p { font-size:13px; margin:0; }
-  .fn-total { font-size:11px; color:var(--cinza-2); padding:0 18px 14px; }
-
-  .btn-azul { background:var(--azul); color:#fff; border:none; padding:9px 18px; border-radius:8px; font-size:12.5px; font-weight:600; cursor:pointer; }
-  .btn-cinza { background:var(--panel-3); color:var(--cinza); border:1px solid var(--borda); padding:9px 16px; border-radius:8px; font-size:12.5px; font-weight:600; cursor:pointer; }
-
-  .modal-bg { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:200; align-items:center; justify-content:center; }
-  .modal-bg.aberto { display:flex; }
-  .modal-card { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:22px; width:440px; max-width:92vw; }
-  .modal-card h3 { margin:0 0 14px; font-size:15px; color:var(--texto); }
-  .modal-card input { width:100%; box-sizing:border-box; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:10px 12px; font-size:13px; color:var(--texto); margin-bottom:10px; font-family:inherit; }
-  .modal-acoes { display:flex; justify-content:flex-end; gap:8px; margin-top:6px; }
+  @media (max-width:900px) {
+    .fn-layout { grid-template-columns:1fr; }
+    .fn-library { position:static; }
+    .fn-list { max-height:320px; }
+  }
+  @media (max-width:620px) {
+    .fn-form { grid-template-columns:1fr; }
+    .fn-composer-head { align-items:flex-start; flex-wrap:nowrap; }
+    .fn-composer-title { flex:1 1 auto; }
+    .fn-step { align-items:flex-start; }
+    .fn-step-actions { flex-direction:column; }
+    .fn-input, .fn-select { font-size:16px; }
+    .fn-composer-foot { flex-wrap:wrap; }
+    .fn-status { flex-basis:100%; }
+  }
+  @media (prefers-reduced-motion:reduce) { .fn-item { transition:none; } }
 </style>
 {% endblock %}
 
@@ -112,293 +123,167 @@
 <div class="topbar">
   <div>
     <h1 style="margin:0;">Funis de WhatsApp</h1>
-    <div class="sub">Monte uma sequência de mensagens, áudios, imagens e PDFs — cada passo com um intervalo. Na extensão, o consultor dispara o funil inteiro na conversa aberta, um passo após o outro</div>
+    <div class="sub">Monte a sequência uma vez. No WhatsApp, confira o destinatário e dispare sem sair da conversa.</div>
   </div>
-  <div style="display:flex; gap:8px;">
+  <div class="fn-top-actions">
     <button class="btn-outline btn-sm" onclick="location.href='/funis/acompanhamento'">Acompanhamento</button>
-    <button class="btn-outline btn-sm" onclick="location.href='/crm/modelos'">Biblioteca de modelos</button>
-    <button class="btn-azul" onclick="abrirNovoFunil()">+ Novo funil</button>
+    <button class="btn-outline btn-sm" onclick="location.href='/crm/modelos'">Biblioteca de mensagens</button>
+    <button class="fn-primary" id="fn-top-new">Novo funil</button>
   </div>
 </div>
 
-<div class="page">
-<div class="fn-wrap">
-  <!-- Lista de funis -->
-  <div class="fn-col">
-    <div class="fn-col-topo">
-      <select class="fn-pasta-sel" id="fn-pasta-filtro" onchange="mudarPastaFiltro()"></select>
-      <input class="fn-busca" id="fn-busca" placeholder="Buscar funil..." oninput="filtrarFunis()">
+<div class="page fn-page">
+  <div class="fn-layout">
+    <aside class="fn-library" aria-label="Funis salvos">
+      <div class="fn-library-head"><h2>Funis salvos</h2><span class="fn-count" id="fn-count">0</span></div>
+      <div class="fn-library-controls">
+        <input class="fn-input fn-focus" id="fn-search" type="search" placeholder="Buscar funil" aria-label="Buscar funil">
+        <select class="fn-select fn-focus" id="fn-folder-filter" aria-label="Filtrar por pasta"></select>
+      </div>
+      <div class="fn-list" id="fn-list"></div>
+    </aside>
+
+    <main class="fn-composer" id="fn-composer" aria-live="polite"></main>
+  </div>
+</div>
+
+<div class="fn-dialog-bg" id="fn-confirm-bg" role="dialog" aria-modal="true" aria-labelledby="fn-confirm-title">
+  <div class="fn-dialog">
+    <h3 id="fn-confirm-title"></h3>
+    <p id="fn-confirm-text"></p>
+    <div class="fn-dialog-actions">
+      <button class="fn-secondary" id="fn-confirm-cancel">Cancelar</button>
+      <button class="fn-primary" id="fn-confirm-ok">Continuar</button>
     </div>
-    <div class="fn-lista" id="fn-lista"></div>
   </div>
-
-  <!-- Builder -->
-  <div class="fn-builder" id="fn-builder"></div>
-</div>
 </div>
 
-<!-- Modal novo funil -->
-<div class="modal-bg" id="modal-novo">
-  <div class="modal-card">
-    <h3 id="modal-novo-titulo">Novo funil</h3>
-    <input id="nf-nome" placeholder="Nome do funil (ex: Abertura PME - Campinas)">
-    <input id="nf-cat" placeholder="Categoria (opcional — ex: PME, GNDI, Renovação)">
-    <div class="modal-acoes">
-      <button class="btn-cinza" onclick="document.getElementById('modal-novo').classList.remove('aberto')">Cancelar</button>
-      <button class="btn-azul" id="nf-salvar" onclick="salvarNovoFunil()">Criar funil</button>
+<div class="fn-dialog-bg" id="fn-folder-bg" role="dialog" aria-modal="true" aria-labelledby="fn-folder-title">
+  <div class="fn-dialog">
+    <h3 id="fn-folder-title">Nova pasta</h3>
+    <p>Crie a pasta dentro de uma pasta existente. O funil atual continua no rascunho.</p>
+    <div class="fn-field"><label for="fn-folder-parent">Dentro de</label><select class="fn-select" id="fn-folder-parent"></select></div>
+    <div class="fn-field" style="margin-top:10px"><label for="fn-folder-name">Nome da pasta</label><input class="fn-input" id="fn-folder-name" maxlength="120"></div>
+    <div class="fn-status erro" id="fn-folder-status" aria-live="polite"></div>
+    <div class="fn-dialog-actions">
+      <button class="fn-secondary" id="fn-folder-cancel">Cancelar</button>
+      <button class="fn-primary" id="fn-folder-save">Criar pasta</button>
     </div>
   </div>
 </div>
 
 <script>
-const FUNIS = {{ funis|tojson }};
+let FUNIS = {{ funis|tojson }};
 const MODELOS = {{ modelos|tojson }};
-const PASTAS = {{ arvore_pastas|tojson }};
+let PASTAS = {{ arvore_pastas|tojson }};
 
-const ICO = {
-  texto: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
-  audio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>',
-  imagem: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
-  video: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>',
-  documento: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
-  relogio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>',
-  lixo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
-  lapis: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>',
-  cima: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>',
-  baixo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>',
-  funil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>',
+const ICONS = {
+  funil:'<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
+  texto:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  audio:'<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>',
+  imagem:'<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>',
+  video:'<polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>',
+  documento:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
+  mais:'<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  estrela:'<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+  cima:'<polyline points="18 15 12 9 6 15"/>', baixo:'<polyline points="6 9 12 15 18 9"/>',
+  lixo:'<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
 };
+function icon(name){ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+(ICONS[name]||'')+'</svg>'; }
+function escapeHtml(value){ const d=document.createElement('div'); d.textContent=value==null?'':String(value); return d.innerHTML; }
+function typeOf(item){ const t=item.tipo||item.midia_tipo; return ['audio','imagem','video','documento'].includes(t)?t:'texto'; }
+function typeLabel(t){ return t==='audio'?'Áudio':t==='imagem'?'Imagem':t==='video'?'Vídeo':t==='documento'?'PDF':'Texto'; }
+function waitLabel(s){ s=Number(s)||0; if(!s)return 'Agora'; const m=Math.floor(s/60), r=s%60; return m&&r?m+' min '+r+' s':m?m+' min':r+' s'; }
+function waitOptions(value){ const opts=[[0,'Agora'],[5,'5 s'],[10,'10 s'],[30,'30 s'],[60,'1 min'],[120,'2 min'],[300,'5 min']]; if(!opts.some(o=>o[0]===value))opts.push([value,waitLabel(value)]); return opts.sort((a,b)=>a[0]-b[0]).map(o=>'<option value="'+o[0]+'"'+(o[0]===value?' selected':'')+'>'+o[1]+'</option>').join(''); }
+function flatFolders(nodes, prefix){ let out=[]; (nodes||PASTAS).forEach(p=>{ out.push({id:p.id,label:(prefix||'')+p.nome}); out=out.concat(flatFolders(p.filhas,(prefix||'')+'— ')); }); return out; }
+function folderOptions(value, all){ let html=all?'<option value="">Todas as pastas</option>':'<option value="">Sem pasta</option>'; return html+flatFolders().map(p=>'<option value="'+p.id+'"'+(String(value||'')===String(p.id)?' selected':'')+'>'+escapeHtml(p.label)+'</option>').join(''); }
 
-let selecionado = null;
+let selectedId = null;
+let draft = null;
+let dirty = false;
+let pickerOpen = false;
+let pickerSearch = '';
+let filterFolder = '';
+let statusText = '';
+let statusKind = '';
 
-function tipoDePasso(p){ return (p.tipo && ICO[p.tipo]) ? p.tipo : 'texto'; }
-function fmtDelay(s){ s = s||0; if(s<=0) return 'imediatamente'; const m=Math.floor(s/60), r=s%60; if(m&&r) return `após ${m}min ${r}s`; if(m) return `após ${m}min`; return `após ${r}s`; }
-function escapar(t){ const d=document.createElement('div'); d.textContent=t==null?'':String(t); return d.innerHTML; }
+function cloneFunnel(f){ return { id:f.id, nome:f.nome||'', categoria:f.categoria||'', pasta_id:f.pasta_id||'', favorito:!!f.favorito, passos:(f.passos||[]).slice().sort((a,b)=>(a.ordem||0)-(b.ordem||0)).map(p=>({ modelo_id:p.modelo_id, nome:p.modelo_nome||p.nome||'', texto:p.corpo_texto||p.texto||'', tipo:typeOf(p), delay_segundos:Number(p.delay_segundos)||0 })) }; }
+function newDraft(){ return {id:null,nome:'',categoria:'',pasta_id:'',favorito:false,passos:[]}; }
+function draftForList(){ return { id:draft.id,nome:draft.nome,categoria:draft.categoria,pasta_id:draft.pasta_id,favorito:draft.favorito,total_delay:draft.passos.reduce((s,p)=>s+(Number(p.delay_segundos)||0),0),passos:draft.passos.map((p,i)=>({modelo_id:p.modelo_id,modelo_nome:p.nome,corpo_texto:p.texto,tipo:p.tipo,midia_tipo:p.tipo==='texto'?null:p.tipo,delay_segundos:p.delay_segundos,ordem:i+1})) }; }
+function setStatus(text, kind){ statusText=text||''; statusKind=kind||''; const el=document.getElementById('fn-status'); if(el){el.textContent=statusText;el.className='fn-status '+statusKind;} }
 
-// ── Pastas (consultor → operadora → subpasta) — filtro de navegação na lista
-//    de funis + "mover pra pasta" no funil selecionado. V1 é um select simples
-//    com indentação por profundidade, não um navegador em grade com drag. ──
-function _pastasFlatten(nos, prefixo){
-  prefixo = prefixo || '';
-  let out = [];
-  (nos || PASTAS).forEach(function(p){
-    out.push({id:p.id, label:prefixo + p.nome});
-    out = out.concat(_pastasFlatten(p.filhas, prefixo + '— '));
-  });
-  return out;
-}
-function _pastaPorId(id, nos){
-  nos = nos || PASTAS;
-  for (const p of nos){
-    if (p.id === id) return p;
-    const achou = _pastaPorId(id, p.filhas);
-    if (achou) return achou;
-  }
-  return null;
-}
-function _popularSelectPastas(sel, valorAtual, comOpcaoTodas){
-  const flat = _pastasFlatten(PASTAS);
-  let html = comOpcaoTodas ? '<option value="">Todas as pastas</option>' : '<option value="">Sem pasta</option>';
-  html += flat.map(function(p){
-    return '<option value="'+p.id+'"'+(String(valorAtual)===String(p.id)?' selected':'')+'>'+escapar(p.label)+'</option>';
-  }).join('');
-  sel.innerHTML = html;
+function renderList(){
+  const q=(document.getElementById('fn-search').value||'').trim().toLowerCase();
+  const visible=FUNIS.filter(f=>(!filterFolder||String(f.pasta_id||'')===String(filterFolder))&&(!q||(f.nome||'').toLowerCase().includes(q)||(f.categoria||'').toLowerCase().includes(q)));
+  document.getElementById('fn-count').textContent=visible.length;
+  const list=document.getElementById('fn-list');
+  if(!visible.length){ list.innerHTML='<div class="fn-list-empty">'+(FUNIS.length?'Nenhum funil bate com este filtro.':'Nenhum funil salvo. Crie o primeiro e adicione as mensagens na ordem.')+'</div>'; return; }
+  list.innerHTML=visible.map(f=>{ const n=(f.passos||[]).length,total=f.total_delay!=null?f.total_delay:(f.passos||[]).reduce((s,p)=>s+(Number(p.delay_segundos)||0),0); return '<button class="fn-item '+(selectedId===f.id?'sel':'')+'" data-id="'+f.id+'"><span class="fn-item-mark">'+icon('funil')+'</span><span class="fn-item-copy"><span class="fn-item-name">'+escapeHtml(f.nome)+'</span><span class="fn-item-meta">'+n+' '+(n===1?'mensagem':'mensagens')+(total?' · '+waitLabel(total):'')+'</span></span><span class="fn-item-fav '+(f.favorito?'on':'')+'">'+icon('estrela')+'</span></button>'; }).join('');
+  list.querySelectorAll('.fn-item').forEach(btn=>btn.addEventListener('click',()=>requestSwitch(()=>selectFunnel(Number(btn.dataset.id)))));
 }
 
-let _pastaFiltro = '';
-function mudarPastaFiltro(){
-  _pastaFiltro = document.getElementById('fn-pasta-filtro').value;
-  renderLista();
-}
-async function criarSubpasta(parentIdPadrao){
-  const flat = _pastasFlatten(PASTAS);
-  const opcoes = flat.map(function(p){ return p.id+' = '+p.label; }).join('\n');
-  const parentStr = prompt('Vai criar dentro de qual pasta? Digite o número:\n'+opcoes, parentIdPadrao||'');
-  if (parentStr===null) return;
-  const nome = prompt('Nome da nova subpasta:');
-  if (!nome || !nome.trim()) return;
-  const d = await api('/crm/pastas/nova', {nome:nome.trim(), parent_id:parseInt(parentStr,10)});
-  if (d.ok) location.reload();
-}
-async function moverFunilPasta(fid, pastaId){
-  const d = await api('/crm/funis/'+fid+'/mover-pasta', {pasta_id: pastaId?parseInt(pastaId,10):null});
-  if (d.ok) recarregar(fid);
+function stepHtml(p,i,total){ const t=typeOf(p); return '<div class="fn-step-block"><div class="fn-delay"><span class="fn-delay-line"></span><label for="fn-delay-'+i+'">'+(i===0?'Começa':'Depois')+'</label><select id="fn-delay-'+i+'" data-delay="'+i+'" aria-label="Espera antes da mensagem '+(i+1)+'">'+waitOptions(Number(p.delay_segundos)||0)+'</select></div><div class="fn-step"><span class="fn-step-order">'+(i+1)+'</span><span class="fn-step-icon t-'+t+'">'+icon(t)+'</span><div class="fn-step-copy"><div class="fn-step-name">'+escapeHtml(p.nome)+'</div>'+(p.texto?'<div class="fn-step-preview">'+escapeHtml(p.texto)+'</div>':'')+'</div><div class="fn-step-actions"><button data-move="'+i+'" data-dir="-1" '+(i===0?'disabled':'')+' aria-label="Mover mensagem '+(i+1)+' para cima">'+icon('cima')+'</button><button data-move="'+i+'" data-dir="1" '+(i===total-1?'disabled':'')+' aria-label="Mover mensagem '+(i+1)+' para baixo">'+icon('baixo')+'</button><button class="perigo" data-remove="'+i+'" aria-label="Remover mensagem '+(i+1)+'">'+icon('lixo')+'</button></div></div></div>'; }
+function pickerResults(){ const q=pickerSearch.trim().toLowerCase(); return MODELOS.filter(m=>!q||(m.nome||'').toLowerCase().includes(q)||(m.corpo_texto||'').toLowerCase().includes(q)||(m.categoria||'').toLowerCase().includes(q)).sort((a,b)=>{const an=(a.nome||'').toLowerCase(),bn=(b.nome||'').toLowerCase(),ap=q&&an.startsWith(q)?0:1,bp=q&&bn.startsWith(q)?0:1;return ap-bp||an.localeCompare(bn);}).slice(0,60); }
+function pickerHtml(){ const items=pickerResults(); return items.length?items.map(m=>{const t=typeOf(m);return '<button class="fn-pick-item" data-model="'+m.id+'"><span class="fn-pick-icon t-'+t+'">'+icon(t)+'</span><span class="fn-pick-copy"><b>'+escapeHtml(m.nome)+'</b><span>'+escapeHtml((m.categoria||'Geral')+' · '+typeLabel(t))+'</span></span></button>';}).join(''):'<div class="fn-picker-empty">Nenhuma mensagem encontrada. Tente pelo nome, texto ou pasta.</div>'; }
+
+function renderComposer(){
+  const root=document.getElementById('fn-composer');
+  if(!draft){ root.innerHTML='<div class="fn-seq-empty" style="margin:80px 24px"><b>Escolha um funil</b><span>Selecione um funil salvo ou crie um novo para montar a sequência.</span></div>'; return; }
+  const total=draft.passos.reduce((s,p)=>s+(Number(p.delay_segundos)||0),0);
+  root.innerHTML='<div class="fn-composer-head"><div class="fn-composer-title"><h2>'+(draft.id?'Editar funil':'Novo funil')+'</h2><p>O tempo aparece antes de cada mensagem, na ordem em que o cliente vai receber.</p></div>'+(draft.id?'<button class="fn-icon" id="fn-favorite" aria-label="'+(draft.favorito?'Tirar dos favoritos':'Marcar como favorito')+'" title="Favorito">'+icon('estrela')+'</button><button class="fn-icon perigo" id="fn-delete" aria-label="Excluir funil" title="Excluir funil">'+icon('lixo')+'</button>':'')+'</div><div class="fn-form"><div class="fn-field"><label for="fn-name">Nome do funil</label><input class="fn-input fn-focus" id="fn-name" maxlength="200" value="'+escapeHtml(draft.nome)+'" placeholder="Ex: Primeiro contato PME"></div><div class="fn-field"><label for="fn-folder">Pasta <span>opcional</span></label><div style="display:flex;gap:7px"><select class="fn-select fn-focus" id="fn-folder">'+folderOptions(draft.pasta_id,false)+'</select><button class="fn-icon" id="fn-new-folder" aria-label="Criar pasta" title="Criar pasta">'+icon('mais')+'</button></div></div><div class="fn-field" style="grid-column:1/-1"><label for="fn-category">Identificação <span>opcional</span></label><input class="fn-input fn-focus" id="fn-category" maxlength="120" value="'+escapeHtml(draft.categoria)+'" placeholder="Ex: PME, Renovação ou Odonto"></div></div><div class="fn-seq-head"><h3>Sequência</h3><span class="fn-seq-meta">'+draft.passos.length+' '+(draft.passos.length===1?'mensagem':'mensagens')+(draft.passos.length?' · '+waitLabel(total):'')+'</span></div><div class="fn-timeline">'+(draft.passos.length?draft.passos.map((p,i)=>stepHtml(p,i,draft.passos.length)).join(''):'<div class="fn-seq-empty"><b>A sequência está vazia</b><span>Adicione a primeira mensagem. Ela pode sair na hora ou esperar alguns segundos.</span></div>')+'</div><div class="fn-add-area"><button class="fn-add-toggle" id="fn-add-toggle">'+icon('mais')+' Adicionar mensagem</button>'+(pickerOpen?'<div class="fn-picker"><label for="fn-picker-search">Buscar na biblioteca</label><input class="fn-input fn-focus" id="fn-picker-search" value="'+escapeHtml(pickerSearch)+'" placeholder="Nome, texto ou pasta"><div class="fn-picker-list" id="fn-picker-list">'+pickerHtml()+'</div></div>':'')+'</div><div class="fn-composer-foot"><div class="fn-status '+statusKind+'" id="fn-status" aria-live="polite">'+escapeHtml(statusText)+'</div><button class="fn-secondary" id="fn-cancel">Cancelar</button><button class="fn-primary" id="fn-save">Salvar funil</button></div>';
+  bindComposer();
 }
 
-function renderLista(){
-  const busca=(document.getElementById('fn-busca').value||'').toLowerCase();
-  const lista=document.getElementById('fn-lista');
-  const vis=FUNIS.filter(f=> {
-    if (_pastaFiltro && String(f.pasta_id||'')!==String(_pastaFiltro)) return false;
-    return !busca || (f.nome||'').toLowerCase().includes(busca) || (f.categoria||'').toLowerCase().includes(busca);
-  });
-  if(!vis.length){ lista.innerHTML='<div class="fn-vazio">'+(FUNIS.length?'Nenhum funil bate com a busca.':'Nenhum funil ainda. Crie o primeiro.')+'</div>'; return; }
-  lista.innerHTML = vis.map(f=>{
-    const n=(f.passos||[]).length;
-    const sub=[f.categoria, n?`${n} passo${n>1?'s':''}`:'sem passos', (f.total_delay?`~${fmtDelay(f.total_delay).replace('após ','')}`:'')]
-      .filter(Boolean).join(' · ');
-    return `<button class="fn-item ${selecionado===f.id?'sel':''}" onclick="selecionar(${f.id})">
-      <span class="fn-item-ico">${ICO.funil}</span>
-      <div class="fn-item-info">
-        <div class="fn-item-nome">${escapar(f.nome)}</div>
-        <div class="fn-item-sub">${escapar(sub)}</div>
-      </div>
-      <span class="fn-star ${f.favorito?'on':''}">${f.favorito?'★':'☆'}</span>
-    </button>`;
-  }).join('');
+function markDirty(){ dirty=true; setStatus('Alterações ainda não salvas.',''); }
+function bindComposer(){
+  ['fn-name','fn-category'].forEach(id=>document.getElementById(id).addEventListener('input',e=>{ if(id==='fn-name')draft.nome=e.target.value;else draft.categoria=e.target.value;markDirty(); }));
+  document.getElementById('fn-folder').addEventListener('change',e=>{draft.pasta_id=e.target.value;markDirty();});
+  document.querySelectorAll('[data-delay]').forEach(s=>s.addEventListener('change',()=>{draft.passos[Number(s.dataset.delay)].delay_segundos=Number(s.value)||0;markDirty();renderComposer();}));
+  document.querySelectorAll('[data-move]').forEach(b=>b.addEventListener('click',()=>{const i=Number(b.dataset.move),j=i+Number(b.dataset.dir);if(j<0||j>=draft.passos.length)return;[draft.passos[i],draft.passos[j]]=[draft.passos[j],draft.passos[i]];markDirty();renderComposer();}));
+  document.querySelectorAll('[data-remove]').forEach(b=>b.addEventListener('click',()=>{draft.passos.splice(Number(b.dataset.remove),1);markDirty();renderComposer();}));
+  document.getElementById('fn-add-toggle').addEventListener('click',()=>{pickerOpen=!pickerOpen;renderComposer();const s=document.getElementById('fn-picker-search');if(s)s.focus();});
+  const search=document.getElementById('fn-picker-search'); if(search){search.addEventListener('input',()=>{pickerSearch=search.value;document.getElementById('fn-picker-list').innerHTML=pickerHtml();bindPicker();});search.addEventListener('keydown',e=>{if(e.key==='Escape'){pickerOpen=false;renderComposer();}else if(e.key==='Enter'){const first=document.querySelector('[data-model]');if(first){e.preventDefault();first.click();}}});bindPicker();}
+  document.getElementById('fn-save').addEventListener('click',saveDraft);
+  document.getElementById('fn-cancel').addEventListener('click',()=>requestSwitch(()=>selectedId?selectFunnel(selectedId):startNew()));
+  const fav=document.getElementById('fn-favorite'); if(fav)fav.addEventListener('click',toggleFavorite);
+  const del=document.getElementById('fn-delete'); if(del)del.addEventListener('click',deleteFunnel);
+  document.getElementById('fn-new-folder').addEventListener('click',openFolderDialog);
 }
+function bindPicker(){ document.querySelectorAll('[data-model]').forEach(b=>b.addEventListener('click',()=>{const m=MODELOS.find(x=>String(x.id)===b.dataset.model);if(!m)return;draft.passos.push({modelo_id:m.id,nome:m.nome,texto:m.corpo_texto||'',tipo:typeOf(m),delay_segundos:draft.passos.length?5:0});dirty=true;pickerOpen=false;pickerSearch='';statusText='Mensagem adicionada. Revise o intervalo antes de salvar.';statusKind='';renderComposer();})); }
 
-function renderBuilder(){
-  const b=document.getElementById('fn-builder');
-  const f=FUNIS.find(x=>x.id===selecionado);
-  if(!f){
-    b.innerHTML=`<div class="fn-empty">${ICO.funil}<p>Selecione um funil à esquerda<br>ou crie um novo para começar.</p></div>`;
-    return;
-  }
-  const passos=(f.passos||[]).slice().sort((a,b)=>(a.ordem-b.ordem)||(a.id-b.id));
-  const total=passos.reduce((s,p)=>s+(p.delay_segundos||0),0);
-  const linhas = passos.map((p,i)=>{
-    const t=tipoDePasso(p);
-    return `<div class="fn-passo t-${t}" data-passo="${p.id}">
-      <div class="fn-passo-ord">${i+1}</div>
-      <div class="fn-passo-ico t-${t}">${ICO[t]}</div>
-      <div class="fn-passo-corpo">
-        <div class="fn-passo-nome">${escapar(p.modelo_nome)}</div>
-        <div class="fn-passo-quando">${ICO.relogio} Enviando após
-          <input type="number" class="fn-delay-inp" min="0" max="3600" value="${p.delay_segundos||0}"
-                 onchange="mudarDelay(${p.id}, this.value)" title="Segundos de espera antes deste passo"> s</div>
-      </div>
-      <div class="fn-passo-acoes">
-        <button class="fn-mini" onclick="mover(${p.id},'cima')" ${i===0?'disabled':''} title="Subir">${ICO.cima}</button>
-        <button class="fn-mini" onclick="mover(${p.id},'baixo')" ${i===passos.length-1?'disabled':''} title="Descer">${ICO.baixo}</button>
-        <button class="fn-mini perigo" onclick="excluirPasso(${p.id})" title="Remover passo">${ICO.lixo}</button>
-      </div>
-    </div>`;
-  }).join('');
-
-  b.innerHTML = `
-    <div class="fn-b-head">
-      <div style="flex:1; min-width:0;">
-        <div class="fn-b-nome">${escapar(f.nome)}</div>
-        ${f.categoria?`<div class="fn-b-cat">${escapar(f.categoria)}</div>`:''}
-      </div>
-      <button class="fn-b-acao star ${f.favorito?'on':''}" onclick="favoritar(${f.id})" title="Favoritar">${f.favorito?'★':'☆'}</button>
-      <button class="fn-b-acao" onclick="renomear(${f.id})" title="Renomear">${ICO.lapis}</button>
-      <button class="fn-b-acao perigo" onclick="excluirFunil(${f.id})" title="Excluir funil">${ICO.lixo}</button>
-    </div>
-    <div class="fn-b-pasta">
-      <select id="fn-b-pasta-sel" onchange="moverFunilPasta(${f.id}, this.value)"></select>
-      <button class="fn-pasta-nova" onclick="criarSubpasta(document.getElementById('fn-b-pasta-sel').value)" title="Criar subpasta">+ subpasta</button>
-    </div>
-    <div class="fn-passos">${linhas || '<div class="fn-vazio" style="padding:20px 0">Nenhum passo ainda. Adicione o primeiro abaixo.</div>'}</div>
-    ${passos.length?`<div class="fn-total">Tempo total da sequência: ~${fmtDelay(total).replace('após ','')}</div>`:''}
-    <div class="fn-picker">
-      <label>Adicionar passo</label>
-      <div class="fn-picker-linha">
-        <div class="fn-pk-combo" style="flex:2">
-          <input type="text" id="pk-busca" placeholder="Buscar modelo por nome, categoria ou tipo…" autocomplete="off"
-                 oninput="filtrarPicker()" onfocus="filtrarPicker()">
-          <div class="fn-pk-lista" id="pk-lista" hidden></div>
-        </div>
-        <div style="flex:1"><input type="number" id="pk-delay" min="0" max="3600" value="5" title="Segundos de espera antes de mandar este passo"></div>
-      </div>
-      <div class="fn-picker-acoes">
-        <button class="btn-azul" onclick="adicionarPasso(${f.id})">Adicionar à sequência</button>
-      </div>
-    </div>`;
-  _popularSelectPastas(document.getElementById('fn-b-pasta-sel'), f.pasta_id, false);
+async function api(url,body){ try{const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const d=await r.json().catch(()=>({ok:false,erro:'O JOB respondeu num formato inesperado.'}));return d&&r.ok?d:{ok:false,erro:(d&&d.erro)||'Não consegui concluir esta ação.'};}catch(e){return{ok:false,erro:'Sem conexão com o JOB. Tente novamente.'};} }
+async function saveDraft(){
+  draft.nome=(document.getElementById('fn-name').value||'').trim(); draft.categoria=(document.getElementById('fn-category').value||'').trim();
+  if(!draft.nome){setStatus('Dê um nome ao funil.','erro');document.getElementById('fn-name').focus();return;}
+  if(!draft.passos.length){setStatus('Adicione pelo menos uma mensagem à sequência.','erro');return;}
+  const btn=document.getElementById('fn-save');btn.disabled=true;btn.textContent='Salvando...';setStatus('Salvando a sequência completa...','');
+  const d=await api('/crm/funis/salvar',{id:draft.id,nome:draft.nome,categoria:draft.categoria,pasta_id:draft.pasta_id||null,passos:draft.passos.map(p=>({modelo_id:p.modelo_id,delay_segundos:Number(p.delay_segundos)||0}))});
+  if(!d.ok){btn.disabled=false;btn.textContent='Salvar funil';setStatus(d.erro||'Não consegui salvar.','erro');return;}
+  draft.id=d.id;selectedId=d.id;const snapshot=draftForList();const idx=FUNIS.findIndex(f=>f.id===d.id);if(idx>=0)FUNIS[idx]=snapshot;else FUNIS.unshift(snapshot);dirty=false;statusText='Funil salvo. Ele já aparece na extensão.';statusKind='ok';history.replaceState(null,'','#funil-'+d.id);renderList();renderComposer();
 }
+async function toggleFavorite(){const d=await api('/crm/funis/'+draft.id+'/favorito',{});if(!d.ok){setStatus(d.erro,'erro');return;}draft.favorito=!!d.favorito;const f=FUNIS.find(x=>x.id===draft.id);if(f)f.favorito=draft.favorito;statusText=draft.favorito?'Funil marcado como favorito.':'Funil retirado dos favoritos.';statusKind='ok';renderList();renderComposer();}
+async function deleteFunnel(){const ok=await confirmAction('Excluir este funil?','O funil e toda a sequência serão removidos. As mensagens da biblioteca continuam intactas.','Excluir funil');if(!ok)return;const d=await api('/crm/funis/'+draft.id+'/excluir',{});if(!d.ok){setStatus(d.erro,'erro');return;}FUNIS=FUNIS.filter(f=>f.id!==draft.id);selectedId=FUNIS.length?FUNIS[0].id:null;draft=selectedId?cloneFunnel(FUNIS[0]):newDraft();dirty=false;history.replaceState(null,'',selectedId?'#funil-'+selectedId:location.pathname);renderList();renderComposer();}
 
-function selecionar(id){ selecionado=id; location.hash='funil-'+id; renderLista(); renderBuilder(); }
-function filtrarFunis(){ renderLista(); }
+function selectFunnel(id){const f=FUNIS.find(x=>x.id===id);if(!f)return;selectedId=id;draft=cloneFunnel(f);dirty=false;pickerOpen=false;pickerSearch='';statusText='';statusKind='';history.replaceState(null,'','#funil-'+id);renderList();renderComposer();}
+function startNew(){selectedId=null;draft=newDraft();dirty=false;pickerOpen=false;pickerSearch='';statusText='';statusKind='';history.replaceState(null,'',location.pathname);renderList();renderComposer();setTimeout(()=>document.getElementById('fn-name')&&document.getElementById('fn-name').focus(),0);}
+async function requestSwitch(action){if(dirty){const ok=await confirmAction('Descartar alterações?','As mudanças feitas desde o último salvamento serão perdidas.','Descartar alterações');if(!ok)return;}action();}
 
-async function api(url, corpo){
-  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(corpo||{})});
-  const d=await r.json().catch(()=>({ok:false,erro:'resposta inválida'}));
-  if(!d.ok) alert(d.erro||'Falhou.');
-  return d;
-}
-function recarregar(id){ if(id!=null) location.hash='funil-'+id; location.reload(); }
+let confirmResolve=null;
+function confirmAction(title,text,okLabel){document.getElementById('fn-confirm-title').textContent=title;document.getElementById('fn-confirm-text').textContent=text;document.getElementById('fn-confirm-ok').textContent=okLabel||'Continuar';document.getElementById('fn-confirm-bg').classList.add('aberto');document.getElementById('fn-confirm-ok').focus();return new Promise(resolve=>{confirmResolve=resolve;});}
+function closeConfirm(value){document.getElementById('fn-confirm-bg').classList.remove('aberto');if(confirmResolve){confirmResolve(value);confirmResolve=null;}}
+document.getElementById('fn-confirm-cancel').addEventListener('click',()=>closeConfirm(false));
+document.getElementById('fn-confirm-ok').addEventListener('click',()=>closeConfirm(true));
 
-function abrirNovoFunil(){ document.getElementById('nf-nome').value=''; document.getElementById('nf-cat').value=''; document.getElementById('modal-novo').classList.add('aberto'); document.getElementById('nf-nome').focus(); }
-async function salvarNovoFunil(){
-  const nome=document.getElementById('nf-nome').value.trim();
-  const categoria=document.getElementById('nf-cat').value.trim();
-  if(!nome){ alert('Dê um nome ao funil.'); return; }
-  const d=await api('/crm/funis/novo',{nome,categoria});
-  if(d.ok) recarregar(d.id);
-}
-async function renomear(id){
-  const f=FUNIS.find(x=>x.id===id); if(!f) return;
-  const nome=prompt('Novo nome do funil:', f.nome); if(nome===null) return;
-  const categoria=prompt('Categoria (deixe vazio para nenhuma):', f.categoria||''); if(categoria===null) return;
-  const d=await api('/crm/funis/'+id+'/renomear',{nome:nome.trim(),categoria:categoria.trim()});
-  if(d.ok) recarregar(id);
-}
-async function favoritar(id){ const d=await api('/crm/funis/'+id+'/favorito',{}); if(d.ok) recarregar(id); }
-async function excluirFunil(id){
-  const f=FUNIS.find(x=>x.id===id);
-  if(!confirm('Excluir o funil "'+(f?f.nome:'')+'" e todos os seus passos?')) return;
-  const d=await api('/crm/funis/'+id+'/excluir',{}); if(d.ok){ selecionado=null; location.hash=''; location.reload(); }
-}
-// ── Combo com busca do "Adicionar passo" — um select nativo com 400+ modelos
-//    era inutilizável. Digita → filtra na hora → clica pra escolher. ──
-let _pkSel = null;
+function openFolderDialog(){document.getElementById('fn-folder-parent').innerHTML=folderOptions(draft.pasta_id||'',false).replace('<option value="">Sem pasta</option>','');document.getElementById('fn-folder-name').value='';document.getElementById('fn-folder-status').textContent='';document.getElementById('fn-folder-bg').classList.add('aberto');document.getElementById('fn-folder-name').focus();}
+function findFolder(id,nodes){for(const p of nodes||PASTAS){if(p.id===id)return p;const found=findFolder(id,p.filhas||[]);if(found)return found;}return null;}
+document.getElementById('fn-folder-cancel').addEventListener('click',()=>document.getElementById('fn-folder-bg').classList.remove('aberto'));
+document.getElementById('fn-folder-save').addEventListener('click',async()=>{const name=document.getElementById('fn-folder-name').value.trim(),parent=Number(document.getElementById('fn-folder-parent').value);const status=document.getElementById('fn-folder-status');if(!name||!parent){status.textContent='Escolha onde a pasta fica e dê um nome.';return;}const btn=document.getElementById('fn-folder-save');btn.disabled=true;btn.textContent='Criando...';const d=await api('/crm/pastas/nova',{nome:name,parent_id:parent});btn.disabled=false;btn.textContent='Criar pasta';if(!d.ok){status.textContent=d.erro;return;}const p=findFolder(parent);if(p){p.filhas=p.filhas||[];p.filhas.push({id:d.id,nome:name,parent_id:parent,filhas:[],modelos:0,funis:0});}draft.pasta_id=d.id;dirty=true;document.getElementById('fn-folder-bg').classList.remove('aberto');document.getElementById('fn-folder-filter').innerHTML=folderOptions(filterFolder,true);renderComposer();setStatus('Pasta criada. Salve o funil para movê-lo para ela.','ok');});
 
-function tipoDoModelo(m){ return (m.midia_tipo && ICO[m.midia_tipo]) ? m.midia_tipo : 'texto'; }
-function rotuloTipo(t){ return t==='audio'?'áudio':(t==='imagem'?'imagem':(t==='documento'?'pdf':(t==='video'?'vídeo':'texto'))); }
+document.getElementById('fn-top-new').addEventListener('click',()=>requestSwitch(startNew));
+document.getElementById('fn-search').addEventListener('input',renderList);
+document.getElementById('fn-folder-filter').innerHTML=folderOptions('',true);
+document.getElementById('fn-folder-filter').addEventListener('change',e=>{filterFolder=e.target.value;renderList();});
 
-function filtrarPicker(){
-  const inp=document.getElementById('pk-busca'), lista=document.getElementById('pk-lista');
-  if(!inp||!lista) return;
-  if(_pkSel && inp.value!==_pkSel.nome) _pkSel=null; // editou depois de escolher
-  const q=(inp.value||'').toLowerCase().trim();
-  const res=MODELOS.filter(m=>{
-    if(!q) return true;
-    return (m.nome||'').toLowerCase().includes(q)
-      || (m.categoria||'').toLowerCase().includes(q)
-      || rotuloTipo(tipoDoModelo(m)).includes(q);
-  }).slice(0,60);
-  lista.innerHTML = res.length ? res.map(m=>{
-    const t=tipoDoModelo(m);
-    return `<button type="button" class="fn-pk-item" onclick="escolherModelo(${m.id})">
-      <span class="fn-passo-ico t-${t}" style="width:26px;height:26px;border-radius:7px;">${ICO[t]}</span>
-      <span class="fn-pk-nome">${escapar(m.nome)}</span>
-      ${m.categoria?`<span class="fn-pk-cat">${escapar(m.categoria)}</span>`:''}
-    </button>`;
-  }).join('') : '<div class="fn-pk-vazio">Nenhum modelo bate com essa busca.</div>';
-  lista.hidden=false;
-}
-
-function escolherModelo(id){
-  const m=MODELOS.find(x=>x.id===id); if(!m) return;
-  _pkSel=m;
-  const inp=document.getElementById('pk-busca'); if(inp) inp.value=m.nome;
-  const lista=document.getElementById('pk-lista'); if(lista) lista.hidden=true;
-}
-
-document.addEventListener('click',(e)=>{
-  const lista=document.getElementById('pk-lista');
-  if(lista && !e.target.closest('.fn-pk-combo')) lista.hidden=true;
-});
-
-async function adicionarPasso(fid){
-  if(!_pkSel){ alert('Busque e escolha um modelo da biblioteca.'); document.getElementById('pk-busca') && document.getElementById('pk-busca').focus(); return; }
-  const delay_segundos=document.getElementById('pk-delay').value;
-  const d=await api('/crm/funis/'+fid+'/passo/novo',{modelo_id:_pkSel.id,delay_segundos});
-  if(d.ok) recarregar(fid);
-}
-async function mudarDelay(pid, val){ const d=await api('/crm/funis/passo/'+pid+'/delay',{delay_segundos:val}); if(d.ok) recarregar(selecionado); }
-async function mover(pid, direcao){ const d=await api('/crm/funis/passo/'+pid+'/mover',{direcao}); if(d.ok) recarregar(selecionado); }
-async function excluirPasso(pid){ if(!confirm('Remover este passo da sequência?')) return; const d=await api('/crm/funis/passo/'+pid+'/excluir',{}); if(d.ok) recarregar(selecionado); }
-
-// Restaura a seleção pelo hash (sobrevive ao reload após cada mudança).
-(function init(){
-  _popularSelectPastas(document.getElementById('fn-pasta-filtro'), '', true);
-  const m=(location.hash||'').match(/funil-(\d+)/);
-  if(m){ const id=parseInt(m[1],10); if(FUNIS.some(f=>f.id===id)) selecionado=id; }
-  if(selecionado===null && FUNIS.length) selecionado=FUNIS[0].id;
-  renderLista(); renderBuilder();
-})();
+(function init(){const match=(location.hash||'').match(/funil-(\d+)/);const initial=match&&FUNIS.find(f=>f.id===Number(match[1]));if(initial)selectFunnel(initial.id);else if(FUNIS.length)selectFunnel(FUNIS[0].id);else startNew();})();
 </script>
 {% endblock %}
