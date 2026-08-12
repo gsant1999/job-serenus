@@ -899,6 +899,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       { ok: msg.ok, erro: msg.erro, wpp_msg_id: msg.wpp_msg_id }, 15000).then(sendResponse);
     return true;
   }
+  if (msg && msg.type === 'fila_enviar_agora') {
+    chamarJob('/api/whatsapp/fila/' + encodeURIComponent(msg.fila_id) + '/enviar-agora', 'POST',
+      { usuario_id: msg.usuario_id }, 15000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'campanha_aguardando') {
     chamarJob('/api/whatsapp/campanha/aguardando?usuario_id=' + encodeURIComponent(msg.usuario_id || ''), 'GET', null, 15000).then(sendResponse);
     return true;

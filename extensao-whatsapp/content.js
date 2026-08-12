@@ -10555,6 +10555,16 @@
     if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
   }
 
+  async function _enviarItemDaFila(item) {
+    if (item.tipo && item.tipo !== 'texto' && item.midia_url) {
+      const dl = await _safeSendMessage({ type: 'baixar_midia', url: item.midia_url });
+      if (!dl || !dl.ok) return { ok: false, erro: (dl && dl.erro) || 'falha ao baixar a mídia' };
+      return pedirEnviarMidia(item.chat_id, item.tipo, dl.dataUrl, item.texto,
+        _nomeArquivoDaUrl(item.midia_url));
+    }
+    return pedirEnviarTexto(item.chat_id, item.texto);
+  }
+
   async function confirmarEnvioPreview(ov, modeloId, midiaTipo) {
     const ta = document.getElementById('job-preview-texto');
     const st = document.getElementById('job-preview-status');
@@ -10588,9 +10598,43 @@
         btn.disabled = false;
         return;
       }
-      await checarFilaDeEnvio();
-      if (st) st.textContent = 'Enviado ✓';
-      setTimeout(() => { ov.remove(); }, 800);
+      // O POST acima só CRIA a mensagem na fila. Antes a tela dizia
+      // "Enviado" nesse ponto, embora o WhatsApp ainda nem tivesse recebido
+      // a chamada; daí a sensação correta de que o botão mentia e demorava.
+      // Para um clique explícito, pede o próprio item agora, sem esperar o
+      // polling. O servidor continua aplicando o mesmo limite de ritmo.
+      if (!_jobGateTentar('envio_direto')) {
+        if (st) st.textContent = 'Outra tarefa do JOB está terminando. Sua mensagem ficou pronta para enviar em seguida.';
+        _agendarFila(1);
+        return;
+      }
+      try {
+        const pronto = await _safeSendMessage({ type: 'fila_enviar_agora',
+          fila_id: resp.id, usuario_id: usuarioId });
+        const item = pronto && pronto.ok && pronto.item;
+        if (!item) {
+          const espera = Math.max(1, Math.ceil(Number(pronto && pronto.espera_s) || 1));
+          if (st) st.textContent = 'O WhatsApp libera este envio em cerca de ' + espera + ' s. A mensagem ficou na fila.';
+          _agendarFila(espera);
+          return;
+        }
+        if (st) st.textContent = 'Enviando pelo WhatsApp…';
+        const envio = await _enviarItemDaFila(item);
+        await _safeSendMessage({ type: 'fila_confirmar', fila_id: item.id,
+          ok: !!(envio && envio.ok), erro: (envio && envio.erro) || null,
+          wpp_msg_id: (envio && envio.wpp_msg_id) || null });
+        if (!envio || !envio.ok) {
+          if (st) st.textContent = 'Não consegui enviar: ' + ((envio && envio.erro) || 'falha no WhatsApp') + '. Tente novamente.';
+          btn.disabled = false;
+          _agendarFila(1);
+          return;
+        }
+        if (st) st.textContent = 'Enviado pelo WhatsApp.';
+        _agendarFila(1);
+        setTimeout(() => { ov.remove(); }, 800);
+      } finally {
+        _jobGateSoltar();
+      }
     } catch (e) {
       if (st) st.textContent = 'Erro: ' + e.message;
       btn.disabled = false;

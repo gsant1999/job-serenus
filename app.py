@@ -20287,6 +20287,69 @@ def api_whatsapp_fila_confirmar(fid):
     return _wa_cors(jsonify({"ok": True}))
 
 
+@app.route('/api/whatsapp/fila/<int:fid>/enviar-agora', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
+def api_whatsapp_fila_enviar_agora(fid):
+    """Entrega UMA mensagem que o consultor acabou de confirmar na extensão.
+
+    O caminho normal continua sendo a fila: campanhas e tarefas agendadas não
+    podem furar o ritmo. Mas um clique explícito na conversa aberta não deve
+    ficar aguardando o polling de 20 segundos para sequer tentar enviar. Esta
+    rota reivindica exatamente o item recém-criado, respeita o mesmo limite de
+    ritmo do servidor e devolve a espera real quando ainda não for seguro.
+    """
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    d = request.json or {}
+    try:
+        usuario_id = int(d.get('usuario_id'))
+    except (TypeError, ValueError):
+        usuario_id = 0
+    if not usuario_id:
+        return _wa_cors(jsonify({"ok": False, "erro": "Usuário não identificado"})), 400
+    conn = db()
+    item = conn.execute("SELECT * FROM whatsapp_extensao_fila WHERE id=?", (fid,)).fetchone()
+    if not item:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "Mensagem não encontrada"})), 404
+    it = dict(item)
+    # Só o próprio consultor pode puxar a sua mensagem recém-confirmada; e só
+    # o caminho explícito pode usar esta entrega imediata.
+    if it.get('responsavel_id') != usuario_id or it.get('origem') != 'extensao_direto':
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "Esta mensagem não pode ser enviada por aqui"})), 403
+    if it.get('status') != 'pendente':
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "Esta mensagem já está sendo processada"})), 409
+
+    ultimo = conn.execute("""SELECT enviado_em, chat_id FROM whatsapp_extensao_fila
+        WHERE responsavel_id=? AND status='enviado' AND enviado_em IS NOT NULL
+        ORDER BY enviado_em DESC LIMIT 1""", (usuario_id,)).fetchone()
+    if ultimo and ultimo['enviado_em']:
+        decorrido = _wa_segundos_desde(ultimo['enviado_em'])
+        mesma = bool(it.get('chat_id') and it.get('chat_id') == ultimo['chat_id'])
+        gate = _wa_gate_atual(mesma)
+        if decorrido is not None and decorrido < gate:
+            close_db(conn)
+            return _wa_cors(jsonify({"ok": True, "item": None,
+                                     "espera_s": round(max(0.0, gate - decorrido), 1)}))
+
+    agora = _agora_sp()
+    claim = conn.execute("""UPDATE whatsapp_extensao_fila SET status='enviando', claim_em=?
+        WHERE id=? AND status='pendente' AND responsavel_id=?""", (agora, fid, usuario_id))
+    if getattr(claim, 'rowcount', 1) == 0:
+        conn.rollback(); close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "A mensagem foi assumida por outra sessão"})), 409
+    conn.commit()
+    midia_url = (f"{_SITE_BASE_URL}/crm/modelos/midia/{it['midia_arquivo']}"
+                 if it.get('midia_arquivo') else None)
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "item": {
+        "id": it['id'], "chat_id": it['chat_id'], "tipo": it['tipo'], "texto": it['texto'],
+        "midia_url": midia_url,
+    }}))
+
+
 @app.route('/api/whatsapp/chat-lead', methods=['GET', 'OPTIONS'])
 @requer('whatsapp:ler')
 def api_whatsapp_chat_lead():
