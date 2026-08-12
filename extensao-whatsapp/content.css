@@ -1425,7 +1425,8 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
    calcula pela midia, isso empurra a foto e joga a hora pra fora.
    Ninguem via botao nenhum e a bolha ficava torta: os dois sintomas, uma
    causa. Vazio some; quando tiver o que mostrar, aparece. */
-.job-doc-slot:empty, .job-tr-slot:empty {
+.job-doc-slot:empty:not(.job-slot-com-conteudo),
+.job-tr-slot:empty:not(.job-slot-com-conteudo) {
   height: 0; margin: 0; padding: 0; border-top: none; overflow: hidden;
 }
 /* NAO E `display:none`, e foi por isso que o botao continuou sumido.

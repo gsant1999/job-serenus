@@ -280,6 +280,10 @@
 
   function _jobRaiz(host) {
     if (!host || !host.attachShadow) return host;      // sem suporte: comportamento antigo
+    // Conteudo em Shadow DOM nao conta para o seletor CSS `:empty` aplicado ao
+    // hospedeiro. Marca explicitamente que este slot ganhou interface; sem a
+    // marca, o proprio CSS reduz o botao a zero mesmo depois de renderizado.
+    try { host.classList.add('job-slot-com-conteudo'); } catch (e) {}
     if (host.shadowRoot) return host.shadowRoot;       // já tem: reaproveita
     let raiz;
     try { raiz = host.attachShadow({ mode: 'open' }); }
@@ -2730,6 +2734,7 @@
   // Colisao nao e risco real: o hash e unico por mensagem e a comparacao so
   // acontece dentro da conversa aberta.
   const _TR_AUDIO_HASH = new Set();
+  const _TR_AUDIO_CANONICO = new Map();
 
   function _trHashDoId(id) {
     const p = String(id || '').split('_');
@@ -2747,6 +2752,11 @@
       '[aria-label*="udio"], [data-testid*="audio"], [data-testid*="ptt"]');
   }
 
+  function _trIdCanonico(id) {
+    if (_TR_AUDIO_IDS.has(id)) return id;
+    return _TR_AUDIO_CANONICO.get(_trHashDoId(id)) || id;
+  }
+
   // Chamada UMA vez por conversa aberta (ver `_barraConvInjetar`), e de novo
   // a cada `_TR_AUDIO_REFRESH_MS` enquanto ela continua aberta — mensagem de
   // audio nova, chegando ao vivo, tambem precisa entrar no Set. Silenciosa: se
@@ -2758,6 +2768,7 @@
       if (r && Array.isArray(r.audios)) {
         _TR_AUDIO_IDS.clear();
         _TR_AUDIO_HASH.clear();
+        _TR_AUDIO_CANONICO.clear();
         for (const a of r.audios) {
           if (!a || !a.msg_id) continue;
           // O msg_id CANONICO continua sendo o do store — e ele que vai pro
@@ -2765,7 +2776,10 @@
           // serve SO pra achar a linha na tela.
           _TR_AUDIO_IDS.add(a.msg_id);
           const h = _trHashDoId(a.msg_id);
-          if (h) _TR_AUDIO_HASH.add(h);
+          if (h) {
+            _TR_AUDIO_HASH.add(h);
+            _TR_AUDIO_CANONICO.set(h, a.msg_id);
+          }
         }
         // ESTA RESPOSTA CHEGA TARDE DEMAIS PRA PASSADA QUE JA RODOU.
         //
@@ -2917,27 +2931,9 @@
     // "NUNCA devolve vazio: botao que some e pior que botao no lugar mais ou
     // menos certo". O caminho do audio nao tinha essa rede — agora tem.
     //
-    // Sem ancora, acha a bolha pela GEOMETRIA, que e o que o proprio arquivo
-    // diz nao mudar entre redesenhos: dentro da linha, o maior bloco que NAO
-    // ocupa a linha inteira. Nao depende de nome de icone nenhum.
-    // Contabilizada em TR.perf.geo como a geometria do documento: isto le
-    // layout (clientWidth/Height + getComputedStyle) e roda dentro da extensao
-    // que estamos investigando por travamento. Medicao que nao aparece no
-    // Diagnostico e custo que ninguem consegue atribuir depois. Aviso do Codex.
-    const _g0 = performance.now();
-    try {
-      let area = 0;
-      for (const e2 of row.querySelectorAll('div, span')) {
-        const w = e2.clientWidth;
-        if (w <= 150 || w >= larguraLinha * 0.94) continue;
-        if (_TR_SUBSTITUIDO[e2.tagName] || _trEhLinhaFlex(e2)) continue;
-        const a = w * (e2.clientHeight || 1);
-        if (a > area) { area = a; melhor = e2; }
-      }
-    } catch (e) { /* cai no return abaixo */ }
-    finally { TR.perf.geo += performance.now() - _g0; TR.perf.geoN++; }
-    if (melhor) return melhor;
-    // Ultimo recurso: a propria linha, marcada como SOLTO — igual ao documento.
+    // Sem ancora semantica, nao tenta adivinhar um ancestral pela area. Esse
+    // palpite podia escolher um wrapper com altura fixa e overflow, deixando o
+    // botao no DOM mas recortado. A propria linha e o fallback estavel.
     // Botao levemente fora do lugar e recuperavel; botao que nao existe, nao.
     // A marca importa: pendurado na linha inteira, sem a classe de solto, o
     // bloco atravessa a conversa de ponta a ponta (foi o que ficou horrivel no
@@ -3078,7 +3074,7 @@
           }
         }
       }
-      if (row.querySelector('.job-tr-slot[data-msg="' + (window.CSS && window.CSS.escape ? window.CSS.escape(id) : id) + '"]:not(.job-doc-slot)')) {
+      if (row.querySelector('.job-tr-slot:not(.job-doc-slot)')) {
         if (!pendente) row._jobPronta = id;
         continue;
       }
@@ -3131,12 +3127,13 @@
         ? (String(id).lastIndexOf('true_', 0) === 0 ? 'consultor' : 'lead')
         : _trLado(bolha, row);
       const slot = document.createElement('div');
+      const idAudio = _trIdCanonico(id);
       slot.className = 'job-tr-slot ' + (lado === 'consultor' ? 'job-tr-dir' : 'job-tr-esq')
                      + (row._jobTrSolto ? ' job-tr-solto' : '');
-      slot.dataset.msg = id;
+      slot.dataset.msg = idAudio;
       // DENTRO da bolha: herda posicao, largura e cor de quem ja esta no lugar certo.
       bolha.appendChild(slot);
-      trRenderSlot(slot, id);
+      trRenderSlot(slot, idAudio);
       if (!pendente) row._jobPronta = id;
     }
     const _gasto = performance.now() - _t0;
@@ -3928,14 +3925,14 @@
     // precisar abrir uma conversa com PDF e reclamar.
     try {
       const conv = await _pedirPonte('ler_conversa_completa', { limite: 150 }, 15000);
-      const porId = {};
-      ((conv && conv.mensagens) || []).forEach((m) => { porId[m.msg_id] = m.tipo || ''; });
+      const porHash = {};
+      ((conv && conv.mensagens) || []).forEach((m) => { porHash[_trHashDoId(m.msg_id)] = m.tipo || ''; });
       const visiveis = Array.from(linhas).map((r) => r.getAttribute('data-id') || '');
       const TIPO_ARQ = ['document', 'image'];
       const TIPO_AUD = ['ptt', 'audio'];
       let vArq = 0, vAud = 0;
       visiveis.forEach((id) => {
-        const tp = porId[id];
+        const tp = porHash[_trHashDoId(id)];
         if (!tp) return;                       // linha que a wa-js nao viu: nao conta
         if (TIPO_ARQ.indexOf(tp) >= 0) vArq++;
         else if (TIPO_AUD.indexOf(tp) >= 0) vAud++;
@@ -4076,11 +4073,11 @@
     let quebrou = null;
     try {
       const conv = await _pedirPonte('ler_conversa_completa', { limite: 150 }, 15000);
-      const porId = {};
-      ((conv && conv.mensagens) || []).forEach((m) => { porId[m.msg_id] = m.tipo || ''; });
+      const porHash = {};
+      ((conv && conv.mensagens) || []).forEach((m) => { porHash[_trHashDoId(m.msg_id)] = m.tipo || ''; });
       let vArq = 0, vAud = 0;
       Array.from(linhas).forEach((r) => {
-        const tp = porId[r.getAttribute('data-id') || ''];
+        const tp = porHash[_trHashDoId(r.getAttribute('data-id') || '')];
         if (!tp) return;
         if (tp === 'document' || tp === 'image') vArq++;
         else if (tp === 'ptt' || tp === 'audio') vAud++;
@@ -4095,7 +4092,7 @@
       // "o seletor achou?" por "o bloco existe?", quando a pergunta que importa
       // e "o botao esta la?". So conta bloco com filho dentro.
       const cheio = (sel) => Array.prototype.filter.call(
-        main.querySelectorAll(sel), (e) => e.children.length > 0).length;
+        main.querySelectorAll(sel), (e) => ((e.shadowRoot || e).children.length > 0)).length;
       const sArq = cheio('.job-doc-slot');
       const sAud = cheio('.job-tr-slot:not(.job-doc-slot)');
       // Tolerancia de um: linha pode ter entrado na tela no meio da medicao.
