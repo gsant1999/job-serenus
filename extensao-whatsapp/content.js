@@ -8166,13 +8166,22 @@
   // Decodificar imagem custa, e as logos nao mudam entre um desenho e outro.
   // Sem este cache, cotar de novo pro mesmo cliente pagava tudo de novo.
   const _cvCache = new Map();
+  const _TETO_CV_IMAGENS = 24;
   function _cvImagem(src) {
     if (!src) return Promise.resolve(null);
     if (_cvCache.has(src)) return Promise.resolve(_cvCache.get(src));
     return new Promise((ok) => {
       const im = new Image();
-      im.onload = () => { _cvCache.set(src, im); ok(im); };
-      im.onerror = () => { _cvCache.set(src, null); ok(null); };   // falha nao derruba a imagem
+      im.onload = () => {
+        _cvCache.set(src, im);
+        _capMap(_cvCache, _TETO_CV_IMAGENS);
+        ok(im);
+      };
+      im.onerror = () => {
+        _cvCache.set(src, null);
+        _capMap(_cvCache, _TETO_CV_IMAGENS);
+        ok(null);
+      };   // falha nao derruba a imagem
       im.src = src;
     });
   }
@@ -9363,7 +9372,10 @@
 
   function setCorpoSecao(html) {
     const c = document.getElementById('job-painel-doc-corpo');
-    if (c) c.innerHTML = html;
+    if (c) {
+      _revogarPreviasMidia();
+      c.innerHTML = html;
+    }
     const cancelBtn = document.getElementById('job-cancelar-btn');
     if (cancelBtn) cancelBtn.addEventListener('click', () => cancelarAnalise(cancelBtn.dataset.reqid));
     const analisarBtn = document.getElementById('job-analisar-btn');
@@ -9991,14 +10003,24 @@
     const bin = atob(b64);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return URL.createObjectURL(new Blob([bytes], { type: mime }));
+    const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+    _urlsPreviaMidia.add(url);
+    return url;
   }
+  const _urlsPreviaMidia = new Set();
+  function _revogarPreviasMidia() {
+    for (const url of _urlsPreviaMidia) {
+      try { URL.revokeObjectURL(url); } catch (e) {}
+    }
+    _urlsPreviaMidia.clear();
+  }
+  _aoLimpar(_revogarPreviasMidia);
   const _midiaObserver = ('IntersectionObserver' in window)
-    ? new IntersectionObserver((entradas) => {
+    ? _observar(new IntersectionObserver((entradas) => {
         for (const en of entradas) {
           if (en.isIntersecting) { _midiaObserver.unobserve(en.target); _carregarUmaMidia(en.target); }
         }
-      }, { root: null, rootMargin: '150px' })
+      }, { root: null, rootMargin: '150px' }))
     : null;
   async function _carregarUmaMidia(ph) {
     if (!ph || ph.getAttribute('data-midia-carregada')) return;
@@ -11824,14 +11846,14 @@
     // análise (leitura de IA em imagens e PDFs, docs_extraidos, transcrições)
     // e, até agora, o caminho de sucesso nunca removia — só o de erro.
     //
-    // 'rodando' e 'cancelado' NUNCA saem. Despejar uma análise em andamento
+    // 'rodando' NUNCA sai. Despejar uma análise em andamento
     // faria o painel "perder" a análise e mostrar "Analisar este lead" com ela
     // ainda rodando por trás — que é exatamente o bug documentado na
     // sincronizarPainelComConversa ("trava depois de clicar Analisar").
-    // 'cancelado' fica porque a tela precisa dizer que foi cancelada; sem a
-    // entrada, o painel voltaria a oferecer analisar como se nada tivesse sido.
+    // Canceladas antigas podem sair quando o teto estourar; a atual continua
+    // presente porque e a entrada mais nova do Map.
     _capMap(_analises, _TETO_ANALISES,
-            (a) => a && (a.status === 'rodando' || a.status === 'cancelado'));
+            (a) => a && a.status === 'rodando');
     atualizarPilula();
     try {
       const painelRolavel = acharPainelRolavel();
