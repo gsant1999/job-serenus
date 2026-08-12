@@ -1,0 +1,34 @@
+{# Alerta de regra de gestor incompleta.
+
+   Usado em três telas (proposta, Financeiro, Fluxo de Caixa) com o MESMO texto e
+   o mesmo link de propósito: aviso que muda de palavra conforme a tela faz a
+   pessoa achar que são problemas diferentes.
+
+   O aviso diz a operadora e o plano exatos e leva direto pra configuração que
+   falta. "Configure as comissões" mandaria procurar entre umas seis telas. #}
+{% if regras_faltando %}
+<div class="rg-alerta">
+  <div class="rg-alerta-titulo">
+    Regra de comissão do gestor incompleta em
+    {{ regras_faltando|length }} operadora{{ '' if regras_faltando|length == 1 else 's' }}
+  </div>
+  <p class="rg-alerta-txt">
+    Enquanto a regra estiver incompleta, estas vendas não geram financeiro, não podem ser liberadas
+    e não pagam PIX. A venda continua cadastrada e pode ficar em rascunho — só o dinheiro fica parado.
+    <i class="ajuda-i" title="A regra do gestor tem três partes: quanto e quando a operadora paga (régua de recebimento), quanto de cada fração é do gestor (régua do gestor) e o que é retido, com alíquota, base e responsável. Faltando qualquer uma, o JOB não sabe quanto pagar e não inventa.">i</i>
+  </p>
+  <table class="rg-alerta-tab">
+    <thead><tr><th>Operadora e plano</th><th class="num">Vendas paradas</th><th>O que falta</th><th></th></tr></thead>
+    <tbody>
+      {% for g in regras_faltando %}
+      <tr>
+        <td><b>{{ g.operadora }}</b> · {{ g.plano }}</td>
+        <td class="num">{{ g.vendas }}</td>
+        <td>{% for f in g.falta %}<div>{{ f }}</div>{% endfor %}</td>
+        <td><a href="{{ g.link }}" class="rg-alerta-btn">Configurar esta regra</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}

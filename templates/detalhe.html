@@ -109,6 +109,64 @@
 
 <div class="page" style="max-width:1280px;">
 
+  {# Regra do gestor incompleta NESTA venda. Vem antes do cabeçalho de propósito:
+     quem abre a proposta pra liberar comissão precisa ver o impedimento antes de
+     clicar, não depois de tentar. #}
+  {% if bloqueio_gestor and bloqueio_gestor.bloqueia %}
+  <div class="rg-alerta">
+    <div class="rg-alerta-titulo">Esta venda não gera financeiro: a regra do gestor está incompleta</div>
+    <p class="rg-alerta-txt">
+      Operadora <b>{{ bloqueio_gestor.operadora }}</b>, plano <b>{{ bloqueio_gestor.plano }}</b>.
+      A venda continua cadastrada e pode ficar em rascunho, mas a geração financeira, a liberação
+      para o corretor e o PIX ficam bloqueados até a regra estar completa.
+      <i class="ajuda-i" title="A regra do gestor tem três partes separadas: a régua de recebimento (quanto e quando a operadora paga), a régua do gestor (quanto de cada fração é dele) e as retenções (com alíquota, base de cálculo e responsável). O JOB não completa nenhuma delas sozinho.">i</i>
+    </p>
+    <ul style="margin:0 0 10px 18px; padding:0; font-size:12px; line-height:1.7;">
+      {% for f in bloqueio_gestor.falta %}<li>{{ f }}</li>{% endfor %}
+    </ul>
+    <a href="{{ bloqueio_gestor.link }}" class="rg-alerta-btn">Configurar a regra desta operadora</a>
+  </div>
+  {% elif conta_gestor and conta_gestor.completa %}
+  {# A conta aberta, fração por fração. Sem isso, "comissão do gestor" é um número
+     sem origem — e número sem origem ninguém confere. #}
+  <div class="card" style="padding:16px 18px; margin-bottom:16px;">
+    <div style="font-family:'Sora',sans-serif;font-size:13px;font-weight:600;margin-bottom:4px;">
+      Comissão do gestor nesta venda<i class="ajuda-i" title="Calculado a partir da regra que foi congelada nesta proposta no dia do cadastro. Mudar a regra depois não altera esta venda.">i</i>
+    </div>
+    <p style="font-size:11.5px;color:var(--cinza);margin:0 0 10px;line-height:1.6;">
+      Regra congelada no cadastro desta venda. Alterar a regra da operadora depois não muda estes valores.
+    </p>
+    <table class="rg-alerta-tab">
+      <thead><tr>
+        <th>Fração</th><th class="num">Recebido</th><th class="num">Bruto do gestor</th>
+        <th class="num">Retenção</th><th class="num">Líquido para PIX</th><th class="num">Saldo Serenus</th>
+      </tr></thead>
+      <tbody>
+        {% for f in conta_gestor.fracoes %}
+        <tr>
+          <td>{{ f.ordem }}. {{ f.evento or ('mês ' ~ f.mes if f.mes else '') }}
+            <div style="font-size:10.5px;color:var(--cinza);">{{ ('%g' % f.percentual_recebimento)|replace('.', ',') }}% da comissão · {{ ('%g' % f.percentual_gestor)|replace('.', ',') }}% para o gestor</div>
+          </td>
+          <td class="num">{{ f.recebido|moeda }}</td>
+          <td class="num">{{ f.bruto_gestor|moeda }}</td>
+          <td class="num">{{ (f.retencao_gestor + f.retencao_serenus)|moeda }}</td>
+          <td class="num"><b>{{ f.liquido_gestor|moeda }}</b></td>
+          <td class="num">{{ f.saldo_serenus|moeda }}</td>
+        </tr>
+        {% endfor %}
+        <tr style="border-top:2px solid var(--borda);">
+          <td><b>Total</b></td>
+          <td class="num"><b>{{ conta_gestor.total_recebido|moeda }}</b></td>
+          <td class="num"><b>{{ conta_gestor.total_bruto_gestor|moeda }}</b></td>
+          <td class="num"><b>{{ (conta_gestor.total_retencao_gestor + conta_gestor.total_retencao_serenus)|moeda }}</b></td>
+          <td class="num"><b>{{ conta_gestor.total_liquido_gestor|moeda }}</b></td>
+          <td class="num"><b>{{ conta_gestor.total_saldo_serenus|moeda }}</b></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
   {# ── HEADER PROPOSTA (full-width) ── #}
   <div class="card" style="background:linear-gradient(135deg,#101720,#0f1f33 50%,#1a1330);margin-bottom:16px;">
     <div style="padding:24px 28px;display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap;">

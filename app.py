@@ -4119,6 +4119,102 @@ def init_db():
             except Exception: pass
         print(f"[CONCILIACAO] criação pulada: {e}")
 
+    # ─── REGRA DO GESTOR/ADMIN VENDEDOR ────────────────────────────────────────
+    # A regra é COMERCIAL: por operadora + variação + plano. Nunca por pessoa.
+    # Duplicar por pessoa faria a mesma venda valer coisas diferentes conforme
+    # quem vendeu, e cada admin novo exigiria recadastrar tudo de novo.
+    #
+    # São TRÊS coisas separadas de propósito, porque são três perguntas distintas:
+    #
+    #   gestor_regra.fracoes_json  — RÉGUA DE RECEBIMENTO: cada fração que a
+    #     operadora/Affinity paga, com percentual e mês/evento. É a régua DELAS.
+    #   gestor_regra.gestor_json   — RÉGUA DO GESTOR: quanto de CADA fração
+    #     recebida pertence ao gestor. É a régua NOSSA, e é outra conta.
+    #   gestor_retencao            — RETENÇÃO: tipo, percentual, base de cálculo,
+    #     responsável, vigência e observação.
+    #
+    # Misturar as três num percentual só foi o que produziu o legado
+    # 'gestor_vendedor', que entrega 100% de toda a comissão numa parcela: ele
+    # não sabe dizer o que é fração da operadora, o que é do gestor e o que é
+    # imposto — então não sabe dizer o que sobra pra Serenus.
+    #
+    # gestor_retencao.percentual é NULLABLE de propósito: alíquota não informada
+    # tem que ser DIFERENTE de alíquota zero. Zero é uma decisão; NULL é a
+    # ausência dela, e ausência bloqueia em vez de calcular errado em silêncio.
+    #
+    # proposta_regra_snapshot é IMUTÁVEL: só INSERT. Mudar a regra amanhã não
+    # pode mudar o que foi combinado numa venda de ontem.
+    try:
+        if is_pg:
+            conn.execute("""CREATE TABLE IF NOT EXISTS gestor_regra (
+                id SERIAL PRIMARY KEY,
+                operadora TEXT NOT NULL, obs TEXT DEFAULT '', plano TEXT NOT NULL,
+                fracoes_json TEXT, gestor_json TEXT,
+                confirmada INTEGER DEFAULT 0,
+                observacao TEXT, ativo INTEGER DEFAULT 1,
+                vigencia_inicio TEXT, vigencia_fim TEXT,
+                criado_por TEXT, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                atualizado_por TEXT, atualizado_em TIMESTAMP,
+                UNIQUE(operadora, obs, plano))""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS gestor_retencao (
+                id SERIAL PRIMARY KEY,
+                regra_id INTEGER NOT NULL,
+                tipo TEXT NOT NULL, nome TEXT,
+                percentual REAL,
+                base_calculo TEXT DEFAULT 'bruto_gestor',
+                responsavel TEXT DEFAULT 'gestor',
+                vigencia_inicio TEXT, vigencia_fim TEXT, observacao TEXT,
+                ativo INTEGER DEFAULT 1,
+                criado_por TEXT, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS proposta_regra_snapshot (
+                id SERIAL PRIMARY KEY,
+                proposta_id INTEGER NOT NULL UNIQUE,
+                regra_id INTEGER,
+                operadora TEXT, obs TEXT, plano TEXT,
+                fracoes_json TEXT, gestor_json TEXT, retencoes_json TEXT,
+                completa INTEGER DEFAULT 0, falta_json TEXT,
+                usuario_id INTEGER, usuario_nome TEXT,
+                congelado_por TEXT, congelado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+        else:
+            conn.execute("""CREATE TABLE IF NOT EXISTS gestor_regra (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                operadora TEXT NOT NULL, obs TEXT DEFAULT '', plano TEXT NOT NULL,
+                fracoes_json TEXT, gestor_json TEXT,
+                confirmada INTEGER DEFAULT 0,
+                observacao TEXT, ativo INTEGER DEFAULT 1,
+                vigencia_inicio TEXT, vigencia_fim TEXT,
+                criado_por TEXT, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                atualizado_por TEXT, atualizado_em TIMESTAMP,
+                UNIQUE(operadora, obs, plano))""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS gestor_retencao (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                regra_id INTEGER NOT NULL,
+                tipo TEXT NOT NULL, nome TEXT,
+                percentual REAL,
+                base_calculo TEXT DEFAULT 'bruto_gestor',
+                responsavel TEXT DEFAULT 'gestor',
+                vigencia_inicio TEXT, vigencia_fim TEXT, observacao TEXT,
+                ativo INTEGER DEFAULT 1,
+                criado_por TEXT, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS proposta_regra_snapshot (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                proposta_id INTEGER NOT NULL UNIQUE,
+                regra_id INTEGER,
+                operadora TEXT, obs TEXT, plano TEXT,
+                fracoes_json TEXT, gestor_json TEXT, retencoes_json TEXT,
+                completa INTEGER DEFAULT 0, falta_json TEXT,
+                usuario_id INTEGER, usuario_nome TEXT,
+                congelado_por TEXT, congelado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+        for idx in ("CREATE INDEX IF NOT EXISTS idx_gregra_op ON gestor_regra(operadora, plano)",
+                    "CREATE INDEX IF NOT EXISTS idx_gret_regra ON gestor_retencao(regra_id)"):
+            conn.execute(idx)
+        conn.commit()
+    except Exception as e:
+        if is_pg:
+            try: conn.rollback()
+            except Exception: pass
+        print(f"[REGRA-GESTOR] criação pulada: {e}")
+
     # ─── REGISTRO DE NOMES DE OPERADORA: preenche a tabela 'operadoras' com o
     # display único de TODA operadora que já existe em recebimento, repasse_corretor
     # ou nas propostas — assim o registro de nomes fica completo e nenhum nome
@@ -4363,6 +4459,11 @@ def init_db():
     # fallback), mas ficava em branco no cadastro ("—" na tela de Usuários) e
     # frágil pra manter. Aqui só preenche o que estava em branco — não mexe em
     # perfil de ninguém. ───
+    # 12/08/2026: essa decisão foi revista. A comissão de gestor passou a vir da
+    # REGRA DO GESTOR (por operadora/variação/plano, em gestor_regra), e cadastro
+    # novo de gestor não recebe mais regime de consultor. Esta migração fica onde
+    # está e não é revertida: ela já rodou em produção, e reverter recalcularia
+    # histórico — coisa que este sistema não faz sozinho.
     try:
         conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
         conn.commit()
@@ -4783,6 +4884,284 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
         'consultor': consultor, 'liquido': liquido,
         'aviso': ' · '.join(avisos),
     }
+
+
+# ═══════════ MOTOR DE REGRA DO GESTOR/ADMIN VENDEDOR ═══════════
+# Todo admin e todo gestor pode vender. O que muda de venda pra venda é a
+# OPERADORA, a variação e o plano — não a pessoa. Por isso a regra é comercial e
+# mora em gestor_regra, e não num campo do usuário.
+#
+# O legado 'gestor_vendedor' continua no arquivo e continua sendo lido, mas só
+# para HISTÓRICO. Ele entrega 100% de toda a comissão numa parcela só, o que
+# não é o combinado: ele não distingue fração da operadora, parte do gestor e
+# retenção, então também não sabe dizer o que sobra para a Serenus. Não
+# recalculamos nada com ele — proposta antiga fica como está.
+#
+# QUATRO CONTAS SEPARADAS, nesta ordem:
+#   1. régua de recebimento — quanto e quando a operadora/Affinity paga;
+#   2. régua do gestor      — quanto de cada fração recebida é do gestor;
+#   3. retenção             — o que sai do bruto do gestor, e de quem é a conta;
+#   4. saldo Serenus        — recebido menos bruto do gestor, menos as retenções
+#                             de responsabilidade da empresa, menos despesas.
+_GESTOR_PERFIS = ('admin', 'supervisor', 'gestor_vendedor')
+_RETENCAO_BASES = ('bruto_gestor', 'fracao_recebida')
+_RETENCAO_RESPONSAVEIS = ('gestor', 'serenus')
+
+
+def _gestor_regra_buscar(conn, operadora, plano):
+    """Acha a regra por operadora + variação + plano. Devolve (regra, retencoes).
+
+    Cai para a regra sem variação (obs vazio) quando a exata não existe — mesmo
+    comportamento das tabelas de recebimento e repasse, pra não obrigar a
+    cadastrar toda variação quando a regra é a mesma."""
+    op_nome, op_obs = _split_operadora(operadora)
+    try:
+        r = conn.execute("""SELECT * FROM gestor_regra
+                            WHERE operadora=? AND obs=? AND plano=? AND COALESCE(ativo,1)=1""",
+                         (op_nome, op_obs, plano)).fetchone()
+        if not r:
+            r = conn.execute("""SELECT * FROM gestor_regra
+                                WHERE operadora=? AND plano=? AND COALESCE(ativo,1)=1
+                                ORDER BY (obs='') DESC LIMIT 1""", (op_nome, plano)).fetchone()
+        if not r:
+            return None, []
+        ret = [dict(x) for x in conn.execute(
+            """SELECT * FROM gestor_retencao WHERE regra_id=? AND COALESCE(ativo,1)=1
+               ORDER BY id""", (r['id'],)).fetchall()]
+        return dict(r), ret
+    except Exception:
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+        return None, []
+
+
+def _gestor_regra_faltas(regra, retencoes):
+    """O que falta pra regra estar COMPLETA. Lista de frases prontas pra tela.
+
+    Regra incompleta não é erro de digitação — é uma pergunta comercial ainda sem
+    resposta. Por isso a lista diz o que perguntar, e não 'campo inválido'."""
+    falta = []
+    if not regra:
+        return ['A régua de recebimento desta operadora, variação e plano não está cadastrada.']
+    try:
+        fracoes = json.loads(regra.get('fracoes_json') or '[]')
+    except Exception:
+        fracoes = []
+    try:
+        gestor = json.loads(regra.get('gestor_json') or '[]')
+    except Exception:
+        gestor = []
+    if not fracoes:
+        falta.append('Falta a régua de recebimento: quantas frações a operadora paga, '
+                     'com que percentual e em que mês ou evento.')
+    for f in fracoes:
+        if f.get('percentual') is None:
+            falta.append(f"Fração {f.get('ordem', '?')} da régua de recebimento está sem percentual.")
+        if not (f.get('evento') or f.get('mes')):
+            falta.append(f"Fração {f.get('ordem', '?')} está sem mês ou evento definido.")
+    if not gestor:
+        falta.append('Falta a régua do gestor: quanto de cada fração recebida pertence a ele.')
+    elif len(gestor) != len(fracoes):
+        falta.append(f'A régua do gestor tem {len(gestor)} fração(ões) e a de recebimento tem '
+                     f'{len(fracoes)}. As duas precisam falar das mesmas frações.')
+    for g in gestor:
+        if g.get('percentual_gestor') is None:
+            falta.append(f"Fração {g.get('ordem', '?')} da régua do gestor está sem percentual.")
+    if not regra.get('confirmada'):
+        falta.append('A régua foi montada mas ninguém confirmou. A sugestão de 100% na primeira '
+                     'fração é sugestão — precisa de confirmação de quem responde pelo comercial.')
+    for r in retencoes:
+        # NULL é ausência de decisão; 0 é uma decisão. A diferença é o ponto.
+        if r.get('percentual') is None:
+            falta.append(f"A retenção '{r.get('nome') or r.get('tipo')}' está sem alíquota informada. "
+                         f"O JOB não inventa alíquota.")
+        if r.get('base_calculo') not in _RETENCAO_BASES:
+            falta.append(f"A retenção '{r.get('nome') or r.get('tipo')}' está sem base de cálculo.")
+        if r.get('responsavel') not in _RETENCAO_RESPONSAVEIS:
+            falta.append(f"A retenção '{r.get('nome') or r.get('tipo')}' está sem responsável "
+                         f"(quem paga: o gestor ou a Serenus).")
+    return falta
+
+
+def _gestor_calcular(snapshot, total_corretora):
+    """Abre a conta fração a fração a partir do snapshot congelado na proposta.
+
+    Devolve por fração: quanto se espera receber, quanto é bruto do gestor,
+    quanto é retenção (separada por responsável), quanto sai líquido pro PIX do
+    gestor e quanto sobra de saldo Serenus.
+
+    Não calcula nada quando a regra está incompleta: devolver número com regra
+    pela metade é pior que não devolver, porque número na tela vira decisão."""
+    vazio = {'completa': False, 'fracoes': [], 'total_recebido': 0.0, 'total_bruto_gestor': 0.0,
+             'total_retencao_gestor': 0.0, 'total_retencao_serenus': 0.0,
+             'total_liquido_gestor': 0.0, 'total_saldo_serenus': 0.0}
+    if not snapshot or not snapshot.get('completa'):
+        return vazio
+    try:
+        fracoes = json.loads(snapshot.get('fracoes_json') or '[]')
+        gestor = json.loads(snapshot.get('gestor_json') or '[]')
+        retencoes = json.loads(snapshot.get('retencoes_json') or '[]')
+    except Exception:
+        return vazio
+    gpor = {int(g.get('ordem', 0)): g for g in gestor}
+    base = float(total_corretora or 0)
+    linhas = []
+    for f in fracoes:
+        ordem = int(f.get('ordem', 0))
+        pct_receb = float(f.get('percentual') or 0)
+        recebido = round(base * pct_receb / 100.0, 2)
+        pct_gestor = float((gpor.get(ordem) or {}).get('percentual_gestor') or 0)
+        bruto_gestor = round(recebido * pct_gestor / 100.0, 2)
+        ret_gestor, ret_serenus, det = 0.0, 0.0, []
+        for r in retencoes:
+            pct = r.get('percentual')
+            if pct is None:
+                continue
+            alvo = bruto_gestor if r.get('base_calculo') == 'bruto_gestor' else recebido
+            v = round(alvo * float(pct) / 100.0, 2)
+            if r.get('responsavel') == 'serenus':
+                ret_serenus += v
+            else:
+                ret_gestor += v
+            det.append({'nome': r.get('nome') or r.get('tipo'), 'percentual': float(pct),
+                        'base': r.get('base_calculo'), 'responsavel': r.get('responsavel'),
+                        'valor': v})
+        liquido_gestor = round(bruto_gestor - ret_gestor, 2)
+        saldo_serenus = round(recebido - bruto_gestor - ret_serenus, 2)
+        linhas.append({
+            'ordem': ordem, 'evento': f.get('evento') or '', 'mes': f.get('mes'),
+            'percentual_recebimento': pct_receb, 'recebido': recebido,
+            'percentual_gestor': pct_gestor, 'bruto_gestor': bruto_gestor,
+            'retencao_gestor': round(ret_gestor, 2), 'retencao_serenus': round(ret_serenus, 2),
+            'retencoes': det,
+            'liquido_gestor': liquido_gestor, 'saldo_serenus': saldo_serenus,
+        })
+    som = lambda k: round(sum(l[k] for l in linhas), 2)
+    return {'completa': True, 'fracoes': linhas,
+            'total_recebido': som('recebido'), 'total_bruto_gestor': som('bruto_gestor'),
+            'total_retencao_gestor': som('retencao_gestor'),
+            'total_retencao_serenus': som('retencao_serenus'),
+            'total_liquido_gestor': som('liquido_gestor'),
+            'total_saldo_serenus': som('saldo_serenus')}
+
+
+def _gestor_e_vendedor(conn, usuario_id):
+    """O usuário desta venda é gestor/admin vendendo? Pergunta ao PERFIL, não a um
+    campo de regime — todo admin e todo gestor pode vender, e forçar
+    'sem_lead_sem_fixo' no cadastro deles era o que fazia a venda de um gestor
+    cair na régua de consultor sem ninguém escolher isso."""
+    if not usuario_id:
+        return False
+    try:
+        u = conn.execute("SELECT perfil FROM usuarios WHERE id=?", (usuario_id,)).fetchone()
+        return bool(u and (u['perfil'] or '') in _GESTOR_PERFIS)
+    except Exception:
+        return False
+
+
+def _gestor_congelar_snapshot(conn, proposta_id, operadora, plano, usuario_id, usuario_nome):
+    """Congela a regra vigente NA PROPOSTA. Só INSERT: snapshot existente nunca é
+    reescrito.
+
+    É o que impede que mudar a regra amanhã mude o que foi combinado ontem. Sem
+    isso, corrigir um percentual reescreveria silenciosamente a comissão de todas
+    as vendas passadas — e ninguém consegue explicar pro consultor por que o
+    valor da venda dele mudou sozinho."""
+    ja = conn.execute("SELECT id FROM proposta_regra_snapshot WHERE proposta_id=?",
+                      (proposta_id,)).fetchone()
+    if ja:
+        return False
+    regra, retencoes = _gestor_regra_buscar(conn, operadora, plano)
+    falta = _gestor_regra_faltas(regra, retencoes)
+    op_nome, op_obs = _split_operadora(operadora)
+    conn.execute("""INSERT INTO proposta_regra_snapshot
+        (proposta_id, regra_id, operadora, obs, plano, fracoes_json, gestor_json,
+         retencoes_json, completa, falta_json, usuario_id, usuario_nome, congelado_por, congelado_em)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (proposta_id, (regra or {}).get('id'), op_nome, op_obs, plano,
+         (regra or {}).get('fracoes_json') or '[]', (regra or {}).get('gestor_json') or '[]',
+         json.dumps(retencoes, ensure_ascii=False, default=str),
+         0 if falta else 1, json.dumps(falta, ensure_ascii=False),
+         usuario_id, usuario_nome, usuario_nome, _agora_sp()))
+    return True
+
+
+def _gestor_snapshot(conn, proposta_id):
+    try:
+        r = conn.execute("SELECT * FROM proposta_regra_snapshot WHERE proposta_id=?",
+                         (proposta_id,)).fetchone()
+        return dict(r) if r else None
+    except Exception:
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+        return None
+
+
+def _gestor_bloqueio(conn, proposta_id):
+    """O que está travado nesta venda por falta de regra, e por quê.
+
+    Devolve {'bloqueia': bool, 'falta': [...], 'operadora': ..., 'plano': ...,
+    'link': ...}. O link é a ação direta: abre a configuração exata que falta, em
+    vez de mandar a pessoa procurar no menu qual das telas de comissão é a certa.
+
+    Venda de consultor não passa por aqui: a regra do gestor não se aplica a ela,
+    e bloquear o que não depende dessa regra pararia o sistema inteiro."""
+    vazio = {'bloqueia': False, 'falta': [], 'operadora': '', 'plano': '', 'link': '',
+             'eh_gestor': False}
+    p = conn.execute("""SELECT id, usuario_id, adm_operadora, modalidade, tipo_pessoa, status
+                        FROM propostas WHERE id=?""", (proposta_id,)).fetchone()
+    if not p:
+        return vazio
+    if not _gestor_e_vendedor(conn, p['usuario_id']):
+        return vazio
+    plano = _plano_from_modalidade(p['modalidade'], p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else '')
+    operadora = p['adm_operadora'] or ''
+    snap = _gestor_snapshot(conn, proposta_id)
+    if snap:
+        try:
+            falta = json.loads(snap.get('falta_json') or '[]')
+        except Exception:
+            falta = []
+        completa = bool(snap.get('completa'))
+    else:
+        regra, retencoes = _gestor_regra_buscar(conn, operadora, plano)
+        falta = _gestor_regra_faltas(regra, retencoes)
+        completa = not falta
+    op_nome, op_obs = _split_operadora(operadora)
+    from urllib.parse import urlencode as _ue
+    link = '/comissoes/regra-gestor?' + _ue({'operadora': op_nome, 'obs': op_obs, 'plano': plano})
+    return {'bloqueia': not completa, 'falta': falta, 'operadora': operadora or '(sem operadora)',
+            'plano': plano, 'link': link, 'eh_gestor': True,
+            'tem_snapshot': bool(snap)}
+
+
+def _gestor_regras_faltando(conn, limite=400):
+    """Resumo das vendas de gestor travadas por regra incompleta, agrupado por
+    operadora/variação/plano — que é o que precisa ser cadastrado.
+
+    Agrupado e não uma linha por venda de propósito: 40 vendas travadas pela MESMA
+    operadora são um cadastro faltando, não 40 problemas. Listar 40 esconde que é
+    um só."""
+    grupos = {}
+    try:
+        propostas = conn.execute("""SELECT id FROM propostas
+                                    WHERE COALESCE(status,'') <> 'Excluída'
+                                      AND COALESCE(estornada,0)=0
+                                    ORDER BY id DESC LIMIT ?""", (limite,)).fetchall()
+    except Exception:
+        return []
+    for p in propostas:
+        b = _gestor_bloqueio(conn, p['id'])
+        if not b['bloqueia']:
+            continue
+        chave = (b['operadora'], b['plano'])
+        g = grupos.setdefault(chave, {'operadora': b['operadora'], 'plano': b['plano'],
+                                      'vendas': 0, 'falta': b['falta'][:2], 'link': b['link'],
+                                      'exemplo': p['id']})
+        g['vendas'] += 1
+    return sorted(grupos.values(), key=lambda x: -x['vendas'])
 
 
 def gerar_parcelas(proposta_id, vigencia, c, dia_vencimento=None, status_override=None):
@@ -7041,6 +7420,12 @@ def _pagar_parcela_asaas_core(conn, pid, operador_nome):
         return False, "Só é possível pagar parcelas liberadas para o corretor"
     if parc['asaas_transfer_id']:
         return False, "Esta parcela já tem um pagamento Asaas iniciado"
+    # ÚLTIMA TRAVA ANTES DO PIX. A liberação já checa a regra, mas o PIX é o
+    # ponto sem volta: se a regra ficou incompleta DEPOIS de liberar (retenção
+    # desativada, regra apagada), o dinheiro não pode sair mesmo assim.
+    travado = _bloqueio_parcela_gestor(conn, pid)
+    if travado:
+        return False, travado
 
     consultor = conn.execute("SELECT chave_pix, nome FROM usuarios WHERE id=?", (parc['usuario_id'],)).fetchone()
     chave_pix = (consultor['chave_pix'] if consultor else '') or ''
@@ -9200,6 +9585,19 @@ def salvar_proposta():
                 VALUES (?,?,?,?,?,?,?,?,?,?,'comissao')""", (parc['proposta_id'],parc['numero'],parc['percentual'],
                                           parc['valor'],parc['valor_corretora'],parc['perc_cliente'],
                                           parc['data_prevista'],parc['status'],parc['competencia'],parc['mensalidade_ref']))
+        # CONGELA A REGRA DO GESTOR NA VENDA. Feito aqui, no nascimento da
+        # proposta, e nunca depois: a regra que vale é a do dia em que a venda
+        # foi combinada. Mudar a régua no mês que vem não pode reescrever o que
+        # já foi acordado — e o snapshot é o único jeito de provar qual era.
+        # Regra incompleta NÃO impede cadastrar: a venda existe, ela só não gera
+        # financeiro nem libera PIX até a configuração ficar de pé.
+        try:
+            _gestor_congelar_snapshot(conn, proposta_id, operadora,
+                                      _plano_from_modalidade(d.get('modalidade', ''),
+                                                             d.get('tipo_pessoa', '')),
+                                      session.get('user_id'), session.get('nome'))
+        except Exception as e:
+            app.logger.warning(f"[REGRA-GESTOR] snapshot da proposta {proposta_id} pulado: {e}")
         conn.commit(); close_db(conn)
         try:
             quem = session.get('nome') or c.get('consultor') or 'Consultor'
@@ -9366,10 +9764,23 @@ def ver_proposta(pid):
             try: solic_pendente['alteracoes_parsed'] = json.loads(row['alteracoes']) if row['alteracoes'] else {}
             except Exception: solic_pendente['alteracoes_parsed'] = {}
 
+    # Regra do gestor desta venda: aparece na própria proposta, com a operadora e
+    # o plano exatos e o link direto pra configuração que falta. Aviso genérico
+    # ("configure as comissões") faz a pessoa procurar; este diz onde ir.
+    conn3 = db()
+    bloqueio_gestor = _gestor_bloqueio(conn3, pid)
+    conta_gestor = None
+    if bloqueio_gestor.get('eh_gestor') and not bloqueio_gestor['bloqueia']:
+        conta_gestor = _gestor_calcular(_gestor_snapshot(conn3, pid),
+                                        p.get('comissao_total_corretora') if isinstance(p, dict)
+                                        else p['comissao_total_corretora'])
+    close_db(conn3)
+
     return render_template('detalhe.html', p=p, parcelas=parcelas, regime=regime, extras=extras_view,
                            campos_secoes=campos_secoes, valores_edit=valores_edit,
                            solic_pendente=solic_pendente, comissao_aviso=comissao_aviso,
                            lead_crm=lead_crm, lead_wa=lead_wa,
+                           bloqueio_gestor=bloqueio_gestor, conta_gestor=conta_gestor,
                            etiquetas_sugeridas=_etiquetas_do_momento(p, lead_crm))
 
 @app.route('/proposta/<int:pid>/consultor', methods=['POST'])
@@ -11681,6 +12092,28 @@ def _notificar_parcela_consultor(conn, pid, verbo, origem=''):
 
 
 # ─── ROTAS DE PARCELAS (FLUXO DE CAIXA) ─────────────────────────────────────────
+def _bloqueio_parcela_gestor(conn, pid):
+    """A regra do gestor desta venda está completa? Devolve a frase do bloqueio,
+    ou '' quando pode seguir.
+
+    Liberar e pagar são os dois momentos em que o dinheiro sai de verdade. Sem
+    régua, retenção e responsável cadastrados, ninguém sabe QUANTO é do gestor e
+    QUANTO é imposto — e pagar antes de saber é pagar errado com data marcada
+    para descobrir."""
+    try:
+        p = conn.execute("SELECT proposta_id FROM parcelas WHERE id=?", (pid,)).fetchone()
+    except Exception:
+        return ''
+    if not p:
+        return ''
+    b = _gestor_bloqueio(conn, p['proposta_id'])
+    if not b['bloqueia']:
+        return ''
+    return (f"A regra de comissão do gestor para {b['operadora']} / {b['plano']} está incompleta. "
+            f"{b['falta'][0] if b['falta'] else ''} Configure em Regra do gestor antes de liberar "
+            f"ou pagar esta parcela.")
+
+
 @app.route('/parcela/<int:pid>/status', methods=['POST'])
 @login_required
 @admin_required
@@ -11688,6 +12121,11 @@ def parcela_status(pid):
     """Mudança manual de status (select do admin)."""
     novo = request.form.get('status')
     conn = db()
+    if novo in ('Liberado para o corretor', 'Pago ao corretor'):
+        travado = _bloqueio_parcela_gestor(conn, pid)
+        if travado:
+            close_db(conn)
+            return jsonify({"ok": False, "erro": travado, "regra_incompleta": True}), 400
     extra = ""
     if novo == 'Liberado para o corretor':
         conn.execute("UPDATE parcelas SET status=?,confirmado_gestor=1,data_confirmacao_gestor=? WHERE id=?",
@@ -11714,6 +12152,11 @@ def parcela_acao(pid):
     """Avança a parcela um passo no fluxo, com confirmação do gestor."""
     acao = request.form.get('acao')
     conn = db()
+    if acao in ('liberar', 'pagar'):
+        travado = _bloqueio_parcela_gestor(conn, pid)
+        if travado:
+            close_db(conn)
+            return jsonify({"ok": False, "msg": travado, "regra_incompleta": True}), 400
     agora = datetime.now(TZ_SP).isoformat()
     if acao == 'receber':
         conn.execute("UPDATE parcelas SET status='Recebido e não repassado' WHERE id=?", (pid,))
@@ -11855,10 +12298,12 @@ def fluxo_caixa():
             WHERE pa.status='Pago ao corretor' AND {_AVIVA} ORDER BY pa.id DESC LIMIT 30
         """).fetchall()
 
+        regras_faltando = _gestor_regras_faltando(conn)
         close_db(conn)
         return render_template('fluxo_caixa.html', ciclo=ciclo, totais=totais,
                                antecipacoes=antecipacoes, lote=lote,
                                recebidos=recebidos, pagos=pagos,
+                               regras_faltando=regras_faltando,
                                status_fluxo=STATUS_FLUXO)
     else:
         # Visão do consultor. Mesmo filtro: sem ele, o consultor via (e
@@ -13244,15 +13689,17 @@ def usuario_novo():
     cpf = d.get('cpf','').strip()
     conn = db()
     try:
-        # Regime de comissão: consultor usa o que foi escolhido no form; qualquer
-        # outro perfil (admin/supervisor/gestor_vendedor) grava explicitamente
-        # 'sem_lead_sem_fixo' — não deixa em branco. Em branco funcionava por
-        # coincidência (vários pontos do código tratam '' como esse fallback),
-        # mas é frágil e a tela de Usuários mostrava "—" em vez do regime real
-        # que estava sendo aplicado nas vendas desse gestor.
+        # Regime de comissão: consultor usa o que foi escolhido no form.
+        # Admin, supervisor e gestor vendedor NÃO usam regime de consultor — a
+        # comissão deles vem da REGRA DO GESTOR, que é por operadora, variação e
+        # plano (ver _gestor_regra_buscar). Gravar 'sem_lead_sem_fixo' neles era
+        # o que fazia a venda de um gestor cair na régua de consultor sem
+        # ninguém ter escolhido isso, e ainda mostrava na tela um regime que não
+        # era o aplicado. Fica em branco de propósito: em branco aqui quer dizer
+        # "não é por regime, é por regra comercial".
         conn.execute("""INSERT INTO usuarios (nome,email,perfil,regime_base,token_setup,token_expira,cpf)
             VALUES (?,?,?,?,?,?,?)""",(nome,email,d.get('perfil','consultor'),
-            (d.get('regime_base','sem_lead_sem_fixo') if d.get('perfil','consultor')=='consultor' else 'sem_lead_sem_fixo'),token,expira,cpf or None))
+            (d.get('regime_base','sem_lead_sem_fixo') if d.get('perfil','consultor')=='consultor' else ''),token,expira,cpf or None))
         conn.commit()
     except sqlite3.IntegrityError:
         flash('E-mail já cadastrado.'); close_db(conn); return redirect(url_for('usuarios'))
@@ -13341,12 +13788,12 @@ def usuario_editar(uid):
         modulos_val = json.dumps(marcados)
     funil_atendimento_id = (d.get('funil_atendimento_id', '') or '').strip()
     funil_atendimento_id = int(funil_atendimento_id) if funil_atendimento_id.isdigit() else None
-    # Regime de comissão: consultor usa o que veio do form; qualquer outro
-    # perfil (admin/supervisor/gestor_vendedor) grava explicitamente
-    # 'sem_lead_sem_fixo' — mesmo motivo do usuario_novo acima (ver comentário lá).
+    # Regime de comissão: consultor usa o que veio do form; admin, supervisor e
+    # gestor vendedor ficam SEM regime — a comissão deles vem da regra do gestor,
+    # por operadora/variação/plano. Mesmo motivo do usuario_novo acima.
     conn.execute("""UPDATE usuarios SET nome=?,email=?,perfil=?,regime_base=?,ativo=?,valor_fixo=?,chave_pix=?,foto=?,cpf=?,telefone=?,waspeed_token=?,modulos=?,funil_atendimento_id=? WHERE id=?""",
         (d['nome'],d['email'].lower(),d['perfil'],
-         (d['regime_base'] if d['perfil']=='consultor' else 'sem_lead_sem_fixo'),ativo,fnum('valor_fixo'),d.get('chave_pix',''),foto_nome,d.get('cpf','') or None,
+         (d['regime_base'] if d['perfil']=='consultor' else ''),ativo,fnum('valor_fixo'),d.get('chave_pix',''),foto_nome,d.get('cpf','') or None,
          d.get('telefone','').strip(),d.get('waspeed_token','').strip() or None,modulos_val,funil_atendimento_id,uid))
     conn.commit(); close_db(conn)
     return redirect(url_for('usuarios'))
@@ -14571,6 +15018,7 @@ def financeiro():
     # usaria conexao fechada e a tela caia inteira.
     conferencia = _conferencia_mes(conn, mes)
     previsao = _previsao_meses(conn, mes)
+    regras_faltando = _gestor_regras_faltando(conn)
     close_db(conn)
 
     # O ROTULO ACOMPANHA O NUMERO. Um total que muda de valor sem dizer de que
@@ -14601,7 +15049,7 @@ def financeiro():
         saldo=saldo, dre=dre, saldo_socios=saldo_socios_lista, lancamento_focus=lancamento_focus,
         centros_custo=CENTROS_CUSTO, tipos_lancamento=TIPOS_LANCAMENTO,
         canais_midia=CANAIS_MIDIA, status_lancamento=STATUS_LANCAMENTO,
-        conferencia=conferencia, previsao=previsao,
+        conferencia=conferencia, previsao=previsao, regras_faltando=regras_faltando,
         calendario=calendario, cal_total=cal_total, cal_rotulo=_cal_rotulo,
         cal_livre=_cal_livre,
         filtros={'faixa': f_faixa, 'centro': f_centro, 'status_lanc': f_status,
@@ -27168,6 +27616,171 @@ def comissao_conciliacao():
     res = session.pop('afy_import_res', None)
     return render_template('comissao_conciliacao.html', itens=itens, resumo=resumo,
                            filtro=filtro, res=res, labels=_AFY_ESTADO_LABEL)
+
+
+@app.route('/comissoes/regra-gestor')
+@login_required
+@admin_required
+def regra_gestor():
+    """CONFIGURAÇÃO DA REGRA DO GESTOR. Uma regra por operadora, variação e plano.
+
+    A tela sugere 100% ao gestor na primeira fração e 0% nas demais, porque é o
+    combinado ('a primeira mensalidade é do gestor, descontada a retenção'). Mas
+    sugestão não salva sozinha: enquanto ninguém confirmar, a regra fica
+    incompleta e o financeiro daquela operadora continua travado. Sugerir e
+    aplicar são coisas diferentes — aplicar sem confirmar é inventar."""
+    conn = db()
+    op_sel = (request.args.get('operadora') or '').strip()
+    obs_sel = (request.args.get('obs') or '').strip()
+    plano_sel = (request.args.get('plano') or 'PME').strip().upper()
+    regras = []
+    for r in conn.execute("SELECT * FROM gestor_regra ORDER BY operadora, obs, plano").fetchall():
+        d = dict(r)
+        ret = [dict(x) for x in conn.execute(
+            "SELECT * FROM gestor_retencao WHERE regra_id=? AND COALESCE(ativo,1)=1 ORDER BY id",
+            (d['id'],)).fetchall()]
+        d['retencoes'] = ret
+        d['falta'] = _gestor_regra_faltas(d, ret)
+        d['display'] = _op_display(d['operadora'], d['obs'])
+        try:
+            d['fracoes'] = json.loads(d.get('fracoes_json') or '[]')
+            d['gestor'] = json.loads(d.get('gestor_json') or '[]')
+        except Exception:
+            d['fracoes'], d['gestor'] = [], []
+        regras.append(d)
+    operadoras = _operadoras_lista(conn)
+    # Vendas de gestor sem regra completa: o motivo de a tela existir.
+    pendentes = []
+    for p in conn.execute("""SELECT p.id, p.razao_social, p.adm_operadora, p.modalidade,
+                                    p.tipo_pessoa, p.consultor, p.status
+                             FROM propostas p
+                             WHERE COALESCE(p.status,'') <> 'Excluída'
+                             ORDER BY p.id DESC LIMIT 300""").fetchall():
+        b = _gestor_bloqueio(conn, p['id'])
+        if b['bloqueia']:
+            pendentes.append({'id': p['id'], 'razao_social': p['razao_social'],
+                              'operadora': b['operadora'], 'plano': b['plano'],
+                              'consultor': p['consultor'], 'falta': b['falta'][:2]})
+    close_db(conn)
+    return render_template('regra_gestor.html', regras=regras, operadoras=operadoras,
+                           op_sel=op_sel, obs_sel=obs_sel, plano_sel=plano_sel,
+                           pendentes=pendentes[:40], bases=_RETENCAO_BASES,
+                           responsaveis=_RETENCAO_RESPONSAVEIS)
+
+
+@app.route('/comissoes/regra-gestor/salvar', methods=['POST'])
+@login_required
+@admin_required
+def regra_gestor_salvar():
+    """Grava a régua de recebimento e a régua do gestor.
+
+    Percentual em branco entra como NULL, não como zero: 'ainda não sei' e 'é
+    zero' são respostas diferentes, e só a primeira deve travar o financeiro."""
+    d = request.json or {}
+    op = (d.get('operadora') or '').strip()
+    obs = (d.get('obs') or '').strip()
+    plano = (d.get('plano') or '').strip().upper()
+    if not op or plano not in ('PME', 'PF', 'ADESAO'):
+        return jsonify({"ok": False, "erro": "Escolha a operadora e o plano."}), 400
+
+    def _pct(v):
+        if v is None or str(v).strip() == '':
+            return None
+        try:
+            return round(float(str(v).replace(',', '.')), 4)
+        except (TypeError, ValueError):
+            return None
+
+    fracoes, gestor = [], []
+    for i, f in enumerate(d.get('fracoes') or [], start=1):
+        fracoes.append({'ordem': i, 'percentual': _pct(f.get('percentual')),
+                        'evento': (f.get('evento') or '').strip()[:60],
+                        'mes': (f.get('mes') if str(f.get('mes') or '').strip() else None)})
+        gestor.append({'ordem': i, 'percentual_gestor': _pct(f.get('percentual_gestor'))})
+    if not fracoes:
+        return jsonify({"ok": False, "erro": "Cadastre pelo menos uma fração de recebimento."}), 400
+    confirmada = 1 if d.get('confirmada') else 0
+    conn = db()
+    agora = _agora_sp()
+    ja = conn.execute("SELECT id FROM gestor_regra WHERE operadora=? AND obs=? AND plano=?",
+                      (op, obs, plano)).fetchone()
+    if ja:
+        conn.execute("""UPDATE gestor_regra SET fracoes_json=?, gestor_json=?, confirmada=?,
+                        observacao=?, vigencia_inicio=?, vigencia_fim=?, ativo=1,
+                        atualizado_por=?, atualizado_em=? WHERE id=?""",
+                     (json.dumps(fracoes, ensure_ascii=False), json.dumps(gestor, ensure_ascii=False),
+                      confirmada, (d.get('observacao') or '')[:400],
+                      (d.get('vigencia_inicio') or '')[:10], (d.get('vigencia_fim') or '')[:10],
+                      session.get('nome'), agora, ja['id']))
+        rid = ja['id']
+    else:
+        cur = conn.execute("""INSERT INTO gestor_regra
+            (operadora, obs, plano, fracoes_json, gestor_json, confirmada, observacao,
+             vigencia_inicio, vigencia_fim, ativo, criado_por, criado_em, atualizado_por, atualizado_em)
+            VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?,?)""",
+            (op, obs, plano, json.dumps(fracoes, ensure_ascii=False),
+             json.dumps(gestor, ensure_ascii=False), confirmada, (d.get('observacao') or '')[:400],
+             (d.get('vigencia_inicio') or '')[:10], (d.get('vigencia_fim') or '')[:10],
+             session.get('nome'), agora, session.get('nome'), agora))
+        rid = _last_insert_id(cur)
+    conn.commit()
+    regra = dict(conn.execute("SELECT * FROM gestor_regra WHERE id=?", (rid,)).fetchone())
+    ret = [dict(x) for x in conn.execute(
+        "SELECT * FROM gestor_retencao WHERE regra_id=? AND COALESCE(ativo,1)=1", (rid,)).fetchall()]
+    falta = _gestor_regra_faltas(regra, ret)
+    close_db(conn)
+    return jsonify({"ok": True, "id": rid, "falta": falta})
+
+
+@app.route('/comissoes/regra-gestor/retencao', methods=['POST'])
+@login_required
+@admin_required
+def regra_gestor_retencao():
+    """Cadastra uma retenção. Alíquota em branco fica NULL e trava o financeiro
+    até alguém informar — o JOB não inventa alíquota de imposto."""
+    d = request.json or {}
+    try:
+        rid = int(d.get('regra_id') or 0)
+    except (TypeError, ValueError):
+        rid = 0
+    tipo = (d.get('tipo') or '').strip()[:40]
+    if not rid or not tipo:
+        return jsonify({"ok": False, "erro": "Informe a regra e o tipo da retenção."}), 400
+    base = (d.get('base_calculo') or '').strip()
+    resp = (d.get('responsavel') or '').strip()
+    if base not in _RETENCAO_BASES:
+        return jsonify({"ok": False, "erro": "Escolha a base de cálculo."}), 400
+    if resp not in _RETENCAO_RESPONSAVEIS:
+        return jsonify({"ok": False, "erro": "Escolha quem paga esta retenção."}), 400
+    pct = d.get('percentual')
+    if pct is None or str(pct).strip() == '':
+        pct = None
+    else:
+        try:
+            pct = round(float(str(pct).replace(',', '.')), 4)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "erro": "Alíquota inválida."}), 400
+    conn = db()
+    conn.execute("""INSERT INTO gestor_retencao
+        (regra_id, tipo, nome, percentual, base_calculo, responsavel,
+         vigencia_inicio, vigencia_fim, observacao, ativo, criado_por, criado_em)
+        VALUES (?,?,?,?,?,?,?,?,?,1,?,?)""",
+        (rid, tipo, (d.get('nome') or tipo)[:60], pct, base, resp,
+         (d.get('vigencia_inicio') or '')[:10], (d.get('vigencia_fim') or '')[:10],
+         (d.get('observacao') or '')[:400], session.get('nome'), _agora_sp()))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "sem_aliquota": pct is None})
+
+
+@app.route('/comissoes/regra-gestor/retencao/<int:rid>/remover', methods=['POST'])
+@login_required
+@admin_required
+def regra_gestor_retencao_remover(rid):
+    """Desativa a retenção (não apaga): snapshot antigo continua explicável."""
+    conn = db()
+    conn.execute("UPDATE gestor_retencao SET ativo=0 WHERE id=?", (rid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
 
 
 @app.route('/comissoes/conciliacao/buscar')
