@@ -5240,11 +5240,16 @@ def _gestor_bloqueio(conn, proposta_id):
     e bloquear o que não depende dessa regra pararia o sistema inteiro."""
     vazio = {'bloqueia': False, 'falta': [], 'operadora': '', 'plano': '', 'link': '',
              'eh_gestor': False}
-    p = conn.execute("""SELECT id, usuario_id, adm_operadora, modalidade, tipo_pessoa, status
+    p = conn.execute("""SELECT id, usuario_id, adm_operadora, modalidade, tipo_pessoa, status,
+                               regime_aplicado
                         FROM propostas WHERE id=?""", (proposta_id,)).fetchone()
     if not p:
         return vazio
-    if not _gestor_e_vendedor(conn, p['usuario_id']):
+    # Perfil atual da pessoa não reclassifica uma venda que já foi gravada. Só
+    # propostas nascidas com a regra comercial própria entram neste motor.
+    # Isso protege os repasses históricos de consultor, inclusive quando um
+    # consultor depois vira administrador ou gestor.
+    if (p['regime_aplicado'] or '') not in ('socio_gestor_regra', 'socio_gestor_pendente'):
         return vazio
     plano = _plano_from_modalidade(p['modalidade'], p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else '')
     operadora = p['adm_operadora'] or ''
@@ -5319,6 +5324,7 @@ def _fin_visao(conn, competencia=''):
                  FROM proposta_regra_snapshot s
                  JOIN propostas p ON p.id = s.proposta_id
                  WHERE COALESCE(p.status,'') <> 'Excluída' AND COALESCE(p.estornada,0)=0"""
+        sql += " AND COALESCE(p.regime_aplicado,'') IN ('socio_gestor_regra','socio_gestor_pendente')"
         for s in conn.execute(sql).fetchall():
             snap = dict(s)
             visao['vendas_gestor'] += 1
@@ -9725,8 +9731,23 @@ def salvar_proposta():
         # `or` (não .get com default): se o valor salvo for '' (string vazia,
         # não ausente), .get(chave, default) devolve '' mesmo assim — só o
         # `or` garante o fallback de verdade.
-        regime_base = session.get('regime_base') or 'sem_lead_sem_fixo'
         conn = db(); cur = conn.cursor()
+        # O dono escolhido no formulário é quem vendeu e quem recebe a
+        # comissão. Administrador que só cadastra a proposta não pode mudar a
+        # regra do vendedor por estar logado com outro perfil.
+        dono_uid = session.get('user_id')
+        if session.get('perfil') == 'admin' and str(d.get('consultor_usuario_id') or '').isdigit():
+            candidato = conn.execute("SELECT id,nome,perfil,regime_base FROM usuarios WHERE id=? AND ativo=1",
+                                     (int(d.get('consultor_usuario_id')),)).fetchone()
+            if candidato:
+                dono_uid = candidato['id']
+        dono = conn.execute("SELECT id,nome,perfil,regime_base FROM usuarios WHERE id=?", (dono_uid,)).fetchone()
+        if not dono:
+            close_db(conn)
+            return jsonify({"ok": False, "erro": "vendedor_invalido",
+                            "msg": "Não foi possível identificar o vendedor desta proposta."}), 400
+        dono_nome = dono['nome']
+        regime_base = dono['regime_base'] or 'sem_lead_sem_fixo'
         # mes_meta = mês do fechamento (data_fechamento do form, ou mês atual) —
         # é o CICLO DE VENDAS oficial do sistema (mesma base do dashboard, do
         # filtro de mês e do fechamento). Calculado ANTES da produção porque a
@@ -9738,13 +9759,13 @@ def salvar_proposta():
         # o campo de data do navegador aceita ano de cinco digitos.
         mes_meta = _mes_meta_de_data(data_fechamento)
         # Produção do CICLO ANTES desta venda + esta venda = produção que define o nível.
-        prod_antes = _producao_mes(conn, session['user_id'], mes_meta)
+        prod_antes = _producao_mes(conn, dono_uid, mes_meta)
         prod_acumulada = prod_antes + valor
         # Consultores continuam, sem exceção, nos três modelos já existentes:
         # Sem Lead/Sem Fixo, Com Lead (N1/N2/N3) ou Com Fixo + Lead.
         # Sócio/gestor/admin não passa por essa matriz: usa a regra comercial
         # própria, por operadora/variação/plano, com retenção explícita.
-        if _gestor_e_vendedor(conn, session.get('user_id')):
+        if _gestor_e_vendedor(conn, dono_uid):
             c = _gestor_calculo_inicial(conn, operadora, modalidade,
                                         d.get('tipo_pessoa', ''), valor)
         else:
@@ -9772,7 +9793,7 @@ def salvar_proposta():
             resp_fin_nome,resp_fin_cpf,resp_fin_nascimento,resp_fin_parentesco,
             resp_fin_telefone,resp_fin_email,resp_fin_no_plano
         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
-            session['user_id'],d.get('consultor'),d.get('supervisora_id') or None,
+            dono_uid,dono_nome,d.get('supervisora_id') or None,
             d.get('proposta_tem_numero'),d.get('numero_proposta'),
             d.get('vigencia'),d.get('modalidade'),d.get('tipo_pessoa'),
             operadora,d.get('produto'),d.get('razao_social'),
@@ -9794,7 +9815,7 @@ def salvar_proposta():
             (d.get('cidade') or '').strip() or None, (d.get('estado') or '').strip().upper()[:2] or None,
             # O DONO vem do formulario (pode ser outro consultor); QUEM SUBIU e
             # sempre a sessao — isso nao se declara, se observa.
-            (int(d.get('consultor_usuario_id')) if str(d.get('consultor_usuario_id') or '').isdigit() else None),
+            dono_uid,
             session['user_id'],
             1 if d.get('vigencia_confirmada') == '1' else 0,
             # A plataforma DERIVA do papel: um campo a menos na tela e um lugar
@@ -9852,13 +9873,14 @@ def salvar_proposta():
         # já foi acordado — e o snapshot é o único jeito de provar qual era.
         # Regra incompleta NÃO impede cadastrar: a venda existe, ela só não gera
         # financeiro nem libera PIX até a configuração ficar de pé.
-        try:
-            _gestor_congelar_snapshot(conn, proposta_id, operadora,
-                                      _plano_from_modalidade(d.get('modalidade', ''),
-                                                             d.get('tipo_pessoa', '')),
-                                      session.get('user_id'), session.get('nome'))
-        except Exception as e:
-            app.logger.warning(f"[REGRA-GESTOR] snapshot da proposta {proposta_id} pulado: {e}")
+        if c.get('modelo') in ('socio_gestor_regra', 'socio_gestor_pendente'):
+            try:
+                _gestor_congelar_snapshot(conn, proposta_id, operadora,
+                                          _plano_from_modalidade(d.get('modalidade', ''),
+                                                                 d.get('tipo_pessoa', '')),
+                                          dono_uid, dono_nome)
+            except Exception as e:
+                app.logger.warning(f"[REGRA-GESTOR] snapshot da proposta {proposta_id} pulado: {e}")
         conn.commit(); close_db(conn)
         try:
             quem = session.get('nome') or c.get('consultor') or 'Consultor'
@@ -9932,8 +9954,9 @@ def toggle_modo_teste():
 @login_required
 def ver_proposta(pid):
     conn = db()
-    p = conn.execute("""SELECT p.*,s.nome as supervisora_nome FROM propostas p
-        LEFT JOIN supervisoras s ON s.id=p.supervisora_id WHERE p.id=?""",(pid,)).fetchone()
+    p = conn.execute("""SELECT p.*,s.nome as supervisora_nome,u.nome as vendedor_nome,u.perfil as vendedor_perfil
+        FROM propostas p LEFT JOIN supervisoras s ON s.id=p.supervisora_id
+        LEFT JOIN usuarios u ON u.id=p.usuario_id WHERE p.id=?""",(pid,)).fetchone()
     if not p: return "Não encontrada", 404
     if session['perfil'] != 'admin' and p['usuario_id'] != session['user_id']: return "Acesso negado", 403
     parcelas = conn.execute("SELECT * FROM parcelas WHERE proposta_id=? ORDER BY numero ASC",(pid,)).fetchall()
@@ -9988,6 +10011,8 @@ def ver_proposta(pid):
     cod = p['regime_aplicado'] or ''
     nome_regime = MODELO_NOME.get(cod, cod or '—')
     regime = {'nome': nome_regime}
+    vendedor = {'nome': p['vendedor_nome'] or p['consultor'] or 'Não informado',
+                'perfil': p['vendedor_perfil'] or ''}
     # Decodifica valores dos campos custom
     try:
         extras = json.loads(p['campos_extras']) if p['campos_extras'] else {}
@@ -10007,16 +10032,16 @@ def ver_proposta(pid):
     if session.get('perfil') == 'admin':
         sp = conn2 = db()
         row = conn2.execute("SELECT * FROM solicitacoes_edicao WHERE proposta_id=? AND status='Pendente' ORDER BY criado_em DESC LIMIT 1", (pid,)).fetchone()
-        # Diagnóstico AO VIVO da comissão: o motor sabe exatamente o que falta
-        # (recebimento e/ou repasse da operadora nesse plano). A tela mostrava só
-        # os zeros gravados sem explicar; agora surfaceia o aviso do próprio motor.
+        # Diagnóstico AO VIVO da comissão de consultor. Venda de sócio/gestor
+        # não consulta Repasse: sua regra própria já está congelada na proposta.
         try:
-            u = conn2.execute("SELECT regime_base FROM usuarios WHERE id=?", (p['usuario_id'],)).fetchone()
-            prod = _producao_mes(conn2, p['usuario_id'], p['mes_meta'], excluir_pid=pid) + (p['valor'] or 0)
-            cc = calc_comissao(p['adm_operadora'], (u['regime_base'] if u else '') or 'sem_lead_sem_fixo',
-                               prod, p['valor'] or 0, p['modalidade'],
-                               p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else '')
-            comissao_aviso = cc.get('aviso') or ''
+            if (p['regime_aplicado'] or '') not in ('socio_gestor_regra', 'socio_gestor_pendente'):
+                u = conn2.execute("SELECT regime_base FROM usuarios WHERE id=?", (p['usuario_id'],)).fetchone()
+                prod = _producao_mes(conn2, p['usuario_id'], p['mes_meta'], excluir_pid=pid) + (p['valor'] or 0)
+                cc = calc_comissao(p['adm_operadora'], (u['regime_base'] if u else '') or 'sem_lead_sem_fixo',
+                                   prod, p['valor'] or 0, p['modalidade'],
+                                   p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else '')
+                comissao_aviso = cc.get('aviso') or ''
         except Exception:
             comissao_aviso = ''
         close_db(conn2)
@@ -10036,12 +10061,26 @@ def ver_proposta(pid):
                                         p.get('comissao_total_corretora') if isinstance(p, dict)
                                         else p['comissao_total_corretora'])
     close_db(conn3)
+    # Os cartões sempre mostram a mesma fonte usada pelo fluxo financeiro. Para
+    # gestor, não reutilizam as colunas legadas de "consultor" por conveniência.
+    comissao_exibicao = {
+        'recebimento': float(p['comissao_total_corretora'] or 0),
+        'repasse': float(p['comissao_consultor'] or 0),
+        'saldo_serenus': float(p['comissao_corretora_liquida'] or 0),
+    }
+    if conta_gestor and conta_gestor.get('completa'):
+        comissao_exibicao = {
+            'recebimento': conta_gestor['total_recebido'],
+            'repasse': conta_gestor['total_liquido_gestor'],
+            'saldo_serenus': conta_gestor['total_saldo_serenus'],
+        }
 
     return render_template('detalhe.html', p=p, parcelas=parcelas, regime=regime, extras=extras_view,
                            campos_secoes=campos_secoes, valores_edit=valores_edit,
                            solic_pendente=solic_pendente, comissao_aviso=comissao_aviso,
                            lead_crm=lead_crm, lead_wa=lead_wa,
-                           bloqueio_gestor=bloqueio_gestor, conta_gestor=conta_gestor,
+                           bloqueio_gestor=bloqueio_gestor, conta_gestor=conta_gestor, vendedor=vendedor,
+                           comissao_exibicao=comissao_exibicao,
                            etiquetas_sugeridas=_etiquetas_do_momento(p, lead_crm))
 
 @app.route('/proposta/<int:pid>/consultor', methods=['POST'])
@@ -10104,10 +10143,18 @@ def recalcular_todas():
     """Recalcula a comissão de TODAS as propostas com o motor atual.
     Só regenera parcelas que ainda não entraram no fluxo. Retorna relatório de avisos."""
     conn = db()
-    props = conn.execute("""SELECT p.*, u.regime_base FROM propostas p
+    props = conn.execute("""SELECT p.*, u.regime_base, u.perfil FROM propostas p
         LEFT JOIN usuarios u ON u.id=p.usuario_id WHERE COALESCE(p.estornada,0)=0""").fetchall()
     recalc, avisos = 0, []
     for p in props:
+        # Nunca passe uma venda de sócio/gestor pelo motor de consultor. Os
+        # snapshots dessas vendas são imutáveis; recalcular tudo não pode
+        # apagar a origem do acordo nem substituir suas parcelas.
+        if (p['regime_aplicado'] or '') in ('socio_gestor_regra', 'socio_gestor_pendente'):
+            avisos.append({'id': p['id'], 'cliente': p['razao_social'],
+                           'operadora': p['adm_operadora'],
+                           'aviso': 'Venda de sócio/gestor preservada: não é recalculada pelo motor de consultor.'})
+            continue
         regime = p['regime_base'] or 'sem_lead_sem_fixo'
         prod_antes = _producao_mes(conn, p['usuario_id'], p['mes_meta'], excluir_pid=p['id'])
         prod_acum = prod_antes + (p['valor'] or 0)
@@ -12142,7 +12189,14 @@ def proposta_editar(pid):
             # mes (exclui esta, que esta sendo editada) e soma o valor NOVO.
             prod_acum = _producao_mes(conn, p['usuario_id'], p['mes_meta'], excluir_pid=pid) + novo_valor
 
-            # Recalcular comissão
+            # Regra de sócio/gestor nasce com snapshot e não pode ser jogada no
+            # motor de consultor por uma edição de valor. A alteração comercial
+            # precisa de uma revisão própria, com as frações visíveis.
+            if regime in ('socio_gestor_regra', 'socio_gestor_pendente'):
+                close_db(conn)
+                return jsonify({"ok": False, "erro": "A venda usa a regra de sócio/gestor. "
+                                  "O valor não foi alterado para evitar recalcular pelo regime de consultor."}), 409
+            # Recalcular comissão do consultor.
             calc = calc_comissao(operadora, regime, prod_acum, novo_valor, mod, tipo_p)
 
             # Atualizar comissões na proposta

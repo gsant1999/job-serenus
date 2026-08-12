@@ -70,10 +70,11 @@ def criar_venda(conn, usuario_id, operadora='Amil', razao='TESTE REGRA VENDA LTD
     cur = conn.execute("""INSERT INTO propostas (usuario_id, consultor, numero_proposta,
                     razao_social, status, comissao_total_corretora, vigencia, modalidade,
                     tipo_contrato, acomodacao, fator_moderador, total_vidas, valor,
-                    adm_operadora, criado_em)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    adm_operadora, regime_aplicado, criado_em)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                  (usuario_id, 'Gestor Teste', None, razao, 'Implantada', 1000.0, '2026-07-01',
-                  'PME', 'Novo', 'Enfermaria', 'Sem', 1, 1000.0, operadora, A._agora_sp()))
+                  'PME', 'Novo', 'Enfermaria', 'Sem', 1, 1000.0, operadora,
+                  'socio_gestor_pendente', A._agora_sp()))
     return A._last_insert_id(cur)
 
 
@@ -370,6 +371,26 @@ def teste_legado_preservado():
           A.MODELO_NOME.get('gestor_vendedor'))
 
 
+def teste_venda_de_consultor_nao_entra_na_regra_de_gestor():
+    print('\n[unit] venda de consultor nao vira gestor se o perfil mudar')
+    limpar()
+    conn = A.db()
+    uid = criar_gestor(conn)
+    cur = conn.execute("""INSERT INTO propostas
+        (usuario_id,consultor,razao_social,status,comissao_total_corretora,valor,
+         adm_operadora,modalidade,regime_aplicado)
+        VALUES (?,?,?,'Ativo',1000,1000,'Amil','PME','sem_lead_sem_fixo')""",
+        (uid, 'Gestor Teste', 'TESTE REGRA CONSULTOR LEGADO'))
+    pid = A._last_insert_id(cur)
+    A._gestor_congelar_snapshot(conn, pid, 'Amil', 'PME', uid, 'Gestor Teste')
+    conn.commit()
+    b = A._gestor_bloqueio(conn, pid)
+    A.close_db(conn)
+    checa('regime gravado de consultor nao e bloqueado pela regra do gestor',
+          not b['eh_gestor'] and not b['bloqueia'], b)
+    limpar()
+
+
 def teste_motor_de_socio_nao_usa_modelo_de_consultor():
     print('\n[unit] socio/gestor nao nasce no modelo Sem Lead/Sem Fixo')
     limpar()
@@ -467,6 +488,7 @@ if __name__ == '__main__':
     teste_rascunho_passa()
     teste_usuario_gestor_sem_regime_de_consultor()
     teste_legado_preservado()
+    teste_venda_de_consultor_nao_entra_na_regra_de_gestor()
     teste_motor_de_socio_nao_usa_modelo_de_consultor()
     teste_telas()
     teste_permissoes()
