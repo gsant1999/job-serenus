@@ -6176,6 +6176,11 @@
       setTimeout(() => { btn.textContent = antes; }, 2600);
       return;
     }
+    if (_foiRepetido(chatId || telefone, midiaTipo || 'texto', texto, modeloId)) {
+      if (st) st.textContent = 'Esta mesma mensagem já foi enviada a este contato há pouco. O JOB bloqueou a repetição.';
+      btn.disabled = false;
+      return;
+    }
     try {
       const payload = { telefone, nome, texto: url, usuario_id: usuarioId };
       if (chatId) payload.chat_id = chatId;
@@ -10629,6 +10634,7 @@
           _agendarFila(1);
           return;
         }
+        _registrarEnvio(chatId || telefone, midiaTipo || 'texto', texto, modeloId);
         if (st) st.textContent = 'Enviado pelo WhatsApp.';
         _agendarFila(1);
         setTimeout(() => { ov.remove(); }, 800);
@@ -11515,6 +11521,26 @@
     return 'j' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   }
 
+  // Trava local de repetição: não deixa o mesmo conteúdo sair duas vezes em
+  // seguida para a mesma conversa, seja pelo botão da biblioteca ou por passo
+  // de funil. É deliberadamente uma recusa imediata, não uma espera oculta.
+  const _ENVIO_REPETIDO_MS = 2 * 60 * 1000;
+  const _enviosRecentes = new Map();
+  function _chaveEnvio(chatId, tipo, texto, modeloId) {
+    return [chatId || '', tipo || 'texto', modeloId || '',
+      String(texto || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase('pt-BR')].join('|');
+  }
+  function _foiRepetido(chatId, tipo, texto, modeloId) {
+    const agora = Date.now();
+    for (const [k, quando] of _enviosRecentes) if (agora - quando > _ENVIO_REPETIDO_MS) _enviosRecentes.delete(k);
+    const chave = _chaveEnvio(chatId, tipo, texto, modeloId);
+    const anterior = _enviosRecentes.get(chave);
+    return !!(anterior && agora - anterior < _ENVIO_REPETIDO_MS);
+  }
+  function _registrarEnvio(chatId, tipo, texto, modeloId) {
+    _enviosRecentes.set(_chaveEnvio(chatId, tipo, texto, modeloId), Date.now());
+  }
+
   // ── Dispara um funil: cria um "job" e entra na fila. Jobs em conversas
   //    DIFERENTES rodam em paralelo (não se atrapalham). Dois jobs pro MESMO
   //    contato enfileiram — o segundo só começa quando o primeiro terminar,
@@ -11582,6 +11608,13 @@
       }
       if (job.cancelar) break;
       job.enviando = i; renderBubble();
+      if (_foiRepetido(job.chatId, passo.tipo, passo.texto, passo.modelo_id)) {
+        job.bloqueados = (job.bloqueados || 0) + 1;
+        job.enviando = -1;
+        job.erro = 'Passo repetido bloqueado para este contato.';
+        renderBubble();
+        continue;
+      }
       let envio;
       try {
         if (passo.tipo && passo.tipo !== 'texto' && passo.midia_url) {
@@ -11598,7 +11631,7 @@
         envio = { ok: false, erro: 'não consegui enviar este passo' };
       }
       job.enviando = -1;
-      if (envio && envio.ok) { job.enviados++; job.passoAtual = i + 1; }
+      if (envio && envio.ok) { _registrarEnvio(job.chatId, passo.tipo, passo.texto, passo.modelo_id); job.enviados++; job.passoAtual = i + 1; }
       renderBubble();
     }
     job.status = job.cancelar ? 'cancelado' : 'concluido';
