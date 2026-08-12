@@ -37926,17 +37926,13 @@ def crm_modelos():
     if erro:
         dados = {'itens': [], 'funis': [], 'total': 0, 'pagina': 1, 'caminho': [], 'erro': erro}
     onde_fav = "COALESCE(favorito,0)=1 AND COALESCE(ativo,1)=1"
-    onde_sem = "pasta_id IS NULL AND COALESCE(ativo,1)=1"
     params_extra = ()
     if not eh_gestor:
         onde_fav += " AND dono_consultor_id=?"
-        onde_sem += " AND dono_consultor_id=?"
         params_extra = (uid,)
     atalhos = {
         'favoritos': conn.execute(
             "SELECT COUNT(*) AS n FROM modelos_conteudo WHERE " + onde_fav, params_extra).fetchone()['n'],
-        'sem_localizacao': conn.execute(
-            "SELECT COUNT(*) AS n FROM modelos_conteudo WHERE " + onde_sem, params_extra).fetchone()['n'],
     }
     proprietarios = [dict(u) for u in conn.execute(
         "SELECT id, nome FROM usuarios WHERE ativo=1 AND perfil='consultor' ORDER BY nome").fetchall()] \
@@ -39100,6 +39096,13 @@ def _bib_garantir_raizes(conn):
         cur = conn.cursor()
         cur.execute("INSERT INTO pastas (nome, parent_id, consultor_id) VALUES ('Compartilhado',NULL,NULL)")
         raizes[None] = _last_insert_id(cur)
+    # A organização atual tem exatamente dois tipos de raiz: Compartilhado e
+    # uma pasta pessoal por consultor. Raízes antigas sem dono (por exemplo
+    # "A organizar") viram subpastas de Compartilhado, preservando IDs,
+    # conteúdo, funis e todos os vínculos existentes.
+    conn.execute("""UPDATE pastas SET parent_id=?
+                    WHERE parent_id IS NULL AND consultor_id IS NULL AND id<>?""",
+                 (raizes[None], raizes[None]))
     # ORDER BY id DESC + sobrescrita do dict = fica valendo a raiz mais antiga
     # se um dia nascer duplicada por corrida.
     existentes = {p['consultor_id']: p['id'] for p in conn.execute(

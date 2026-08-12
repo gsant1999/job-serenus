@@ -8,7 +8,7 @@
      pasta aberta. Canal (WhatsApp, SMS, e-mail) é filtro, não gaveta: o mesmo
      assunto costuma existir nos três, e separar por canal antes de separar por
      dono era o que deixava a tela antiga ilegível. */
-  .bib { display:grid; grid-template-columns:270px minmax(0,1fr); gap:22px; align-items:start; max-width:1240px; }
+  .bib { display:grid; grid-template-columns:330px minmax(0,1fr); gap:24px; align-items:start; max-width:1380px; }
   .bib-lado { background:var(--panel); border:1px solid var(--borda); border-radius:12px; padding:12px 10px 14px;
               position:sticky; top:14px; max-height:calc(100vh - 40px); overflow:auto; }
   .bib-lado-topo { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:2px 6px 10px; }
@@ -31,6 +31,9 @@
   .bib-pasta-menu svg { width:15px; height:15px; }
   .bib-pasta-linha { display:flex; align-items:center; }
   .bib-pasta-linha .bib-pasta-btn { flex:1; min-width:0; }
+  .bib-grupo-titulo { color:var(--cinza-2); font-size:10px; font-weight:800; letter-spacing:.65px;
+                      text-transform:uppercase; padding:12px 8px 5px; }
+  .bib-grupo-titulo:first-child { padding-top:2px; }
   .bib-no > summary { list-style:none; cursor:pointer; display:flex; align-items:center; gap:7px;
                       padding:7px 8px; border-radius:8px; font-size:13px; color:var(--texto);
                       transition:background .12s; }
@@ -41,6 +44,8 @@
   .bib-no[open] > summary .bib-seta { transform:rotate(90deg); }
   .bib-no-nome { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .bib-no-n { font-size:11px; color:var(--cinza-2); font-variant-numeric:tabular-nums; }
+  .bib-inativo { font-size:9px; font-weight:800; letter-spacing:.35px; text-transform:uppercase; color:var(--cinza);
+                 background:var(--panel-3); border-radius:999px; padding:2px 6px; flex:0 0 auto; }
   .bib-raiz > summary { font-weight:700; }
   .bib-filhas { padding-left:14px; border-left:1px solid var(--borda); margin-left:13px; }
   .bib-pasta-btn { display:flex; align-items:center; gap:7px; width:100%; text-align:left; background:none; border:none;
@@ -117,6 +122,15 @@
   .bib-menu button:focus-visible { outline:2px solid var(--azul); outline-offset:-2px; }
   .bib-menu .sep { height:1px; background:var(--borda); margin:6px 4px; }
   .bib-menu .perigo { color:var(--erro); }
+  .bib-pasta-acoes { display:grid; gap:8px; }
+  .bib-pasta-acao { width:100%; display:flex; align-items:flex-start; justify-content:space-between; gap:14px;
+                     text-align:left; padding:12px 13px; border:1px solid var(--borda); border-radius:11px;
+                     background:var(--panel-2); color:var(--texto); cursor:pointer; font:inherit; }
+  .bib-pasta-acao:hover { border-color:var(--borda-2); background:var(--panel-3); }
+  .bib-pasta-acao:focus-visible { outline:2px solid var(--azul); outline-offset:2px; }
+  .bib-pasta-acao b { display:block; font-size:13px; margin-bottom:2px; }
+  .bib-pasta-acao small { display:block; color:var(--cinza); font-size:11.5px; line-height:1.4; }
+  .bib-pasta-acao.perigo b { color:var(--erro); }
 
   /* Folha própria: nada de alert()/confirm() do navegador. */
   .bib-folha-bg { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:400; display:none;
@@ -199,8 +213,8 @@
 <div class="bib">
   <aside class="bib-lado" aria-label="Proprietários e pastas">
     <div class="bib-lado-topo">
-      <span class="bib-lado-titulo">Proprietários</span>
-      {% if pode_gerir %}<button class="bib-icobtn" id="bib-nova-pasta" title="Nova pasta dentro da pasta aberta" aria-label="Nova pasta">
+      <span class="bib-lado-titulo">Pastas da biblioteca</span>
+      {% if pode_gerir %}<button class="bib-icobtn" id="bib-nova-pasta" title="Criar uma subpasta" aria-label="Criar uma subpasta">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20h16a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-7.5L10 4H4a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
       </button>{% endif %}
     </div>
@@ -209,12 +223,6 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;flex-shrink:0"><polygon points="12 2 15 9 22 9.5 17 14.5 18.5 21.5 12 18 5.5 21.5 7 14.5 2 9.5 9 9"/></svg>
         <span class="bib-no-nome">Favoritos</span><span class="bib-no-n">{{ atalhos.favoritos }}</span>
       </button>
-      {% if atalhos.sem_localizacao %}
-      <button class="bib-pasta-btn virtual" data-escopo="sem-localizacao" data-dono="compartilhado">
-        <span class="bib-seta" aria-hidden="true"></span>
-        <span class="bib-no-nome">Sem localização</span><span class="bib-no-n">{{ atalhos.sem_localizacao }}</span>
-      </button>
-      {% endif %}
     </div>
     <div id="bib-arvore"></div>
   </aside>
@@ -310,12 +318,13 @@ function bibNoHtml(no, nivel) {
   const temFilhas = (no.filhas || []).length > 0;
   const selecionada = chaveSel === String(no.id) && BIB_ESTADO.escopo === 'pasta';
   const rotuloDono = no.dono_nome ? ' — ' + no.dono_nome : '';
+  const inativo = nivel === 0 && no.dono_id != null && !no.dono_ativo ? '<span class="bib-inativo">Inativo</span>' : '';
   const menu = bibPastaMenuHtml(no, nivel);
   if (!temFilhas) {
     return '<div class="bib-pasta-linha ' + (no.arquivada ? 'arquivada' : '') + '"><button class="bib-pasta-btn ' + (selecionada ? 'on' : '') + '" data-pasta="' + no.id + '">' +
       '<span class="bib-seta" aria-hidden="true"></span>' +
       '<span class="bib-no-nome">' + esc(no.nome) + '</span>' +
-      '<span class="bib-no-n">' + (no.total || 0) + '</span></button>' + menu + '</div>';
+      inativo + '<span class="bib-no-n">' + (no.total || 0) + '</span></button>' + menu + '</div>';
   }
   const aberta = BIB_ABERTAS.has(String(no.id)) ? ' open' : '';
   return '<details class="bib-no ' + (nivel === 0 ? 'bib-raiz ' : '') + (no.arquivada ? 'arquivada' : '') + '"' + aberta + '>' +
@@ -323,7 +332,7 @@ function bibNoHtml(no, nivel) {
       esc(no.nome + rotuloDono) + '">' +
       '<span class="bib-seta">' + BIB_ICO.seta + '</span>' +
       '<span class="bib-no-nome">' + esc(no.nome) + '</span>' +
-      '<span class="bib-no-n">' + (no.total || 0) + '</span>' + menu + '</summary>' +
+      inativo + '<span class="bib-no-n">' + (no.total || 0) + '</span>' + menu + '</summary>' +
     '<div class="bib-filhas">' + no.filhas.map((f) => bibNoHtml(f, nivel + 1)).join('') + '</div>' +
     '</details>';
 }
@@ -345,7 +354,10 @@ function bibDesenharArvore() {
   }
   const ativas = BIB_ARVORE.filter((r) => !r.arquivada);
   const arquivadas = BIB_ARVORE.filter((r) => r.arquivada);
-  alvo.innerHTML = ativas.map((r) => bibNoHtml(r, 0)).join('') + (arquivadas.length
+  const compartilhadas = ativas.filter((r) => r.dono_id == null);
+  const pessoais = ativas.filter((r) => r.dono_id != null);
+  alvo.innerHTML = (compartilhadas.length ? '<div class="bib-grupo-titulo">Compartilhado</div>' + compartilhadas.map((r) => bibNoHtml(r, 0)).join('') : '') +
+    (pessoais.length ? '<div class="bib-grupo-titulo">Consultores</div>' + pessoais.map((r) => bibNoHtml(r, 0)).join('') : '') + (arquivadas.length
     ? '<details class="bib-arquivadas"><summary>Pastas arquivadas (' + arquivadas.length + ')</summary>' +
       arquivadas.map((r) => bibNoHtml(r, 0)).join('') + '</details>' : '');
   // A seta só abre/recolhe. O nome seleciona e mantém a pasta aberta. Antes o
@@ -712,7 +724,7 @@ function bibNoPorId(id, nos) {
   return null;
 }
 
-function bibMenuPasta(id, ancora) {
+function bibMenuPasta(id) {
   const pasta = bibNoPorId(id);
   if (!pasta) return;
   bibFecharMenu();
@@ -729,22 +741,24 @@ function bibMenuPasta(id, ancora) {
       classe: pasta.arquivada ? '' : 'perigo', aoClicar: () => bibFolhaArquivarPasta(pasta) });
   }
   if (!acoes.length) return;
-  const html = '<div class="bib-menu bib-menu-pasta"></div>';
-  const linha = document.querySelector('[data-pasta-acao="' + id + '"]');
-  if (!linha) return;
-  linha.insertAdjacentHTML('afterend', html);
-  const menu = linha.nextElementSibling;
-  _bibMenuAberto = menu;
-  const r = (ancora || linha).getBoundingClientRect();
-  menu.style.top = Math.min(window.innerHeight - 42, r.bottom + 4) + 'px';
-  menu.style.left = Math.max(8, Math.min(window.innerWidth - 212, r.right - 196)) + 'px';
-  acoes.forEach((acao) => {
-    const b = document.createElement('button');
-    b.textContent = acao.rotulo;
-    if (acao.classe) b.className = acao.classe;
-    b.addEventListener('click', () => { menu.remove(); acao.aoClicar(); });
-    menu.appendChild(b);
-  });
+  const descricoes = {
+    'Renomear pasta': 'Troca somente o nome desta subpasta.',
+    'Mover subpasta': 'Leva esta pasta e tudo que está dentro para outro local.',
+    'Excluir subpasta': 'Só funciona quando a subpasta estiver completamente vazia.',
+    'Arquivar pasta': 'Retira o consultor inativo da operação sem apagar o acervo.',
+    'Restaurar pasta': 'Devolve a pasta arquivada para a lista de consultores.'
+  };
+  const corpo = '<div class="bib-pasta-acoes">' + acoes.map((acao, i) =>
+    '<button class="bib-pasta-acao ' + (acao.classe || '') + '" data-opcao-pasta="' + i + '"><span><b>' +
+      esc(acao.rotulo) + '</b><small>' + esc(descricoes[acao.rotulo] || '') + '</small></span></button>').join('') + '</div>';
+  bibAbrirFolha('Ações da pasta', esc(pasta.nome), corpo, [
+    { rotulo: 'Fechar', aoClicar: bibFecharFolha }
+  ]);
+  document.querySelectorAll('[data-opcao-pasta]').forEach((b) => b.addEventListener('click', () => {
+    const acao = acoes[Number(b.dataset.opcaoPasta)];
+    bibFecharFolha();
+    acao.aoClicar();
+  }));
 }
 
 function bibFolhaRenomearPasta(pasta) {
@@ -820,8 +834,8 @@ function bibDestinoHtml(soDoDono, selecionada) {
       '</label>' + filhas + '</div>';
   }
   const raizes = (soDoDono === undefined || soDoDono === null)
-    ? BIB_ARVORE
-    : BIB_ARVORE.filter((r) => String(r.dono_id == null ? 'compartilhado' : r.dono_id) === String(soDoDono));
+    ? BIB_ARVORE.filter((r) => !r.arquivada)
+    : BIB_ARVORE.filter((r) => !r.arquivada && String(r.dono_id == null ? 'compartilhado' : r.dono_id) === String(soDoDono));
   if (!raizes.length) return '<div class="bib-consequencia">Esse proprietário ainda não tem pasta. O conteúdo vai para a pasta-mãe dele.</div>';
   return '<div class="bib-destino">' + raizes.map((r) => no(r, 0)).join('') + '</div>';
 }
