@@ -4017,6 +4017,108 @@ def init_db():
             except Exception: pass
         print(f"[WATCHLIST] criação pulada: {e}")
 
+    # ─── CONCILIAÇÃO DA AFFINITY E RAZÃO FINANCEIRO ────────────────────────────
+    # Criadas aqui (idempotente, os dois bancos no mesmo lugar) pra não mexer nos
+    # 2 blocos gigantes de schema — mesmo motivo da watchlist acima.
+    #
+    # affinity_conciliacao: UMA LINHA POR LINHA DE EXTRATO IMPORTADA. É o registro
+    # do que a Affinity apurou, com a venda a que ela pertence. Append-only na
+    # importação: o mesmo código de comissão nunca entra duas vezes (chave_idem é
+    # UNIQUE), e importar de novo não altera linha existente. As únicas colunas
+    # que mudam depois são as de vínculo manual e de confirmação de entrada — e
+    # cada uma delas exige usuário, data e observação, e deixa evento no razão.
+    #
+    # fin_evento: O RAZÃO. Append-only de verdade — nada aqui é alterado nem
+    # apagado. Cada fato financeiro é uma linha com estado, papel, valor e sinal.
+    # Financeiro e Fluxo de Caixa leem daqui, então as duas telas param de
+    # discordar por consultarem tabelas diferentes.
+    # chave_idem é o que torna a operação idempotente: rodar duas vezes o mesmo
+    # fato não duplica dinheiro, porque a segunda gravação bate na UNIQUE.
+    try:
+        if is_pg:
+            conn.execute("""CREATE TABLE IF NOT EXISTS affinity_conciliacao (
+                id SERIAL PRIMARY KEY,
+                chave_idem TEXT UNIQUE NOT NULL,
+                codigo_comissao TEXT, arquivo TEXT, arquivo_hash TEXT,
+                cadastro_cod TEXT, cadastro_nome TEXT,
+                geracao TEXT, previsao TEXT, data_pagamento_informada TEXT, nf_situacao TEXT,
+                linha_ordem INTEGER DEFAULT 0,
+                operadora TEXT, cliente TEXT, numero_proposta TEXT, parcela_extrato INTEGER,
+                tipo TEXT DEFAULT 'normal', percentual REAL DEFAULT 0,
+                bruto REAL DEFAULT 0, liquido REAL DEFAULT 0,
+                total_bruto_extrato REAL DEFAULT 0, total_liquido_extrato REAL DEFAULT 0,
+                debitos_extrato REAL DEFAULT 0,
+                conf_ancora TEXT, conf_impresso REAL, conf_lido REAL, conf_diferenca REAL,
+                leitura_fechada INTEGER DEFAULT 0,
+                proposta_id INTEGER, parcela_id INTEGER,
+                vinculo_criterio TEXT, vinculo_por TEXT, vinculo_em TEXT, vinculo_observacao TEXT,
+                estado TEXT DEFAULT 'apurado_affinity',
+                entrada_ref TEXT, entrada_forma TEXT, entrada_por TEXT, entrada_em TEXT,
+                entrada_observacao TEXT,
+                extrato_id INTEGER, extrato_item_id INTEGER,
+                importado_por INTEGER, importado_por_nome TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em TIMESTAMP)""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS fin_evento (
+                id SERIAL PRIMARY KEY,
+                chave_idem TEXT UNIQUE NOT NULL,
+                estado TEXT NOT NULL, papel TEXT DEFAULT 'serenus',
+                proposta_id INTEGER, parcela_id INTEGER, conciliacao_id INTEGER,
+                fracao INTEGER,
+                competencia TEXT, data_evento TEXT,
+                valor REAL DEFAULT 0, sinal INTEGER DEFAULT 1,
+                origem TEXT, origem_ref TEXT, descricao TEXT,
+                usuario_id INTEGER, usuario_nome TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+        else:
+            conn.execute("""CREATE TABLE IF NOT EXISTS affinity_conciliacao (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chave_idem TEXT UNIQUE NOT NULL,
+                codigo_comissao TEXT, arquivo TEXT, arquivo_hash TEXT,
+                cadastro_cod TEXT, cadastro_nome TEXT,
+                geracao TEXT, previsao TEXT, data_pagamento_informada TEXT, nf_situacao TEXT,
+                linha_ordem INTEGER DEFAULT 0,
+                operadora TEXT, cliente TEXT, numero_proposta TEXT, parcela_extrato INTEGER,
+                tipo TEXT DEFAULT 'normal', percentual REAL DEFAULT 0,
+                bruto REAL DEFAULT 0, liquido REAL DEFAULT 0,
+                total_bruto_extrato REAL DEFAULT 0, total_liquido_extrato REAL DEFAULT 0,
+                debitos_extrato REAL DEFAULT 0,
+                conf_ancora TEXT, conf_impresso REAL, conf_lido REAL, conf_diferenca REAL,
+                leitura_fechada INTEGER DEFAULT 0,
+                proposta_id INTEGER, parcela_id INTEGER,
+                vinculo_criterio TEXT, vinculo_por TEXT, vinculo_em TEXT, vinculo_observacao TEXT,
+                estado TEXT DEFAULT 'apurado_affinity',
+                entrada_ref TEXT, entrada_forma TEXT, entrada_por TEXT, entrada_em TEXT,
+                entrada_observacao TEXT,
+                extrato_id INTEGER, extrato_item_id INTEGER,
+                importado_por INTEGER, importado_por_nome TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em TIMESTAMP)""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS fin_evento (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chave_idem TEXT UNIQUE NOT NULL,
+                estado TEXT NOT NULL, papel TEXT DEFAULT 'serenus',
+                proposta_id INTEGER, parcela_id INTEGER, conciliacao_id INTEGER,
+                fracao INTEGER,
+                competencia TEXT, data_evento TEXT,
+                valor REAL DEFAULT 0, sinal INTEGER DEFAULT 1,
+                origem TEXT, origem_ref TEXT, descricao TEXT,
+                usuario_id INTEGER, usuario_nome TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+        for idx in ("CREATE INDEX IF NOT EXISTS idx_afy_conc_prop ON affinity_conciliacao(proposta_id)",
+                    "CREATE INDEX IF NOT EXISTS idx_afy_conc_cod ON affinity_conciliacao(codigo_comissao)",
+                    "CREATE INDEX IF NOT EXISTS idx_afy_conc_est ON affinity_conciliacao(estado)",
+                    "CREATE INDEX IF NOT EXISTS idx_fin_ev_prop ON fin_evento(proposta_id)",
+                    "CREATE INDEX IF NOT EXISTS idx_fin_ev_comp ON fin_evento(competencia)",
+                    "CREATE INDEX IF NOT EXISTS idx_fin_ev_est ON fin_evento(estado)"):
+            conn.execute(idx)
+        conn.commit()
+    except Exception as e:
+        if is_pg:
+            try: conn.rollback()
+            except Exception: pass
+        print(f"[CONCILIACAO] criação pulada: {e}")
+
     # ─── REGISTRO DE NOMES DE OPERADORA: preenche a tabela 'operadoras' com o
     # display único de TODA operadora que já existe em recebimento, repasse_corretor
     # ou nas propostas — assim o registro de nomes fica completo e nenhum nome
@@ -26552,11 +26654,15 @@ def _ext_conferir_lote(conn, arquivos):
     para a mesma decisao e como ter dois relogios — nunca se sabe qual esta certo."""
     linhas = []
     for nome, dados in arquivos:
+        # Hash do arquivo: guarda QUAL PDF gerou aquele lançamento. Nome de
+        # arquivo se repete e se renomeia; o conteúdo, não.
+        arquivo_hash = hashlib.sha256(dados).hexdigest()[:32] if dados else ''
         try:
             cab, itens, avisos = ler_extrato_affinity(dados, nome)
         except Exception as e:
             app.logger.exception('[EXTRATO-PREVIA] falha ao ler %s', nome)
-            linhas.append({'arquivo': nome, 'falhou': True, 'erro_leitura': str(e)[:180],
+            linhas.append({'arquivo': nome, 'arquivo_hash': arquivo_hash,
+                           'falhou': True, 'erro_leitura': str(e)[:180],
                            'codigo': '', 'itens': [], 'avisos': [], 'situacao': 'nao_fechou',
                            'precisa_revisao': True, 'tipo_txt': '—', 'n_itens': 0, 'tipos': [],
                            'total_bruto': 0.0, 'total_liquido': 0.0, 'debitos': 0.0,
@@ -26610,7 +26716,8 @@ def _ext_conferir_lote(conn, arquivos):
                 'divergencia': div,
             })
         l = {
-            'arquivo': nome, 'falhou': False, 'erro_leitura': '',
+            'arquivo': nome, 'arquivo_hash': arquivo_hash,
+            'falhou': False, 'erro_leitura': '',
             'codigo': cab.get('codigo_comissao') or '',
             'cadastro_cod': cab.get('cadastro_cod') or '',
             'cadastro_nome': cab.get('cadastro_nome') or '',
@@ -26658,9 +26765,18 @@ def _ext_conferir_lote(conn, arquivos):
     codigos = [c for c in vistos if c]
     if codigos:
         marcas = ','.join('?' for _ in codigos)
-        ja = {str(r['codigo_comissao']) for r in conn.execute(
-            f"SELECT codigo_comissao FROM comissao_extrato WHERE codigo_comissao IN ({marcas})",
-            codigos).fetchall()}
+        # As DUAS tabelas: o importador antigo grava em comissao_extrato e a
+        # importacao controlada em affinity_conciliacao. Olhar so uma faria o
+        # extrato ja importado num caminho parecer novo no outro — e pagar duas
+        # vezes e exatamente o que a duplicidade existe pra impedir.
+        for tabela in ('comissao_extrato', 'affinity_conciliacao'):
+            try:
+                ja |= {str(r['codigo_comissao']) for r in conn.execute(
+                    f"SELECT DISTINCT codigo_comissao FROM {tabela} "
+                    f"WHERE codigo_comissao IN ({marcas})", codigos).fetchall()}
+            except Exception:
+                # Banco antigo, antes da migracao: seguir com o que existe.
+                pass
     for cod, grupo in vistos.items():
         for l in grupo:
             l['dup_lote'] = len(grupo) > 1
@@ -26768,6 +26884,426 @@ def comissao_extrato_lote_previa():
     resumo, por_cadastro = _ext_resumo_lote(linhas)
     return render_template('comissao_extrato_previa.html', linhas=linhas, resumo=resumo,
                            por_cadastro=por_cadastro, erro=erro, limite=_EXT_LOTE_MAX)
+
+
+# ═══════ IMPORTACAO CONTROLADA E CONCILIACAO (APPEND-ONLY) ═══════
+# A previa mostra. Esta parte GRAVA — e por isso ela grava pouco, num lugar so, e
+# nunca por cima de nada.
+#
+# O que ela NAO toca, por decisao e nao por esquecimento: propostas, parcelas,
+# recebimento, repasse_corretor, lancamentos. Importar extrato nao pode mudar
+# status financeiro de venda nenhuma. Se pudesse, um PDF da Affinity mandaria em
+# parcela ja paga, ja conciliada, ja com PIX — e nao ha desfazer para isso.
+#
+# ESTADOS, e por que sao seis e nao um flag de "pago":
+#   previsto           — a regua diz que vai vir. Ninguem apurou nada ainda.
+#   apurado_affinity   — a Affinity emitiu extrato e diz que vai pagar isto.
+#   entrada_confirmada — o dinheiro chegou na conta. So por identificador Asaas
+#                        ou confirmacao humana com usuario, data e observacao.
+#   liberado_repasse   — a Serenus liberou o valor do gestor/consultor.
+#   pix_iniciado       — a transferencia foi disparada e ainda pode falhar.
+#   pago               — o Asaas confirmou.
+# Colapsar isso em "recebido" foi o que fez a tela dizer que extrato e dinheiro
+# que entrou. Sao coisas diferentes e a diferenca custa dinheiro.
+_AFY_ESTADOS = ('previsto', 'apurado_affinity', 'entrada_confirmada',
+                'liberado_repasse', 'pix_iniciado', 'pago')
+_AFY_ESTADO_LABEL = {
+    'previsto': 'Previsto',
+    'apurado_affinity': 'Apurado pela Affinity',
+    'entrada_confirmada': 'Entrada confirmada',
+    'liberado_repasse': 'Liberado para repasse',
+    'pix_iniciado': 'PIX iniciado',
+    'pago': 'Pago',
+    'ajuste_sem_efeito': 'Ajuste sem efeito',
+    'sem_vinculo': 'Sem venda vinculada',
+}
+
+
+def _fin_competencia(data_br):
+    """'05/08/2026' -> '2026-08'. Sem data, devolve vazio — inventar competencia
+    joga dinheiro num mes que ninguem escolheu."""
+    m = re.match(r'^(\d{2})/(\d{2})/(\d{4})$', (data_br or '').strip())
+    return f'{m.group(3)}-{m.group(2)}' if m else ''
+
+
+def _fin_registrar(conn, chave_idem, estado, valor, **kw):
+    """Grava um fato no razao. IDEMPOTENTE: a chave e UNIQUE, entao rodar duas
+    vezes a mesma importacao nao duplica dinheiro — a segunda passada bate na
+    restricao e nao insere.
+
+    Devolve True se inseriu, False se ja existia. Nunca faz UPDATE: o razao e
+    append-only. Corrigir um fato e registrar o fato contrario, nao apagar o
+    primeiro — apagar destroi a prova de que houve correcao."""
+    ja = conn.execute("SELECT id FROM fin_evento WHERE chave_idem=?", (chave_idem,)).fetchone()
+    if ja:
+        return False
+    conn.execute("""INSERT INTO fin_evento
+        (chave_idem, estado, papel, proposta_id, parcela_id, conciliacao_id, fracao,
+         competencia, data_evento, valor, sinal, origem, origem_ref, descricao,
+         usuario_id, usuario_nome, criado_em)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (chave_idem, estado, kw.get('papel', 'serenus'), kw.get('proposta_id'),
+         kw.get('parcela_id'), kw.get('conciliacao_id'), kw.get('fracao'),
+         kw.get('competencia', ''), kw.get('data_evento', ''), round(float(valor or 0), 2),
+         int(kw.get('sinal', 1)), kw.get('origem', ''), str(kw.get('origem_ref', ''))[:120],
+         str(kw.get('descricao', ''))[:300], kw.get('usuario_id'),
+         str(kw.get('usuario_nome', ''))[:80], _agora_sp()))
+    return True
+
+
+def _afy_importar_lote(conn, linhas, usuario_id, usuario_nome):
+    """Importa APENAS o que esta pronto, e diz em voz alta o que deixou de fora.
+
+    Pronto quer dizer as tres coisas juntas:
+      1. leitura fechada — a soma bate com o total impresso no proprio PDF;
+      2. codigo novo — extrato ja importado nao entra de novo;
+      3. arquivo integro — nao falhou na leitura.
+
+    Casamento com a venda NAO e condicao de importar, e sim de contar como
+    conciliado. Item sem venda entra mesmo assim, com proposta em branco, e cai
+    na fila de revisao. Deixar de fora seria pior: o dinheiro existe no extrato e
+    sumiria da conta do mes por nao ter onde encostar.
+
+    Casamento por NOME nunca e aplicado aqui, mesmo com candidato unico. Na
+    previa ele e sugestao visivel; na gravacao ele viraria vinculo com cara de
+    fato. Nome so vira vinculo por confirmacao humana, na fila de revisao."""
+    res = {'extratos': 0, 'itens': 0, 'vinculados': 0, 'sem_vinculo': 0, 'ajustes': 0,
+           'ignorados': [], 'ja_importados': 0, 'valor': 0.0}
+    for l in linhas:
+        cod = l.get('codigo') or ''
+        if l.get('falhou'):
+            res['ignorados'].append((l['arquivo'], 'não consegui ler o arquivo'))
+            continue
+        if not l.get('leitura_fechada'):
+            res['ignorados'].append((l['arquivo'], 'a leitura não fechou com o total impresso'))
+            continue
+        if not cod:
+            res['ignorados'].append((l['arquivo'], 'o PDF não traz código de comissão'))
+            continue
+        if l.get('dup_banco'):
+            res['ja_importados'] += 1
+            res['ignorados'].append((l['arquivo'], f'o código {cod} já foi importado antes'))
+            continue
+        if not l.get('itens'):
+            res['ignorados'].append((l['arquivo'], 'nenhuma linha de venda reconhecida'))
+            continue
+
+        ajuste = bool(l.get('ajuste'))
+        competencia = _fin_competencia(l.get('data_pagamento') or l.get('previsao') or '')
+        importou_algo = False
+        for ordem, it in enumerate(l['itens']):
+            # A chave e o codigo do extrato + a posicao da linha nele. Dois
+            # extratos diferentes com a mesma venda sao dois fatos diferentes
+            # (parcelas distintas); a mesma linha do mesmo extrato e um so.
+            chave = f"afy:{cod}:{ordem}"
+            if conn.execute("SELECT id FROM affinity_conciliacao WHERE chave_idem=?",
+                            (chave,)).fetchone():
+                continue
+            seguro = it.get('criterio') == 'numero_proposta'
+            estado = ('ajuste_sem_efeito' if ajuste
+                      else ('apurado_affinity' if seguro else 'sem_vinculo'))
+            cur = conn.execute("""INSERT INTO affinity_conciliacao
+                (chave_idem, codigo_comissao, arquivo, arquivo_hash, cadastro_cod, cadastro_nome,
+                 geracao, previsao, data_pagamento_informada, nf_situacao, linha_ordem,
+                 operadora, cliente, numero_proposta, parcela_extrato, tipo, percentual,
+                 bruto, liquido, total_bruto_extrato, total_liquido_extrato, debitos_extrato,
+                 conf_ancora, conf_impresso, conf_lido, conf_diferenca, leitura_fechada,
+                 proposta_id, parcela_id, vinculo_criterio, vinculo_por, vinculo_em,
+                 estado, importado_por, importado_por_nome, criado_em)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (chave, cod, l.get('arquivo'), l.get('arquivo_hash') or '',
+                 l.get('cadastro_cod'), l.get('cadastro_nome'), l.get('geracao'),
+                 l.get('previsao'), l.get('data_pagamento'), l.get('nf_situacao'), ordem,
+                 it.get('operadora'), it.get('cliente'), it.get('numero_proposta'),
+                 it.get('parcela'), it.get('tipo'), it.get('percentual'),
+                 it.get('bruto'), it.get('liquido'), l.get('total_bruto'),
+                 l.get('total_liquido'), l.get('debitos'), l.get('conf_ancora'),
+                 l.get('conf_impresso'), l.get('conf_lido'), l.get('conf_diferenca'),
+                 1 if l.get('leitura_fechada') else 0,
+                 it.get('proposta_id') if seguro else None,
+                 it.get('parcela_id') if seguro else None,
+                 'numero_proposta' if seguro else None,
+                 usuario_nome if seguro else None, _agora_sp() if seguro else None,
+                 estado, usuario_id, usuario_nome, _agora_sp()))
+            cid = _last_insert_id(cur)
+            importou_algo = True
+            res['itens'] += 1
+            if ajuste:
+                res['ajustes'] += 1
+            elif seguro:
+                res['vinculados'] += 1
+            else:
+                res['sem_vinculo'] += 1
+            # Ajuste NAO vira evento de dinheiro: o estorno e a antecipacao que
+            # ele cancela se anulam, e lancar os dois contaria o mesmo dinheiro
+            # duas vezes — uma no extrato que estornou, outra no que recebeu.
+            if not ajuste:
+                _fin_registrar(conn, f"{chave}:apurado", 'apurado_affinity',
+                               it.get('liquido'), papel='affinity',
+                               proposta_id=it.get('proposta_id') if seguro else None,
+                               parcela_id=it.get('parcela_id') if seguro else None,
+                               conciliacao_id=cid, competencia=competencia,
+                               data_evento=l.get('data_pagamento') or l.get('previsao') or '',
+                               sinal=1, origem='affinity_pdf', origem_ref=cod,
+                               descricao=f"Extrato {cod} — {(it.get('cliente') or '')[:60]}",
+                               usuario_id=usuario_id, usuario_nome=usuario_nome)
+                res['valor'] += float(it.get('liquido') or 0)
+        if importou_algo:
+            res['extratos'] += 1
+            # Tarifa e demais debitos do extrato: saida, uma vez por extrato.
+            if not ajuste and float(l.get('debitos') or 0):
+                _fin_registrar(conn, f"afy:{cod}:debito", 'apurado_affinity',
+                               abs(float(l.get('debitos') or 0)), papel='tarifa',
+                               competencia=competencia,
+                               data_evento=l.get('data_pagamento') or l.get('previsao') or '',
+                               sinal=-1, origem='affinity_pdf', origem_ref=cod,
+                               descricao=f"Débitos e tarifas do extrato {cod}",
+                               usuario_id=usuario_id, usuario_nome=usuario_nome)
+                res['valor'] -= abs(float(l.get('debitos') or 0))
+    res['valor'] = round(res['valor'], 2)
+    return res
+
+
+@app.route('/comissoes/extrato/lote/importar', methods=['POST'])
+@login_required
+@admin_required
+def comissao_extrato_lote_importar():
+    """IMPORTA os itens prontos do lote. Grava so em affinity_conciliacao e
+    fin_evento — proposta, parcela e status financeiro ficam intactos.
+
+    Os arquivos sobem de novo de proposito. A previa nao guarda o lote em lugar
+    nenhum (essa e a garantia de que ela nao grava), entao guardar o resultado
+    dela para importar depois exigiria uma area temporaria que envelhece e mente:
+    a venda pode ter sido cadastrada entre a conferencia e a importacao. Reler os
+    mesmos arquivos custa segundos e conclui sobre o banco de agora."""
+    conn = db()
+    arquivos = [a for a in request.files.getlist('pdfs') if a and a.filename]
+    if not arquivos:
+        close_db(conn)
+        return render_template('comissao_extrato_previa.html', linhas=[],
+                               resumo=_ext_resumo_lote([])[0], por_cadastro=[],
+                               erro='Escolha os mesmos PDFs que você conferiu para importar.',
+                               limite=_EXT_LOTE_MAX)
+    if len(arquivos) > _EXT_LOTE_MAX:
+        close_db(conn)
+        return render_template('comissao_extrato_previa.html', linhas=[],
+                               resumo=_ext_resumo_lote([])[0], por_cadastro=[],
+                               erro=f'Limite de {_EXT_LOTE_MAX} arquivos por vez.',
+                               limite=_EXT_LOTE_MAX)
+    linhas = _ext_conferir_lote(conn, [(a.filename, a.read()) for a in arquivos])
+    try:
+        res = _afy_importar_lote(conn, linhas, session.get('user_id'), session.get('nome'))
+        conn.commit()
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        close_db(conn)
+        app.logger.exception('[AFFINITY-IMPORT] falha')
+        resumo, por_cadastro = _ext_resumo_lote(linhas)
+        return render_template('comissao_extrato_previa.html', linhas=linhas, resumo=resumo,
+                               por_cadastro=por_cadastro, limite=_EXT_LOTE_MAX,
+                               erro=f'Não importei nada: {e}')
+    close_db(conn)
+    session['afy_import_res'] = res
+    return redirect('/comissoes/conciliacao')
+
+
+def _afy_sugestoes(conn, c):
+    """Candidatos POR NOME para um item sem vinculo. Sugestao, nunca vinculo.
+
+    Devolve lista — inclusive quando ha varios. Ambiguidade tem que aparecer:
+    esconder o segundo candidato faria o primeiro parecer certo."""
+    nome = re.sub(r'^[\d.\-/]+\s*', '', (c.get('cliente') or '')).strip()
+    if len(nome) < 10:
+        return []
+    return [dict(r) for r in conn.execute(
+        """SELECT id, numero_proposta, razao_social, consultor, adm_operadora,
+                  COALESCE(comissao_total_corretora,0) comissao, status
+           FROM propostas
+           WHERE UPPER(COALESCE(razao_social,'')) LIKE ?
+             AND COALESCE(status,'') <> 'Excluída'
+           ORDER BY id DESC LIMIT 5""", (nome.upper() + '%',)).fetchall()]
+
+
+@app.route('/comissoes/conciliacao')
+@login_required
+@admin_required
+def comissao_conciliacao():
+    """FILA DE REVISAO E RAZAO DA AFFINITY.
+
+    Responde, na ordem: o que a Affinity apurou, o que disso ja tem venda, o que
+    esta esperando alguem apontar a venda, e o que ja foi confirmado como entrada
+    no banco. Cada estado tem uma acao propria — quem abre a tela nao precisa
+    adivinhar o que fazer com a linha."""
+    filtro = (request.args.get('estado') or 'sem_vinculo').strip()
+    conn = db()
+    onde, params = '', []
+    if filtro and filtro != 'todos':
+        onde, params = 'WHERE c.estado = ?', [filtro]
+    itens = [dict(r) for r in conn.execute(f"""
+        SELECT c.*, p.razao_social, p.consultor, p.adm_operadora,
+               COALESCE(p.comissao_total_corretora,0) job_comissao
+        FROM affinity_conciliacao c
+        LEFT JOIN propostas p ON p.id = c.proposta_id
+        {onde}
+        ORDER BY c.codigo_comissao DESC, c.linha_ordem LIMIT 400""", params).fetchall()]
+    for c in itens:
+        c['sugestoes'] = _afy_sugestoes(conn, c) if c['estado'] == 'sem_vinculo' else []
+        c['estado_label'] = _AFY_ESTADO_LABEL.get(c['estado'], c['estado'])
+    contagem = {r['estado']: r['n'] for r in conn.execute(
+        "SELECT estado, COUNT(*) n FROM affinity_conciliacao GROUP BY estado").fetchall()}
+    tot = conn.execute("""SELECT COUNT(*) n, COALESCE(SUM(liquido),0) v
+                          FROM affinity_conciliacao
+                          WHERE estado NOT IN ('ajuste_sem_efeito')""").fetchone()
+    confirmado = conn.execute("""SELECT COALESCE(SUM(liquido),0) v FROM affinity_conciliacao
+                                 WHERE estado='entrada_confirmada'""").fetchone()
+    close_db(conn)
+    resumo = {
+        'linhas': tot['n'] or 0,
+        'apurado': round(float(tot['v'] or 0), 2),
+        'entrada_confirmada': round(float(confirmado['v'] or 0), 2),
+        'contagem': contagem,
+        'total': sum(contagem.values()),
+    }
+    res = session.pop('afy_import_res', None)
+    return render_template('comissao_conciliacao.html', itens=itens, resumo=resumo,
+                           filtro=filtro, res=res, labels=_AFY_ESTADO_LABEL)
+
+
+@app.route('/comissoes/conciliacao/buscar')
+@login_required
+@admin_required
+def comissao_conciliacao_buscar():
+    """Busca de venda para o vinculo manual. Por numero ou por razao social."""
+    q = (request.args.get('q') or '').strip()
+    if len(q) < 3:
+        return jsonify({"ok": True, "propostas": []})
+    conn = db()
+    like = f'%{q.upper()}%'
+    num = re.sub(r'[^\d]', '', q)
+    rows = conn.execute("""SELECT id, numero_proposta, razao_social, consultor, adm_operadora,
+                                  COALESCE(comissao_total_corretora,0) comissao, status, vigencia
+                           FROM propostas
+                           WHERE (UPPER(COALESCE(razao_social,'')) LIKE ?
+                                  OR (? <> '' AND REPLACE(REPLACE(COALESCE(numero_proposta,''),'.',''),'-','') LIKE ?))
+                             AND COALESCE(status,'') <> 'Excluída'
+                           ORDER BY id DESC LIMIT 20""", (like, num, f'%{num}%')).fetchall()
+    close_db(conn)
+    return jsonify({"ok": True, "propostas": [dict(r) for r in rows]})
+
+
+@app.route('/comissoes/conciliacao/<int:cid>/vincular', methods=['POST'])
+@login_required
+@admin_required
+def comissao_conciliacao_vincular(cid):
+    """VINCULO MANUAL AUDITADO: aponta a venda de um item que o número não casou.
+
+    Exige observacao porque o vinculo manual e um julgamento de alguem, e daqui a
+    tres meses a pergunta vai ser 'por que essa linha foi parar nessa venda?'.
+    Sem o porque escrito, a resposta e 'ninguem lembra'."""
+    d = request.json or {}
+    try:
+        pid = int(d.get('proposta_id') or 0)
+    except (TypeError, ValueError):
+        pid = 0
+    obs = (d.get('observacao') or '').strip()
+    if not pid:
+        return jsonify({"ok": False, "erro": "Escolha a venda."}), 400
+    if len(obs) < 5:
+        return jsonify({"ok": False, "erro": "Escreva por que esta linha é desta venda "
+                                             "(no mínimo 5 caracteres)."}), 400
+    conn = db()
+    c = conn.execute("SELECT * FROM affinity_conciliacao WHERE id=?", (cid,)).fetchone()
+    if not c:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Item não encontrado."}), 404
+    if c['proposta_id']:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Este item já está vinculado. Vínculo não se "
+                                             "sobrescreve — abra um chamado se estiver errado."}), 400
+    if c['estado'] == 'ajuste_sem_efeito':
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Ajuste de efeito zero não se vincula a venda: "
+                                             "ele não é dinheiro novo."}), 400
+    p = conn.execute("SELECT id, razao_social FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Venda não encontrada."}), 404
+    agora = _agora_sp()
+    conn.execute("""UPDATE affinity_conciliacao
+                    SET proposta_id=?, vinculo_criterio='manual', vinculo_por=?, vinculo_em=?,
+                        vinculo_observacao=?, estado='apurado_affinity', atualizado_em=?
+                    WHERE id=?""",
+                 (pid, session.get('nome'), agora, obs[:400], agora, cid))
+    _fin_registrar(conn, f"afy:vinculo:{cid}", 'apurado_affinity', c['liquido'],
+                   papel='affinity', proposta_id=pid, conciliacao_id=cid,
+                   competencia=_fin_competencia(c['data_pagamento_informada'] or c['previsao']),
+                   data_evento=c['data_pagamento_informada'] or c['previsao'] or '',
+                   sinal=1, origem='vinculo_manual', origem_ref=c['codigo_comissao'],
+                   descricao=f"Vínculo manual: {obs[:150]}",
+                   usuario_id=session.get('user_id'), usuario_nome=session.get('nome'))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "razao_social": p['razao_social']})
+
+
+@app.route('/comissoes/conciliacao/<int:cid>/confirmar-entrada', methods=['POST'])
+@login_required
+@admin_required
+def comissao_conciliacao_confirmar_entrada(cid):
+    """CONFIRMA QUE O DINHEIRO ENTROU. E o unico lugar do sistema que pode dizer
+    isso, e ele exige prova.
+
+    Prova e uma das duas: identificador da transacao no Asaas, ou uma pessoa
+    assinando embaixo com observacao. Valor e data parecidos NAO servem e nao ha
+    caminho aqui que os aceite — dois extratos do mesmo mes com o mesmo valor
+    existem, e casar por semelhanca marcaria o errado como recebido, deixando o
+    certo esperando para sempre."""
+    d = request.json or {}
+    ref = (d.get('asaas_id') or '').strip()
+    obs = (d.get('observacao') or '').strip()
+    humana = bool(d.get('confirmacao_humana'))
+    if not ref and not humana:
+        return jsonify({"ok": False, "erro": "Informe o identificador da transação no Asaas "
+                                             "ou confirme manualmente com uma observação."}), 400
+    if not ref and len(obs) < 5:
+        return jsonify({"ok": False, "erro": "Confirmação manual exige observação dizendo como "
+                                             "você conferiu a entrada."}), 400
+    conn = db()
+    c = conn.execute("SELECT * FROM affinity_conciliacao WHERE id=?", (cid,)).fetchone()
+    if not c:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Item não encontrado."}), 404
+    if c['estado'] == 'ajuste_sem_efeito':
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Ajuste de efeito zero não tem entrada para "
+                                             "confirmar."}), 400
+    if c['estado'] == 'entrada_confirmada':
+        # Idempotente: repetir a confirmacao nao duplica evento nem grita.
+        close_db(conn)
+        return jsonify({"ok": True, "ja": True})
+    if not c['proposta_id']:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Aponte a venda antes de confirmar a entrada. "
+                                             "Dinheiro confirmado sem dono não vira repasse."}), 400
+    agora = _agora_sp()
+    conn.execute("""UPDATE affinity_conciliacao
+                    SET estado='entrada_confirmada', entrada_ref=?, entrada_forma=?,
+                        entrada_por=?, entrada_em=?, entrada_observacao=?, atualizado_em=?
+                    WHERE id=?""",
+                 (ref[:120], 'asaas' if ref else 'humana', session.get('nome'), agora,
+                  obs[:400], agora, cid))
+    _fin_registrar(conn, f"afy:entrada:{cid}", 'entrada_confirmada', c['liquido'],
+                   papel='serenus', proposta_id=c['proposta_id'], parcela_id=c['parcela_id'],
+                   conciliacao_id=cid,
+                   competencia=_fin_competencia(c['data_pagamento_informada'] or c['previsao']),
+                   data_evento=c['data_pagamento_informada'] or c['previsao'] or '',
+                   sinal=1, origem='asaas' if ref else 'confirmacao_humana',
+                   origem_ref=ref or c['codigo_comissao'],
+                   descricao=(f"Entrada confirmada por Asaas {ref}" if ref
+                              else f"Entrada confirmada manualmente: {obs[:150]}"),
+                   usuario_id=session.get('user_id'), usuario_nome=session.get('nome'))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
 
 
 @app.route('/lead/<int:lid>')

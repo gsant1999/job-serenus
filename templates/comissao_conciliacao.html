@@ -1,0 +1,309 @@
+{% extends 'base.html' %}
+{% block title %}Conciliação da Affinity{% endblock %}
+{% block head %}
+<style>
+  .panel-box { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 20px; margin-bottom:16px; }
+  .panel-box h2 { font-family:'Sora',sans-serif; font-size:14px; font-weight:600; color:var(--texto); margin:0 0 6px; }
+  .panel-box .vazio { color:var(--cinza-2); font-size:12px; padding:8px 0; }
+  .cc-sub { font-size:12px; color:var(--cinza); margin:0 0 14px; line-height:1.55; }
+
+  table.pnl-tab { width:100%; border-collapse:collapse; font-size:12.5px; }
+  table.pnl-tab th { text-align:left; color:var(--cinza-2); font-size:10px; text-transform:uppercase; letter-spacing:.5px; font-weight:600; padding:0 10px 10px; border-bottom:1px solid var(--borda); }
+  table.pnl-tab td { padding:10px; border-bottom:1px solid var(--borda); color:var(--texto); vertical-align:top; }
+  table.pnl-tab td.num, table.pnl-tab th.num { text-align:right; font-variant-numeric:tabular-nums; }
+
+  .pill { display:inline-block; padding:2px 9px; border-radius:20px; font-size:11px; font-weight:600; white-space:nowrap; }
+  .pill-verde { background:var(--verde-soft); color:var(--verde); }
+  .pill-erro { background:rgba(244,63,94,.12); color:var(--erro); }
+  .pill-cinza { background:rgba(125,133,150,.14); color:var(--cinza); }
+  .pill-amarelo { background:rgba(250,204,21,.14); color:var(--amarelo); }
+  .pill-azul { background:rgba(59,130,246,.14); color:var(--info); }
+
+  .cc-num-linha { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .cc-num { flex:1 1 170px; background:var(--panel-2); border:1px solid var(--borda); border-radius:10px; padding:12px 14px; }
+  .cc-num b { display:block; font-size:19px; font-variant-numeric:tabular-nums; }
+  .cc-num span { display:block; font-size:10px; color:var(--cinza); margin-top:3px; }
+  .cc-num.destaque { border-color:var(--verde); }
+  .cc-num.destaque b { color:var(--verde); }
+
+  .cc-filtros { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .cc-chip { border:1px solid var(--borda); background:var(--panel-2); color:var(--cinza); border-radius:20px;
+             padding:6px 13px; font-size:12px; font-weight:600; text-decoration:none; display:inline-block; }
+  .cc-chip:hover { border-color:var(--azul); color:var(--texto); }
+  .cc-chip.on { background:var(--azul); border-color:var(--azul); color:#fff; }
+  .cc-chip .c { opacity:.75; font-weight:500; margin-left:4px; }
+
+  .cc-linha2 { font-size:11px; color:var(--cinza); margin-top:3px; line-height:1.5; }
+  .cc-aviso { background:var(--panel-2); border:1px solid var(--borda); border-left:3px solid var(--amarelo);
+              border-radius:10px; padding:12px 14px; font-size:12px; color:var(--texto); line-height:1.6; margin-bottom:16px; }
+  .cc-ok { background:var(--panel-2); border:1px solid var(--borda); border-left:3px solid var(--verde);
+           border-radius:10px; padding:12px 14px; font-size:12.5px; color:var(--texto); line-height:1.7; margin-bottom:16px; }
+  .cc-ok a, .cc-aviso a { color:var(--verde); text-decoration:underline; }
+  .cc-busca { width:100%; padding:7px 9px; border:1px solid var(--borda); border-radius:8px;
+              background:var(--panel-2); color:var(--texto); font-family:inherit; font-size:12px; }
+  .cc-cand { border:1px solid var(--borda); border-radius:8px; padding:7px 9px; margin-top:6px; background:var(--panel-2); }
+  .cc-cand b { font-size:12px; }
+  .cc-acao { margin-top:8px; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .cc-mini { padding:5px 10px; font-size:11.5px; border-radius:8px; border:1px solid var(--borda);
+             background:var(--panel-2); color:var(--texto); cursor:pointer; font-family:inherit; font-weight:600; }
+  .cc-mini:hover { border-color:var(--azul); }
+  .cc-mini[disabled] { opacity:.5; cursor:not-allowed; }
+  #ccTab a { color:var(--azul); text-decoration:none; font-weight:600; }
+  #ccTab a:hover { text-decoration:underline; }
+  .cc-msg { font-size:11px; margin-top:4px; }
+  .cc-msg.erro { color:var(--erro); }
+  .cc-msg.ok { color:var(--verde); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Conciliação da Affinity</h1>
+    <div class="sub">O que a Affinity apurou, a que venda pertence e o que já foi confirmado como entrada.</div>
+  </div>
+  <div>
+    <a href="/comissoes/extrato/lote/previsualizar" class="btn-outline">Conferir novo lote</a>
+    <a href="/comissoes/extrato" class="btn-outline">Extratos</a>
+  </div>
+</div>
+
+<div class="page">
+
+  {% if res %}
+  <div class="cc-ok">
+    <b>Importação concluída.</b>
+    {{ res.extratos }} extrato{{ '' if res.extratos == 1 else 's' }} e {{ res.itens }} linha{{ '' if res.itens == 1 else 's' }};
+    {{ res.vinculados }} já com venda apontada pelo número, {{ res.sem_vinculo }} esperando alguém apontar,
+    {{ res.ajustes }} ajuste{{ '' if res.ajustes == 1 else 's' }} de efeito zero.
+    Valor apurado registrado: {{ res.valor|moeda }}.
+    {% if res.ignorados %}
+    <div style="margin-top:8px;">
+      <b>Não importei {{ res.ignorados|length }} arquivo{{ '' if res.ignorados|length == 1 else 's' }}:</b>
+      <ul style="margin:4px 0 0 18px; padding:0;">
+        {% for arq, porque in res.ignorados %}<li>{{ arq }} — {{ porque }}</li>{% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# O óbvio dito na tela: o que cada estado significa e o que ele NÃO significa. #}
+  <div class="cc-aviso">
+    <b>Apurado não é recebido.</b> Uma linha em "apurado pela Affinity" quer dizer que ela emitiu extrato
+    e diz que vai pagar. Só vira "entrada confirmada" com o identificador da transação no Asaas ou com
+    alguém confirmando manualmente e escrevendo como conferiu. Valor e data parecidos não confirmam nada.
+  </div>
+
+  <div class="cc-num-linha">
+    <div class="cc-num"><b>{{ resumo.linhas }}</b><span>linhas conciliáveis<i class="ajuda-i" title="Linhas de extrato importadas, fora os ajustes de efeito zero (estorno que cancela antecipação e extrato transferido).">i</i></span></div>
+    <div class="cc-num"><b>{{ resumo.apurado|moeda }}</b><span>apurado pela Affinity<i class="ajuda-i" title="Soma do líquido das linhas importadas. É o que a Affinity diz que vai pagar — ainda não é dinheiro na conta.">i</i></span></div>
+    <div class="cc-num destaque"><b>{{ resumo.entrada_confirmada|moeda }}</b><span>entrada confirmada<i class="ajuda-i" title="Só entra aqui o que teve identificador Asaas ou confirmação humana registrada com usuário, data e observação.">i</i></span></div>
+    <div class="cc-num"><b>{{ resumo.contagem.get('sem_vinculo', 0) }}</b><span>esperando vínculo</span></div>
+  </div>
+
+  <div class="cc-filtros">
+    {% for chave, rotulo in [('sem_vinculo','Sem venda vinculada'), ('apurado_affinity','Apurado'),
+                             ('entrada_confirmada','Entrada confirmada'), ('ajuste_sem_efeito','Ajustes'),
+                             ('todos','Todos')] %}
+    <a class="cc-chip {{ 'on' if filtro == chave }}" href="/comissoes/conciliacao?estado={{ chave }}">
+      {{ rotulo }}<span class="c">{{ resumo.total if chave == 'todos' else resumo.contagem.get(chave, 0) }}</span>
+    </a>
+    {% endfor %}
+  </div>
+
+  <div class="panel-box">
+    <h2>Linhas</h2>
+    {% if not itens %}
+      <div class="vazio">
+        Nada nesta situação.
+        {% if resumo.total == 0 %}
+        Nenhum extrato foi importado ainda — comece pela
+        <a href="/comissoes/extrato/lote/previsualizar">pré-conferência</a>.
+        {% endif %}
+      </div>
+    {% else %}
+    <table class="pnl-tab" id="ccTab">
+      <thead>
+        <tr>
+          <th>Extrato e linha</th>
+          <th>Cliente no extrato</th>
+          <th>Venda no JOB</th>
+          <th class="num">Líquido</th>
+          <th>Situação e ação</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in itens %}
+        <tr data-id="{{ c.id }}">
+          <td>
+            <b>{{ c.codigo_comissao }}</b>
+            <div class="cc-linha2">{{ c.arquivo }}</div>
+            <div class="cc-linha2">
+              {% if c.data_pagamento_informada %}Affinity informa pagamento em {{ c.data_pagamento_informada }}
+              {% elif c.previsao %}previsão {{ c.previsao }}{% else %}sem data{% endif %}
+            </div>
+            {% if c.cadastro_cod %}<div class="cc-linha2"><span class="pill pill-cinza">{{ c.cadastro_cod }}</span> {{ (c.cadastro_nome or '')[:28] }}</div>{% endif %}
+          </td>
+          <td>
+            {{ c.cliente }}
+            <div class="cc-linha2">
+              {{ c.operadora }} · parcela {{ c.parcela_extrato }} ·
+              <span class="pill {{ 'pill-amarelo' if c.tipo in ('antecipação','estorno','transferência') else 'pill-cinza' }}">{{ c.tipo }}</span>
+            </div>
+            {% if c.numero_proposta %}<div class="cc-linha2">proposta no extrato: {{ c.numero_proposta }}</div>{% endif %}
+          </td>
+          <td>
+            {% if c.proposta_id %}
+              <a href="/proposta/{{ c.proposta_id }}">{{ (c.razao_social or ('venda #' ~ c.proposta_id))[:38] }}</a>
+              <div class="cc-linha2">
+                {% if c.vinculo_criterio == 'numero_proposta' %}<span class="pill pill-verde">pelo número</span>
+                {% else %}<span class="pill pill-azul">vínculo manual</span>{% endif %}
+                {%- if c.consultor %} · {{ c.consultor }}{% endif %}
+              </div>
+              {% if c.vinculo_observacao %}<div class="cc-linha2">{{ c.vinculo_por }}: {{ c.vinculo_observacao[:110] }}</div>{% endif %}
+            {% elif c.estado == 'ajuste_sem_efeito' %}
+              <span class="cc-linha2">ajuste não se liga a venda</span>
+            {% else %}
+              <span class="pill pill-erro">sem venda apontada</span>
+              {% if c.sugestoes %}
+              <div class="cc-linha2">
+                {{ c.sugestoes|length }} candidato{{ '' if c.sugestoes|length == 1 else 's' }} pelo nome —
+                sugestão, não vínculo. Confirme antes.
+              </div>
+              {% for s in c.sugestoes %}
+              <div class="cc-cand">
+                <b>{{ s.razao_social[:40] }}</b>
+                <div class="cc-linha2">nº {{ s.numero_proposta or '—' }} · {{ s.consultor }} · {{ s.status }}</div>
+                <button type="button" class="cc-mini" data-usar="{{ s.id }}">Usar esta venda</button>
+              </div>
+              {% endfor %}
+              {% endif %}
+              <div class="cc-acao">
+                <input type="text" class="cc-busca" placeholder="Buscar outra venda por nome ou número" data-busca="1">
+              </div>
+              <div data-res="1"></div>
+            {% endif %}
+          </td>
+          <td class="num">
+            <b>{{ c.liquido|moeda }}</b>
+            {% if c.percentual and c.percentual < 99.99 %}
+            <div class="cc-linha2">{{ ('%g' % c.percentual)|replace('.', ',') }}% da parcela</div>
+            {% endif %}
+          </td>
+          <td>
+            {% if c.estado == 'entrada_confirmada' %}
+              <span class="pill pill-verde">entrada confirmada</span>
+              <div class="cc-linha2">
+                {% if c.entrada_forma == 'asaas' %}Asaas {{ c.entrada_ref }}{% else %}confirmada por {{ c.entrada_por }}{% endif %}
+                {%- if c.entrada_em %} em {{ c.entrada_em[:16] }}{% endif %}
+              </div>
+              {% if c.entrada_observacao %}<div class="cc-linha2">{{ c.entrada_observacao[:110] }}</div>{% endif %}
+            {% elif c.estado == 'ajuste_sem_efeito' %}
+              <span class="pill pill-azul">ajuste sem efeito</span>
+              <div class="cc-linha2">Estorno ou transferência: não é dinheiro novo, não vira entrada.</div>
+            {% elif c.estado == 'sem_vinculo' %}
+              <span class="pill pill-amarelo">esperando vínculo</span>
+              <div class="cc-linha2">Aponte a venda para poder confirmar a entrada depois.</div>
+            {% else %}
+              <span class="pill pill-cinza">apurado pela Affinity</span>
+              <div class="cc-acao">
+                <input type="text" class="cc-busca" style="max-width:190px;" placeholder="ID da transação no Asaas" data-asaas="1">
+                <button type="button" class="cc-mini" data-conf="asaas">Confirmar pelo Asaas</button>
+                <button type="button" class="cc-mini" data-conf="humana">Confirmar manualmente</button>
+              </div>
+            {% endif %}
+            <div class="cc-msg" data-msg="1"></div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+function msg(tr, texto, ok){
+  var m = tr.querySelector('[data-msg]');
+  if (!m) return;
+  m.textContent = texto;
+  m.className = 'cc-msg ' + (ok ? 'ok' : 'erro');
+}
+function post(url, corpo){
+  return fetch(url, {method:'POST', headers:{'Content-Type':'application/json'},
+                     body: JSON.stringify(corpo)}).then(function(r){ return r.json(); });
+}
+// Vínculo manual: sempre pede o porquê. Sem o motivo escrito, daqui a três meses
+// ninguém sabe explicar por que a linha foi parar naquela venda.
+function vincular(tr, propostaId){
+  var obs = prompt('Por que esta linha do extrato é desta venda? (fica registrado com seu nome)');
+  if (obs === null) return;
+  if (obs.trim().length < 5) { msg(tr, 'Escreva o motivo com pelo menos 5 caracteres.', false); return; }
+  post('/comissoes/conciliacao/' + tr.dataset.id + '/vincular',
+       {proposta_id: propostaId, observacao: obs}).then(function(d){
+    if (d.ok) { msg(tr, 'Vinculado a ' + (d.razao_social || 'venda') + '. Recarregando...', true);
+                setTimeout(function(){ location.reload(); }, 800); }
+    else msg(tr, d.erro || 'Não consegui vincular.', false);
+  });
+}
+document.querySelectorAll('#ccTab tr[data-id]').forEach(function(tr){
+  tr.querySelectorAll('[data-usar]').forEach(function(b){
+    b.addEventListener('click', function(){ vincular(tr, b.dataset.usar); });
+  });
+  var busca = tr.querySelector('[data-busca]');
+  if (busca) {
+    var timer = null;
+    busca.addEventListener('input', function(){
+      clearTimeout(timer);
+      timer = setTimeout(function(){
+        var q = busca.value.trim();
+        var alvo = tr.querySelector('[data-res]');
+        if (q.length < 3) { alvo.innerHTML = ''; return; }
+        fetch('/comissoes/conciliacao/buscar?q=' + encodeURIComponent(q))
+          .then(function(r){ return r.json(); })
+          .then(function(d){
+            alvo.innerHTML = '';
+            (d.propostas || []).forEach(function(p){
+              var div = document.createElement('div');
+              div.className = 'cc-cand';
+              div.innerHTML = '<b></b><div class="cc-linha2"></div>';
+              div.querySelector('b').textContent = p.razao_social || ('venda #' + p.id);
+              div.querySelector('.cc-linha2').textContent =
+                'nº ' + (p.numero_proposta || '—') + ' · ' + (p.consultor || '') + ' · ' + (p.status || '');
+              var bt = document.createElement('button');
+              bt.type = 'button'; bt.className = 'cc-mini'; bt.textContent = 'Usar esta venda';
+              bt.addEventListener('click', function(){ vincular(tr, p.id); });
+              div.appendChild(bt);
+              alvo.appendChild(div);
+            });
+            if (!(d.propostas || []).length) alvo.innerHTML = '<div class="cc-linha2">Nenhuma venda encontrada.</div>';
+          });
+      }, 350);
+    });
+  }
+  tr.querySelectorAll('[data-conf]').forEach(function(b){
+    b.addEventListener('click', function(){
+      var corpo = {};
+      if (b.dataset.conf === 'asaas') {
+        var campo = tr.querySelector('[data-asaas]');
+        var ref = (campo && campo.value || '').trim();
+        if (!ref) { msg(tr, 'Cole o identificador da transação no Asaas.', false); return; }
+        corpo.asaas_id = ref;
+      } else {
+        var obs = prompt('Como você conferiu que este valor entrou na conta? (fica registrado com seu nome)');
+        if (obs === null) return;
+        if (obs.trim().length < 5) { msg(tr, 'Escreva como conferiu, com pelo menos 5 caracteres.', false); return; }
+        corpo.confirmacao_humana = true; corpo.observacao = obs;
+      }
+      b.disabled = true;
+      post('/comissoes/conciliacao/' + tr.dataset.id + '/confirmar-entrada', corpo).then(function(d){
+        if (d.ok) { msg(tr, 'Entrada confirmada. Recarregando...', true);
+                    setTimeout(function(){ location.reload(); }, 800); }
+        else { b.disabled = false; msg(tr, d.erro || 'Não consegui confirmar.', false); }
+      });
+    });
+  });
+});
+</script>
+{% endblock %}

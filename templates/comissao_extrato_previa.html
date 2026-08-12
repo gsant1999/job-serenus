@@ -102,10 +102,24 @@
       A leitura é a mesma do importador, então o que aparecer aqui é o que entraria lá.
     </p>
     <form method="post" enctype="multipart/form-data" class="pv-form" id="pvForm">
-      <input type="file" name="pdfs" accept="application/pdf" multiple required>
+      <input type="file" name="pdfs" accept="application/pdf" multiple required id="pvArquivos">
       <button type="submit" class="btn" id="pvBtn">Ler e conferir sem gravar</button>
+      {# Importar é o MESMO formulário, com outro destino: os arquivos precisam
+         subir de novo (a prévia não guarda o lote — é isso que garante que ela
+         não grava) e reler conclui sobre o banco de agora, não o de minutos
+         atrás. Botão secundário e separado do principal: ação que move dinheiro
+         não fica colada na ação que só olha. #}
+      <button type="submit" class="btn-outline" id="pvImp" formaction="/comissoes/extrato/lote/importar">
+        Importar itens prontos
+      </button>
       <span class="pv-linha2" id="pvStatus"></span>
     </form>
+    <p class="pv-sub" style="margin:10px 0 0;">
+      <b>Importar itens prontos</b> grava só o que está pronto: leitura fechada, código novo e arquivo
+      íntegro. Item cujo número de proposta não casou entra na fila de revisão, sem venda apontada —
+      nome parecido nunca vira vínculo sozinho. Nenhuma proposta, parcela ou status financeiro é
+      alterado, e nada é marcado como recebido.<i class="ajuda-i" title="A importação escreve apenas na conciliação e no razão financeiro. Confirmar que o dinheiro entrou é um segundo passo, que exige identificador do Asaas ou confirmação humana com observação.">i</i>
+    </p>
   </div>
 
   {% if linhas %}
@@ -306,12 +320,29 @@ document.querySelectorAll('.pv-chip').forEach(function(b){
   });
 });
 // Ler 32 PDFs leva alguns segundos. Sem reacao imediata a pessoa clica de novo.
+// Importar e a acao que grava: confirma intencao antes, e diz o que vai fazer.
 var form = document.getElementById('pvForm');
+var importando = false;
+var btImp = document.getElementById('pvImp');
+if (btImp) btImp.addEventListener('click', function(e){
+  var n = (document.getElementById('pvArquivos').files || []).length;
+  if (!n) return;
+  if (!confirm('Importar ' + n + ' arquivo(s)?\n\nGrava as linhas prontas na conciliação. ' +
+               'Nada é marcado como recebido e nenhuma proposta ou parcela é alterada.')) {
+    e.preventDefault();
+    return;
+  }
+  importando = true;
+});
 if (form) form.addEventListener('submit', function(){
-  var b = document.getElementById('pvBtn');
+  var b = importando ? btImp : document.getElementById('pvBtn');
+  var outro = importando ? document.getElementById('pvBtn') : btImp;
   b.disabled = true;
-  b.textContent = 'Lendo os arquivos...';
-  document.getElementById('pvStatus').textContent = 'Nada está sendo gravado — só leitura.';
+  b.textContent = importando ? 'Importando...' : 'Lendo os arquivos...';
+  if (outro) outro.disabled = true;
+  document.getElementById('pvStatus').textContent = importando
+    ? 'Gravando só o que está pronto.'
+    : 'Nada está sendo gravado — só leitura.';
 });
 </script>
 {% endblock %}
