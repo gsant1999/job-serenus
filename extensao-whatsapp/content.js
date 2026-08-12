@@ -11893,9 +11893,10 @@
       // manda só o id e o servidor pega do cache. A análise pedida à mão nunca
       // aprendeu o truque e rebaixava tudo do zero, toda vez.
       //
-      // Agora: lista os ids (barato, sem mídia), pergunta quais já têm texto, e
-      // baixa SÓ o que falta, em lotes de 3. Depois de "Transcrever tudo" numa
-      // conversa, a análise passa a mandar zero base64.
+      // Agora: lista os ids (barato, sem mídia), pergunta quais já têm texto,
+      // baixa e TRANSCREVE so o que falta em lotes de 3, e solta o base64 antes
+      // do lote seguinte. A analise final manda apenas ids; o servidor le o
+      // texto do cache que acabou de ser preenchido.
       try {
         const lista = await _pedirPonte('listar_audios', {}, 15000);
         const todos = ((lista && lista.audios) || []).slice(0, 60);
@@ -11907,19 +11908,52 @@
           if (rc && rc.ok) cacheados = rc.transcricoes || {};
         }
         const faltam = todos.filter((a) => !(a.msg_id in cacheados)).map((a) => a.msg_id);
-        const baixados = {};
         for (let i = 0; i < faltam.length; i += 3) {
-          status('Baixando áudio ' + Math.min(i + 3, faltam.length) + ' de ' + faltam.length + '…');
-          const rb = await _pedirPonte('baixar_audios_ids', { ids: faltam.slice(i, i + 3) }, 90000);
-          ((rb && rb.audios) || []).forEach((a) => { baixados[a.msg_id] = a; });
+          if (_cancelados.has(reqId)) break;
+          const ids = faltam.slice(i, i + 3);
+          let rb = null;
+          let lote = [];
+          let pendentes = [];
+          const semTexto = new Set(ids);
+          try {
+            status('Baixando áudio ' + Math.min(i + 3, faltam.length) + ' de ' + faltam.length + '…');
+            rb = await _pedirPonte('baixar_audios_ids', { ids }, 90000);
+            lote = (rb && Array.isArray(rb.audios)) ? rb.audios : [];
+            if (!lote.length) continue;
+            if (_cancelados.has(reqId)) continue;
+            status('Transcrevendo áudio ' + Math.min(i + 3, faltam.length) + ' de ' + faltam.length + '…');
+            const marcarResolvidos = (resp) => {
+              const textos = (resp && resp.ok && resp.transcricoes) || {};
+              for (const a of lote) {
+                const mid = a && a.msg_id;
+                if (mid && String(textos[mid] || '').trim()) semTexto.delete(mid);
+              }
+            };
+            let tr = await _safeSendMessage({ type: 'transcrever_audios', audios: lote }).catch(() => null);
+            marcarResolvidos(tr);
+            pendentes = lote.filter((a) => a && semTexto.has(a.msg_id));
+            if (pendentes.length) {
+              await new Promise((res) => setTimeout(res, 800));
+              tr = await _safeSendMessage({ type: 'transcrever_audios', audios: pendentes }).catch(() => null);
+              marcarResolvidos(tr);
+            }
+          } catch (e) { /* a analise final presta contas pelo total encontrado */ }
+          finally {
+            // `pendentes` e `lote` apontam pros mesmos objetos grandes de `rb`.
+            // Esvazia os tres antes de ceder a thread, para nenhum base64 de um
+            // lote sobreviver ate o download do proximo.
+            pendentes.length = 0;
+            lote.length = 0;
+            try { if (rb && Array.isArray(rb.audios)) rb.audios.length = 0; } catch (e2) {}
+            rb = null;
+          }
           // Devolve a mão pro navegador entre lotes — sem isso a aba trava.
           await new Promise((res) => setTimeout(res, 400));
         }
-        audios = todos.map((a) => {
-          const b = baixados[a.msg_id];
-          return b ? { msg_id: a.msg_id, de: a.de, hora: a.hora, base64: b.base64, mime: b.mime }
-                   : { msg_id: a.msg_id, de: a.de, hora: a.hora };  // servidor usa o cache
-        });
+        // Sempre so metadado leve. O backend aceita id sem base64 quando o
+        // cache existe; se algum audio falhou, `audios_encontrados` abaixo faz
+        // o resultado avisar quantos ficaram de fora em vez de fingir sucesso.
+        audios = todos.map((a) => ({ msg_id: a.msg_id, de: a.de, hora: a.hora }));
       } catch (e) { audios = []; }
 
       status('Baixando documentos PDF…');
