@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MedSênior x Saúde Beneficência em Campinas, Serenus Corretora</title>
+<style>
+  :root {
+    color-scheme: light;
+    --papel:#FBFAF6; --papel-2:#F2F0E7; --branco:#FFFFFF;
+    --tinta:#182019; --tinta-2:#48544B; --tinta-3:#6B776E;
+    --linha:#DAD5C7; --linha-forte:#B7B1A0;
+    --bene:#B03A34; --bene-fundo:#FAEEEC; --bene-linha:#E7C7C3; --bene-barra:#C9564F;
+    --med:#0D6B38;  --med-fundo:#EAF3EC;  --med-linha:#B5D4BE;  --med-barra:#2E8C4E;
+    --lima:#95BF3C;
+    --atencao:#8A5600; --atencao-fundo:#FBF2DE; --atencao-linha:#E3CEA1;
+    --display:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,"Times New Roman",serif;
+    --corpo:"Seravek","Gill Sans Nova",Avenir,"Lucida Grande","Segoe UI",system-ui,-apple-system,sans-serif;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--papel); color:var(--tinta); font-family:var(--corpo);
+         font-size:20px; line-height:1.6; -webkit-text-size-adjust:100%; }
+  .pagina { max-width:1000px; margin:0 auto; padding:0 24px 80px; }
+
+  /* ---------- barra superior ---------- */
+  .barra { position:sticky; top:0; z-index:20; background:var(--papel);
+           border-bottom:1px solid var(--linha); padding:14px 0 16px; margin-bottom:40px;
+           display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap; }
+  .marca-topo { height:38px; width:auto; }
+  .acao { display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  .btn-imprimir { font-family:var(--corpo); font-size:19px; font-weight:600; color:var(--branco);
+                  background:var(--med); border:2px solid var(--med); border-radius:4px;
+                  padding:12px 26px; cursor:pointer; }
+  .btn-imprimir:hover { background:#0A5A2F; border-color:#0A5A2F; }
+  .btn-imprimir:focus-visible { outline:3px solid var(--tinta); outline-offset:3px; }
+  .btn-link { font-family:var(--corpo); font-size:19px; font-weight:600; color:var(--med);
+              background:var(--branco); border:2px solid var(--med-linha); border-radius:4px;
+              padding:12px 22px; cursor:pointer; }
+  .btn-link:hover { border-color:var(--med); }
+  .btn-link:focus-visible { outline:3px solid var(--tinta); outline-offset:3px; }
+
+  /* aviso de validade, so no link mandado ao cliente */
+  .validade { background:var(--med-fundo); border:1px solid var(--med-linha); border-radius:6px;
+              padding:16px 20px; margin-bottom:32px; font-size:18px; color:var(--tinta-2); }
+  .validade b { color:var(--med); }
+
+  /* modal do link */
+  .overlay { position:fixed; inset:0; background:rgba(24,32,25,.55); z-index:50;
+             display:none; align-items:center; justify-content:center; padding:20px; }
+  .overlay.aberto { display:flex; }
+  .modal { background:var(--branco); border-radius:8px; max-width:520px; width:100%;
+           padding:30px; box-shadow:0 18px 50px rgba(0,0,0,.28); }
+  .modal h3 { font-family:var(--display); font-size:26px; font-weight:600; margin:0 0 8px; }
+  .modal p { font-size:18px; color:var(--tinta-2); margin:0 0 20px; line-height:1.5; }
+  .modal label { display:block; font-size:16px; font-weight:600; margin-bottom:8px; }
+  .modal input { width:100%; font-family:var(--corpo); font-size:18px; padding:12px 14px;
+                 border:2px solid var(--linha); border-radius:4px; margin-bottom:20px;
+                 background:var(--papel); color:var(--tinta); }
+  .modal input:focus { outline:none; border-color:var(--med); }
+  .prazos { display:flex; gap:10px; margin-bottom:24px; }
+  .prazo { flex:1; text-align:center; border:2px solid var(--linha); border-radius:4px;
+           padding:11px; cursor:pointer; font-size:17px; font-weight:600; color:var(--tinta-2); }
+  .prazo.ativo { background:var(--med); border-color:var(--med); color:var(--branco); }
+  .modal-acoes { display:flex; gap:12px; justify-content:flex-end; }
+  .modal-resultado { display:none; word-break:break-all; font-size:17px; background:var(--papel-2);
+                     border:1px solid var(--linha); border-radius:4px; padding:14px; margin-bottom:20px; }
+  .modal-resultado.visivel { display:block; }
+  .toast { position:fixed; left:50%; bottom:28px; transform:translateX(-50%);
+           background:var(--tinta); color:var(--branco); font-size:18px; padding:14px 24px;
+           border-radius:5px; z-index:60; opacity:0; pointer-events:none; transition:opacity .2s; }
+  .toast.visivel { opacity:1; }
+
+  /* ---------- capa ---------- */
+  .eyebrow { font-size:16px; font-weight:600; letter-spacing:.11em; text-transform:uppercase;
+             color:var(--tinta-3); margin:0 0 18px; }
+  h1 { font-family:var(--display); font-size:48px; line-height:1.12; font-weight:600;
+       letter-spacing:-.01em; text-wrap:balance; margin:0 0 28px; max-width:17em; }
+  .resumo { font-size:22px; line-height:1.55; max-width:42em; margin:0 0 32px; }
+
+  .duelo { display:grid; grid-template-columns:1fr auto 1fr; align-items:stretch;
+           border:2px solid var(--linha-forte); border-radius:8px; overflow:hidden; margin-bottom:34px; }
+  .duelo-lado { padding:26px 28px; display:flex; flex-direction:column; gap:14px; }
+  .duelo-lado.hoje { background:var(--bene-fundo); }
+  .duelo-lado.novo { background:var(--med-fundo); }
+  /* alturas diferentes porque os arquivos tem folgas diferentes na arte;
+     o que se equilibra aqui e o peso otico, nao o numero de pixels */
+  .duelo-logo { width:auto; align-self:flex-start; }
+  .duelo-logo.bene { height:50px; }
+  .duelo-logo.med { height:70px; margin:-10px 0; }
+  .duelo-rotulo { font-size:15px; font-weight:700; letter-spacing:.12em;
+                  text-transform:uppercase; margin:0; }
+  .hoje .duelo-rotulo { color:var(--bene); }
+  .novo .duelo-rotulo { color:var(--med); }
+  .duelo-detalhe { font-size:19px; color:var(--tinta-2); margin:0; line-height:1.4; }
+  .duelo-meio { background:var(--linha-forte); width:2px; }
+
+  .destaque { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:18px; margin:0 0 30px; }
+  .cifra { border:2px solid var(--med-linha); border-radius:6px; padding:22px;
+           background:var(--branco); }
+  .cifra b { display:block; font-family:var(--display); font-size:48px; line-height:1;
+             font-weight:600; font-variant-numeric:tabular-nums; margin-bottom:10px; color:var(--med); }
+  .cifra span { font-size:18px; line-height:1.4; color:var(--tinta-2); display:block; }
+  .data-guia { font-size:17px; color:var(--tinta-3); margin:0; }
+
+  section { margin-bottom:64px; }
+  h2 { font-family:var(--display); font-size:34px; line-height:1.2; font-weight:600;
+       text-wrap:balance; margin:0 0 10px; padding-bottom:14px; border-bottom:3px solid var(--tinta); }
+  .subtitulo { font-size:19px; color:var(--tinta-2); margin:0 0 30px; max-width:46em; }
+
+  /* ---------- placar ---------- */
+  .placar { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; margin-bottom:38px; }
+  .placar-item { border-radius:6px; padding:22px 24px; border:2px solid; text-align:left; }
+  .placar-item.med { background:var(--med-fundo); border-color:var(--med-linha); }
+  .placar-item.empate { background:var(--papel-2); border-color:var(--linha-forte); }
+  .placar-item.bene { background:var(--bene-fundo); border-color:var(--bene-linha); }
+  .placar-item b { display:block; font-family:var(--display); font-size:44px; line-height:1;
+                   font-weight:600; margin-bottom:8px; }
+  .placar-item.med b { color:var(--med); }
+  .placar-item.bene b { color:var(--bene); }
+  .placar-item span { font-size:18px; line-height:1.4; color:var(--tinta-2); }
+
+  /* ---------- barras por especialidade ---------- */
+  .faixa { margin-bottom:44px; }
+  .faixa-titulo { display:flex; align-items:baseline; gap:14px; flex-wrap:wrap;
+                  padding:16px 22px; border-radius:5px; margin-bottom:20px; }
+  .faixa-titulo h3 { font-family:var(--display); font-size:26px; font-weight:600; margin:0; }
+  .faixa-titulo em { font-style:normal; font-size:18px; font-weight:600; }
+  .faixa.ganha .faixa-titulo { background:var(--med); border:2px solid var(--med); }
+  .faixa.ganha h3, .faixa.ganha em { color:var(--branco); }
+  .faixa.perde .faixa-titulo { background:var(--bene-fundo); border:2px solid var(--bene-linha); }
+  .faixa.perde h3, .faixa.perde em { color:var(--bene); }
+  .faixa.empata .faixa-titulo { background:var(--papel-2); border:2px solid var(--linha-forte); }
+
+  .linha-esp { display:grid; grid-template-columns:236px 1fr; gap:22px; align-items:center;
+               padding:15px 0; border-bottom:1px solid var(--linha); }
+  .esp-nome { font-size:20px; font-weight:600; line-height:1.25; }
+  .esp-selo { display:block; font-size:15px; font-weight:600; color:var(--med);
+              margin-top:4px; line-height:1.3; }
+  .esp-barras { display:flex; flex-direction:column; gap:9px; }
+  .bar-linha { display:grid; grid-template-columns:112px 1fr 190px; gap:14px; align-items:center; }
+  .bar-tag { font-size:15px; font-weight:700; }
+  .bar-tag.hoje { color:var(--bene); }
+  .bar-tag.novo { color:var(--med); }
+  .bar-trilho { display:block; height:18px; background:var(--papel-2);
+                border:1px solid var(--linha); border-radius:3px; overflow:hidden; }
+  .bar-preenche { display:block; height:100%; min-width:3px; }
+  .bar-preenche.hoje { background:var(--bene-barra); }
+  .bar-preenche.novo { background:var(--med-barra); }
+  .bar-valor { font-size:17px; color:var(--tinta-2); font-variant-numeric:tabular-nums; }
+
+  /* ---------- colunas ---------- */
+  .par { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:22px; }
+  .coluna { border:2px solid; border-radius:6px; padding:0 0 24px; background:var(--branco); }
+  .coluna.hoje { border-color:var(--bene-linha); }
+  .coluna.novo { border-color:var(--med-linha); }
+  .coluna-topo { padding:15px 22px; font-size:16px; font-weight:700; letter-spacing:.09em;
+                 text-transform:uppercase; color:var(--branco); margin-bottom:22px; }
+  .hoje .coluna-topo { background:var(--bene); }
+  .novo .coluna-topo { background:var(--med); }
+  .coluna-corpo { padding:0 22px; }
+  .numerao { font-family:var(--display); font-size:58px; line-height:1; font-weight:600;
+             font-variant-numeric:tabular-nums; display:block; margin-bottom:4px; }
+  .hoje .numerao { color:var(--bene); }
+  .novo .numerao { color:var(--med); }
+  .numerao-legenda { font-size:18px; color:var(--tinta-2); margin:0 0 24px; }
+  ul.lugares { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:17px; }
+  ul.lugares li { padding-left:20px; border-left:4px solid var(--linha); }
+  .hoje ul.lugares li { border-left-color:var(--bene-linha); }
+  .novo ul.lugares li { border-left-color:var(--med-linha); }
+  ul.lugares li.forte { border-left-color:var(--lima); border-left-width:6px; }
+  .lugar-nome { display:block; font-size:20px; font-weight:600; line-height:1.3; }
+  .lugar-end { display:block; font-size:18px; color:var(--tinta-2); line-height:1.4; }
+  .lugar-nota { display:block; font-size:17px; color:var(--tinta-3); font-style:italic; margin-top:3px; }
+  li.forte .lugar-nota { color:var(--med); font-style:normal; font-weight:600; }
+
+  /* ---------- santa tereza ---------- */
+  .st { border:2px solid var(--med-linha); border-radius:6px; background:var(--branco); overflow:hidden; }
+  .st-topo { background:var(--med); color:var(--branco); padding:22px 28px; }
+  .st-topo h3 { font-family:var(--display); font-size:28px; font-weight:600; margin:0 0 6px; }
+  .st-topo p { margin:0; font-size:18px; opacity:.93; line-height:1.5; }
+  .st-corpo { padding:28px; }
+  .st-corpo h4 { font-size:17px; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
+                 color:var(--tinta-3); margin:0 0 16px; }
+  .chips { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:28px; }
+  .chip { font-size:18px; font-weight:600; background:var(--med-fundo); color:var(--med);
+          border:1px solid var(--med-linha); border-radius:4px; padding:8px 15px; }
+  ul.conhecidos { list-style:none; margin:0 0 22px; padding:0; display:grid;
+                  grid-template-columns:repeat(auto-fill,minmax(290px,1fr)); gap:12px; }
+  ul.conhecidos li { font-size:19px; font-weight:600; padding:13px 17px;
+                     background:var(--papel-2); border-left:4px solid var(--med); border-radius:3px; }
+  .crm { display:block; font-size:16px; font-weight:400; color:var(--tinta-3); }
+  .nota-final { font-size:19px; color:var(--tinta-2); margin:0; line-height:1.55; }
+
+  /* ---------- tabela ---------- */
+  .tabela-envelope { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:19px; }
+  caption { text-align:left; font-size:19px; color:var(--tinta-2); padding-bottom:16px; }
+  th { text-align:left; font-size:15px; font-weight:700; letter-spacing:.09em;
+       text-transform:uppercase; color:var(--tinta-3); padding:0 16px 10px 0;
+       border-bottom:2px solid var(--tinta); }
+  td { padding:14px 16px 14px 0; border-bottom:1px solid var(--linha);
+       vertical-align:top; line-height:1.4; }
+  td.nome { font-weight:600; }
+  td.onde { color:var(--tinta-2); font-size:18px; }
+  tbody tr:nth-child(even) td { background:var(--papel-2); }
+
+  /* ---------- atencao ---------- */
+  .conferir { background:var(--atencao-fundo); border:2px solid var(--atencao-linha);
+              border-radius:6px; padding:32px; }
+  .conferir h2 { border-bottom-color:var(--atencao); color:var(--atencao); margin-bottom:8px; }
+  ol.checagens { margin:26px 0 0; padding:0; list-style:none; counter-reset:item;
+                 display:flex; flex-direction:column; gap:26px; }
+  ol.checagens li { counter-increment:item; padding-left:58px; position:relative; }
+  ol.checagens li::before { content:counter(item); position:absolute; left:0; top:0;
+    width:42px; height:42px; border-radius:50%; background:var(--atencao); color:var(--branco);
+    font-family:var(--display); font-size:22px; font-weight:600;
+    display:flex; align-items:center; justify-content:center; }
+  ol.checagens h3 { font-size:21px; font-weight:700; margin:7px 0; line-height:1.35; }
+  ol.checagens p { margin:0; font-size:19px; line-height:1.55; color:var(--tinta-2); }
+
+  .assinatura { margin-top:64px; padding-top:28px; border-top:2px solid var(--linha);
+                display:flex; align-items:flex-start; justify-content:space-between;
+                gap:30px; flex-wrap:wrap; }
+  .assinatura img { height:46px; width:auto; }
+  .rodape { font-size:17px; line-height:1.6; color:var(--tinta-3); max-width:46em; }
+  .rodape p { margin:0 0 10px; }
+
+  @media (max-width:800px) {
+    body { font-size:19px; }
+    h1 { font-size:33px; } h2 { font-size:27px; }
+    .par, .destaque, .placar { grid-template-columns:1fr; }
+    .duelo { grid-template-columns:1fr; }
+    .duelo-meio { width:auto; height:2px; }
+    .linha-esp { grid-template-columns:1fr; gap:12px; }
+    .bar-linha { grid-template-columns:100px 1fr; }
+    .bar-valor { grid-column:2; }
+    .pagina { padding:0 18px 60px; }
+  }
+  @media (prefers-reduced-motion:reduce) { * { transition:none !important; animation:none !important; } }
+
+  @media print {
+    @page { margin:12mm 10mm; }
+    body { font-size:10.5pt; background:var(--branco);
+           print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+    .barra { display:none; }
+    .pagina { max-width:none; padding:0; }
+    h1 { font-size:24pt; } h2 { font-size:16pt; }
+    section { margin-bottom:20pt; }
+    .duelo, .coluna, .cifra, .placar-item, .st, .conferir, .faixa-titulo, .linha-esp,
+    .st-corpo, ul.conhecidos li { break-inside:avoid; }
+    .faixa { break-inside:avoid-page; margin-bottom:18pt; }
+    .numerao { font-size:26pt; } .cifra b, .placar-item b { font-size:24pt; }
+    .duelo-logo { height:38px; }
+    .lugar-nome, .esp-nome { font-size:10.5pt; }
+    .lugar-end, .lugar-nota, .bar-valor, td.onde, .chip, .esp-selo { font-size:9.5pt; }
+    .bar-tag { font-size:8.5pt; }
+    table, ol.checagens p { font-size:10pt; }
+    tbody tr { break-inside:avoid; }
+    thead { display:table-header-group; }
+    .assinatura { margin-top:18pt; }
+    .overlay, .toast { display:none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="pagina">
+
+  <div class="barra">
+    <img class="marca-topo" src="{{ url_for('static', filename='brand/serenus-logo-black-640.png') }}" alt="Serenus Corretora">
+    <div class="acao">
+      <button type="button" class="btn-link" id="btn-link">Link para o cliente</button>
+      <button type="button" class="btn-imprimir" id="btn-imprimir">Imprimir ou salvar em PDF</button>
+    </div>
+  </div>
+
+  <div class="validade" id="validade" hidden></div>
+
+  <header>
+    <p class="eyebrow">Comparativo de rede médica em Campinas</p>
+    <h1>Pelo mesmo valor, uma rede montada para quem já passou dos 59.</h1>
+
+    <div class="duelo">
+      <div class="duelo-lado hoje">
+        <img class="duelo-logo bene" src="{{ url_for('static', filename='operadoras/saude-beneficencia.png') }}" alt="Saúde Beneficência">
+        <p class="duelo-rotulo">O plano de hoje</p>
+        <p class="duelo-detalhe">Plano STD<br>Rede geral, para todas as idades</p>
+      </div>
+      <div class="duelo-meio"></div>
+      <div class="duelo-lado novo">
+        <img class="duelo-logo med" src="{{ url_for('static', filename='operadoras/medsenior.svg') }}" alt="MedSênior">
+        <p class="duelo-rotulo">A proposta</p>
+        <p class="duelo-detalhe">Campinas 1, acomodação em enfermaria<br>Rede exclusiva para quem tem mais de 59 anos</p>
+      </div>
+    </div>
+
+    <p class="resumo">Comparamos os dois guias médicos oficiais, registro por registro. Em <strong>__N_GANHA__ das __N_TOTAL__ especialidades</strong> analisadas a MedSênior oferece mais médicos ou mais lugares para você marcar consulta em Campinas. E o ganho está justamente onde a saúde mais pede atenção depois dos 60: coração, hormônios, pulmão, rim, reumatismo e oncologia.</p>
+
+    <div class="destaque">
+      <div class="cifra"><b>__N_GANHA__</b><span>especialidades com mais opção na MedSênior</span></div>
+      <div class="cifra"><b>5</b><span>hospitais à sua disposição, contra 3 hoje</span></div>
+      <div class="cifra"><b>18</b><span>endereços para coletar exame de sangue, contra 7</span></div>
+      <div class="cifra"><b>23</b><span>geriatras dedicados, contra 1 na rede atual</span></div>
+    </div>
+
+    <p class="data-guia">Guias médicos oficiais das duas operadoras, ambos emitidos em 12 de agosto de 2026, filtrados para a cidade de Campinas.</p>
+  </header>
+
+  <section>
+    <h2>O que mais pesa depois dos 60</h2>
+    <p class="subtitulo">A barra mostra quantos médicos cada plano tem na cidade. Quando o guia não traz o nome dos profissionais, como acontece em psicologia e fisioterapia, contamos as clínicas credenciadas.</p>
+
+    <div class="placar">
+      <div class="placar-item med"><b>__N_GANHA__</b><span>especialidades com mais opção na MedSênior</span></div>
+      <div class="placar-item empate"><b>__N_EMPATA__</b><span>especialidades em que os dois se equivalem</span></div>
+      <div class="placar-item bene"><b>__N_PERDE__</b><span>especialidades em que a Beneficência tem mais opção</span></div>
+    </div>
+
+    <div class="faixa ganha">
+      <div class="faixa-titulo"><h3>Onde a MedSênior tem mais opção</h3><em>__N_GANHA__ especialidades</em></div>
+      __GANHA__
+    </div>
+
+    <div class="faixa empata">
+      <div class="faixa-titulo"><h3>Onde os dois estão parecidos</h3><em>__N_EMPATA__ especialidades</em></div>
+      __EMPATA__
+    </div>
+
+    <div class="faixa perde">
+      <div class="faixa-titulo"><h3>Onde a Beneficência tem mais opção</h3><em>__N_PERDE__ especialidades</em></div>
+      __PERDE__
+      <p class="nota-final" style="margin-top:18px">Vale dizer com todas as letras: se você faz acompanhamento frequente de ouvido, nariz e garganta ou terapia com psicólogo, este é o ponto a pesar antes de decidir. Pediatria, obstetrícia e maternidade também só existem na Beneficência, porque a MedSênior atende apenas maiores de 59 anos.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Cinco hospitais no lugar de um</h2>
+    <p class="subtitulo">Hoje praticamente tudo depende de um endereço. Na MedSênior, se um pronto-socorro estiver cheio ou longe, existe outro.</p>
+
+    <div class="par">
+      <div class="coluna hoje">
+        <p class="coluna-topo">Saúde Beneficência, hoje</p>
+        <div class="coluna-corpo">
+          <span class="numerao">3</span>
+          <p class="numerao-legenda">hospitais, sendo um deles o principal para tudo</p>
+          <ul class="lugares">
+            <li><span class="lugar-nome">Hospital Beneficência Portuguesa</span>
+                <span class="lugar-end">Rua Onze de Agosto, 557, Centro</span>
+                <span class="lugar-nota">Hospital geral, com oncologia e ortopedia no mesmo endereço</span></li>
+            <li><span class="lugar-nome">Maternidade de Campinas</span>
+                <span class="lugar-end">Av. Orosimbo Maia, 165, Vila Itapura</span></li>
+            <li><span class="lugar-nome">Irmandade de Misericórdia, ASSIM</span>
+                <span class="lugar-end">Av. Benjamin Constant, 1.657</span>
+                <span class="lugar-nota">Somente pediatria</span></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="coluna novo">
+        <p class="coluna-topo">MedSênior, a proposta</p>
+        <div class="coluna-corpo">
+          <span class="numerao">5</span>
+          <p class="numerao-legenda">hospitais, em seis endereços diferentes</p>
+          <ul class="lugares">
+            <li class="forte"><span class="lugar-nome">Hospital do Coração de Campinas, IMC</span>
+                <span class="lugar-end">Av. Benjamin Constant, 1.725, Centro</span>
+                <span class="lugar-nota">Referência em coração na cidade. Não existe na sua rede de hoje.</span></li>
+            <li><span class="lugar-nome">Hospital e Maternidade Santa Tereza</span>
+                <span class="lugar-end">Rua José Paulino, 1.246, Centro<br>Pronto-socorro na Rua Bernardino de Campos, 804</span>
+                <span class="lugar-nota">Hospital principal, onde ficam as consultas e a urgência</span></li>
+            <li><span class="lugar-nome">Casa de Saúde Campinas</span>
+                <span class="lugar-end">Praça Doutor Tófoli, 28, Centro</span>
+                <span class="lugar-nota">Internação e pronto-socorro</span></li>
+            <li><span class="lugar-nome">Hospital Renascença</span>
+                <span class="lugar-end">Av. Barão de Itapura, 1.444, Botafogo</span></li>
+            <li><span class="lugar-nome">Day Hospital</span>
+                <span class="lugar-end">Av. Benjamin Constant, 2.011, Cambuí</span>
+                <span class="lugar-nota">Procedimentos com alta no mesmo dia</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Onde as suas consultas vão acontecer</h2>
+    <p class="subtitulo">Duas portas de entrada, e as duas com equipe fixa. É o que muda no seu dia a dia.</p>
+
+    <div class="st" style="margin-bottom:24px">
+      <div class="st-topo">
+        <h3>Clínica MedSênior Campinas</h3>
+        <p>Av. Barão de Itapura, 940, Botafogo &middot; 4007-2001<br>Atendimento no mesmo prédio, com equipe própria</p>
+      </div>
+      <div class="st-corpo">
+        <h4>Especialidades atendidas pela equipe da própria MedSênior</h4>
+        <div class="chips">
+          <span class="chip">Geriatria</span><span class="chip">Clínica médica</span>
+          <span class="chip">Medicina de família</span><span class="chip">Cardiologia</span>
+          <span class="chip">Endocrinologia</span><span class="chip">Hematologia</span>
+          <span class="chip">Oncologia</span><span class="chip">Cirurgia oncológica</span>
+          <span class="chip">Reumatologia</span><span class="chip">Nutrologia</span>
+          <span class="chip">Homeopatia</span>
+        </div>
+        <p class="nota-final">São 23 médicos fixos, que acompanham você ao longo do tempo em vez de atender uma consulta avulsa. É esse acompanhamento contínuo que a rede geral da Beneficência não organiza: lá existe apenas um geriatra credenciado em Campinas.</p>
+      </div>
+    </div>
+
+    <div class="st">
+      <div class="st-topo">
+        <h3>Hospital e Maternidade Santa Tereza</h3>
+        <p>Rua José Paulino, 1.246, Centro &middot; (19) 3733-4345<br>Pronto-socorro na Rua Bernardino de Campos, 804, Centro</p>
+      </div>
+      <div class="st-corpo">
+        <h4>As __N_ST_ESP__ especialidades que você marca dentro do hospital</h4>
+        <div class="chips">
+          __CHIPS__
+        </div>
+        <p class="nota-final" style="margin-bottom:26px">O corpo clínico do hospital tem __N_ST_DOCS__ médicos, e sobe para __N_ST_INT__ na internação e no pronto-socorro. Marcar consulta no mesmo lugar onde você seria internado encurta caminho: o exame, o especialista e a internação ficam sob o mesmo teto.</p>
+
+        <h4>Desses médicos, __N_ST_CONHECIDOS__ já atendem você hoje</h4>
+        <ul class="conhecidos">
+          __CONHECIDOS__
+        </ul>
+        <p class="nota-final">Os demais são profissionais novos. Vale conferir na lista mais adiante se os médicos que você consulta com frequência estão entre os que seguem atendendo pelos dois planos.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Exame de sangue perto de casa</h2>
+    <p class="subtitulo">Para quem coleta com frequência, a distância até o laboratório pesa mais no dia a dia do que qualquer outra coisa do contrato.</p>
+
+    <div class="par">
+      <div class="coluna hoje">
+        <p class="coluna-topo">Saúde Beneficência, hoje</p>
+        <div class="coluna-corpo">
+          <span class="numerao">7</span>
+          <p class="numerao-legenda">endereços, todos na região central</p>
+          <ul class="lugares">
+            <li><span class="lugar-nome">Labclinicas</span><span class="lugar-end">Av. Benjamin Constant, 1.725 &middot; Rua Barreto Leme, 1.570 &middot; Av. Andrade Neves, 295</span></li>
+            <li><span class="lugar-nome">Laboratório Samuel Pessoa</span><span class="lugar-end">Av. Andrade Neves, 1.746 &middot; Av. Barão de Itapura, 917</span></li>
+            <li><span class="lugar-nome">Labap e Biomega</span><span class="lugar-end">Av. Andrade Neves, 295 &middot; Av. Andrade Neves, 1.608</span></li>
+          </ul>
+        </div>
+      </div>
+      <div class="coluna novo">
+        <p class="coluna-topo">MedSênior, a proposta</p>
+        <div class="coluna-corpo">
+          <span class="numerao">18</span>
+          <p class="numerao-legenda">endereços, espalhados por toda a cidade</p>
+          <ul class="lugares">
+            <li class="forte"><span class="lugar-nome">Confiance, 10 unidades</span><span class="lugar-end">Vila Rica, Ponte Preta, Viracopos, Taquaral, Jardim Chapadão, Vila Itapura, Santa Cândida, Jardim Guanabara, Jardim do Lago</span><span class="lugar-nota">Fora do centro, em bairros residenciais</span></li>
+            <li class="forte"><span class="lugar-nome">Sabin, 6 unidades</span><span class="lugar-end">Barão Geraldo, Nova Campinas, Jardim Brasil, Jardim do Lago, Nossa Senhora Auxiliadora, Vila Itapura</span></li>
+            <li><span class="lugar-nome">Labi Saúde</span><span class="lugar-end">Av. Francisco Glicério, 648, Centro</span></li>
+            <li><span class="lugar-nome">Laboratório Samuel Pessoa</span><span class="lugar-end">Av. Andrade Neves, 1.746, o mesmo que você já usa</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Os médicos que continuam com você</h2>
+    <p class="subtitulo">Estes __N_COMUNS__ médicos atendem pelos <strong>dois</strong> planos. Se o seu está aqui, você não o perde ao trocar. Procure o nome dele agora.</p>
+
+    <div class="tabela-envelope">
+      <table>
+        <caption>Cruzamento nome por nome entre os dois guias oficiais.</caption>
+        <thead>
+          <tr><th scope="col">Médico</th><th scope="col">Especialidade</th><th scope="col">Onde atende pela MedSênior</th></tr>
+        </thead>
+        <tbody>
+          __TABELA__
+        </tbody>
+      </table>
+    </div>
+
+    <h2 style="margin-top:50px">As clínicas que seguem as mesmas</h2>
+    <p class="subtitulo">__N_CLIN__ clínicas e laboratórios atendem pelos dois planos, no endereço de sempre.</p>
+    <ul class="lugares">
+      __CLINICAS__
+    </ul>
+  </section>
+
+  <section class="conferir">
+    <h2>Antes de assinar, confirme três pontos</h2>
+    <p class="subtitulo">Nenhum deles está no guia médico, e todos mudam a conta final.</p>
+
+    <ol class="checagens">
+      <li>
+        <h3>Este plano é de enfermaria</h3>
+        <p>O Campinas 1 tem acomodação em <strong>enfermaria</strong>, que é o quarto compartilhado na internação. Se o seu plano de hoje é de apartamento individual, peça também o preço da versão da MedSênior com apartamento antes de fechar.</p>
+      </li>
+      <li>
+        <h3>As carências precisam ser negociadas</h3>
+        <p>Trocar de operadora pode fazer os prazos de espera recomeçarem do zero, inclusive para cirurgias e internações. A portabilidade de carências evita isso, mas exige requisitos de tempo de plano e de faixa de preço. <strong>Peça a análise de portabilidade por escrito.</strong></p>
+      </li>
+      <li>
+        <h3>Confira os seus médicos na lista</h3>
+        <p>Separe os nomes dos médicos que você consulta com frequência e procure na tabela desta página. Se dois ou três dos principais não estiverem lá, vale conversar sobre isso antes de qualquer assinatura.</p>
+      </li>
+    </ol>
+  </section>
+
+  <div class="assinatura">
+    <div class="rodape">
+      <p>Comparação elaborada a partir do Guia Médico Web da Associação de Saúde Portuguesa de Beneficência e do Guia Médico MedSênior, plano CPS 1 em enfermaria, localidade Campinas e São Paulo, ambos emitidos em 12 de agosto de 2026. As contagens foram apuradas cruzando os dois documentos registro a registro.</p>
+      <p>As operadoras podem alterar, incluir ou descredenciar prestadores sem aviso prévio. Confirme a rede na data da contratação.</p>
+    </div>
+    <img src="{{ url_for('static', filename='brand/serenus-logo-black-640.png') }}" alt="Serenus Corretora">
+  </div>
+
+</div>
+
+<div class="overlay" id="overlay-link">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-titulo">
+    <h3 id="modal-titulo">Link para o cliente</h3>
+    <p>Gera um endereço que abre este comparativo sem precisar de senha. Ele deixa de funcionar sozinho no prazo escolhido.</p>
+
+    <label for="campo-cliente">Nome do cliente, para você se achar depois</label>
+    <input type="text" id="campo-cliente" placeholder="Opcional" autocomplete="off">
+
+    <label>Quanto tempo o link fica de pé</label>
+    <div class="prazos">
+      <div class="prazo" data-prazo="24h" role="button" tabindex="0">24 horas</div>
+      <div class="prazo ativo" data-prazo="7d" role="button" tabindex="0">7 dias</div>
+      <div class="prazo" data-prazo="30d" role="button" tabindex="0">30 dias</div>
+    </div>
+
+    <div class="modal-resultado" id="resultado-link"></div>
+
+    <div class="modal-acoes">
+      <button type="button" class="btn-link" id="btn-fechar">Fechar</button>
+      <button type="button" class="btn-imprimir" id="btn-gerar">Gerar link</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script id="comp-ctx" type="application/json">{{ comp_ctx|tojson }}</script>
+<script>
+(function () {
+  "use strict";
+
+  var CTX = (function () {
+    var el = document.getElementById("comp-ctx");
+    if (!el) { return { modo: "standalone" }; }
+    try { return JSON.parse(el.textContent); } catch (e) { return { modo: "standalone" }; }
+  })();
+
+  function avisar(msg) {
+    var t = document.getElementById("toast");
+    t.textContent = msg;
+    t.classList.add("visivel");
+    clearTimeout(avisar._t);
+    avisar._t = setTimeout(function () { t.classList.remove("visivel"); }, 3400);
+  }
+
+  document.getElementById("btn-imprimir").addEventListener("click", function () {
+    window.print();
+  });
+
+  var btnLink = document.getElementById("btn-link");
+  var overlay = document.getElementById("overlay-link");
+  var resultado = document.getElementById("resultado-link");
+
+  // No link que vai para o cliente nao existe botao de gerar link, e o topo
+  // avisa ate quando a pagina fica no ar.
+  if (CTX.modo === "public") {
+    btnLink.remove();
+    overlay.remove();
+    var aviso = document.getElementById("validade");
+    var frases = [];
+    if (CTX.geradoPara) {
+      frases.push("Preparado para <b>" + CTX.geradoPara + "</b>"
+        + (CTX.geradoPor ? " por " + CTX.geradoPor : ""));
+    } else if (CTX.geradoPor) {
+      frases.push("Preparado por " + CTX.geradoPor);
+    }
+    if (CTX.expiraTexto) {
+      frases.push("Esta página fica disponível até <b>" + CTX.expiraTexto + "</b>");
+    }
+    if (frases.length) {
+      aviso.innerHTML = frases.join(". ") + ".";
+      aviso.hidden = false;
+    }
+    return;
+  }
+
+  var prazo = "7d";
+  Array.prototype.forEach.call(overlay.querySelectorAll(".prazo"), function (p) {
+    function escolher() {
+      prazo = p.getAttribute("data-prazo");
+      Array.prototype.forEach.call(overlay.querySelectorAll(".prazo"), function (x) {
+        x.classList.toggle("ativo", x === p);
+      });
+    }
+    p.addEventListener("click", escolher);
+    p.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); escolher(); }
+    });
+  });
+
+  function fechar() {
+    overlay.classList.remove("aberto");
+    resultado.classList.remove("visivel");
+    resultado.textContent = "";
+  }
+
+  btnLink.addEventListener("click", function () {
+    overlay.classList.add("aberto");
+    document.getElementById("campo-cliente").focus();
+  });
+  document.getElementById("btn-fechar").addEventListener("click", fechar);
+  overlay.addEventListener("click", function (e) { if (e.target === overlay) { fechar(); } });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && overlay.classList.contains("aberto")) { fechar(); }
+  });
+
+  document.getElementById("btn-gerar").addEventListener("click", function () {
+    if (!CTX.gerarLinkUrl) { avisar("Disponível apenas dentro do JOB."); return; }
+    var botao = this;
+    botao.disabled = true;
+    botao.textContent = "Gerando...";
+    fetch(CTX.gerarLinkUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prazo: prazo,
+        cliente: document.getElementById("campo-cliente").value
+      })
+    })
+      .then(function (r) {
+        if (!r.ok) { throw new Error("http " + r.status); }
+        return r.json();
+      })
+      .then(function (d) {
+        resultado.textContent = d.url;
+        resultado.classList.add("visivel");
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(d.url).then(
+            function () { avisar("Link copiado. Vale até " + d.expiraTexto + "."); },
+            function () { avisar("Link gerado. Vale até " + d.expiraTexto + "."); }
+          );
+        } else {
+          avisar("Link gerado. Vale até " + d.expiraTexto + ".");
+        }
+      })
+      .catch(function () { avisar("Não deu para gerar o link. Tente de novo."); })
+      .finally(function () {
+        botao.disabled = false;
+        botao.textContent = "Gerar link";
+      });
+  });
+})();
+</script>
+</body>
+</html>

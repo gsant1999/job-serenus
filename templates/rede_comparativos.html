@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Comparativos de rede{% endblock %}
+{% block content %}
+<style>
+  .rc-wrap{max-width:600px;margin:0 auto;padding:8px 4px 40px;}
+  .rc-head{margin-bottom:24px;}
+  .rc-head h1{font-family:'Sora',sans-serif;font-size:22px;font-weight:800;margin:0 0 6px;color:var(--texto);}
+  .rc-head p{margin:0;font-size:13.5px;color:var(--cinza);}
+  .rc-list{display:flex;flex-direction:column;gap:12px;}
+  .rc-card{display:flex;align-items:center;gap:16px;text-decoration:none;color:inherit;
+    background:var(--card-bg);border:1px solid var(--borda);border-radius:14px;
+    padding:18px;transition:border-color .15s,transform .15s;}
+  .rc-card:hover{border-color:var(--borda-2);transform:translateY(-1px);}
+  .rc-mark{flex:none;width:56px;height:56px;border-radius:12px;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:3px;background:#fff;border:1px solid var(--borda);
+    overflow:hidden;padding:5px;}
+  .rc-mark img{max-width:92%;max-height:44%;object-fit:contain;display:block;}
+  .rc-body{flex:1;min-width:0;}
+  .rc-body b{display:block;font-size:15.5px;color:var(--texto);}
+  .rc-body span{display:block;font-size:12.5px;color:var(--cinza);margin-top:3px;line-height:1.4;}
+  .rc-body em{display:block;font-style:normal;font-size:11.5px;color:var(--cinza-2);margin-top:5px;}
+  .rc-arrow{flex:none;color:var(--cinza-2);}
+  .rc-vazio{font-size:13.5px;color:var(--cinza);padding:20px;border:1px dashed var(--borda);
+    border-radius:12px;text-align:center;}
+  .rc-note{margin-top:26px;font-size:11.5px;color:var(--cinza-2);}
+</style>
+<div class="rc-wrap">
+  <div class="rc-head">
+    <h1>Comparativos de rede</h1>
+    <p>Rede de uma operadora contra a outra, apurada nos guias médicos oficiais. Para mostrar ao cliente o que muda na troca.</p>
+  </div>
+
+  <div class="rc-list">
+    {% for item in itens %}
+    <a class="rc-card" href="{{ url_for('rede_comparativo', slug=item.slug) }}">
+      <div class="rc-mark">
+        {% for logo in item.logos %}
+        <img src="{{ url_for('static', filename=logo) }}" alt="">
+        {% endfor %}
+      </div>
+      <div class="rc-body">
+        <b>{{ item.titulo }}</b>
+        <span>{{ item.sub }}</span>
+        <em>Guias emitidos em {{ item.emitido }}</em>
+      </div>
+      <svg class="rc-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg>
+    </a>
+    {% else %}
+    <p class="rc-vazio">Nenhum comparativo publicado ainda.</p>
+    {% endfor %}
+  </div>
+
+  <p class="rc-note">Material exclusivo Serenus Corretora de Saúde. Confirme a rede na data da contratação: as operadoras podem alterar prestadores sem aviso prévio.</p>
+</div>
+{% endblock %}
