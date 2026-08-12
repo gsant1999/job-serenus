@@ -56,7 +56,8 @@ emoji, no padrão do material do cliente.
 > A acomodação deste plano é enfermaria. Se hoje o senhor tem apartamento, eu
 > trago o valor da versão com apartamento.
 >
-> As carências precisam de análise de portabilidade, para não recomeçar do zero.
+> As carências precisam de redução aprovada pela operadora, para não recomeçar do
+> zero. Não prometa antes de ter por escrito.
 >
 > E confirmar na lista os médicos que o senhor consulta com frequência.
 >
