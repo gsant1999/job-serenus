@@ -3451,6 +3451,10 @@ def init_db():
         ("modelos_conteudo", "dono_consultor_id", "INTEGER"),
         ("whatsapp_funis", "pasta_id", "INTEGER"),
         ("whatsapp_funis", "dono_consultor_id", "INTEGER"),
+        # Arquivo lógico da pasta-mãe de consultor inativo. O acervo e os
+        # vínculos ficam intactos; só sai da árvore operacional.
+        ("pastas", "arquivada", "INTEGER DEFAULT 0"),
+        ("pastas", "arquivada_em", "TIMESTAMP"),
         # Cidade/região da tabela de preço (o PDC calcula por cidade — preço e
         # rede valem por cidade, não dá pra assumir "vale em qualquer lugar").
         ("cotacao_tabela", "cidade", "TEXT DEFAULT ''"),
@@ -38678,7 +38682,6 @@ def _construir_arvore_pastas(conn, usuario_id=None, eh_gestor=True):
 
 @app.route('/crm/pastas/nova', methods=['POST'])
 @login_required
-@admin_required
 def crm_pasta_nova():
     """Só cria SUBpasta — as 5 raízes (Compartilhado, A organizar, uma por
     consultor) são geridas pelo backfill automático, não por aqui."""
@@ -38704,15 +38707,17 @@ def crm_pasta_nova():
 
 @app.route('/crm/pastas/<int:pid>/renomear', methods=['POST'])
 @login_required
-@admin_required
 def crm_pasta_renomear(pid):
     d = request.json or {}
     nome = (d.get('nome') or '').strip()[:120]
     if not nome:
         return jsonify({"ok": False, "erro": "Nome não pode ficar vazio"}), 400
     conn = db()
-    if not conn.execute("SELECT id FROM pastas WHERE id=?", (pid,)).fetchone():
+    pasta = conn.execute("SELECT id,parent_id FROM pastas WHERE id=?", (pid,)).fetchone()
+    if not pasta:
         close_db(conn); return jsonify({"ok": False, "erro": "Pasta não encontrada"}), 404
+    if pasta['parent_id'] is None:
+        close_db(conn); return jsonify({"ok": False, "erro": "A pasta-mãe é definida pelo consultor e não pode ser renomeada aqui."}), 400
     if not _bib_eh_gestor() and _pasta_dono(conn, pid) != session.get('user_id'):
         close_db(conn)
         return jsonify({"ok": False, "erro": "Você só pode renomear as suas pastas"}), 403
@@ -38723,7 +38728,6 @@ def crm_pasta_renomear(pid):
 
 @app.route('/crm/pastas/<int:pid>/mover', methods=['POST'])
 @login_required
-@admin_required
 def crm_pasta_mover(pid):
     """Muda uma SUBpasta de lugar (as 5 raízes não se movem — ficam fixas).
     Recalcula dono_consultor_id em cascata pra ela e tudo dentro, já que
@@ -38762,7 +38766,6 @@ def crm_pasta_mover(pid):
 
 @app.route('/crm/pastas/<int:pid>/excluir', methods=['POST'])
 @login_required
-@admin_required
 def crm_pasta_excluir(pid):
     conn = db()
     pasta = conn.execute("SELECT id, parent_id FROM pastas WHERE id=?", (pid,)).fetchone()
@@ -38782,6 +38785,50 @@ def crm_pasta_excluir(pid):
     conn.execute("DELETE FROM pastas WHERE id=?", (pid,))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
+
+
+@app.route('/crm/pastas/<int:pid>/arquivar', methods=['POST'])
+@login_required
+def crm_pasta_arquivar(pid):
+    """Arquiva somente a raiz pessoal de um consultor já inativo.
+
+    Arquivar não exclui mídia, conteúdo, subpastas nem funis. A pasta passa a
+    aparecer no agrupamento Arquivadas para gestores, sem poluir a operação.
+    """
+    if not _bib_eh_gestor():
+        return jsonify({'ok': False, 'erro': 'Somente gestores podem arquivar uma pasta de consultor.'}), 403
+    conn = db()
+    pasta = conn.execute("""SELECT p.id,p.parent_id,p.consultor_id,COALESCE(p.arquivada,0) arquivada,
+                                  u.ativo usuario_ativo
+                           FROM pastas p LEFT JOIN usuarios u ON u.id=p.consultor_id
+                           WHERE p.id=?""", (pid,)).fetchone()
+    if not pasta:
+        close_db(conn); return jsonify({'ok': False, 'erro': 'Pasta não encontrada.'}), 404
+    if pasta['parent_id'] is not None or pasta['consultor_id'] is None:
+        close_db(conn); return jsonify({'ok': False, 'erro': 'Apenas a pasta-mãe pessoal de um consultor pode ser arquivada.'}), 400
+    if pasta['usuario_ativo']:
+        close_db(conn); return jsonify({'ok': False, 'erro': 'Desative o consultor antes de arquivar a pasta dele.'}), 400
+    if pasta['arquivada']:
+        close_db(conn); return jsonify({'ok': True, 'arquivada': True})
+    conn.execute("UPDATE pastas SET arquivada=1, arquivada_em=CURRENT_TIMESTAMP WHERE id=?", (pid,))
+    conn.commit(); close_db(conn)
+    return jsonify({'ok': True, 'arquivada': True})
+
+
+@app.route('/crm/pastas/<int:pid>/desarquivar', methods=['POST'])
+@login_required
+def crm_pasta_desarquivar(pid):
+    if not _bib_eh_gestor():
+        return jsonify({'ok': False, 'erro': 'Somente gestores podem restaurar uma pasta arquivada.'}), 403
+    conn = db()
+    pasta = conn.execute("SELECT id,parent_id,consultor_id FROM pastas WHERE id=?", (pid,)).fetchone()
+    if not pasta:
+        close_db(conn); return jsonify({'ok': False, 'erro': 'Pasta não encontrada.'}), 404
+    if pasta['parent_id'] is not None or pasta['consultor_id'] is None:
+        close_db(conn); return jsonify({'ok': False, 'erro': 'Apenas uma pasta-mãe pessoal pode ser restaurada.'}), 400
+    conn.execute("UPDATE pastas SET arquivada=0, arquivada_em=NULL WHERE id=?", (pid,))
+    conn.commit(); close_db(conn)
+    return jsonify({'ok': True, 'arquivada': False})
 
 
 @app.route('/crm/modelos/<int:mid>/mover-pasta', methods=['POST'])
@@ -39024,9 +39071,26 @@ def _bib_donos_com_raiz(conn):
     return donos
 
 
+def _bib_normalizar_nome_aline(conn):
+    """Corrige a grafia histórica exata, sem alterar nomes de outras pessoas.
+
+    Esta não é uma regra automática de título: siglas e nomes empresariais
+    podem legitimamente usar caixa alta. O ajuste foi autorizado apenas para
+    este cadastro pessoal que estava destoando de todos os demais.
+    """
+    antigo, novo = 'ALINE AMANCIO ACACIO', 'Aline Amancio Acacio'
+    linha = conn.execute("SELECT id FROM usuarios WHERE nome=?", (antigo,)).fetchone()
+    if not linha:
+        return
+    conn.execute("UPDATE usuarios SET nome=? WHERE id=?", (novo, linha['id']))
+    conn.execute("UPDATE pastas SET nome=? WHERE parent_id IS NULL AND consultor_id=?", (novo, linha['id']))
+    app.logger.info('[BIBLIOTECA] nome de Aline padronizado')
+
+
 def _bib_garantir_raizes(conn):
     """Cria o que faltar de raiz e devolve {dono_id ou None: pasta_id}.
     Idempotente: só insere o que não existe, e nunca mexe no que existe."""
+    _bib_normalizar_nome_aline(conn)
     raizes = {}
     r = conn.execute("""SELECT id FROM pastas WHERE parent_id IS NULL AND consultor_id IS NULL
         AND nome='Compartilhado' ORDER BY id LIMIT 1""").fetchone()
@@ -39054,7 +39118,7 @@ def _bib_garantir_raizes(conn):
 
 def _bib_mapa_pastas(conn):
     return {p['id']: dict(p) for p in conn.execute(
-        "SELECT id, nome, parent_id, consultor_id FROM pastas").fetchall()}
+        "SELECT id, nome, parent_id, consultor_id, COALESCE(arquivada,0) arquivada FROM pastas").fetchall()}
 
 
 def _bib_dono_pela_raiz(mapa, pasta_id):
@@ -39095,8 +39159,9 @@ def _bib_arvore(conn, usuario_id, eh_gestor):
     dele — no site, conteúdo de colega e Compartilhado não aparecem."""
     _bib_garantir_raizes(conn)
     mapa = _bib_mapa_pastas(conn)
-    nomes_usuarios = {u['id']: u['nome'] for u in conn.execute(
-        "SELECT id, nome FROM usuarios").fetchall()}
+    usuarios = {u['id']: dict(u) for u in conn.execute(
+        "SELECT id, nome, COALESCE(ativo,1) ativo FROM usuarios").fetchall()}
+    nomes_usuarios = {uid: u['nome'] for uid, u in usuarios.items()}
     por_pasta = {}
     for r in conn.execute("""SELECT pasta_id, tipo, COUNT(*) AS n FROM modelos_conteudo
         WHERE COALESCE(ativo,1)=1 GROUP BY pasta_id, tipo""").fetchall():
@@ -39118,7 +39183,8 @@ def _bib_arvore(conn, usuario_id, eh_gestor):
         itens = por_pasta.get(p['id'], {})
         return {'id': p['id'], 'nome': p['nome'], 'parent_id': p['parent_id'],
                 'itens': {c: itens.get(c, 0) for c in _BIB_CANAIS},
-                'funis': funis_por_pasta.get(p['id'], 0), 'filhas': [], 'virtual': False}
+                'funis': funis_por_pasta.get(p['id'], 0), 'filhas': [], 'virtual': False,
+                'arquivada': bool(p.get('arquivada'))}
 
     nos = {pid: _no(p) for pid, p in mapa.items()}
     raizes = []
@@ -39130,6 +39196,7 @@ def _bib_arvore(conn, usuario_id, eh_gestor):
             no = nos[pid]
             no['dono_id'] = p['consultor_id']
             no['dono_nome'] = nomes_usuarios.get(p['consultor_id']) or 'Compartilhado'
+            no['dono_ativo'] = bool(usuarios.get(p['consultor_id'], {}).get('ativo', 1)) if p['consultor_id'] is not None else True
             raizes.append(no)
 
     for raiz in raizes:
@@ -39160,6 +39227,8 @@ def _bib_arvore(conn, usuario_id, eh_gestor):
         _ordenar(raiz)
 
     def _peso(r):
+        if r.get('arquivada'):
+            return (3, (r['dono_nome'] or '').lower())
         if r['dono_id'] is None:
             return (0 if r['nome'] == 'Compartilhado' else 1, (r['nome'] or '').lower())
         return (2, (r['dono_nome'] or '').lower())

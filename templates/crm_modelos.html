@@ -21,6 +21,16 @@
   .bib-no { display:block; height:auto; min-height:0; overflow:visible; }
   .bib-no:not([open]) > .bib-filhas { display:none; }
   .bib-no[open] > .bib-filhas { display:block; }
+  .bib-no.arquivada > summary, .bib-no.arquivada > .bib-pasta-btn { opacity:.62; }
+  .bib-arquivadas { margin-top:10px; border-top:1px solid var(--borda-2); padding-top:8px; }
+  .bib-arquivadas > summary { cursor:pointer; list-style:none; color:var(--cinza); font-size:12px; font-weight:700; padding:6px 8px; }
+  .bib-arquivadas > summary::-webkit-details-marker { display:none; }
+  .bib-pasta-menu { margin-left:2px; width:22px; height:22px; display:inline-flex; align-items:center; justify-content:center;
+                     border-radius:6px; color:var(--cinza-2); cursor:pointer; flex:0 0 auto; }
+  .bib-pasta-menu:hover, .bib-pasta-menu:focus-visible { background:var(--panel-3); color:var(--texto); outline:none; }
+  .bib-pasta-menu svg { width:15px; height:15px; }
+  .bib-pasta-linha { display:flex; align-items:center; }
+  .bib-pasta-linha .bib-pasta-btn { flex:1; min-width:0; }
   .bib-no > summary { list-style:none; cursor:pointer; display:flex; align-items:center; gap:7px;
                       padding:7px 8px; border-radius:8px; font-size:13px; color:var(--texto);
                       transition:background .12s; }
@@ -300,21 +310,31 @@ function bibNoHtml(no, nivel) {
   const temFilhas = (no.filhas || []).length > 0;
   const selecionada = chaveSel === String(no.id) && BIB_ESTADO.escopo === 'pasta';
   const rotuloDono = no.dono_nome ? ' — ' + no.dono_nome : '';
+  const menu = bibPastaMenuHtml(no, nivel);
   if (!temFilhas) {
-    return '<button class="bib-pasta-btn ' + (selecionada ? 'on' : '') + '" data-pasta="' + no.id + '">' +
+    return '<div class="bib-pasta-linha ' + (no.arquivada ? 'arquivada' : '') + '"><button class="bib-pasta-btn ' + (selecionada ? 'on' : '') + '" data-pasta="' + no.id + '">' +
       '<span class="bib-seta" aria-hidden="true"></span>' +
       '<span class="bib-no-nome">' + esc(no.nome) + '</span>' +
-      '<span class="bib-no-n">' + (no.total || 0) + '</span></button>';
+      '<span class="bib-no-n">' + (no.total || 0) + '</span></button>' + menu + '</div>';
   }
   const aberta = BIB_ABERTAS.has(String(no.id)) ? ' open' : '';
-  return '<details class="bib-no ' + (nivel === 0 ? 'bib-raiz' : '') + '"' + aberta + '>' +
+  return '<details class="bib-no ' + (nivel === 0 ? 'bib-raiz ' : '') + (no.arquivada ? 'arquivada' : '') + '"' + aberta + '>' +
     '<summary class="' + (selecionada ? 'on' : '') + '" data-pasta="' + no.id + '" title="' +
       esc(no.nome + rotuloDono) + '">' +
       '<span class="bib-seta">' + BIB_ICO.seta + '</span>' +
       '<span class="bib-no-nome">' + esc(no.nome) + '</span>' +
-      '<span class="bib-no-n">' + (no.total || 0) + '</span></summary>' +
+      '<span class="bib-no-n">' + (no.total || 0) + '</span>' + menu + '</summary>' +
     '<div class="bib-filhas">' + no.filhas.map((f) => bibNoHtml(f, nivel + 1)).join('') + '</div>' +
     '</details>';
+}
+
+function bibPastaMenuHtml(no, nivel) {
+  if (!BIB_PODE_GERIR) return '';
+  const podeArquivarRaiz = nivel === 0 && no.dono_id != null && !no.dono_ativo;
+  const podeGerirSubpasta = nivel > 0;
+  if (!podeArquivarRaiz && !podeGerirSubpasta) return '';
+  return '<span class="bib-pasta-menu" role="button" tabindex="0" data-pasta-acao="' + no.id +
+    '" aria-label="Ações da pasta ' + esc(no.nome) + '" title="Ações da pasta">' + BIB_ICO.mais + '</span>';
 }
 
 function bibDesenharArvore() {
@@ -323,13 +343,17 @@ function bibDesenharArvore() {
     alvo.innerHTML = '<div class="bib-vazio" style="padding:18px 8px"><b>Sem pasta ainda</b>Seu conteúdo aparece em Sem localização até você criar a primeira pasta.</div>';
     return;
   }
-  alvo.innerHTML = BIB_ARVORE.map((r) => bibNoHtml(r, 0)).join('');
+  const ativas = BIB_ARVORE.filter((r) => !r.arquivada);
+  const arquivadas = BIB_ARVORE.filter((r) => r.arquivada);
+  alvo.innerHTML = ativas.map((r) => bibNoHtml(r, 0)).join('') + (arquivadas.length
+    ? '<details class="bib-arquivadas"><summary>Pastas arquivadas (' + arquivadas.length + ')</summary>' +
+      arquivadas.map((r) => bibNoHtml(r, 0)).join('') + '</details>' : '');
   // A seta só abre/recolhe. O nome seleciona e mantém a pasta aberta. Antes o
   // redraw após a navegação esquecia o atributo open e a árvore "pulava".
   alvo.querySelectorAll('summary[data-pasta]').forEach((s) => {
     s.addEventListener('click', (ev) => {
       const details = s.parentElement;
-      if (ev.target.closest('.bib-seta')) return;
+      if (ev.target.closest('.bib-seta, [data-pasta-acao]')) return;
       ev.preventDefault();
       details.open = true;
       BIB_ABERTAS.add(String(s.dataset.pasta));
@@ -355,6 +379,11 @@ function bibDesenharArvore() {
   });
   alvo.querySelectorAll('.bib-pasta-btn[data-escopo]').forEach((b) => {
     b.addEventListener('click', () => bibAbrirEscopo(b.dataset.escopo, b.dataset.dono));
+  });
+  alvo.querySelectorAll('[data-pasta-acao]').forEach((b) => {
+    const abrir = (ev) => { ev.preventDefault(); ev.stopPropagation(); bibMenuPasta(Number(b.dataset.pastaAcao), b); };
+    b.addEventListener('click', abrir);
+    b.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') abrir(ev); });
   });
 }
 
@@ -588,7 +617,7 @@ function bibFecharMenu() {
   if (_bibMenuAberto) { _bibMenuAberto.remove(); _bibMenuAberto = null; }
 }
 document.addEventListener('click', (ev) => {
-  if (_bibMenuAberto && !ev.target.closest('.bib-menu') && !ev.target.closest('[data-acao]')) bibFecharMenu();
+  if (_bibMenuAberto && !ev.target.closest('.bib-menu') && !ev.target.closest('[data-acao], [data-pasta-acao]')) bibFecharMenu();
 });
 document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { bibFecharMenu(); bibFecharFolha(); } });
 
@@ -672,6 +701,111 @@ function bibFolhaErro(msg) {
   const e = document.getElementById('bib-folha-erro');
   e.textContent = msg;
   e.classList.add('aparece');
+}
+
+function bibNoPorId(id, nos) {
+  for (const no of nos || BIB_ARVORE) {
+    if (Number(no.id) === Number(id)) return no;
+    const achado = bibNoPorId(id, no.filhas || []);
+    if (achado) return achado;
+  }
+  return null;
+}
+
+function bibMenuPasta(id, ancora) {
+  const pasta = bibNoPorId(id);
+  if (!pasta) return;
+  bibFecharMenu();
+  const ehRaiz = !pasta.parent_id;
+  const podeArquivar = ehRaiz && pasta.dono_id != null && !pasta.dono_ativo;
+  const acoes = [];
+  if (!ehRaiz) {
+    acoes.push({ rotulo: 'Renomear pasta', aoClicar: () => bibFolhaRenomearPasta(pasta) });
+    acoes.push({ rotulo: 'Mover subpasta', aoClicar: () => bibFolhaMoverPasta(pasta) });
+    acoes.push({ rotulo: 'Excluir subpasta', classe: 'perigo', aoClicar: () => bibFolhaExcluirPasta(pasta) });
+  }
+  if (podeArquivar) {
+    acoes.push({ rotulo: pasta.arquivada ? 'Restaurar pasta' : 'Arquivar pasta',
+      classe: pasta.arquivada ? '' : 'perigo', aoClicar: () => bibFolhaArquivarPasta(pasta) });
+  }
+  if (!acoes.length) return;
+  const html = '<div class="bib-menu bib-menu-pasta"></div>';
+  const linha = document.querySelector('[data-pasta-acao="' + id + '"]');
+  if (!linha) return;
+  linha.insertAdjacentHTML('afterend', html);
+  const menu = linha.nextElementSibling;
+  _bibMenuAberto = menu;
+  const r = (ancora || linha).getBoundingClientRect();
+  menu.style.top = Math.min(window.innerHeight - 42, r.bottom + 4) + 'px';
+  menu.style.left = Math.max(8, Math.min(window.innerWidth - 212, r.right - 196)) + 'px';
+  acoes.forEach((acao) => {
+    const b = document.createElement('button');
+    b.textContent = acao.rotulo;
+    if (acao.classe) b.className = acao.classe;
+    b.addEventListener('click', () => { menu.remove(); acao.aoClicar(); });
+    menu.appendChild(b);
+  });
+}
+
+function bibFolhaRenomearPasta(pasta) {
+  bibAbrirFolha('Renomear subpasta', esc(pasta.nome),
+    '<label class="campo" for="bib-pasta-nome">Nome da pasta</label><input id="bib-pasta-nome" type="text" value="' + esc(pasta.nome) + '">',
+    [{ rotulo: 'Cancelar', aoClicar: bibFecharFolha }, {
+      rotulo: 'Salvar nome', classe: 'btn', aoClicar: (b) => {
+        const nome = (document.getElementById('bib-pasta-nome').value || '').trim();
+        if (!nome) return bibFolhaErro('Informe um nome para a pasta.');
+        return bibComOcupado(b, 'Salvando…', async () => {
+          const { dados } = await bibPost('/crm/pastas/' + pasta.id + '/renomear', { nome: nome });
+          if (!dados.ok) return bibFolhaErro(dados.erro || 'Não foi possível renomear a pasta.');
+          bibFecharFolha(); toast('Subpasta renomeada', 'ok'); bibRecarregarTudo();
+        });
+      }
+    }]);
+}
+
+function bibFolhaMoverPasta(pasta) {
+  bibAbrirFolha('Mover subpasta', esc(pasta.nome),
+    '<label class="campo">Nova pasta pai</label>' + bibDestinoHtml(null) +
+    '<div class="bib-consequencia">Mover conserva todos os conteúdos, subpastas e funis. Não é possível mover uma pasta para dentro dela mesma.</div>',
+    [{ rotulo: 'Cancelar', aoClicar: bibFecharFolha }, {
+      rotulo: 'Mover para esta pasta', classe: 'btn', aoClicar: (b) => {
+        const destino = bibDestinoEscolhido();
+        if (!destino) return bibFolhaErro('Escolha a nova pasta pai.');
+        return bibComOcupado(b, 'Movendo…', async () => {
+          const { dados } = await bibPost('/crm/pastas/' + pasta.id + '/mover', { parent_id: Number(destino) });
+          if (!dados.ok) return bibFolhaErro(dados.erro || 'Não foi possível mover a subpasta.');
+          bibFecharFolha(); toast('Subpasta movida', 'ok'); bibRecarregarTudo();
+        });
+      }
+    }]);
+}
+
+function bibFolhaExcluirPasta(pasta) {
+  bibAbrirFolha('Excluir subpasta', esc(pasta.nome),
+    '<div class="bib-consequencia" style="border-color:rgba(244,63,94,.4)"><b>Esta ação não tem desfazer.</b><br>Uma subpasta só pode ser excluída se estiver vazia: sem conteúdo, funil ou subpasta dentro. Mova ou exclua esses itens antes.</div>',
+    [{ rotulo: 'Cancelar', aoClicar: bibFecharFolha }, {
+      rotulo: 'Excluir subpasta vazia', classe: 'btn btn-danger', aoClicar: (b) => bibComOcupado(b, 'Excluindo…', async () => {
+        const { dados } = await bibPost('/crm/pastas/' + pasta.id + '/excluir', {});
+        if (!dados.ok) return bibFolhaErro(dados.erro || 'A subpasta não pode ser excluída agora.');
+        bibFecharFolha(); toast('Subpasta excluída', 'ok'); bibRecarregarTudo();
+      })
+    }]);
+}
+
+function bibFolhaArquivarPasta(pasta) {
+  const restaurar = !!pasta.arquivada;
+  const acao = restaurar ? 'Restaurar' : 'Arquivar';
+  const explicacao = restaurar
+    ? 'A pasta volta para a árvore operacional. Nenhum conteúdo será alterado.'
+    : 'A pasta sai da árvore operacional e fica em Pastas arquivadas. Conteúdos, mídias e funis continuam preservados.';
+  bibAbrirFolha(acao + ' pasta de consultor', esc(pasta.nome), '<div class="bib-consequencia">' + explicacao + '</div>',
+    [{ rotulo: 'Cancelar', aoClicar: bibFecharFolha }, {
+      rotulo: acao + ' pasta', classe: restaurar ? 'btn' : 'btn btn-danger', aoClicar: (b) => bibComOcupado(b, restaurar ? 'Restaurando…' : 'Arquivando…', async () => {
+        const { dados } = await bibPost('/crm/pastas/' + pasta.id + '/' + (restaurar ? 'desarquivar' : 'arquivar'), {});
+        if (!dados.ok) return bibFolhaErro(dados.erro || 'Não foi possível concluir esta ação.');
+        bibFecharFolha(); toast(restaurar ? 'Pasta restaurada' : 'Pasta arquivada', 'ok'); bibRecarregarTudo();
+      })
+    }]);
 }
 
 // Árvore de destino dentro da folha: as mesmas pastas, sem os itens.
