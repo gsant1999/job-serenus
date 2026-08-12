@@ -191,6 +191,27 @@ def teste_conta_do_gestor():
     checa('snapshot incompleto nao calcula', A._gestor_calcular(snap2, 1000.0)['fracoes'] == [])
 
 
+def teste_regua_em_mensalidades_nao_incha_comissao():
+    print('\n[unit] 100 + 100 + 80 distribui a comissão, não multiplica por 2,8')
+    snap = {
+        'completa': 1,
+        'fracoes_json': json.dumps([
+            {'ordem': 1, 'percentual': 100.0},
+            {'ordem': 2, 'percentual': 100.0},
+            {'ordem': 3, 'percentual': 80.0}]),
+        'gestor_json': json.dumps([
+            {'ordem': 1, 'percentual_gestor': 100.0},
+            {'ordem': 2, 'percentual_gestor': 50.0},
+            {'ordem': 3, 'percentual_gestor': 50.0}]),
+        'retencoes_json': '[]',
+    }
+    r = A._gestor_calcular(snap, 5400.24)
+    checa('total recebido continua igual à comissão da venda',
+          abs(r['total_recebido'] - 5400.24) < 0.01, r['total_recebido'])
+    checa('gestor não recebe mais que a comissão total',
+          r['total_liquido_gestor'] <= 5400.24, r['total_liquido_gestor'])
+
+
 def teste_snapshot_imutavel():
     print('\n[unit] snapshot congela a regra na venda')
     limpar()
@@ -439,6 +460,7 @@ if __name__ == '__main__':
     teste_retencao_sem_aliquota()
     teste_sugestao_nao_e_confirmacao()
     teste_conta_do_gestor()
+    teste_regua_em_mensalidades_nao_incha_comissao()
     teste_snapshot_imutavel()
     teste_bloqueio_liberacao_e_pix()
     teste_consultor_nao_e_bloqueado()

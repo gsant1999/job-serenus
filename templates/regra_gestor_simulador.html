@@ -77,9 +77,9 @@
           <th>Venda</th>
           <th>Operadora e plano</th>
           <th class="num">Comissão da venda</th>
-          <th class="num">Atual (consultor)</th>
-          <th class="num">Simulado (gestor)</th>
-          <th class="num">Diferença</th>
+          <th class="num">Repasse atual gravado</th>
+          <th class="num">Simulação do gestor</th>
+          <th class="num">Diferença simulada</th>
           <th>Situação</th>
         </tr>
       </thead>
@@ -87,7 +87,7 @@
         {% for l in linhas %}
         <tr>
           <td>
-            {% if l.aplicavel %}<input type="checkbox" class="sm-sel" value="{{ l.id }}">{% endif %}
+            <span title="O histórico é apenas para conferência; nenhuma venda antiga pode ser alterada por esta tela.">—</span>
           </td>
           <td><a href="/proposta/{{ l.id }}">{{ (l.razao_social or '')[:36] }}</a>
             <div class="sm-linha2">{{ l.consultor }}</div></td>
@@ -108,7 +108,7 @@
               <span class="pill pill-amarelo">sem regra</span>
               <div class="sm-linha2">{{ l.falta[0] }}</div>
             {% else %}
-              <span class="pill pill-verde">pode aplicar</span>
+              <span class="pill pill-amarelo">somente conferência</span>
               {% if l.sim_serenus is not none %}<div class="sm-linha2">saldo Serenus simulado: {{ l.sim_serenus|moeda }}</div>{% endif %}
             {% endif %}
           </td>
@@ -117,56 +117,9 @@
       </tbody>
     </table>
 
-    <div class="sm-acoes">
-      <button type="button" class="btn-outline" id="smAplicar">Aplicar nas vendas marcadas</button>
-      <span class="sm-linha2" id="smCont">nenhuma marcada</span>
-    </div>
-    <div class="sm-msg" id="smMsg"></div>
+    <div class="sm-acoes"><span class="sm-linha2">Este histórico é somente para conferência. A regra de sócios e gestores vale para vendas novas e não altera repasses de consultores já cadastrados.</span></div>
     {% endif %}
   </div>
 </div>
 
-<script>
-function marcadas(){
-  return Array.prototype.filter.call(document.querySelectorAll('.sm-sel'), function(c){ return c.checked; })
-    .map(function(c){ return c.value; });
-}
-function atualizarContagem(){
-  var n = marcadas().length;
-  document.getElementById('smCont').textContent =
-    n ? (n + (n === 1 ? ' venda marcada' : ' vendas marcadas')) : 'nenhuma marcada';
-}
-document.querySelectorAll('.sm-sel').forEach(function(c){
-  c.addEventListener('change', atualizarContagem);
-});
-var bt = document.getElementById('smAplicar');
-if (bt) bt.addEventListener('click', function(){
-  var ids = marcadas();
-  var msg = document.getElementById('smMsg');
-  if (!ids.length) { msg.textContent = 'Marque as vendas primeiro.'; msg.className = 'sm-msg erro'; return; }
-  // Digitar APLICAR e não só clicar OK: a ação reescreve a regra congelada de
-  // vendas que já existem, e um clique acidental não deve conseguir fazer isso.
-  var conf = prompt('Isto reescreve a regra congelada de ' + ids.length + ' venda(s).\n' +
-                    'O estado anterior fica guardado no histórico de cada proposta.\n\n' +
-                    'Digite APLICAR para confirmar:');
-  if (conf === null) return;
-  bt.disabled = true;
-  fetch('/comissoes/regra-gestor/aplicar-historico', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({propostas: ids, confirmacao: conf})
-  }).then(function(r){ return r.json(); }).then(function(d){
-    bt.disabled = false;
-    if (!d.ok) { msg.textContent = d.erro || 'Não consegui aplicar.'; msg.className = 'sm-msg erro'; return; }
-    var txt = d.aplicadas.length + ' venda(s) atualizada(s).';
-    if (d.recusadas && d.recusadas.length) {
-      txt += ' ' + d.recusadas.length + ' recusada(s): ' +
-             d.recusadas.map(function(x){ return x[0] + ' (' + x[1] + ')'; }).join('; ');
-    }
-    msg.textContent = txt + ' Recarregando...';
-    msg.className = 'sm-msg ok';
-    setTimeout(function(){ location.reload(); }, 2200);
-  });
-});
-atualizarContagem();
-</script>
 {% endblock %}

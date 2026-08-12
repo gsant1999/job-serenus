@@ -5055,11 +5055,25 @@ def _gestor_calcular(snapshot, total_corretora):
         return vazio
     gpor = {int(g.get('ordem', 0)): g for g in gestor}
     base = float(total_corretora or 0)
+    # Os percentuais da régua de recebimento são *fatias da mensalidade*.
+    # Ex.: 100% + 100% + 80% representa 2,8 mensalidades. Eles não podem
+    # incidir cada um sobre a comissão total, pois isso faria uma comissão de
+    # R$ 5.400 virar R$ 15.120. Para distribuir a comissão total sem inventar
+    # dinheiro, cada fração recebe seu peso relativo dentro da régua inteira.
+    # Também funciona para uma regra 30% + 70%, cuja soma já é 100%.
+    pesos = [max(0.0, float(f.get('percentual') or 0)) for f in fracoes]
+    peso_total = sum(pesos)
+    if peso_total <= 0:
+        return vazio
     linhas = []
-    for f in fracoes:
+    for indice, f in enumerate(fracoes):
         ordem = int(f.get('ordem', 0))
         pct_receb = float(f.get('percentual') or 0)
-        recebido = round(base * pct_receb / 100.0, 2)
+        # A última absorve só o resíduo de centavos da divisão. Assim, todas
+        # as retenções abaixo são calculadas sobre o valor final da fração.
+        recebido = (round(base * pct_receb / peso_total, 2)
+                    if indice < len(fracoes) - 1
+                    else round(base - sum(l['recebido'] for l in linhas), 2))
         pct_gestor = float((gpor.get(ordem) or {}).get('percentual_gestor') or 0)
         bruto_gestor = round(recebido * pct_gestor / 100.0, 2)
         ret_gestor, ret_serenus, det = 0.0, 0.0, []
@@ -28234,6 +28248,15 @@ def regra_gestor_aplicar_historico():
     O que muda: apenas o SNAPSHOT da proposta. Valor de parcela, status
     financeiro e lançamento não são reescritos por esta rota — recalcular
     dinheiro que já foi combinado é o que este sistema não faz sozinho."""
+    # Histórico de vendas anteriores aos snapshots de sócio/gestor é somente
+    # leitura por enquanto. A página existe para conferência, não para trocar
+    # um repasse de consultor já cadastrado por uma regra nova sem migração
+    # auditada. As comissões originais continuam intactas.
+    aplicacao_historica_bloqueada = True
+    if aplicacao_historica_bloqueada:
+        return jsonify({"ok": False, "erro": "A aplicação automática no histórico está bloqueada. "
+                                               "Confira a simulação corrigida; nenhuma comissão já "
+                                               "cadastrada será alterada por esta tela."}), 409
     d = request.json or {}
     ids = [int(x) for x in (d.get('propostas') or []) if str(x).isdigit()]
     confirmacao = (d.get('confirmacao') or '').strip().upper()
