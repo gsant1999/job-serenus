@@ -23444,7 +23444,7 @@ def api_whatsapp_enviar_direto():
                                  (modelo_id, usuario_id)).fetchone()
         if not permitido:
             close_db(conn)
-            return _wa_cors(jsonify({"ok": False, "erro": "Você só pode enviar mensagens próprias ou compartilhadas pela extensão"})), 403
+            return _wa_cors(jsonify({"ok": False, "erro": "Sua biblioteca mudou. Feche e abra Mensagens novamente antes de enviar."})), 403
 
     _sem_numero_reportar = False
     tel_norm = _normalizar_telefone(telefone)
