@@ -145,11 +145,11 @@
   {% if modelos_whatsapp %}
   <div id="wa-lista" class="mo-lista">
     {% for g in wpp_grupos %}
-    <details class="pasta-wa" open>
+    <details class="pasta-wa">
       <summary class="pasta-wa-nome">{{ g.dono }} <span>({{ g.total }})</span></summary>
       {% for sp in g.subpastas %}
       {% set mostra_sub = g.subpastas|length > 1 or sp.nome != 'Geral' %}
-      {% if mostra_sub %}<details class="subpasta-wa" open><summary class="subpasta-wa-nome">{{ sp.nome }} <span>({{ sp.total }})</span></summary>{% endif %}
+      {% if mostra_sub %}<details class="subpasta-wa"><summary class="subpasta-wa-nome">{{ sp.nome }} <span>({{ sp.total }})</span></summary>{% endif %}
       {% for ts in sp.tipos %}
       <div class="wa-tipo-header">{{ ts.tipo }} <span>({{ ts.itens|length }})</span></div>
       {% for m in ts.itens %}

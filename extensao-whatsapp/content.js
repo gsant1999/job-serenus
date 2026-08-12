@@ -154,16 +154,10 @@
     });
   } catch (e) { /* mantém o padrão de produção */ }
 
-  // ── Pastas (Funis/Mensagens) começam FECHADAS por padrão — só abrem se o
-  //    próprio consultor abrir, e aí lembra (mesmo depois de F5) — pedido do
-  //    Guilherme, 18/07: "mantenha as pastas sempre fechadas a não ser que o
-  //    usuário abra a dele". ──
+  // ── Pastas (Funis/Mensagens) começam FECHADAS em cada abertura da tela.
+  //    Com centenas de itens, lembrar uma pasta aberta transforma a volta à
+  //    biblioteca numa parede de conteúdo. Quem quiser consulta, abre ali.
   let _pastasAbertas = new Set();
-  try {
-    chrome.storage.local.get(['pastasAbertas']).then((c) => {
-      _pastasAbertas = new Set(c && c.pastasAbertas || []);
-    });
-  } catch (e) { /* começa fechado se falhar */ }
   function _pastaAberta(key) { return _pastasAbertas.has(key); }
   _ouvir(document, 'toggle', (e) => {
     const el = e.target;
@@ -171,7 +165,6 @@
     const key = el.dataset.pastaKey;
     if (!key) return;
     if (el.open) _pastasAbertas.add(key); else _pastasAbertas.delete(key);
-    try { chrome.storage.local.set({ pastasAbertas: [..._pastasAbertas] }); } catch (e2) { /* best-effort */ }
   }, true); // toggle não borbulha — precisa capture
 
   // ── Reporta erros JS pro JOB (visibilidade de bug em produção — antes só
@@ -10648,6 +10641,7 @@
   }
 
   async function abrirSecaoMensagens() {
+    _pastasAbertas.clear();
     setCorpoSecaoMensagens(telaMensagensCarregando());
     let modelos;
     try {
@@ -10968,6 +10962,7 @@
   }
 
   async function abrirSecaoFunis() {
+    _pastasAbertas.clear();
     setCorpoSecaoMensagens(_secHead('Funis', _FUNIS_SUB) + _telaCarregando('Carregando seus funis…'));
     let res;
     try {
