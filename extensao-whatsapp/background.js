@@ -840,6 +840,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     ).then(sendResponse);
     return true;
   }
+  if (msg && msg.type === 'salvar_funil') {
+    chrome.storage.local.get(['usuarioId']).then(({ usuarioId }) => {
+      const dados = Object.assign({}, msg.dados || {}, { usuario_id: usuarioId || null });
+      return chamarJob('/api/whatsapp/extensao/funis/salvar', 'POST', dados, 20000);
+    }).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'funil_disparado') {
     // Só registra que o funil foi tocado (contador + timeline do lead) — o
     // envio de cada passo já aconteceu client-side pela ponte wa-js. Manda

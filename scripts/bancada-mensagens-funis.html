@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Bancada de Mensagens e Funis</title>
+  <link rel="stylesheet" href="../extensao-whatsapp/content.css">
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      background: #111827;
+      padding: 24px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .bancada-controles {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .bancada-controles button {
+      min-height: 38px;
+      padding: 8px 14px;
+      border: 1px solid #475569;
+      border-radius: 10px;
+      background: #1e293b;
+      color: #e2e8f0;
+      cursor: pointer;
+    }
+    .bancada-controles button.on { border-color: #1fd8a4; color: #1fd8a4; }
+    .bancada-palco { display: flex; justify-content: center; }
+    .bancada-painel {
+      width: 400px;
+      height: min(780px, calc(100vh - 100px));
+      overflow-y: auto;
+      padding: 12px;
+      border-radius: 18px;
+      background: var(--job-bg1);
+      color: var(--job-txt);
+      box-shadow: 0 24px 70px rgba(0,0,0,.45);
+      font-family: var(--job-ui);
+    }
+    .bancada-tela[hidden] { display: none; }
+    .bancada-cabecalho { margin-bottom: 14px; }
+    .bancada-cabecalho h1 { margin: 0; color: var(--job-txt); font: 700 20px var(--job-marca); }
+    .bancada-cabecalho p { margin: 4px 0 0; color: var(--job-txt-fraco); font-size: 11.5px; line-height: 1.45; }
+    .bancada-modelo {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 10px;
+      margin-top: 8px;
+      border: 1px solid var(--job-borda);
+      border-radius: 10px;
+      background: var(--job-bg2);
+      color: var(--job-txt);
+    }
+    .bancada-modelo span:first-child {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: var(--job-bg1);
+      color: var(--job-info);
+    }
+    .bancada-modelo div { min-width: 0; }
+    .bancada-modelo b { display: block; font-size: 12px; }
+    .bancada-modelo small { color: var(--job-txt-fraco); font-size: 10px; }
+    @media (max-width: 480px) {
+      body { padding: 8px; }
+      .bancada-controles { flex-wrap: wrap; }
+      .bancada-painel { width: 100%; height: calc(100vh - 98px); border-radius: 14px; }
+    }
+  </style>
+</head>
+<body data-job-tema="escuro">
+  <nav class="bancada-controles" aria-label="Controles da bancada">
+    <button class="on" data-tela="funil">Editor de funil</button>
+    <button data-tela="mensagens">Mensagens</button>
+    <button data-tema>Alternar tema</button>
+  </nav>
+
+  <main class="bancada-palco">
+    <section id="job-painel-doc" class="bancada-painel">
+      <div class="bancada-tela" data-conteudo="funil">
+        <div class="job-funil-editor">
+          <div class="job-funil-editor-nav">
+            <button aria-label="Voltar">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            </button>
+            <div><b>Novo funil</b><span>Monte a sequência sem sair da conversa</span></div>
+          </div>
+
+          <div class="job-funil-editor-campos">
+            <label for="bench-nome">Nome do funil</label>
+            <input class="job-inp" id="bench-nome" value="Primeiro contato PME">
+            <label for="bench-pasta">Pasta <span>opcional</span></label>
+            <input class="job-inp" id="bench-pasta" value="Campanhas">
+          </div>
+
+          <div class="job-funil-editor-resumo"><b>Sequência</b><span>3 mensagens · 15 s</span></div>
+          <div class="job-funil-editor-lista" role="list">
+            <div class="job-funil-editor-bloco" role="listitem">
+              <div class="job-funil-conector"><span class="job-funil-conector-linha"></span><label>Começa</label><select class="job-funil-delay"><option>Agora</option></select></div>
+              <div class="job-funil-editor-passo">
+                <span class="job-funil-editor-num">1</span>
+                <span class="job-funil-editor-ico">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                </span>
+                <div class="job-funil-editor-info"><div class="job-funil-editor-nome">Saudação geral</div><div class="job-funil-editor-previa">Olá, tudo bem? Sou da Serenus.</div></div>
+                <div class="job-funil-editor-acoes"><button disabled aria-label="Mover para cima">↑</button><button aria-label="Mover para baixo">↓</button><button class="job-funil-remover" aria-label="Remover">×</button></div>
+              </div>
+            </div>
+
+            <div class="job-funil-editor-bloco" role="listitem">
+              <div class="job-funil-conector"><span class="job-funil-conector-linha"></span><label>Depois</label><select class="job-funil-delay"><option>5 s</option></select></div>
+              <div class="job-funil-editor-passo t-audio">
+                <span class="job-funil-editor-num">2</span>
+                <span class="job-funil-editor-ico">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3zM19 10v2a7 7 0 0 1-14 0v-2M12 19v4"/></svg>
+                </span>
+                <div class="job-funil-editor-info"><div class="job-funil-editor-nome">Apresentação em áudio</div><div class="job-funil-editor-previa">Áudio de 18 segundos</div></div>
+                <div class="job-funil-editor-acoes"><button aria-label="Mover para cima">↑</button><button aria-label="Mover para baixo">↓</button><button class="job-funil-remover" aria-label="Remover">×</button></div>
+              </div>
+            </div>
+
+            <div class="job-funil-editor-bloco" role="listitem">
+              <div class="job-funil-conector"><span class="job-funil-conector-linha"></span><label>Depois</label><select class="job-funil-delay"><option>10 s</option></select></div>
+              <div class="job-funil-editor-passo t-imagem">
+                <span class="job-funil-editor-num">3</span>
+                <span class="job-funil-editor-ico">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                </span>
+                <div class="job-funil-editor-info"><div class="job-funil-editor-nome">Campanha PME</div><div class="job-funil-editor-previa">Imagem com apresentação da campanha</div></div>
+                <div class="job-funil-editor-acoes"><button aria-label="Mover para cima">↑</button><button disabled aria-label="Mover para baixo">↓</button><button class="job-funil-remover" aria-label="Remover">×</button></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="job-funil-adicionar"><button id="job-funil-abrir-picker" type="button">Adicionar mensagem</button></div>
+          <div class="job-funil-editor-rodape"><div class="job-funil-editor-status" aria-live="polite"></div><button class="job-funil-editor-cancelar">Cancelar</button><button class="job-funil-editor-salvar">Salvar funil</button></div>
+        </div>
+      </div>
+
+      <div class="bancada-tela" data-conteudo="mensagens" hidden>
+        <header class="bancada-cabecalho"><h1>Mensagens</h1><p>Suas frases, áudios e imagens prontos para usar na conversa.</p></header>
+        <div class="job-novo-modelo">
+          <div class="job-novo-modelo-head"><div><b>Nova mensagem</b><span>Salve uma vez para reutilizar em qualquer conversa.</span></div><button aria-label="Fechar">×</button></div>
+          <label for="bench-msg-nome">Nome da mensagem</label><input class="job-inp" id="bench-msg-nome" value="Retorno de cotação">
+          <label for="bench-msg-pasta">Pasta <span>opcional</span></label><input class="job-inp" id="bench-msg-pasta" value="Cotações">
+          <label for="bench-msg-texto">Mensagem</label><textarea class="job-inp job-inp-txt" id="bench-msg-texto">Olá, preparei sua cotação. Posso te explicar as opções?</textarea>
+          <div class="job-novo-acoes"><button class="job-mini-btn">Gravar áudio</button><button class="job-mini-btn">Anexar arquivo</button></div>
+          <div class="job-grav-status"></div><button class="job-salvar-modelo">Salvar mensagem</button>
+        </div>
+        <div class="bancada-modelo"><span>T</span><div><b>Boas-vindas</b><small>Abertura · texto</small></div></div>
+        <div class="bancada-modelo"><span>A</span><div><b>Apresentação pessoal</b><small>Abertura · áudio</small></div></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const botoesTela = [...document.querySelectorAll('[data-tela]')];
+    botoesTela.forEach((botao) => botao.addEventListener('click', () => {
+      botoesTela.forEach((item) => item.classList.toggle('on', item === botao));
+      document.querySelectorAll('[data-conteudo]').forEach((tela) => { tela.hidden = tela.dataset.conteudo !== botao.dataset.tela; });
+    }));
+    document.querySelector('[data-tema]').addEventListener('click', () => {
+      document.body.dataset.jobTema = document.body.dataset.jobTema === 'claro' ? 'escuro' : 'claro';
+    });
+  </script>
+</body>
+</html>

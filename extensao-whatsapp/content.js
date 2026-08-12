@@ -10563,13 +10563,15 @@
 
   // ═══════════════ Funis (sequência de disparo, estilo ZapVoice) ═══════════════
   // Um funil é uma sequência de passos (texto/áudio/imagem/PDF), cada um com um
-  // intervalo. Aqui na extensão o consultor DISPARA o funil inteiro na conversa
-  // aberta: manda o passo, espera o intervalo, manda o próximo — sempre uma
-  // ação explícita dele numa conversa que está na tela, nunca em massa. Montar/
-  // editar funis é no site (/crm/funis); aqui é só disparar. Envio de cada passo
-  // reusa a MESMA ponte wa-js do envio avulso (texto e mídia do item A).
+  // intervalo. O consultor DISPARA na conversa aberta; o gestor também monta e
+  // edita AQUI, sem perder o contexto do WhatsApp. Site e extensão salvam o
+  // mesmo rascunho completo, então não existem dois formatos de funil.
   const FUNIS_CACHE_MS = 5 * 60 * 1000;
-  let _funisCache = null; // {ts, funis}
+  let _funisCache = null; // {ts, funis, gestor}
+  let _fnRascunho = null;
+  let _fnEditorSujo = false;
+  let _fnPickerBusca = '';
+  let _fnPickerAberto = false;
   // Fila de execuções: cada disparo vira um "job" independente. Jobs em
   // conversas DIFERENTES rodam em paralelo (não se atrapalham). Dois jobs pro
   // MESMO contato (chatId) enfileiram — o segundo só começa quando o primeiro
@@ -10584,7 +10586,8 @@
     // fresco — já quebrou uma vez (cache devolvia o array cru, dispararFunil lia
     // res.ok, dava undefined e alertava "não tem passos" com os passos na tela).
     if (!forcar && _funisCache && (Date.now() - _funisCache.ts) < FUNIS_CACHE_MS) {
-      return { ok: true, funis: _funisCache.funis };
+      _gestorModo = !!_funisCache.gestor;
+      return { ok: true, funis: _funisCache.funis, gestor: _gestorModo };
     }
     // Devolve a resposta CRUA (não só o array) pra abrirSecaoFunis distinguir
     // "deu erro" de "não tem funil" — e nunca ficar preso no spinner.
@@ -10600,8 +10603,8 @@
     if (!resp || !resp.ok) return { ok: false, erro: (resp && resp.erro) || 'Não consegui falar com o JOB.' };
     const funis = resp.funis || [];
     _gestorModo = !!resp.gestor;
-    _funisCache = { ts: Date.now(), funis };
-    return { ok: true, funis };
+    _funisCache = { ts: Date.now(), funis, gestor: _gestorModo };
+    return { ok: true, funis, gestor: _gestorModo };
   }
 
   function funilTipoIcone(tipo, px) {
@@ -10884,6 +10887,8 @@
 
   function renderFunis(funis) {
     return _secHead('Funis', _FUNIS_SUB, (funis && funis.length) || '') +
+      (_gestorModo ? '<button class="job-funil-criar" id="job-funil-criar">' +
+        _svgIco('mais', 14) + ' Montar funil</button>' : '') +
       '<div class="job-biblioteca-controles">' +
         '<input class="job-inp" id="job-busca-funil" placeholder="Buscar funil…" value="' + esc(_fnBusca) + '">' +
         '<div class="job-fchips">' +
@@ -10892,15 +10897,17 @@
         '</div>' +
       '</div>' +
       '<div id="job-funis-lista">' + listaFunisHTML(funis) + '</div>' +
-      '<a class="job-funis-gerenciar" href="' + esc(_SITE_BASE_URL_EXT) + '/crm/funis" target="_blank" rel="noopener">Gerenciar funis no site →</a>';
+      '<a class="job-funis-gerenciar" href="' + esc(_SITE_BASE_URL_EXT) + '/crm/funis" target="_blank" rel="noopener">Abrir central de funis no JOB</a>';
   }
 
   function listaFunisHTML(funis) {
     if (!funis.length) {
       return _vazio('Nenhum funil montado',
-        'Um funil dispara vários passos em sequência — texto, áudio, imagem — com o intervalo que você definir. Monte o primeiro no site e ele aparece aqui.',
-        '<a class="job-analisar-btn job-vazio-btn" href="' + esc(_SITE_BASE_URL_EXT) +
-        '/crm/funis" target="_blank" rel="noopener">Montar funil no JOB</a>');
+        'Um funil envia texto, áudio, imagem ou PDF em sequência, com o intervalo que você definir.',
+        _gestorModo
+          ? '<button class="job-analisar-btn job-vazio-btn" id="job-funil-vazio-criar">Montar o primeiro funil</button>'
+          : '<a class="job-analisar-btn job-vazio-btn" href="' + esc(_SITE_BASE_URL_EXT) +
+            '/crm/funis" target="_blank" rel="noopener">Abrir funis no JOB</a>');
     }
     const vis = funis.filter(funilPassaFiltro);
     if (!vis.length) return _vazioFiltro('funil', 'job-limpar-f-funil');
@@ -10967,12 +10974,328 @@
         '<button class="job-funil-expandir" title="Mostrar/ocultar passos">' + _svgIco('chevron', 14) + '</button>' +
       '</div>' +
       '<div class="job-funil-passos">' + (listaPassos || '<div class="job-vazio" style="padding:8px 0 2px">Este funil está vazio: nenhum passo pra disparar. Edite no site pra adicionar.</div>') + '</div>' +
-      '<button class="job-funil-disparar" data-funil-id="' + f.id + '"' + (passos.length ? '' : ' disabled') + '>' +
-        _ICO_ENVIAR + ' Disparar funil</button>' +
+      '<div class="job-funil-acoes">' +
+        (_gestorModo ? '<button class="job-funil-editar" data-funil-id="' + f.id + '">' +
+          _svgIco('lapis', 13) + ' Editar</button>' : '') +
+        '<button class="job-funil-disparar" data-funil-id="' + f.id + '"' + (passos.length ? '' : ' disabled') + '>' +
+          _ICO_ENVIAR + ' Disparar</button>' +
+      '</div>' +
     '</div>';
   }
 
   const _ICO_ENVIAR = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
+
+  function _fnTipoDoModelo(m) {
+    return (m && ['audio', 'imagem', 'video', 'documento'].includes(m.midia_tipo || m.tipo))
+      ? (m.midia_tipo || m.tipo) : 'texto';
+  }
+
+  function _fnPassoDoModelo(m) {
+    return {
+      modelo_id: m.id,
+      nome: m.nome || 'Mensagem sem nome',
+      texto: m.texto || '',
+      tipo: _fnTipoDoModelo(m),
+      midia_url: m.midia_url || null,
+      delay_segundos: (_fnRascunho && _fnRascunho.passos.length) ? 5 : 0,
+    };
+  }
+
+  function _fnDelayOpcoes(valor) {
+    const opcoes = [
+      [0, 'Agora'], [5, '5 s'], [10, '10 s'], [30, '30 s'],
+      [60, '1 min'], [120, '2 min'], [300, '5 min'],
+    ];
+    if (!opcoes.some((o) => o[0] === valor)) opcoes.push([valor, fmtQuando(valor).replace('após ', '')]);
+    return opcoes.sort((a, b) => a[0] - b[0]).map((o) =>
+      '<option value="' + o[0] + '"' + (o[0] === valor ? ' selected' : '') + '>' + esc(o[1]) + '</option>'
+    ).join('');
+  }
+
+  function _fnCardEditor(p, i, total) {
+    const tipo = p.tipo || 'texto';
+    const previa = (p.texto || '').trim();
+    return '<div class="job-funil-editor-bloco" role="listitem">' +
+      '<div class="job-funil-conector">' +
+        '<span class="job-funil-conector-linha"></span>' +
+        '<label for="job-fn-delay-' + i + '">' + (i === 0 ? 'Começa' : 'Depois') + '</label>' +
+        '<select id="job-fn-delay-' + i + '" class="job-funil-delay" data-index="' + i +
+          '" aria-label="Espera antes da mensagem ' + (i + 1) + '">' +
+          _fnDelayOpcoes(Math.max(0, Number(p.delay_segundos) || 0)) +
+        '</select>' +
+      '</div>' +
+      '<div class="job-funil-editor-passo t-' + esc(tipo) + '">' +
+        '<span class="job-funil-editor-num">' + (i + 1) + '</span>' +
+        '<span class="job-funil-editor-ico">' + funilTipoIcone(tipo, 15) + '</span>' +
+        '<div class="job-funil-editor-info">' +
+          '<div class="job-funil-editor-nome">' + esc(p.nome) + '</div>' +
+          (previa ? '<div class="job-funil-editor-previa">' + esc(previa) + '</div>' : '') +
+        '</div>' +
+        '<div class="job-funil-editor-acoes">' +
+          '<button class="job-funil-mover" data-index="' + i + '" data-dir="-1"' + (i === 0 ? ' disabled' : '') +
+            ' aria-label="Mover mensagem ' + (i + 1) + ' para cima">' + _svgIco('cima', 14) + '</button>' +
+          '<button class="job-funil-mover" data-index="' + i + '" data-dir="1"' + (i === total - 1 ? ' disabled' : '') +
+            ' aria-label="Mover mensagem ' + (i + 1) + ' para baixo">' + _svgIco('baixo', 14) + '</button>' +
+          '<button class="job-funil-remover" data-index="' + i + '" aria-label="Remover mensagem ' + (i + 1) + '">' +
+            _svgIco('lixo', 14) + '</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function _fnResultadosModelos() {
+    const modelos = (_modelosCache && _modelosCache.modelos) || [];
+    const q = (_fnPickerBusca || '').trim().toLowerCase();
+    return modelos.filter((m) => {
+      if (!q) return true;
+      return (m.nome || '').toLowerCase().includes(q)
+        || (m.texto || '').toLowerCase().includes(q)
+        || (m.categoria || '').toLowerCase().includes(q);
+    }).sort((a, b) => {
+      const an = (a.nome || '').toLowerCase(), bn = (b.nome || '').toLowerCase();
+      const ap = q && an.startsWith(q) ? 0 : 1, bp = q && bn.startsWith(q) ? 0 : 1;
+      return ap - bp || an.localeCompare(bn);
+    }).slice(0, 40);
+  }
+
+  function _fnPickerListaHTML() {
+    const resultados = _fnResultadosModelos();
+    if (!resultados.length) {
+      return '<div class="job-funil-picker-vazio">Nenhuma mensagem bate com a busca. Tente pelo nome ou pela pasta.</div>';
+    }
+    return resultados.map((m) => {
+      const tipo = _fnTipoDoModelo(m);
+      return '<button class="job-funil-picker-item" type="button" data-modelo-id="' + m.id + '">' +
+        '<span class="job-funil-picker-ico t-' + tipo + '">' + funilTipoIcone(tipo, 14) + '</span>' +
+        '<span class="job-funil-picker-info"><b>' + esc(m.nome) + '</b>' +
+          '<small>' + esc((m.categoria || 'Geral') + ' · ' + (tipo === 'documento' ? 'PDF' : tipo)) + '</small></span>' +
+      '</button>';
+    }).join('');
+  }
+
+  function renderEditorFunil() {
+    const r = _fnRascunho;
+    const passos = r.passos || [];
+    return '<div class="job-funil-editor">' +
+      '<div class="job-funil-editor-nav">' +
+        '<button id="job-funil-editor-voltar" aria-label="Voltar para os funis">' + _svgIco('voltar', 15) + '</button>' +
+        '<div><b>' + (r.id ? 'Editar funil' : 'Novo funil') + '</b><span>Monte a sequência sem sair da conversa</span></div>' +
+      '</div>' +
+      '<div class="job-funil-editor-campos">' +
+        '<label for="job-funil-editor-nome">Nome do funil</label>' +
+        '<input class="job-inp" id="job-funil-editor-nome" maxlength="200" autocomplete="off" value="' + esc(r.nome || '') +
+          '" placeholder="Ex: Primeiro contato PME">' +
+        '<label for="job-funil-editor-cat">Pasta <span>opcional</span></label>' +
+        '<input class="job-inp" id="job-funil-editor-cat" maxlength="120" autocomplete="off" value="' + esc(r.categoria || '') +
+          '" placeholder="Ex: PME ou Renovação">' +
+      '</div>' +
+      '<div class="job-funil-editor-resumo"><b>Sequência</b><span>' + passos.length + ' ' + (passos.length === 1 ? 'mensagem' : 'mensagens') +
+        (passos.length ? ' · ' + esc(fmtQuando(passos.reduce((s, p) => s + (Number(p.delay_segundos) || 0), 0)).replace('após ', '')) : '') + '</span></div>' +
+      '<div class="job-funil-editor-lista" role="list">' +
+        (passos.length ? passos.map((p, i) => _fnCardEditor(p, i, passos.length)).join('')
+          : '<div class="job-funil-editor-vazio"><b>A sequência está vazia</b><span>Adicione a primeira mensagem abaixo. Ela pode sair na hora ou depois de um intervalo.</span></div>') +
+      '</div>' +
+      '<div class="job-funil-adicionar">' +
+        '<button id="job-funil-abrir-picker" type="button">' + _svgIco('mais', 14) + ' Adicionar mensagem</button>' +
+        (_fnPickerAberto ? '<div class="job-funil-picker">' +
+          '<label for="job-funil-picker-busca">Buscar na biblioteca</label>' +
+          '<input class="job-inp" id="job-funil-picker-busca" autocomplete="off" value="' + esc(_fnPickerBusca) +
+            '" placeholder="Nome, texto ou pasta" aria-controls="job-funil-picker-lista">' +
+          '<div id="job-funil-picker-lista" class="job-funil-picker-lista">' + _fnPickerListaHTML() + '</div>' +
+        '</div>' : '') +
+      '</div>' +
+      '<div class="job-funil-editor-rodape">' +
+        '<div id="job-funil-editor-status" class="job-funil-editor-status" aria-live="polite"></div>' +
+        '<button class="job-funil-editor-cancelar" id="job-funil-editor-cancelar" type="button">Cancelar</button>' +
+        '<button class="job-funil-editor-salvar" id="job-funil-editor-salvar" type="button">Salvar funil</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function _fnEditorStatus(texto, erro) {
+    const el = document.getElementById('job-funil-editor-status');
+    if (!el) return;
+    el.textContent = texto || '';
+    el.classList.toggle('erro', !!erro);
+  }
+
+  function _fnAtualizarPicker() {
+    const lista = document.getElementById('job-funil-picker-lista');
+    if (lista) {
+      lista.innerHTML = _fnPickerListaHTML();
+      ligarItensPickerFunil();
+    }
+  }
+
+  function ligarItensPickerFunil() {
+    document.querySelectorAll('.job-funil-picker-item[data-modelo-id]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const m = ((_modelosCache && _modelosCache.modelos) || []).find((x) => String(x.id) === btn.dataset.modeloId);
+        if (!m) return;
+        _fnRascunho.passos.push(_fnPassoDoModelo(m));
+        _fnEditorSujo = true;
+        _fnPickerAberto = false;
+        _fnPickerBusca = '';
+        setCorpoSecaoMensagens(renderEditorFunil());
+        ligarEditorFunil();
+      });
+    });
+  }
+
+  async function voltarDaEdicaoFunil() {
+    if (_fnEditorSujo && !await _confirmar({
+      titulo: 'Descartar alterações?',
+      texto: 'O funil volta ao estado em que estava antes de abrir o editor.',
+      ok: 'Descartar alterações',
+    })) return;
+    _fnRascunho = null;
+    _fnEditorSujo = false;
+    _fnPickerAberto = false;
+    await abrirSecaoFunis();
+  }
+
+  async function abrirEditorFunil(funilId) {
+    if (!_gestorModo) return;
+    setCorpoSecaoMensagens(_secHead(funilId ? 'Editar funil' : 'Novo funil', 'Preparando sua biblioteca…') +
+      _telaCarregando('Carregando mensagens…'));
+    let modelos;
+    try { modelos = await buscarModelos(false); }
+    catch (e) { setCorpoSecaoMensagens(_avisoRecarregarAba()); return; }
+    if (_secaoAtiva !== 'funis') return;
+    const funil = funilId && _funisCache
+      ? _funisCache.funis.find((f) => String(f.id) === String(funilId)) : null;
+    if (funilId && !funil) {
+      setCorpoSecaoMensagens(_telaFalha('Funil não encontrado', 'Volte à lista e tente abrir de novo.', 'job-funis-retry', 'Voltar à lista'));
+      const retry = document.getElementById('job-funis-retry');
+      if (retry) retry.addEventListener('click', abrirSecaoFunis);
+      return;
+    }
+    _fnRascunho = funil ? {
+      id: funil.id, nome: funil.nome || '', categoria: funil.categoria || '',
+      passos: (funil.passos || []).map((p) => ({
+        modelo_id: p.modelo_id, nome: p.nome, texto: p.texto || '', tipo: p.tipo || 'texto',
+        midia_url: p.midia_url || null, delay_segundos: Number(p.delay_segundos) || 0,
+      })),
+    } : { id: null, nome: '', categoria: '', passos: [] };
+    _fnEditorSujo = false;
+    _fnPickerBusca = '';
+    _fnPickerAberto = !modelos.length;
+    setCorpoSecaoMensagens(renderEditorFunil());
+    ligarEditorFunil();
+    const nome = document.getElementById('job-funil-editor-nome');
+    if (nome && !funil) nome.focus();
+  }
+
+  async function salvarEditorFunil() {
+    const nome = document.getElementById('job-funil-editor-nome');
+    const cat = document.getElementById('job-funil-editor-cat');
+    _fnRascunho.nome = (nome && nome.value || '').trim();
+    _fnRascunho.categoria = (cat && cat.value || '').trim();
+    if (!_fnRascunho.nome) {
+      _fnEditorStatus('Dê um nome ao funil.', true);
+      if (nome) nome.focus();
+      return;
+    }
+    if (!_fnRascunho.passos.length) {
+      _fnEditorStatus('Adicione pelo menos uma mensagem à sequência.', true);
+      return;
+    }
+    const btn = document.getElementById('job-funil-editor-salvar');
+    if (btn) { btn.disabled = true; btn.textContent = 'Salvando…'; }
+    let resp;
+    try {
+      resp = await chrome.runtime.sendMessage({
+        type: 'salvar_funil',
+        dados: {
+          id: _fnRascunho.id,
+          nome: _fnRascunho.nome,
+          categoria: _fnRascunho.categoria,
+          passos: _fnRascunho.passos.map((p) => ({
+            modelo_id: p.modelo_id,
+            delay_segundos: Math.max(0, Number(p.delay_segundos) || 0),
+          })),
+        },
+      });
+    } catch (e) {
+      resp = { ok: false, erro: 'Recarregue a aba do WhatsApp Web e tente novamente.' };
+    }
+    if (!resp || !resp.ok) {
+      _fnEditorStatus((resp && resp.erro) || 'Não consegui salvar. Tente de novo.', true);
+      if (btn) { btn.disabled = false; btn.textContent = 'Salvar funil'; }
+      return;
+    }
+    _fnEditorSujo = false;
+    _fnRascunho = null;
+    _funisCache = null;
+    await abrirSecaoFunis();
+    _dizerNoRodape('Funil salvo e pronto para usar.');
+  }
+
+  function ligarEditorFunil() {
+    const voltar = document.getElementById('job-funil-editor-voltar');
+    const cancelar = document.getElementById('job-funil-editor-cancelar');
+    const salvar = document.getElementById('job-funil-editor-salvar');
+    if (voltar) voltar.addEventListener('click', voltarDaEdicaoFunil);
+    if (cancelar) cancelar.addEventListener('click', voltarDaEdicaoFunil);
+    if (salvar) salvar.addEventListener('click', salvarEditorFunil);
+    ['job-funil-editor-nome', 'job-funil-editor-cat'].forEach((id) => {
+      const inp = document.getElementById(id);
+      if (inp) inp.addEventListener('input', () => {
+        if (id === 'job-funil-editor-nome') _fnRascunho.nome = inp.value;
+        else _fnRascunho.categoria = inp.value;
+        _fnEditorSujo = true;
+        _fnEditorStatus('');
+      });
+    });
+    document.querySelectorAll('.job-funil-delay[data-index]').forEach((sel) => {
+      sel.addEventListener('change', () => {
+        const p = _fnRascunho.passos[Number(sel.dataset.index)];
+        if (p) {
+          p.delay_segundos = Number(sel.value) || 0;
+          _fnEditorSujo = true;
+          setCorpoSecaoMensagens(renderEditorFunil());
+          ligarEditorFunil();
+        }
+      });
+    });
+    document.querySelectorAll('.job-funil-mover[data-index]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const i = Number(btn.dataset.index), j = i + Number(btn.dataset.dir);
+        if (j < 0 || j >= _fnRascunho.passos.length) return;
+        const trocado = _fnRascunho.passos[i];
+        _fnRascunho.passos[i] = _fnRascunho.passos[j];
+        _fnRascunho.passos[j] = trocado;
+        _fnEditorSujo = true;
+        setCorpoSecaoMensagens(renderEditorFunil()); ligarEditorFunil();
+      });
+    });
+    document.querySelectorAll('.job-funil-remover[data-index]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        _fnRascunho.passos.splice(Number(btn.dataset.index), 1);
+        _fnEditorSujo = true;
+        setCorpoSecaoMensagens(renderEditorFunil()); ligarEditorFunil();
+      });
+    });
+    const abrirPicker = document.getElementById('job-funil-abrir-picker');
+    if (abrirPicker) abrirPicker.addEventListener('click', () => {
+      _fnPickerAberto = !_fnPickerAberto;
+      setCorpoSecaoMensagens(renderEditorFunil()); ligarEditorFunil();
+      const inp = document.getElementById('job-funil-picker-busca'); if (inp) inp.focus();
+    });
+    const busca = document.getElementById('job-funil-picker-busca');
+    if (busca) {
+      busca.addEventListener('input', () => { _fnPickerBusca = busca.value || ''; _fnAtualizarPicker(); });
+      busca.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          _fnPickerAberto = false; setCorpoSecaoMensagens(renderEditorFunil()); ligarEditorFunil();
+        } else if (e.key === 'Enter') {
+          const primeiro = document.querySelector('.job-funil-picker-item[data-modelo-id]');
+          if (primeiro) { e.preventDefault(); primeiro.click(); }
+        }
+      });
+    }
+    ligarItensPickerFunil();
+  }
 
   function rerenderFunisLista() {
     const c = document.getElementById('job-funis-lista');
@@ -11013,6 +11336,11 @@
     document.querySelectorAll('.job-funil-disparar[data-funil-id]').forEach((btn) => {
       btn.addEventListener('click', () => dispararFunil(btn.dataset.funilId));
     });
+    document.querySelectorAll('.job-funil-editar[data-funil-id]').forEach((btn) => {
+      btn.addEventListener('click', () => abrirEditorFunil(btn.dataset.funilId));
+    });
+    const vazioCriar = document.getElementById('job-funil-vazio-criar');
+    if (vazioCriar) vazioCriar.addEventListener('click', () => abrirEditorFunil(null));
     document.querySelectorAll('.job-fpasso-olho').forEach((btn) => {
       btn.addEventListener('click', () => {
         const passo = btn.closest('.job-fpasso');
@@ -11028,6 +11356,8 @@
   }
 
   function ligarAcoesFunis() {
+    const criar = document.getElementById('job-funil-criar');
+    if (criar) criar.addEventListener('click', () => abrirEditorFunil(null));
     const busca = document.getElementById('job-busca-funil');
     if (busca) busca.addEventListener('input', () => {
       _fnBusca = (busca.value || '').trim().toLowerCase();
@@ -11056,20 +11386,21 @@
     const res = await buscarFunis(false);
     // Três casos DIFERENTES, três mensagens — misturar tudo em "não tem passos"
     // já mascarou um bug real de cache.
-    if (!res || !res.ok) { alert('Não consegui carregar o funil: ' + ((res && res.erro) || 'tente de novo.')); return; }
+    if (!res || !res.ok) { _dizerNoRodape('Não consegui carregar o funil. Tente de novo.'); return; }
     const funil = (res.funis || []).find((f) => String(f.id) === String(funilId));
-    if (!funil) { alert('Funil não encontrado — feche e abra a aba Funis pra recarregar.'); return; }
-    if (!(funil.passos || []).length) { alert('Esse funil não tem passos. Adicione passos no site (Funis WhatsApp).'); return; }
+    if (!funil) { _dizerNoRodape('Funil não encontrado. Abra a aba Funis novamente.'); return; }
+    if (!(funil.passos || []).length) { _dizerNoRodape('Esse funil está vazio. Edite e adicione a primeira mensagem.'); return; }
     const { usuarioId } = await _safeStorageGet(['usuarioId']);
-    if (!usuarioId) { alert('Selecione seu usuário no popup da extensão primeiro.'); return; }
+    if (!usuarioId) { _dizerNoRodape('Entre no popup do JOB antes de disparar.'); return; }
     let chatId = '';
     try { chatId = await pedirChatId(); } catch (e) { chatId = ''; }
-    if (!chatId) { alert('Abra a conversa do cliente antes de disparar o funil.'); return; }
+    if (!chatId) { _dizerNoRodape('Abra a conversa do cliente antes de disparar.'); return; }
     const nome = nomeDoContato() || 'este contato';
+    const totalS = funil.passos.reduce((s, p) => s + (Number(p.delay_segundos) || 0), 0);
     if (!await _confirmar({
       titulo: 'Disparar "' + funil.nome + '"?',
-      texto: funil.passos.length + ' passo(s) vão sair na conversa de ' + nome
-           + ', um de cada vez, com o intervalo do funil.',
+      texto: funil.passos.length + ' ' + (funil.passos.length === 1 ? 'mensagem' : 'mensagens') +
+           ' para ' + nome + (totalS ? ', ao longo de aproximadamente ' + fmtQuando(totalS).replace('após ', '') : ', começando agora') + '.',
       ok: 'Disparar agora' })) return;
     let telefone = await garantirTelefone(nome, chatId);
 

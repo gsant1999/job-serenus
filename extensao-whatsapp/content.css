@@ -1643,6 +1643,12 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-funis-gerenciar { display: block; text-align: center; margin: 14px 0 4px; font-size: 11.5px;
   color: var(--job-info); text-decoration: none; }
 .job-funis-gerenciar:hover { color: var(--job-info); text-decoration: underline; }
+.job-funil-criar { width: 100%; min-height: 44px; margin: 0 0 12px; border: 1px solid var(--job-acento);
+  border-radius: 11px; background: color-mix(in srgb, var(--job-acento) 11%, var(--job-bg1)); color: var(--job-acento);
+  font: 600 12.5px var(--job-ui); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 7px;
+  transition: background var(--job-t-rapido) ease, color var(--job-t-rapido) ease, border-color var(--job-t-rapido) ease; }
+.job-funil-criar:hover { background: color-mix(in srgb, var(--job-acento) 17%, var(--job-bg1)); }
+.job-funil-criar:active { filter: brightness(.95); }
 .job-funil-card { background: var(--job-bg2); border: 1px solid var(--job-borda); border-radius: 12px;
   padding: 12px; margin-bottom: 10px;
   transition: border-color var(--job-t-rapido) ease, box-shadow var(--job-t-rapido) ease; }
@@ -1695,13 +1701,107 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-fpasso.t-video     .job-fpasso-ico { color: var(--job-warn); }
 .job-fpasso.t-documento .job-fpasso-ico { color: var(--job-danger); }
 
-.job-funil-disparar { width: 100%; margin-top: 10px; background: var(--job-acento);
+.job-funil-acoes { display: flex; gap: 8px; margin-top: 10px; }
+.job-funil-editar, .job-funil-disparar { min-height: 42px; border-radius: 10px; padding: 9px 12px; font-size: 12.5px;
+  font-weight: 600; font-family: var(--job-ui); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 7px; }
+.job-funil-editar { flex: 0 0 92px; border: 1px solid var(--job-borda); background: var(--job-bg1); color: var(--job-txt-fraco); }
+.job-funil-editar:hover { border-color: var(--job-acento); color: var(--job-txt); }
+.job-funil-disparar { flex: 1 1 auto; background: var(--job-acento);
   color: var(--job-acento-txt); border: none; border-radius: 10px; padding: 10px; font-size: 12.5px; font-weight: 600; cursor: pointer;
   display: flex; align-items: center; justify-content: center; gap: 7px;
   box-shadow: 0 2px 8px rgba(31,216,164,.25); transition: filter .12s, box-shadow .12s; }
 .job-funil-disparar svg { flex-shrink: 0; }
 .job-funil-disparar:hover:not(:disabled) { filter: brightness(1.08); box-shadow: 0 3px 12px rgba(31,216,164,.35); }
 .job-funil-disparar:disabled { background: var(--job-bg3); color: var(--job-txt-fraco); cursor: default; box-shadow: none; }
+
+/* Editor de funil: o tempo mora ENTRE as mensagens. A linha do tempo deixa
+   ordem e ritmo visíveis sem abrir uma coleção de campos técnicos. */
+.job-funil-editor { margin: -2px 0 0; }
+.job-funil-editor-nav { position: sticky; top: -12px; z-index: 4; margin: -12px -12px 14px; padding: 12px 14px 11px;
+  display: flex; align-items: center; gap: 10px; background: color-mix(in srgb, var(--job-bg1) 94%, transparent);
+  border-bottom: 1px solid var(--job-borda); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+.job-funil-editor-nav > button { width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--job-borda);
+  background: var(--job-bg2); color: var(--job-txt); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.job-funil-editor-nav > button:hover { border-color: var(--job-acento); }
+.job-funil-editor-nav > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.job-funil-editor-nav b { color: var(--job-txt); font-size: 14px; font-weight: 680; }
+.job-funil-editor-nav span { color: var(--job-txt-fraco); font-size: 10.5px; }
+.job-funil-editor-campos { display: grid; grid-template-columns: 1fr; gap: 6px; padding: 0 2px; }
+.job-funil-editor-campos label, .job-funil-picker > label { color: var(--job-txt-fraco); font-size: 10.5px; font-weight: 650; }
+.job-funil-editor-campos label:not(:first-child) { margin-top: 6px; }
+.job-funil-editor-campos label span { font-weight: 450; color: var(--job-txt-fraco2); }
+.job-funil-editor-campos .job-inp { min-height: 44px; margin: 0; }
+.job-funil-editor-resumo { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 18px 2px 4px; }
+.job-funil-editor-resumo b { color: var(--job-txt); font-size: 12.5px; }
+.job-funil-editor-resumo span { color: var(--job-txt-fraco); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.job-funil-editor-lista { display: flex; flex-direction: column; }
+.job-funil-editor-bloco { position: relative; }
+.job-funil-conector { height: 34px; display: flex; align-items: center; gap: 6px; padding-left: 18px; color: var(--job-txt-fraco); }
+.job-funil-conector-linha { width: 1px; align-self: stretch; margin-left: 0; background: var(--job-borda); }
+.job-funil-conector label { font-size: 9.5px; font-weight: 600; margin-left: 3px; }
+.job-funil-delay { height: 26px; min-width: 68px; padding: 2px 22px 2px 8px; border-radius: 999px;
+  border: 1px solid var(--job-borda); background: var(--job-bg2); color: var(--job-txt); font: 600 10px var(--job-ui);
+  font-variant-numeric: tabular-nums; cursor: pointer; }
+.job-funil-delay:focus-visible { outline: 2px solid var(--job-acento); outline-offset: 2px; }
+.job-funil-editor-passo { display: flex; align-items: center; gap: 9px; min-height: 62px; padding: 9px 8px 9px 10px;
+  border: 1px solid var(--job-borda); border-radius: 12px; background: var(--job-bg2); }
+.job-funil-editor-num { width: 20px; height: 20px; flex: 0 0 auto; border-radius: 50%; background: var(--job-bg3);
+  color: var(--job-txt-fraco); display: flex; align-items: center; justify-content: center; font-size: 9.5px; font-weight: 700; }
+.job-funil-editor-ico { width: 28px; height: 28px; flex: 0 0 auto; border-radius: 8px; background: var(--job-bg1);
+  display: flex; align-items: center; justify-content: center; color: var(--job-info); }
+.job-funil-editor-passo.t-audio .job-funil-editor-ico { color: #b3a0f8; }
+.job-funil-editor-passo.t-imagem .job-funil-editor-ico { color: var(--job-sucesso); }
+.job-funil-editor-passo.t-video .job-funil-editor-ico { color: var(--job-warn); }
+.job-funil-editor-passo.t-documento .job-funil-editor-ico { color: var(--job-danger); }
+.job-funil-editor-info { flex: 1 1 auto; min-width: 0; }
+.job-funil-editor-nome { color: var(--job-txt); font-size: 11.5px; font-weight: 650; line-height: 1.3; }
+.job-funil-editor-previa { margin-top: 3px; color: var(--job-txt-fraco); font-size: 9.5px; line-height: 1.35;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job-funil-editor-acoes { flex: 0 0 auto; display: grid; grid-template-columns: 32px 32px; gap: 3px; }
+.job-funil-editor-acoes button { width: 32px; height: 28px; border: none; border-radius: 7px; background: transparent;
+  color: var(--job-txt-fraco2); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.job-funil-editor-acoes button:hover:not(:disabled) { background: var(--job-bg3); color: var(--job-txt); }
+.job-funil-editor-acoes button:disabled { opacity: .25; cursor: default; }
+.job-funil-editor-acoes .job-funil-remover { grid-column: 2; color: var(--job-danger); }
+.job-funil-editor-vazio { margin: 12px 0 4px; padding: 18px 14px; border: 1px dashed var(--job-borda);
+  border-radius: 12px; background: var(--job-bg2); display: flex; flex-direction: column; gap: 5px; text-align: center; }
+.job-funil-editor-vazio b { color: var(--job-txt); font-size: 12px; }
+.job-funil-editor-vazio span { color: var(--job-txt-fraco); font-size: 10.5px; line-height: 1.45; }
+.job-funil-adicionar { margin-top: 12px; }
+#job-funil-abrir-picker { width: 100%; min-height: 44px; border: 1px dashed var(--job-borda); border-radius: 11px;
+  background: var(--job-bg2); color: var(--job-acento); font: 600 12px var(--job-ui); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 7px; }
+#job-funil-abrir-picker:hover { border-color: var(--job-acento); }
+.job-funil-picker { margin-top: 8px; padding: 11px; border: 1px solid var(--job-borda); border-radius: 12px; background: var(--job-bg2); }
+.job-funil-picker .job-inp { min-height: 42px; margin: 6px 0 8px; }
+.job-funil-picker-lista { max-height: 270px; overflow-y: auto; border: 1px solid var(--job-borda); border-radius: 10px; background: var(--job-bg1); }
+.job-funil-picker-item { width: 100%; min-height: 48px; padding: 7px 9px; border: none; border-bottom: 1px solid var(--job-borda);
+  background: transparent; color: var(--job-txt); cursor: pointer; display: flex; align-items: center; gap: 9px; text-align: left; }
+.job-funil-picker-item:last-child { border-bottom: none; }
+.job-funil-picker-item:hover, .job-funil-picker-item:focus-visible { background: var(--job-bg2); outline: none; }
+.job-funil-picker-ico { width: 30px; height: 30px; flex: 0 0 auto; border-radius: 8px; background: var(--job-bg2);
+  display: flex; align-items: center; justify-content: center; color: var(--job-info); }
+.job-funil-picker-ico.t-audio { color: #b3a0f8; }
+.job-funil-picker-ico.t-imagem { color: var(--job-sucesso); }
+.job-funil-picker-ico.t-video { color: var(--job-warn); }
+.job-funil-picker-ico.t-documento { color: var(--job-danger); }
+.job-funil-picker-info { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.job-funil-picker-info b { font-size: 11px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job-funil-picker-info small { font-size: 9.5px; color: var(--job-txt-fraco); }
+.job-funil-picker-vazio { padding: 16px 12px; color: var(--job-txt-fraco); font-size: 10.5px; line-height: 1.45; text-align: center; }
+.job-funil-editor-rodape { position: sticky; bottom: -12px; z-index: 3; margin: 14px -12px -12px; padding: 10px 12px 12px;
+  display: grid; grid-template-columns: auto 1fr; gap: 8px; background: color-mix(in srgb, var(--job-bg1) 94%, transparent);
+  border-top: 1px solid var(--job-borda); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+.job-funil-editor-status { grid-column: 1 / -1; min-height: 14px; color: var(--job-sucesso); font-size: 10.5px; line-height: 1.3; }
+.job-funil-editor-status.erro { color: var(--job-danger); }
+.job-funil-editor-cancelar, .job-funil-editor-salvar { min-height: 44px; padding: 9px 14px; border-radius: 10px;
+  font: 600 12px var(--job-ui); cursor: pointer; }
+.job-funil-editor-cancelar { border: 1px solid var(--job-borda); background: var(--job-bg2); color: var(--job-txt-fraco); }
+.job-funil-editor-salvar { border: none; background: var(--job-acento); color: var(--job-acento-txt); }
+.job-funil-editor-salvar:disabled { opacity: .55; cursor: default; }
+@media (prefers-reduced-motion: reduce) {
+  .job-funil-criar, .job-funil-card, .job-funil-expandir svg { transition: none; }
+}
 
 /* Ícones SVG inline (kit _svgIco) — alinhamento com o texto ao lado. */
 .job-tico { display: inline-flex; vertical-align: -2px; margin-right: 2px; }
