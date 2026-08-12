@@ -5093,8 +5093,8 @@ MODULOS = [
     # CRM (gerenciais)
     {'key': 'crm_frios',     'label': 'CRM · Base Fria',      'prefixos': ['/crm/frios'],                         'admin': True},
     {'key': 'crm_fluxos',    'label': 'CRM · Fluxos',         'prefixos': ['/crm/fluxos'],                        'admin': True},
-    {'key': 'crm_funis',     'label': 'CRM · Funis WhatsApp', 'prefixos': ['/crm/funis'],                         'admin': True},
-    {'key': 'crm_modelos',   'label': 'CRM · Modelos',        'prefixos': ['/crm/modelos'],                       'admin': True},
+    {'key': 'crm_funis',     'label': 'CRM · Funis WhatsApp', 'prefixos': ['/crm/funis'],                         'admin': False},
+    {'key': 'crm_modelos',   'label': 'CRM · Modelos',        'prefixos': ['/crm/modelos'],                       'admin': False},
     # Administração (gerenciais)
     {'key': 'usuarios',      'label': 'Usuários',             'prefixos': ['/usuarios', '/usuario/'],             'admin': True},
     {'key': 'score',         'label': 'Score de Utilização',  'prefixos': ['/score'],                             'admin': True},
@@ -23562,32 +23562,24 @@ def api_whatsapp_extensao_modelos():
     seção Mensagens do painel. Monta a URL de mídia pronta pra extensão não
     precisar saber o padrão de rota.
 
-    Com ?usuario_id=N, devolve só a pasta DAQUELE consultor (dono_consultor_id=N)
-    + itens de pasta compartilhada/sem pasta (dono_consultor_id NULL = material
-    da corretora, visível a todos). Pedido do Guilherme: cada consultora vê os
+    A identidade vem do token do aparelho. Devolve só a pasta daquele
+    consultor + itens compartilhados (dono_consultor_id NULL). Cada consultora vê os
     áudios da própria voz + o material compartilhado, não a biblioteca de todo
     mundo — filtra por dono_consultor_id (organização por pasta), não mais por
     criado_por (que só registrava quem CADASTROU, sem relação com de quem é o
     conteúdo — os 641 modelos importados em massa tinham todos criado_por do
-    admin que rodou a importação). ATENÇÃO: isso é organização, NÃO segurança —
-    a chave da extensão é única/compartilhada, então qualquer portador dela
-    pode pedir o usuario_id que quiser. Segurança real = chave por usuário
-    (item futuro)."""
+    admin que rodou a importação)."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    try:
-        uid = int(request.args.get('usuario_id') or 0)
-    except (TypeError, ValueError):
-        uid = 0
+    if not getattr(g, 'usuario_id', None) or not getattr(g, 'usuario', None):
+        return _wa_cors(jsonify({'ok': False, 'erro': 'Entre no JOB pelo popup da extensão'})), 401
+    uid = g.usuario_id
     conn = db()
     # Gestor (admin/supervisor/gestor_vendedor) enxerga a biblioteca de TODO
     # mundo, organizada por dono — pra supervisionar. Consultor continua vendo
     # só a pasta dele + o compartilhado. Pedido do Guilherme: "eu como gestor
     # quero ter acesso às mensagens e funis de todos, em pasta, organizado".
-    perfil = None
-    if uid:
-        prow = conn.execute("SELECT perfil FROM usuarios WHERE id=?", (uid,)).fetchone()
-        perfil = prow['perfil'] if prow else None
+    perfil = g.usuario['perfil'] if getattr(g, 'usuario', None) else None
     eh_gestor = perfil in ('admin', 'supervisor', 'gestor_vendedor')
     where = "m.tipo='whatsapp' AND m.ativo=1"
     params = []
@@ -23609,6 +23601,7 @@ def api_whatsapp_extensao_modelos():
             "categoria": md.get('categoria') or '', "favorito": bool(md.get('favorito')),
             "vezes_usado": md.get('vezes_usado') or 0,
             "dono_nome": md.get('dono_nome') or 'Compartilhado',
+            "pode_editar": eh_gestor or md.get('dono_consultor_id') == uid,
             "midia_url": (f"{_SITE_BASE_URL}/crm/modelos/midia/{md['midia_arquivo']}" if md['midia_arquivo'] else None),
         })
     return _wa_cors(jsonify({"ok": True, "gestor": eh_gestor, "modelos": modelos}))
@@ -23624,17 +23617,15 @@ def api_whatsapp_extensao_modelo_novo():
     criado_por = usuario_id escolhido no popup (pra saber quem cadastrou)."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
+    if not getattr(g, 'usuario_id', None) or not getattr(g, 'usuario', None):
+        return _wa_cors(jsonify({'ok': False, 'erro': 'Entre no JOB pelo popup da extensão'})), 401
     nome = (request.form.get('nome') or '').strip()
     texto = (request.form.get('texto') or '').strip()
     if not nome or not texto:
         return _wa_cors(jsonify({"ok": False, "erro": "Nome e texto são obrigatórios"})), 400
     if len(texto) > 4000:
         return _wa_cors(jsonify({"ok": False, "erro": "Texto longo demais (máx. 4000 caracteres)"})), 400
-    criado_por = None
-    try:
-        criado_por = int(request.form.get('usuario_id'))
-    except (TypeError, ValueError):
-        pass
+    criado_por = g.usuario_id
     # dono_consultor_id = quem gravou (mesmo usuario_id) — sem isso, o próprio
     # áudio que a consultora acabou de gravar sumiria da lista dela assim que
     # a extensão passasse a filtrar por dono_consultor_id em vez de criado_por.
@@ -23676,10 +23667,17 @@ def api_whatsapp_extensao_modelo_favorito(mid):
     """Marca/desmarca favorito (fixa no topo da biblioteca). Só tipo='whatsapp'."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
+    if not getattr(g, 'usuario_id', None) or not getattr(g, 'usuario', None):
+        return _wa_cors(jsonify({'ok': False, 'erro': 'Entre no JOB pelo popup da extensão'})), 401
     conn = db()
-    m = conn.execute("SELECT favorito FROM modelos_conteudo WHERE id=? AND tipo='whatsapp'", (mid,)).fetchone()
+    eh_gestor = g.usuario['perfil'] in ('admin', 'supervisor', 'gestor_vendedor')
+    m = conn.execute("""SELECT favorito, dono_consultor_id FROM modelos_conteudo
+        WHERE id=? AND tipo='whatsapp'""", (mid,)).fetchone()
     if not m:
         close_db(conn); return _wa_cors(jsonify({"ok": False, "erro": "Modelo não encontrado"})), 404
+    if not eh_gestor and m['dono_consultor_id'] != g.usuario_id:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "Você só pode alterar suas mensagens"})), 403
     novo = 0 if m['favorito'] else 1
     conn.execute("UPDATE modelos_conteudo SET favorito=? WHERE id=?", (novo, mid))
     conn.commit(); close_db(conn)
@@ -23693,13 +23691,77 @@ def api_whatsapp_extensao_modelo_excluir(mid):
     (não deixa a extensão apagar modelo de email/sms por engano/abuso)."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
+    if not getattr(g, 'usuario_id', None) or not getattr(g, 'usuario', None):
+        return _wa_cors(jsonify({'ok': False, 'erro': 'Entre no JOB pelo popup da extensão'})), 401
     conn = db()
-    m = conn.execute("SELECT id FROM modelos_conteudo WHERE id=? AND tipo='whatsapp'", (mid,)).fetchone()
+    eh_gestor = g.usuario['perfil'] in ('admin', 'supervisor', 'gestor_vendedor')
+    m = conn.execute("""SELECT id, dono_consultor_id FROM modelos_conteudo
+        WHERE id=? AND tipo='whatsapp'""", (mid,)).fetchone()
     if not m:
         close_db(conn); return _wa_cors(jsonify({"ok": False, "erro": "Modelo não encontrado"})), 404
+    if not eh_gestor and m['dono_consultor_id'] != g.usuario_id:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "Você só pode excluir suas mensagens"})), 403
     conn.execute("DELETE FROM modelos_conteudo WHERE id=? AND tipo='whatsapp'", (mid,))
     conn.commit(); close_db(conn)
     return _wa_cors(jsonify({"ok": True}))
+
+
+def _nome_copia_disponivel(conn, tabela, nome, dono_consultor_id):
+    """Cria um nome de cópia sem tocar no item original."""
+    base = f"Cópia de {(nome or 'Sem nome').strip()}"[:200]
+    candidato = base
+    n = 2
+    while conn.execute(
+            f"SELECT id FROM {tabela} WHERE nome=? AND COALESCE(dono_consultor_id,0)=COALESCE(?,0)",
+            (candidato, dono_consultor_id)).fetchone():
+        sufixo = f" ({n})"
+        candidato = base[:200 - len(sufixo)] + sufixo
+        n += 1
+    return candidato
+
+
+def _duplicar_modelo_whatsapp(conn, mid, usuario_id):
+    origem = conn.execute("""SELECT * FROM modelos_conteudo
+        WHERE id=? AND tipo='whatsapp' AND ativo=1""", (mid,)).fetchone()
+    if not origem:
+        return None, 'Mensagem não encontrada'
+    origem = dict(origem)
+    nome = _nome_copia_disponivel(conn, 'modelos_conteudo', origem['nome'], usuario_id)
+    cur = conn.cursor()
+    cur.execute("""INSERT INTO modelos_conteudo
+        (tipo, nome, assunto, corpo_html, corpo_texto, variante, ativo, criado_por,
+         midia_arquivo, midia_tipo, categoria, favorito, vezes_usado, pasta_id, dono_consultor_id)
+        VALUES ('whatsapp',?,?,?,?,?,1,?,?,?,?,0,0,NULL,?)""",
+        (nome, origem.get('assunto'), origem.get('corpo_html'), origem.get('corpo_texto'),
+         origem.get('variante'), usuario_id, origem.get('midia_arquivo'), origem.get('midia_tipo'),
+         origem.get('categoria'), usuario_id))
+    return _last_insert_id(cur), None
+
+
+@app.route('/api/whatsapp/extensao/modelos/<int:mid>/duplicar', methods=['POST', 'OPTIONS'])
+@requer('crm:escrever')
+def api_whatsapp_extensao_modelo_duplicar(mid):
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not getattr(g, 'usuario_id', None) or not getattr(g, 'usuario', None):
+        return _wa_cors(jsonify({'ok': False, 'erro': 'Entre no JOB pelo popup da extensão'})), 401
+    conn = db()
+    origem = conn.execute("""SELECT dono_consultor_id FROM modelos_conteudo
+        WHERE id=? AND tipo='whatsapp' AND ativo=1""", (mid,)).fetchone()
+    eh_gestor = g.usuario['perfil'] in ('admin', 'supervisor', 'gestor_vendedor')
+    if not origem:
+        close_db(conn)
+        return _wa_cors(jsonify({'ok': False, 'erro': 'Mensagem não encontrada'})), 404
+    if not eh_gestor and origem['dono_consultor_id'] not in (None, g.usuario_id):
+        close_db(conn)
+        return _wa_cors(jsonify({'ok': False, 'erro': 'Você não tem acesso a esta mensagem'})), 403
+    novo_id, erro = _duplicar_modelo_whatsapp(conn, mid, g.usuario_id)
+    if erro:
+        close_db(conn)
+        return _wa_cors(jsonify({'ok': False, 'erro': erro})), 404
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({'ok': True, 'id': novo_id}))
 
 
 @app.route('/api/whatsapp/extensao/funis', methods=['GET', 'OPTIONS'])
@@ -23712,21 +23774,15 @@ def api_whatsapp_extensao_funis():
     na conversa que está na tela — nunca em massa/automático."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    # Mesmo filtro por consultor dos modelos: ?usuario_id=N → funis da pasta
-    # DELA (dono_consultor_id=N) + funis de pasta compartilhada/sem pasta
-    # (NULL = da corretora). Organização, não segurança — ver comentário em
-    # api_whatsapp_extensao_modelos.
-    try:
-        uid = int(request.args.get('usuario_id') or 0)
-    except (TypeError, ValueError):
-        uid = 0
+    if not getattr(g, 'usuario_id', None) or not getattr(g, 'usuario', None):
+        return _wa_cors(jsonify({'ok': False, 'erro': 'Entre no JOB pelo popup da extensão'})), 401
+    # Mesmo filtro por identidade autenticada dos modelos: pasta pessoal mais
+    # funis compartilhados (NULL = material da corretora).
+    uid = g.usuario_id
     conn = db()
     # Gestor vê os funis de todo mundo (organizado por dono); consultor vê só o
     # dele + compartilhado — mesma regra dos modelos.
-    perfil = None
-    if uid:
-        prow = conn.execute("SELECT perfil FROM usuarios WHERE id=?", (uid,)).fetchone()
-        perfil = prow['perfil'] if prow else None
+    perfil = g.usuario['perfil'] if getattr(g, 'usuario', None) else None
     eh_gestor = perfil in ('admin', 'supervisor', 'gestor_vendedor')
     where_f = "f.ativo=1"
     params_f = []
@@ -23766,9 +23822,10 @@ def api_whatsapp_extensao_funis():
             "categoria": fd.get('categoria') or '', "favorito": bool(fd.get('favorito')),
             "vezes_disparado": fd.get('vezes_disparado') or 0,
             "dono_nome": fd.get('dono_nome') or 'Compartilhado',
+            "pode_editar": eh_gestor or fd.get('dono_consultor_id') == uid,
             "passos": por_funil.get(fd['id'], []),
         })
-    return _wa_cors(jsonify({"ok": True, "gestor": eh_gestor, "funis": out}))
+    return _wa_cors(jsonify({"ok": True, "gestor": eh_gestor, "pode_criar": True, "funis": out}))
 
 
 # --- FILA DE COTAÇÃO SERVIDOR ---
@@ -37736,13 +37793,18 @@ def _salvar_imagem_modelo(fstorage, prefixo):
 
 @app.route('/crm/modelos')
 @login_required
-@admin_required
 def crm_modelos():
+    uid = session.get('user_id')
+    eh_gestor = session.get('perfil') in ('admin', 'supervisor', 'gestor_vendedor')
     conn = db()
+    where = '' if eh_gestor else "WHERE m.tipo='whatsapp' AND (m.dono_consultor_id=? OR m.dono_consultor_id IS NULL)"
+    params = () if eh_gestor else (uid,)
     modelos = [dict(m) for m in conn.execute(
         """SELECT m.*, u.nome AS dono_nome FROM modelos_conteudo m
            LEFT JOIN usuarios u ON u.id = m.dono_consultor_id
-           ORDER BY m.tipo, m.nome""").fetchall()]
+           %s ORDER BY m.tipo, m.nome""" % where, params).fetchall()]
+    usuarios_destino = [dict(u) for u in conn.execute(
+        "SELECT id,nome FROM usuarios WHERE ativo=1 AND perfil='consultor' ORDER BY nome").fetchall()] if eh_gestor else []
     close_db(conn)
     wpp = [m for m in modelos if m['tipo'] == 'whatsapp']
     # Favorito primeiro, depois nome — dentro de cada tipo.
@@ -37784,7 +37846,31 @@ def crm_modelos():
     return render_template('crm_modelos.html',
                            modelos_email=[m for m in modelos if m['tipo'] == 'email'],
                            modelos_sms=[m for m in modelos if m['tipo'] == 'sms'],
-                           modelos_whatsapp=wpp, wpp_grupos=wpp_grupos, stats_wpp=stats_wpp)
+                           modelos_whatsapp=wpp, wpp_grupos=wpp_grupos, stats_wpp=stats_wpp,
+                           pode_gerir=eh_gestor, usuario_id=uid,
+                           usuarios_destino=usuarios_destino)
+
+
+@app.route('/crm/modelos/<int:mid>/duplicar', methods=['POST'])
+@login_required
+def crm_modelo_duplicar(mid):
+    uid = session.get('user_id')
+    eh_gestor = session.get('perfil') in ('admin', 'supervisor', 'gestor_vendedor')
+    conn = db()
+    origem = conn.execute("""SELECT dono_consultor_id FROM modelos_conteudo
+        WHERE id=? AND tipo='whatsapp' AND ativo=1""", (mid,)).fetchone()
+    if not origem:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Mensagem não encontrada'}), 404
+    if not eh_gestor and origem['dono_consultor_id'] not in (None, uid):
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Você não tem acesso a esta mensagem'}), 403
+    novo_id, erro = _duplicar_modelo_whatsapp(conn, mid, uid)
+    if erro:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': erro}), 400
+    conn.commit(); close_db(conn)
+    return jsonify({'ok': True, 'id': novo_id})
 
 
 @app.route('/crm/modelos/imagem/<path:nome>')
@@ -37888,7 +37974,6 @@ _MODELO_WPP_LIMITE = {'imagem': 8_000_000, 'audio': 16_000_000, 'video': 16_000_
 
 @app.route('/crm/modelos/whatsapp/novo', methods=['POST'])
 @login_required
-@admin_required
 def crm_modelo_whatsapp_novo():
     """Modelo de mensagem de WhatsApp — base da biblioteca reutilizável (pedido
     explícito do Guilherme, pra depois virar funil). Texto sempre obrigatório;
@@ -37926,9 +38011,11 @@ def crm_modelo_whatsapp_novo():
 
     categoria = (request.form.get('categoria') or '').strip()[:80] or None
     conn = db()
-    conn.execute("""INSERT INTO modelos_conteudo (tipo, nome, corpo_texto, variante, ativo, criado_por, midia_arquivo, midia_tipo, categoria)
-                    VALUES ('whatsapp',?,?,?,1,?,?,?,?)""",
-                 (nome, texto, variante, session.get('user_id'), midia_arquivo, midia_tipo, categoria))
+    conn.execute("""INSERT INTO modelos_conteudo
+                    (tipo,nome,corpo_texto,variante,ativo,criado_por,midia_arquivo,midia_tipo,categoria,dono_consultor_id)
+                    VALUES ('whatsapp',?,?,?,1,?,?,?,?,?)""",
+                 (nome, texto, variante, session.get('user_id'), midia_arquivo,
+                  midia_tipo, categoria, session.get('user_id')))
     mid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
            else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
     conn.commit(); close_db(conn)
@@ -37946,15 +38033,14 @@ def _zv_categoria_do_nome(nome):
 
 @app.route('/crm/modelos/importar-zapvoice', methods=['POST'])
 @login_required
-@admin_required
 def crm_importar_zapvoice():
-    """Importa um backup do ZapVoice (JSON) pra biblioteca de WhatsApp do JOB.
-    Formato: arrays de metadados (audios/messages/medias/docs, cada item com
-    id/name/isFavorite) + objectsList (id -> data: texto puro ou data:URI
-    base64). Streaming com ijson pra aguentar backups grandes sem estourar a
-    memória. Dedup por nome (re-subir não duplica). Mídia é salva via
-    upload_arquivo_r2 e importada como modelo com midia_arquivo/midia_tipo —
-    o envio de mídia em si é fase à parte, mas o item já fica na biblioteca."""
+    """Importa conteúdo e funis do ZapVoice sem alterar registros existentes.
+
+    O arquivo pode ser grande, então a leitura é incremental. Cada importação
+    ganha uma pasta própria e nomes repetidos recebem sufixo. Isso mantém o
+    backup reversível: apagar a pasta importada depois não afeta o acervo que
+    já estava no JOB.
+    """
     import ijson, io as _io, base64 as _b64, tempfile as _tmp
     f = request.files.get('arquivo')
     if not f or not f.filename:
@@ -37963,31 +38049,91 @@ def crm_importar_zapvoice():
     try:
         f.save(tmp.name)
         tmp.close()
-        # Passo 1: metadados (id -> nome, favorito). Pequeno, cabe na memória.
+        # Metadados e sequências são pequenos; as mídias continuam em streaming.
         meta = {}
-        for kind in ('audios', 'messages', 'medias', 'docs'):
-            with open(tmp.name, 'rb') as fh:
-                for it in ijson.items(fh, f'{kind}.item'):
-                    if it.get('id'):
-                        meta[it['id']] = {'nome': (it.get('name') or 'Sem nome').strip()[:200],
-                                          'fav': 1 if it.get('isFavorite') else 0}
-        conn = db()
-        existentes = {r['nome'] for r in conn.execute(
-            "SELECT nome FROM modelos_conteudo WHERE tipo='whatsapp'").fetchall()}
+        tipos_meta = {'audios', 'messages', 'medias', 'docs'}
+        atual_meta = None
+        tipo_atual = None
+        with open(tmp.name, 'rb') as fh:
+            for prefix, evento, valor in ijson.parse(fh):
+                raiz = prefix.split('.', 1)[0]
+                if raiz == 'objectsList':
+                    break
+                if raiz not in tipos_meta:
+                    continue
+                if prefix == f'{raiz}.item' and evento == 'start_map':
+                    atual_meta, tipo_atual = {}, raiz
+                elif prefix == f'{raiz}.item' and evento == 'end_map':
+                    if atual_meta and atual_meta.get('id'):
+                        meta[atual_meta['id']] = {
+                            'nome': (atual_meta.get('name') or 'Sem nome').strip()[:200],
+                            'fav': 1 if atual_meta.get('isFavorite') else 0}
+                    atual_meta, tipo_atual = None, None
+                elif atual_meta is not None and prefix.startswith(f'{tipo_atual}.item.') \
+                        and evento in ('string', 'number', 'boolean', 'null'):
+                    atual_meta[prefix.rsplit('.', 1)[-1]] = valor
         criado_por = session.get('user_id')
-        contagem = {'texto': 0, 'audio': 0, 'imagem': 0, 'documento': 0, 'video': 0, 'pulados': 0, 'erros': 0}
-        # Passo 2: objectsList, um item por vez (blob grande decodificado e
-        # descartado na hora — memória fica limitada).
+        eh_gestor = session.get('perfil') in ('admin', 'supervisor', 'gestor_vendedor')
+        dono = criado_por
+        if eh_gestor and request.form.get('destino') == 'compartilhado':
+            dono = None
+        elif eh_gestor and request.form.get('destino_usuario_id'):
+            try:
+                dono = int(request.form.get('destino_usuario_id'))
+            except (TypeError, ValueError):
+                return jsonify({'ok': False, 'erro': 'Consultor de destino inválido'}), 400
+
+        conn = db()
+        if dono is not None and not conn.execute(
+                "SELECT id FROM usuarios WHERE id=? AND ativo=1", (dono,)).fetchone():
+            close_db(conn)
+            return jsonify({'ok': False, 'erro': 'Consultor de destino não encontrado'}), 400
+
+        raiz = conn.execute("""SELECT id FROM pastas WHERE parent_id IS NULL
+            AND COALESCE(consultor_id,0)=COALESCE(?,0)
+            ORDER BY CASE WHEN nome='Compartilhado' THEN 0 ELSE 1 END, id LIMIT 1""", (dono,)).fetchone()
+        if raiz:
+            raiz_id = raiz['id']
+        else:
+            nome_raiz = 'Compartilhado' if dono is None else (
+                conn.execute("SELECT nome FROM usuarios WHERE id=?", (dono,)).fetchone()['nome'])
+            cur = conn.cursor()
+            cur.execute("INSERT INTO pastas (nome,parent_id,consultor_id) VALUES (?,NULL,?)", (nome_raiz, dono))
+            raiz_id = _last_insert_id(cur)
+        pasta_nome = 'Importado do ZapVoice ' + datetime.now(TZ_SP).strftime('%d-%m-%Y')
+        base_pasta = pasta_nome
+        n_pasta = 2
+        while conn.execute("SELECT id FROM pastas WHERE parent_id=? AND nome=?", (raiz_id, pasta_nome)).fetchone():
+            pasta_nome = f'{base_pasta} ({n_pasta})'; n_pasta += 1
+        cur = conn.cursor()
+        cur.execute("INSERT INTO pastas (nome,parent_id,consultor_id) VALUES (?,?,NULL)", (pasta_nome, raiz_id))
+        pasta_id = _last_insert_id(cur)
+
+        nomes = {r['nome'] for r in conn.execute("""SELECT nome FROM modelos_conteudo
+            WHERE tipo='whatsapp' AND COALESCE(dono_consultor_id,0)=COALESCE(?,0)""", (dono,)).fetchall()}
+        nomes_funis = {r['nome'] for r in conn.execute("""SELECT nome FROM whatsapp_funis
+            WHERE COALESCE(dono_consultor_id,0)=COALESCE(?,0)""", (dono,)).fetchall()}
+
+        def nome_livre(original, existentes, limite=200):
+            base = (original or 'Sem nome').strip()[:limite]
+            candidato = base; numero = 2
+            while candidato in existentes:
+                sufixo = f' (importado {numero})'
+                candidato = base[:limite-len(sufixo)] + sufixo
+                numero += 1
+            existentes.add(candidato)
+            return candidato
+
+        contagem = {'texto': 0, 'audio': 0, 'imagem': 0, 'documento': 0,
+                    'video': 0, 'funis': 0, 'passos': 0, 'pulados': 0, 'erros': 0}
+        id_modelo = {}
         with open(tmp.name, 'rb') as fh:
             for obj in ijson.items(fh, 'objectsList.item'):
                 oid = obj.get('id')
                 m = meta.get(oid)
                 if not m:
                     continue
-                nome = m['nome']
-                if nome in existentes:
-                    contagem['pulados'] += 1
-                    continue
+                nome = nome_livre(m['nome'], nomes)
                 cat = _zv_categoria_do_nome(nome)
                 data = obj.get('data')
                 try:
@@ -38004,31 +38150,63 @@ def crm_importar_zapvoice():
                             midia_tipo, ext = 'video', '.mp4'
                         else:
                             midia_tipo, ext = 'documento', '.bin'
-                        raw = _b64.b64decode(b64data)
-                        nome_arq = f"MODELO_WPP_ZV_{_sanitizar_filename(oid)}{ext}"
-                        upload_arquivo_r2(_io.BytesIO(raw), f"modelos/{nome_arq}")
-                        conn.execute("""INSERT INTO modelos_conteudo
-                            (tipo, nome, corpo_texto, ativo, criado_por, midia_arquivo, midia_tipo, categoria, favorito)
-                            VALUES ('whatsapp',?,?,1,?,?,?,?,?)""",
-                            (nome, nome, criado_por, nome_arq, midia_tipo, cat, m['fav']))
+                        raw = _b64.b64decode(b64data, validate=True)
+                        nome_arq = f"MODELO_WPP_ZV_{_sanitizar_filename(oid)}_{int(time.time())}{ext}"
+                        up = upload_arquivo_r2(_io.BytesIO(raw), f"modelos/{nome_arq}")
+                        if not up.get('ok'):
+                            raise RuntimeError('não foi possível guardar a mídia')
+                        cur = conn.cursor()
+                        cur.execute("""INSERT INTO modelos_conteudo
+                            (tipo,nome,corpo_texto,ativo,criado_por,midia_arquivo,midia_tipo,
+                             categoria,favorito,pasta_id,dono_consultor_id)
+                            VALUES ('whatsapp',?,?,1,?,?,?,?,?,?,?)""",
+                            (nome, (obj.get('caption') or nome)[:4000], criado_por, nome_arq,
+                             midia_tipo, cat, m['fav'], pasta_id, dono))
                         contagem[midia_tipo] += 1
                     else:
                         texto = (data or '').strip()[:4000]
                         if not texto:
                             contagem['pulados'] += 1
                             continue
-                        conn.execute("""INSERT INTO modelos_conteudo
-                            (tipo, nome, corpo_texto, ativo, criado_por, categoria, favorito)
-                            VALUES ('whatsapp',?,?,1,?,?,?)""",
-                            (nome, texto, criado_por, cat, m['fav']))
+                        cur = conn.cursor()
+                        cur.execute("""INSERT INTO modelos_conteudo
+                            (tipo,nome,corpo_texto,ativo,criado_por,categoria,favorito,pasta_id,dono_consultor_id)
+                            VALUES ('whatsapp',?,?,1,?,?,?,?,?)""",
+                            (nome, texto, criado_por, cat, m['fav'], pasta_id, dono))
                         contagem['texto'] += 1
-                    existentes.add(nome)
-                    conn.commit()
+                    id_modelo[oid] = _last_insert_id(cur)
                 except Exception as e:
                     contagem['erros'] += 1
                     app.logger.warning(f"[IMPORT-ZV] falhou item {oid}: {e}")
+
+        with open(tmp.name, 'rb') as fh:
+            for funil in ijson.items(fh, 'funnels.item'):
+                passos = []
+                for passo in funil.get('itemsSequence') or []:
+                    mid = id_modelo.get(passo.get('itemId'))
+                    if not mid:
+                        continue
+                    delay = _funil_num(passo.get('delayBeforeSend'), 0, 0, 3600)
+                    passos.append((mid, delay))
+                if not passos:
+                    contagem['pulados'] += 1
+                    continue
+                nome_funil = nome_livre(funil.get('name'), nomes_funis)
+                cur = conn.cursor()
+                cur.execute("""INSERT INTO whatsapp_funis
+                    (nome,categoria,favorito,ativo,vezes_disparado,criado_por,pasta_id,dono_consultor_id)
+                    VALUES (?,NULL,?,1,0,?,?,?)""",
+                    (nome_funil, 1 if funil.get('isFavorite') else 0, criado_por, pasta_id, dono))
+                fid = _last_insert_id(cur)
+                for ordem, (mid, delay) in enumerate(passos, 1):
+                    conn.execute("""INSERT INTO whatsapp_funil_passos
+                        (funil_id,ordem,modelo_id,delay_segundos) VALUES (?,?,?,?)""",
+                        (fid, ordem, mid, delay))
+                contagem['funis'] += 1
+                contagem['passos'] += len(passos)
+        conn.commit()
         close_db(conn)
-        return jsonify({"ok": True, "contagem": contagem})
+        return jsonify({"ok": True, "contagem": contagem, "pasta": pasta_nome})
     finally:
         try:
             os.unlink(tmp.name)
@@ -38200,7 +38378,7 @@ def _pasta_recalcular_cascata(conn, pasta_id):
     conn.execute(f"UPDATE whatsapp_funis SET dono_consultor_id=? WHERE pasta_id IN ({marcadores})", (dono, *todas))
 
 
-def _construir_arvore_pastas(conn):
+def _construir_arvore_pastas(conn, usuario_id=None, eh_gestor=True):
     """Monta a árvore inteira (pastas + contagem de modelos/funis ativos
     dentro de cada uma) num JSON só, pra navegação client-side sem round-trip
     — mesmo espírito do navegador do Material de Apoio, mas recursivo de
@@ -38219,7 +38397,10 @@ def _construir_arvore_pastas(conn):
             by_id[p['parent_id']]['filhas'].append(p)
         else:
             raizes.append(p)
-    return raizes
+    if eh_gestor:
+        return raizes
+    return [p for p in raizes
+            if p.get('consultor_id') == usuario_id or p.get('nome') == 'Compartilhado']
 
 
 @app.route('/crm/pastas/nova', methods=['POST'])
@@ -38510,7 +38691,7 @@ def _funil_num(v, padrao, minimo, maximo):
     return max(minimo, min(maximo, n))
 
 
-def _funil_salvar_completo(conn, dados, criado_por, funil_id=None):
+def _funil_salvar_completo(conn, dados, criado_por, funil_id=None, dono_forcado=None):
     """Salva cabeçalho e sequência numa transação lógica só.
 
     O editor antigo persistia cada clique separadamente e recarregava a página
@@ -38548,7 +38729,7 @@ def _funil_salvar_completo(conn, dados, criado_por, funil_id=None):
 
     pasta_foi_enviada = 'pasta_id' in dados
     pasta_id = dados.get('pasta_id') if pasta_foi_enviada else None
-    dono = None
+    dono = dono_forcado
     if pasta_foi_enviada and pasta_id:
         try:
             pasta_id = int(pasta_id)
@@ -38556,7 +38737,10 @@ def _funil_salvar_completo(conn, dados, criado_por, funil_id=None):
             return None, 'A pasta escolhida é inválida'
         if not conn.execute("SELECT id FROM pastas WHERE id=?", (pasta_id,)).fetchone():
             return None, 'A pasta escolhida não existe mais'
-        dono = _pasta_dono(conn, pasta_id)
+        dono_pasta = _pasta_dono(conn, pasta_id)
+        if dono_forcado is not None and dono_pasta != dono_forcado:
+            return None, 'Escolha uma pasta sua'
+        dono = dono_pasta
 
     if funil_id:
         atual = conn.execute("SELECT id FROM whatsapp_funis WHERE id=? AND ativo=1", (funil_id,)).fetchone()
@@ -38587,12 +38771,19 @@ def _funil_salvar_completo(conn, dados, criado_por, funil_id=None):
 
 @app.route('/crm/funis/salvar', methods=['POST'])
 @login_required
-@admin_required
 def crm_funil_salvar_completo():
     dados = request.json or {}
     funil_id = _funil_num(dados.get('id'), 0, 0, 2_000_000_000) or None
+    uid = session.get('user_id')
+    eh_gestor = session.get('perfil') in ('admin', 'supervisor', 'gestor_vendedor')
     conn = db()
-    salvo_id, erro = _funil_salvar_completo(conn, dados, session.get('user_id'), funil_id)
+    if funil_id and not eh_gestor:
+        atual = conn.execute("SELECT dono_consultor_id FROM whatsapp_funis WHERE id=?", (funil_id,)).fetchone()
+        if not atual or atual['dono_consultor_id'] != uid:
+            close_db(conn)
+            return jsonify({'ok': False, 'erro': 'Você só pode editar seus funis'}), 403
+    salvo_id, erro = _funil_salvar_completo(
+        conn, dados, uid, funil_id, None if eh_gestor else uid)
     if erro:
         close_db(conn)
         return jsonify({'ok': False, 'erro': erro}), 400
@@ -38606,16 +38797,20 @@ def api_whatsapp_extensao_funil_salvar():
     """Cria ou edita uma sequência sem tirar o gestor do WhatsApp."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
+    if not getattr(g, 'usuario_id', None) or not getattr(g, 'usuario', None):
+        return _wa_cors(jsonify({'ok': False, 'erro': 'Entre no JOB pelo popup da extensão'})), 401
     perfil = (g.usuario['perfil'] if getattr(g, 'usuario', None) else None)
-    if perfil not in ('admin', 'supervisor', 'gestor_vendedor'):
-        return _wa_cors(jsonify({
-            'ok': False,
-            'erro': 'Somente gestores podem montar ou editar funis pela extensão'
-        })), 403
+    eh_gestor = perfil in ('admin', 'supervisor', 'gestor_vendedor')
     dados = request.json or {}
     funil_id = _funil_num(dados.get('id'), 0, 0, 2_000_000_000) or None
     conn = db()
-    salvo_id, erro = _funil_salvar_completo(conn, dados, g.usuario_id, funil_id)
+    if funil_id and not eh_gestor:
+        atual = conn.execute("SELECT dono_consultor_id FROM whatsapp_funis WHERE id=?", (funil_id,)).fetchone()
+        if not atual or atual['dono_consultor_id'] != g.usuario_id:
+            close_db(conn)
+            return _wa_cors(jsonify({'ok': False, 'erro': 'Você só pode editar seus funis'})), 403
+    salvo_id, erro = _funil_salvar_completo(
+        conn, dados, g.usuario_id, funil_id, None if eh_gestor else g.usuario_id)
     if erro:
         close_db(conn)
         return _wa_cors(jsonify({'ok': False, 'erro': erro})), 400
@@ -38625,23 +38820,36 @@ def api_whatsapp_extensao_funil_salvar():
 
 @app.route('/crm/funis')
 @login_required
-@admin_required
 def crm_funis():
+    uid = session.get('user_id')
+    eh_gestor = session.get('perfil') in ('admin', 'supervisor', 'gestor_vendedor')
     conn = db()
+    where = "ativo=1" if eh_gestor else "ativo=1 AND (dono_consultor_id=? OR dono_consultor_id IS NULL)"
+    params = () if eh_gestor else (uid,)
     funis = [dict(f) for f in conn.execute(
-        "SELECT * FROM whatsapp_funis WHERE ativo=1 ORDER BY favorito DESC, (categoria IS NULL), categoria, nome").fetchall()]
+        f"SELECT * FROM whatsapp_funis WHERE {where} ORDER BY favorito DESC, (categoria IS NULL), categoria, nome", params).fetchall()]
+    ids_funis = [f['id'] for f in funis]
+    filtro_passos = ''
+    params_passos = ()
+    if ids_funis:
+        filtro_passos = 'WHERE p.funil_id IN (%s)' % ','.join('?' for _ in ids_funis)
+        params_passos = tuple(ids_funis)
+    else:
+        filtro_passos = 'WHERE 1=0'
     passos = [dict(p) for p in conn.execute("""
         SELECT p.id, p.funil_id, p.ordem, p.delay_segundos,
                m.id AS modelo_id, m.nome AS modelo_nome, m.midia_tipo, m.corpo_texto
         FROM whatsapp_funil_passos p
         JOIN modelos_conteudo m ON m.id = p.modelo_id
-        ORDER BY p.funil_id, p.ordem, p.id""").fetchall()]
+        %s ORDER BY p.funil_id, p.ordem, p.id""" % filtro_passos, params_passos).fetchall()]
     # Biblioteca de modelos pra montar os passos (só WhatsApp ativos).
     modelos = [dict(m) for m in conn.execute("""
         SELECT id, nome, midia_tipo, categoria, corpo_texto FROM modelos_conteudo
         WHERE tipo='whatsapp' AND ativo=1
-        ORDER BY (categoria IS NULL), categoria, nome""").fetchall()]
-    arvore_pastas = _construir_arvore_pastas(conn)
+        %s ORDER BY (categoria IS NULL), categoria, nome""" %
+        ('' if eh_gestor else 'AND (dono_consultor_id=? OR dono_consultor_id IS NULL)'),
+        () if eh_gestor else (uid,)).fetchall()]
+    arvore_pastas = _construir_arvore_pastas(conn, uid, eh_gestor)
     close_db(conn)
     por_funil = {}
     for p in passos:
@@ -38650,7 +38858,75 @@ def crm_funis():
     for f in funis:
         f['passos'] = por_funil.get(f['id'], [])
         f['total_delay'] = sum((p['delay_segundos'] or 0) for p in f['passos'])
-    return render_template('crm_funis.html', funis=funis, modelos=modelos, arvore_pastas=arvore_pastas)
+        f['pode_editar'] = eh_gestor or f.get('dono_consultor_id') == uid
+    return render_template('crm_funis.html', funis=funis, modelos=modelos,
+                           arvore_pastas=arvore_pastas, pode_gerir=eh_gestor,
+                           usuario_id=uid)
+
+
+def _duplicar_funil(conn, fid, usuario_id):
+    origem = conn.execute("SELECT * FROM whatsapp_funis WHERE id=? AND ativo=1", (fid,)).fetchone()
+    if not origem:
+        return None, 'Funil não encontrado'
+    origem = dict(origem)
+    nome = _nome_copia_disponivel(conn, 'whatsapp_funis', origem['nome'], usuario_id)
+    cur = conn.cursor()
+    cur.execute("""INSERT INTO whatsapp_funis
+        (nome, categoria, favorito, ativo, vezes_disparado, criado_por, pasta_id, dono_consultor_id)
+        VALUES (?,?,0,1,0,?,NULL,?)""",
+        (nome, origem.get('categoria'), usuario_id, usuario_id))
+    novo_id = _last_insert_id(cur)
+    for p in conn.execute("""SELECT ordem, modelo_id, delay_segundos
+            FROM whatsapp_funil_passos WHERE funil_id=? ORDER BY ordem,id""", (fid,)).fetchall():
+        conn.execute("""INSERT INTO whatsapp_funil_passos
+            (funil_id, ordem, modelo_id, delay_segundos) VALUES (?,?,?,?)""",
+            (novo_id, p['ordem'], p['modelo_id'], p['delay_segundos']))
+    return novo_id, None
+
+
+@app.route('/crm/funis/<int:fid>/duplicar', methods=['POST'])
+@login_required
+def crm_funil_duplicar(fid):
+    uid = session.get('user_id')
+    eh_gestor = session.get('perfil') in ('admin', 'supervisor', 'gestor_vendedor')
+    conn = db()
+    origem = conn.execute("SELECT dono_consultor_id FROM whatsapp_funis WHERE id=? AND ativo=1", (fid,)).fetchone()
+    if not origem:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Funil não encontrado'}), 404
+    if not eh_gestor and origem['dono_consultor_id'] not in (None, uid):
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Você não tem acesso a este funil'}), 403
+    novo_id, erro = _duplicar_funil(conn, fid, uid)
+    if erro:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': erro}), 400
+    conn.commit(); close_db(conn)
+    return jsonify({'ok': True, 'id': novo_id})
+
+
+@app.route('/api/whatsapp/extensao/funis/<int:fid>/duplicar', methods=['POST', 'OPTIONS'])
+@requer('crm:escrever')
+def api_whatsapp_extensao_funil_duplicar(fid):
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not getattr(g, 'usuario_id', None) or not getattr(g, 'usuario', None):
+        return _wa_cors(jsonify({'ok': False, 'erro': 'Entre no JOB pelo popup da extensão'})), 401
+    conn = db()
+    origem = conn.execute("SELECT dono_consultor_id FROM whatsapp_funis WHERE id=? AND ativo=1", (fid,)).fetchone()
+    eh_gestor = g.usuario['perfil'] in ('admin', 'supervisor', 'gestor_vendedor')
+    if not origem:
+        close_db(conn)
+        return _wa_cors(jsonify({'ok': False, 'erro': 'Funil não encontrado'})), 404
+    if not eh_gestor and origem['dono_consultor_id'] not in (None, g.usuario_id):
+        close_db(conn)
+        return _wa_cors(jsonify({'ok': False, 'erro': 'Você não tem acesso a este funil'})), 403
+    novo_id, erro = _duplicar_funil(conn, fid, g.usuario_id)
+    if erro:
+        close_db(conn)
+        return _wa_cors(jsonify({'ok': False, 'erro': erro})), 400
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({'ok': True, 'id': novo_id}))
 
 
 @app.route('/crm/funis/novo', methods=['POST'])

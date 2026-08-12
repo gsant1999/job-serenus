@@ -105,8 +105,10 @@
 <div class="page">
 <div class="mo-tabs">
   <button class="mo-tab on" data-canal="whatsapp" onclick="mudarAba(this)">WhatsApp <span class="mo-tab-n">{{ modelos_whatsapp|length }}</span></button>
+  {% if pode_gerir %}
   <button class="mo-tab" data-canal="email" onclick="mudarAba(this)">E-mail <span class="mo-tab-n">{{ modelos_email|length }}</span></button>
   <button class="mo-tab" data-canal="sms" onclick="mudarAba(this)">SMS <span class="mo-tab-n">{{ modelos_sms|length }}</span></button>
+  {% endif %}
 </div>
 
 <!-- ═══ Canal WhatsApp (aba padrão — é 99% do uso) ═══ -->
@@ -123,8 +125,16 @@
       <button class="wa-fchip" data-f="documento" onclick="setFiltroWpp(this)">PDF <span>{{ stats_wpp.documento or 0 }}</span></button>
     </div>
     <div class="mo-toolbar-acoes">
-      {% if eh_serenus %}<button class="btn-outline btn-sm" onclick="document.getElementById('zv-arquivo').click()">Importar backup</button>{% endif %}
-      <button class="btn-azul" style="padding:8px 16px; font-size:12.5px;" onclick="document.getElementById('modal-whatsapp').classList.add('aberto')">+ Novo modelo</button>
+      {% if eh_serenus %}
+      {% if pode_gerir %}
+      <select id="zv-destino" aria-label="Destino da importação" style="min-height:36px;border:1px solid var(--borda);border-radius:8px;background:var(--panel-2);color:var(--texto);padding:6px 9px;font:600 11.5px inherit;">
+        <option value="compartilhado">Pasta compartilhada</option>
+        {% for u in usuarios_destino %}<option value="usuario:{{ u.id }}">{{ u.nome }}</option>{% endfor %}
+      </select>
+      {% endif %}
+      <button class="btn-outline btn-sm" onclick="document.getElementById('zv-arquivo').click()">Importar backup</button>
+      {% endif %}
+      <button class="btn-azul" style="padding:8px 16px; font-size:12.5px;" onclick="document.getElementById('modal-whatsapp').classList.add('aberto')">Novo modelo</button>
     </div>
   </div>
   {% endif %}
@@ -168,7 +178,7 @@
           <span class="wa-row-meta">{{ m.categoria or '' }}{{ ' · usado ' ~ m.vezes_usado ~ '×' if m.vezes_usado else '' }}</span>
         </div>
         {% if not m.ativo %}<span class="mo-chip off">Desativado</span>{% endif %}
-        <button class="wa-fav {{ 'ativo' if m.favorito else '' }}" onclick="event.stopPropagation(); toggleFavorito({{ m.id }}, this)" title="Favoritar">★</button>
+        {% if pode_gerir or m.dono_consultor_id == usuario_id %}<button class="wa-fav {{ 'ativo' if m.favorito else '' }}" onclick="event.stopPropagation(); toggleFavorito({{ m.id }}, this)" title="Favoritar">★</button>{% endif %}
         <span class="wa-row-seta">›</span>
       </div>
       <div class="wa-row-detalhe" hidden>
@@ -181,10 +191,14 @@
         <a href="/crm/modelos/midia/{{ m.midia_arquivo }}" target="_blank" rel="noopener" class="btn-ghost" style="font-size:11.5px; display:inline-block; margin-top:8px;">Abrir {{ 'PDF' if m.midia_tipo == 'documento' else 'vídeo' }}</a>
         {% endif %}
         <div class="mo-acoes">
+          <button class="btn-ghost" style="font-size:11.5px; color:var(--azul);" onclick="duplicarModelo({{ m.id }}, this)">Duplicar</button>
+          {% if pode_gerir %}
           <button class="btn-ghost" style="font-size:11.5px; color:var(--teal);" onclick="editarModelo({{ m.id }})">Editar</button>
           <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
           <button class="btn-ghost" style="font-size:11.5px; color:var(--erro);" data-nome="{{ m.nome|e }}" onclick="excluirModelo({{ m.id }}, this)">Excluir</button>
+          {% endif %}
         </div>
+        {% if pode_gerir %}
         <div class="mo-editar" id="ed-{{ m.id }}" hidden style="margin-top:8px;">
           <input id="edn-{{ m.id }}" class="job-inp" value="{{ m.nome|e }}" placeholder="Nome do modelo" style="width:100%; box-sizing:border-box; margin-bottom:6px; padding:8px 10px; font-size:12.5px; background:var(--fundo-2,#15151e); border:1px solid var(--borda); border-radius:8px; color:var(--texto);">
           <textarea id="edt-{{ m.id }}" placeholder="Texto da mensagem" style="width:100%; box-sizing:border-box; min-height:72px; padding:8px 10px; font-size:12.5px; background:var(--fundo-2,#15151e); border:1px solid var(--borda); border-radius:8px; color:var(--texto); resize:vertical;">{{ m.corpo_texto or '' }}</textarea>
@@ -195,6 +209,7 @@
             <button class="btn-ghost" style="font-size:11.5px;" onclick="editarModelo({{ m.id }})">Cancelar</button>
           </div>
         </div>
+        {% endif %}
       </div>
     </div>
       {% endfor %}
@@ -218,7 +233,7 @@
 </div>
 
 <!-- ═══ Canal E-mail ═══ -->
-<div class="canal-painel" data-canal="email" style="display:none;">
+{% if pode_gerir %}<div class="canal-painel" data-canal="email" style="display:none;">
   {% if modelos_email %}
   <div class="mo-toolbar">
     <div class="mo-toolbar-acoes">
@@ -310,6 +325,7 @@
   </div>
   {% endif %}
 </div>
+{% endif %}
 </div>
 
 <!-- Modal: novo modelo de e-mail -->
@@ -460,19 +476,40 @@ function importarZapVoice(inp){
   st.innerHTML = 'Importando <b>' + f.name + '</b> (' + mb + ' MB)… arquivos grandes podem levar alguns minutos. Não feche a página.';
   var fd = new FormData();
   fd.append('arquivo', f);
+  var destino = document.getElementById('zv-destino');
+  if (destino && destino.value === 'compartilhado') fd.append('destino', 'compartilhado');
+  else if (destino && destino.value.indexOf('usuario:') === 0) fd.append('destino_usuario_id', destino.value.split(':')[1]);
   fetch('/crm/modelos/importar-zapvoice', {method:'POST', body: fd})
     .then(function(r){ return r.json(); })
     .then(function(d){
       if (!d.ok) { st.innerHTML = 'Erro: ' + (d.erro || 'falha na importação'); return; }
       var c = d.contagem;
-      st.innerHTML = 'Importado: <b>' + c.texto + '</b> textos, <b>' + c.audio + '</b> áudios, <b>' +
-        c.imagem + '</b> imagens, <b>' + c.documento + '</b> documentos' +
-        (c.pulados ? ' · ' + c.pulados + ' já existiam' : '') +
+      st.innerHTML = 'Importado na pasta <b>' + d.pasta + '</b>: <b>' + c.texto + '</b> textos, <b>' + c.audio + '</b> áudios, <b>' +
+        c.imagem + '</b> imagens, <b>' + c.documento + '</b> documentos, <b>' + c.funis + '</b> funis e <b>' + c.passos + '</b> passos' +
+        (c.pulados ? ' · ' + c.pulados + ' itens sem conteúdo foram ignorados' : '') +
         (c.erros ? ' · ' + c.erros + ' com erro' : '') + '. Recarregando…';
       setTimeout(function(){ location.reload(); }, 1500);
     })
     .catch(function(e){ st.innerHTML = 'Erro: ' + e.message + ' (se o arquivo for muito grande, pode ter estourado o limite de upload).'; });
   inp.value = '';
+}
+
+function duplicarModelo(id, btn){
+  var original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Duplicando...';
+  fetch('/crm/modelos/' + id + '/duplicar', {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) throw new Error(d.erro || 'Não consegui duplicar');
+      btn.textContent = 'Duplicado';
+      setTimeout(function(){ location.reload(); }, 700);
+    })
+    .catch(function(e){
+      btn.disabled = false; btn.textContent = original;
+      var st = document.getElementById('zv-status');
+      st.style.display = 'block'; st.textContent = e.message;
+    });
 }
 
 

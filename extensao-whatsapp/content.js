@@ -10089,7 +10089,8 @@
       '<div class="job-modelo-acoes">' +
         '<button class="job-modelo-enviar" data-modelo-id="' + m.id + '">' + rotuloEnviar(m) + '</button>' +
         '<button class="job-modelo-copiar" data-texto="' + esc(m.texto) + '">Copiar</button>' +
-        '<button class="job-modelo-excluir" data-modelo-id="' + m.id + '" title="Excluir">×</button>' +
+        '<button class="job-modelo-duplicar" data-modelo-id="' + m.id + '" title="Criar uma cópia">Duplicar</button>' +
+        (m.pode_editar ? '<button class="job-modelo-excluir" data-modelo-id="' + m.id + '" title="Excluir">×</button>' : '') +
       '</div>' +
     '</div>';
   }
@@ -10243,6 +10244,9 @@
     });
     document.querySelectorAll('.job-modelo-excluir').forEach((btn) => {
       btn.addEventListener('click', () => excluirModelo(btn.dataset.modeloId));
+    });
+    document.querySelectorAll('.job-modelo-duplicar').forEach((btn) => {
+      btn.addEventListener('click', () => duplicarModelo(btn.dataset.modeloId, btn));
     });
     document.querySelectorAll('.job-modelo-fav').forEach((btn) => {
       btn.addEventListener('click', () => toggleFavoritoModelo(btn.dataset.modeloId, btn));
@@ -10422,6 +10426,24 @@
     if (!resp || !resp.ok) { _dizerNoRodape((resp && resp.erro) || 'Não consegui excluir a mensagem.'); return; }
     await buscarModelos(true);
     if (_secaoAtiva === 'mensagens') { setCorpoSecaoMensagens(renderModelos(_modelosCache.modelos)); ligarAcoesModelos(); }
+  }
+
+  async function duplicarModelo(id, btn) {
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Duplicando…';
+    const resp = await chrome.runtime.sendMessage({ type: 'duplicar_modelo', id });
+    if (!resp || !resp.ok) {
+      btn.disabled = false; btn.textContent = original;
+      _dizerNoRodape((resp && resp.erro) || 'Não consegui duplicar a mensagem.');
+      return;
+    }
+    await buscarModelos(true);
+    if (_secaoAtiva === 'mensagens') {
+      setCorpoSecaoMensagens(renderModelos(_modelosCache.modelos));
+      ligarAcoesModelos();
+    }
+    _dizerNoRodape('Cópia criada na sua biblioteca.');
   }
 
   // Ao clicar "Enviar texto" NÃO dispara na hora — abre um preview editável
@@ -10887,8 +10909,8 @@
 
   function renderFunis(funis) {
     return _secHead('Funis', _FUNIS_SUB, (funis && funis.length) || '') +
-      (_gestorModo ? '<button class="job-funil-criar" id="job-funil-criar">' +
-        _svgIco('mais', 14) + ' Montar funil</button>' : '') +
+      '<button class="job-funil-criar" id="job-funil-criar">' +
+        _svgIco('mais', 14) + ' Montar funil</button>' +
       '<div class="job-biblioteca-controles">' +
         '<input class="job-inp" id="job-busca-funil" placeholder="Buscar funil…" value="' + esc(_fnBusca) + '">' +
         '<div class="job-fchips">' +
@@ -10904,10 +10926,7 @@
     if (!funis.length) {
       return _vazio('Nenhum funil montado',
         'Um funil envia texto, áudio, imagem ou PDF em sequência, com o intervalo que você definir.',
-        _gestorModo
-          ? '<button class="job-analisar-btn job-vazio-btn" id="job-funil-vazio-criar">Montar o primeiro funil</button>'
-          : '<a class="job-analisar-btn job-vazio-btn" href="' + esc(_SITE_BASE_URL_EXT) +
-            '/crm/funis" target="_blank" rel="noopener">Abrir funis no JOB</a>');
+        '<button class="job-analisar-btn job-vazio-btn" id="job-funil-vazio-criar">Montar o primeiro funil</button>');
     }
     const vis = funis.filter(funilPassaFiltro);
     if (!vis.length) return _vazioFiltro('funil', 'job-limpar-f-funil');
@@ -10975,8 +10994,10 @@
       '</div>' +
       '<div class="job-funil-passos">' + (listaPassos || '<div class="job-vazio" style="padding:8px 0 2px">Este funil está vazio: nenhum passo pra disparar. Edite no site pra adicionar.</div>') + '</div>' +
       '<div class="job-funil-acoes">' +
-        (_gestorModo ? '<button class="job-funil-editar" data-funil-id="' + f.id + '">' +
+        (f.pode_editar ? '<button class="job-funil-editar" data-funil-id="' + f.id + '">' +
           _svgIco('lapis', 13) + ' Editar</button>' : '') +
+        '<button class="job-funil-duplicar" data-funil-id="' + f.id + '">' +
+          _ICO_COPIAR + ' Duplicar</button>' +
         '<button class="job-funil-disparar" data-funil-id="' + f.id + '"' + (passos.length ? '' : ' disabled') + '>' +
           _ICO_ENVIAR + ' Disparar</button>' +
       '</div>' +
@@ -11155,7 +11176,6 @@
   }
 
   async function abrirEditorFunil(funilId) {
-    if (!_gestorModo) return;
     setCorpoSecaoMensagens(_secHead(funilId ? 'Editar funil' : 'Novo funil', 'Preparando sua biblioteca…') +
       _telaCarregando('Carregando mensagens…'));
     let modelos;
@@ -11339,6 +11359,9 @@
     document.querySelectorAll('.job-funil-editar[data-funil-id]').forEach((btn) => {
       btn.addEventListener('click', () => abrirEditorFunil(btn.dataset.funilId));
     });
+    document.querySelectorAll('.job-funil-duplicar[data-funil-id]').forEach((btn) => {
+      btn.addEventListener('click', () => duplicarFunil(btn.dataset.funilId, btn));
+    });
     const vazioCriar = document.getElementById('job-funil-vazio-criar');
     if (vazioCriar) vazioCriar.addEventListener('click', () => abrirEditorFunil(null));
     document.querySelectorAll('.job-fpasso-olho').forEach((btn) => {
@@ -11372,6 +11395,21 @@
     });
     ligarAcoesListaFunis();
     _ligarLimparFiltroFunil();
+  }
+
+  async function duplicarFunil(id, btn) {
+    const original = btn.innerHTML;
+    btn.disabled = true;
+    btn.textContent = 'Duplicando…';
+    const resp = await chrome.runtime.sendMessage({ type: 'duplicar_funil', id });
+    if (!resp || !resp.ok) {
+      btn.disabled = false; btn.innerHTML = original;
+      _dizerNoRodape((resp && resp.erro) || 'Não consegui duplicar o funil.');
+      return;
+    }
+    _funisCache = null;
+    await abrirSecaoFunis();
+    _dizerNoRodape('Cópia do funil criada na sua pasta.');
   }
 
   function _uid() {

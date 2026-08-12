@@ -483,7 +483,8 @@ async function chamarJob(caminho, metodo, corpo, timeoutMs, reqId, opts) {
 // fetch pro JOB por causa do CSP do WhatsApp Web).
 async function criarModelo(dados) {
   const { jobUrl, extKey } = await config();
-  if (!extKey) return { ok: false, erro: 'Configure a chave da extensão no popup.' };
+  const { extToken } = await chrome.storage.local.get(['extToken']);
+  if (!extKey && !extToken) return { ok: false, erro: 'Entre no JOB pelo popup da extensão.' };
   try {
     const fd = new FormData();
     fd.append('nome', dados.nome || '');
@@ -497,7 +498,9 @@ async function criarModelo(dados) {
       fd.append('arquivo_midia', blob, dados.midia_nome);
     }
     const resp = await fetch(jobUrl + '/api/whatsapp/extensao/modelos/novo', {
-      method: 'POST', headers: { 'X-Extension-Key': extKey }, body: fd,
+      method: 'POST', headers: extToken
+        ? { 'Authorization': 'Bearer ' + extToken }
+        : { 'X-Extension-Key': extKey }, body: fd,
     });
     const d = await resp.json().catch(() => null);
     if (!resp.ok) return { ok: false, erro: (d && d.erro) || ('HTTP ' + resp.status) };
@@ -825,26 +828,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg && msg.type === 'listar_modelos') {
-    // Manda o consultor escolhido no popup: o JOB devolve só a biblioteca DELE
-    // (+ itens sem dono, material da corretora) — cada um vê a própria voz.
-    chrome.storage.local.get(['usuarioId']).then(({ usuarioId }) =>
-      chamarJob('/api/whatsapp/extensao/modelos' +
-        (usuarioId ? '?usuario_id=' + encodeURIComponent(usuarioId) : ''), 'GET', null, 15000)
-    ).then(sendResponse);
+    chamarJob('/api/whatsapp/extensao/modelos', 'GET', null, 15000).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'listar_funis') {
-    chrome.storage.local.get(['usuarioId']).then(({ usuarioId }) =>
-      chamarJob('/api/whatsapp/extensao/funis' +
-        (usuarioId ? '?usuario_id=' + encodeURIComponent(usuarioId) : ''), 'GET', null, 15000)
-    ).then(sendResponse);
+    chamarJob('/api/whatsapp/extensao/funis', 'GET', null, 15000).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'salvar_funil') {
-    chrome.storage.local.get(['usuarioId']).then(({ usuarioId }) => {
-      const dados = Object.assign({}, msg.dados || {}, { usuario_id: usuarioId || null });
-      return chamarJob('/api/whatsapp/extensao/funis/salvar', 'POST', dados, 20000);
-    }).then(sendResponse);
+    chamarJob('/api/whatsapp/extensao/funis/salvar', 'POST', msg.dados || {}, 20000).then(sendResponse);
+    return true;
+  }
+  if (msg && msg.type === 'duplicar_funil') {
+    chamarJob('/api/whatsapp/extensao/funis/' + encodeURIComponent(msg.id) + '/duplicar',
+      'POST', {}, 15000).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'funil_disparado') {
@@ -869,6 +866,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg && msg.type === 'excluir_modelo') {
     chamarJob('/api/whatsapp/extensao/modelos/' + encodeURIComponent(msg.id) + '/excluir', 'POST', {}, 15000).then(sendResponse);
+    return true;
+  }
+  if (msg && msg.type === 'duplicar_modelo') {
+    chamarJob('/api/whatsapp/extensao/modelos/' + encodeURIComponent(msg.id) + '/duplicar',
+      'POST', {}, 15000).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'favorito_modelo') {
