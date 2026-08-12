@@ -1844,6 +1844,29 @@ def init_db():
             app.logger.info("[INIT_DB] ✅ Tabela recebimento garantida")
         except Exception as e:
             app.logger.error(f"[INIT_DB] Erro ao criar recebimento: {e}")
+
+        # GARANTIR que comparativo_link existe.
+        # No Postgres, um CREATE que falha derruba a transação inteira e todos os
+        # comandos seguintes do laço acima falham junto, só que o except apenas
+        # loga e segue. Quem está no fim da lista nunca chega a ser criado. Por
+        # isso a tabela nova ganha commit próprio, igual recebimento acima.
+        try:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS comparativo_link (
+                    id SERIAL PRIMARY KEY,
+                    token TEXT UNIQUE NOT NULL,
+                    criado_por_id INTEGER, criado_por_nome TEXT,
+                    cliente TEXT, slug TEXT,
+                    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expira_em TIMESTAMP NOT NULL,
+                    revogado INTEGER DEFAULT 0,
+                    aberturas INTEGER DEFAULT 0
+                )
+            """)
+            conn.commit()
+            app.logger.info("[INIT_DB] ✅ Tabela comparativo_link garantida")
+        except Exception as e:
+            app.logger.error(f"[INIT_DB] Erro ao criar comparativo_link: {e}")
     else:
         # SQLite: usar executescript
         conn.executescript("""
