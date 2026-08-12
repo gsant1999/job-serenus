@@ -38510,6 +38510,119 @@ def _funil_num(v, padrao, minimo, maximo):
     return max(minimo, min(maximo, n))
 
 
+def _funil_salvar_completo(conn, dados, criado_por, funil_id=None):
+    """Salva cabeçalho e sequência numa transação lógica só.
+
+    O editor antigo persistia cada clique separadamente e recarregava a página
+    inteira. Este contrato recebe o rascunho completo, valida tudo antes de
+    tocar no banco e só então substitui os passos. É usado pelo site e pela
+    extensão para os dois editores falarem a mesma língua.
+    """
+    nome = (dados.get('nome') or '').strip()[:200]
+    categoria = (dados.get('categoria') or '').strip()[:120] or None
+    passos_brutos = dados.get('passos')
+    if not nome:
+        return None, 'Dê um nome ao funil'
+    if not isinstance(passos_brutos, list) or not passos_brutos:
+        return None, 'Adicione pelo menos uma mensagem à sequência'
+    if len(passos_brutos) > 60:
+        return None, 'Um funil pode ter no máximo 60 mensagens'
+
+    passos = []
+    for i, passo in enumerate(passos_brutos, 1):
+        if not isinstance(passo, dict):
+            return None, f'A mensagem {i} está inválida'
+        modelo_id = _funil_num(passo.get('modelo_id'), 0, 0, 2_000_000_000)
+        if not modelo_id:
+            return None, f'Escolha o conteúdo da mensagem {i}'
+        delay = _funil_num(passo.get('delay_segundos'), 5, 0, 3600)
+        passos.append({'modelo_id': modelo_id, 'delay_segundos': delay})
+
+    ids = sorted(set(p['modelo_id'] for p in passos))
+    marcadores = ','.join('?' for _ in ids)
+    validos = conn.execute(
+        f"SELECT id FROM modelos_conteudo WHERE id IN ({marcadores}) AND tipo='whatsapp' AND ativo=1",
+        ids).fetchall()
+    if {r['id'] for r in validos} != set(ids):
+        return None, 'Uma das mensagens não existe mais na biblioteca'
+
+    pasta_foi_enviada = 'pasta_id' in dados
+    pasta_id = dados.get('pasta_id') if pasta_foi_enviada else None
+    dono = None
+    if pasta_foi_enviada and pasta_id:
+        try:
+            pasta_id = int(pasta_id)
+        except (TypeError, ValueError):
+            return None, 'A pasta escolhida é inválida'
+        if not conn.execute("SELECT id FROM pastas WHERE id=?", (pasta_id,)).fetchone():
+            return None, 'A pasta escolhida não existe mais'
+        dono = _pasta_dono(conn, pasta_id)
+
+    if funil_id:
+        atual = conn.execute("SELECT id FROM whatsapp_funis WHERE id=? AND ativo=1", (funil_id,)).fetchone()
+        if not atual:
+            return None, 'Funil não encontrado'
+        if pasta_foi_enviada:
+            conn.execute("""UPDATE whatsapp_funis
+                SET nome=?, categoria=?, pasta_id=?, dono_consultor_id=? WHERE id=?""",
+                (nome, categoria, pasta_id or None, dono, funil_id))
+        else:
+            conn.execute("UPDATE whatsapp_funis SET nome=?, categoria=? WHERE id=?",
+                         (nome, categoria, funil_id))
+        conn.execute("DELETE FROM whatsapp_funil_passos WHERE funil_id=?", (funil_id,))
+    else:
+        cur = conn.cursor()
+        cur.execute("""INSERT INTO whatsapp_funis
+            (nome, categoria, ativo, criado_por, pasta_id, dono_consultor_id)
+            VALUES (?,?,1,?,?,?)""",
+            (nome, categoria, criado_por, pasta_id or None, dono))
+        funil_id = _last_insert_id(cur)
+
+    for ordem, passo in enumerate(passos, 1):
+        conn.execute("""INSERT INTO whatsapp_funil_passos
+            (funil_id, ordem, modelo_id, delay_segundos) VALUES (?,?,?,?)""",
+            (funil_id, ordem, passo['modelo_id'], passo['delay_segundos']))
+    return funil_id, None
+
+
+@app.route('/crm/funis/salvar', methods=['POST'])
+@login_required
+@admin_required
+def crm_funil_salvar_completo():
+    dados = request.json or {}
+    funil_id = _funil_num(dados.get('id'), 0, 0, 2_000_000_000) or None
+    conn = db()
+    salvo_id, erro = _funil_salvar_completo(conn, dados, session.get('user_id'), funil_id)
+    if erro:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': erro}), 400
+    conn.commit(); close_db(conn)
+    return jsonify({'ok': True, 'id': salvo_id})
+
+
+@app.route('/api/whatsapp/extensao/funis/salvar', methods=['POST', 'OPTIONS'])
+@requer('crm:escrever')
+def api_whatsapp_extensao_funil_salvar():
+    """Cria ou edita uma sequência sem tirar o gestor do WhatsApp."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    perfil = (g.usuario['perfil'] if getattr(g, 'usuario', None) else None)
+    if perfil not in ('admin', 'supervisor', 'gestor_vendedor'):
+        return _wa_cors(jsonify({
+            'ok': False,
+            'erro': 'Somente gestores podem montar ou editar funis pela extensão'
+        })), 403
+    dados = request.json or {}
+    funil_id = _funil_num(dados.get('id'), 0, 0, 2_000_000_000) or None
+    conn = db()
+    salvo_id, erro = _funil_salvar_completo(conn, dados, g.usuario_id, funil_id)
+    if erro:
+        close_db(conn)
+        return _wa_cors(jsonify({'ok': False, 'erro': erro})), 400
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({'ok': True, 'id': salvo_id}))
+
+
 @app.route('/crm/funis')
 @login_required
 @admin_required
