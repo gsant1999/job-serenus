@@ -37926,6 +37926,91 @@ def crm_modelo_duplicar(mid):
     return jsonify({'ok': True, 'id': novo_id})
 
 
+@app.route('/crm/modelos/exportar-backup', methods=['GET'])
+@login_required
+@admin_required
+def crm_modelos_exportar_backup():
+    """Entrega uma cópia portátil da biblioteca, incluindo mídias e funis.
+
+    O banco guarda só o nome do arquivo de mídia. Um JSON com esses nomes não
+    serviria para recuperar a biblioteca se o volume/R2 falhasse; por isso o
+    download é um ZIP com o inventário e os arquivos reais. Não altera dado.
+    """
+    import tempfile
+    import zipfile
+
+    conn = db()
+    try:
+        modelos = [dict(r) for r in conn.execute(
+            "SELECT * FROM modelos_conteudo ORDER BY id").fetchall()]
+        funis = [dict(r) for r in conn.execute(
+            "SELECT * FROM whatsapp_funis ORDER BY id").fetchall()]
+        passos_funis = [dict(r) for r in conn.execute(
+            "SELECT * FROM whatsapp_funil_passos ORDER BY funil_id, ordem, id").fetchall()]
+        pastas = [dict(r) for r in conn.execute(
+            "SELECT * FROM pastas ORDER BY parent_id, nome, id").fetchall()]
+        donos = [dict(r) for r in conn.execute(
+            "SELECT id, nome, perfil, ativo FROM usuarios ORDER BY id").fetchall()]
+        vinculos_fluxos = [dict(r) for r in conn.execute(
+            "SELECT id, fluxo_id, ordem, canal, template FROM fluxo_passos "
+            "WHERE template LIKE 'upload_%' ORDER BY fluxo_id, ordem, id").fetchall()]
+    finally:
+        close_db(conn)
+
+    criado_em = datetime.now(TZ_SP)
+    arquivo_tmp = tempfile.NamedTemporaryFile(
+        prefix='job-biblioteca-', suffix='.zip', delete=False)
+    arquivo_tmp.close()
+    ausentes = []
+    try:
+        with zipfile.ZipFile(arquivo_tmp.name, 'w', compression=zipfile.ZIP_DEFLATED,
+                             compresslevel=6) as pacote:
+            for modelo in modelos:
+                nome_midia = (modelo.get('midia_arquivo') or '').strip()
+                if not nome_midia:
+                    continue
+                conteudo, _ = _localizar_anexo(nome_midia)
+                if conteudo is None:
+                    ausentes.append(nome_midia)
+                    continue
+                pacote.writestr('midias/' + os.path.basename(nome_midia), conteudo)
+            inventario = {
+                'formato': 'job-biblioteca-v1',
+                'criado_em': criado_em.isoformat(),
+                'escopo': 'modelos-funis-pastas-midias',
+                'modelos': modelos,
+                'funis': funis,
+                'passos_funis': passos_funis,
+                'pastas': pastas,
+                'proprietarios': donos,
+                'vinculos_fluxos': vinculos_fluxos,
+                'midias_ausentes': ausentes,
+            }
+            pacote.writestr('biblioteca.json', json.dumps(
+                inventario, ensure_ascii=False, indent=2, default=str))
+    except Exception:
+        try:
+            os.unlink(arquivo_tmp.name)
+        except OSError:
+            pass
+        raise
+
+    resposta = send_file(
+        arquivo_tmp.name,
+        as_attachment=True,
+        download_name='JOB-biblioteca-' + criado_em.strftime('%Y-%m-%d-%H%M') + '.zip',
+        mimetype='application/zip')
+
+    @resposta.call_on_close
+    def _remover_backup_temporario():
+        try:
+            os.unlink(arquivo_tmp.name)
+        except OSError:
+            pass
+
+    return resposta
+
+
 @app.route('/crm/modelos/imagem/<path:nome>')
 def crm_modelo_imagem(nome):
     """Serve as imagens dos modelos SEM login — o cliente de e-mail do lead
