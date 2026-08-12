@@ -4670,95 +4670,96 @@
     //    preenche o CRM sai da conversa falada.
     const { usuarioId } = await _safeStorageGet(['usuarioId']);
 
-    // O LOTE DE 3 LIMITAVA CONCORRENCIA, NAO MEMORIA.
+    // NENHUM BASE64 SOBREVIVE AO SEU LOTE — NEM AQUI, NEM NO SERVICE WORKER.
     //
-    // Antes: os 3 base64 de cada lote iam pra um objeto `baixados` que so era
-    // consumido no fim — ou seja, ao terminar a conversa TODOS os audios dela
-    // estavam vivos ao mesmo tempo, e ainda ganhavam mais duas representacoes
-    // (o clone estruturado pro service worker e o JSON.stringify de
-    // background.js:425). Numa conversa com 30 audios sem cache isso e dezenas
-    // de MB de STRING em Large Object Space, tres vezes.
+    // Prova do crash, renderer do WhatsApp em 11/08/2026 21:05:59:
+    //   v8-oom-lo-space-size 2588.41MB de 4096, "ran out of reservation".
+    // Large Object Space e onde STRING GRANDE mora, e base64 de audio e
+    // exatamente isso.
     //
-    // Prova do crash de 11/08/2026 21:05: renderer com lo-space em 2.588 MB de
-    // 4.096 e "ran out of reservation". Large Object Space e onde string grande
-    // mora — e base64 de audio e exatamente isso. Achado do Codex.
+    // O codigo original baixava em lotes de 3 mas guardava tudo num objeto
+    // `baixados` consumido so no fim: o lote limitava CONCORRENCIA, nao
+    // MEMORIA. Ao terminar a conversa, todos os base64 dela estavam vivos ao
+    // mesmo tempo, mais o clone estruturado e mais o JSON.stringify.
     //
-    // Agora cada lote e ENTREGUE ao service worker assim que chega e some da
-    // memoria desta aba. O protocolo em partes ja existia
-    // (analisar_iniciar/parte/executar) e era usado pela analise manual; a
-    // varredura nao podia usar porque `analisar_iniciar` descartava os campos
-    // dela — corrigido no mesmo commit.
+    // A 4.79 tentou resolver mandando lote a lote pro service worker. Nao
+    // resolveu: so mudou o acumulo de processo — o SW juntava tudo em
+    // `_partesAnalise` e serializava no fim. Trocar o lugar do problema nao e
+    // conserto.
     //
-    // LIMITE HONESTO: isto tira o pico do RENDERER, que e quem estourou. O
-    // service worker continua juntando as partes e serializando tudo no fim,
-    // so que em outro processo, com heap proprio, e sem levar a aba junto.
-    const reqId = 'varr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-    const base = {
-      economico: true,
-      chat_id: alvo.chat_id,
-      telefone: meta.telefone || '',
-      nome: meta.nome || '',
-      lead_id: meta.lead_id || null,
-      // De ONDE veio esta leitura, pra o custo ter procedencia no painel.
-      origem: meta.origem || 'varredura',
-      // E DE ONDE VEIO A DECISAO DE LER — que e outra coisa.
-      //
-      // O servidor usa isto pra decidir se cria lead no CRM. Analise que o
-      // consultor pediu significa que ele ja decidiu que aquilo e lead;
-      // varredura nao significa nada disso — ela le TODA conversa que teve
-      // mensagem, e era por isso que fornecedor, contador e o tecnico do
-      // ar-condicionado viravam lead e enchiam a tela de auditoria.
-      //
-      // Sem este campo a regra nova nao surte efeito nenhum: o padrao do
-      // servidor e 'manual', pra extensao antiga nao mudar de comportamento.
-      origem_analise: 'varredura',
-      lote_id: meta.lote_id || null,
-      usuario_id: usuarioId || null,
-      mensagens: conv.mensagens || [],
-      ultima_msg_id: conv.ultima_msg_id || meta.ultima_msg_id || '',
-      ultima_msg_em: meta.ultima_msg_em || 0,
-    };
-    const ini = await _safeSendMessage({ type: 'analisar_iniciar', reqId, base });
-    if (!ini || !ini.ok) throw new Error((ini && ini.erro) || 'falha_analise');
-
-    // Os que JA tem transcricao no servidor viajam sem base64 — so o id, como
-    // antes. Vao de uma vez porque sao leves.
-    const semAudio = audios.filter((a) => a.msg_id in cacheados)
-                           .map((a) => ({ msg_id: a.msg_id, de: a.de, hora: a.hora }));
-    if (semAudio.length) {
-      await _safeSendMessage({ type: 'analisar_parte', reqId, tipo: 'audios', itens: semAudio });
-    }
-
-    // Os que precisam de download vao LOTE A LOTE, e cada lote e esquecido
-    // aqui assim que o service worker confirma que recebeu.
-    const porId = new Map(audios.map((a) => [a.msg_id, a]));
+    // Agora cada lote e TRANSCRITO na hora. O servidor grava a transcricao no
+    // cache por msg_id (e ainda dedupe por filehash), entao o lote pode ser
+    // solto imediatamente e a analise do fim leva SO OS IDS. Depois de cada
+    // volta deste laco, nao existe base64 vivo em lugar nenhum.
+    const _pausa = (ms) => new Promise((res) => setTimeout(res, ms));
+    let _loteFalhou = 0;
     for (let i = 0; i < semCache.length; i += 3) {
-      // Lotes pequenos: baixar 30 audios de uma vez e o que trava a maquina.
       const ids = semCache.slice(i, i + 3);
-      const r = await _pedirPonte('baixar_audios_ids', { ids }, 90000);
-      const vindos = new Map(((r && r.audios) || []).map((b) => [b.msg_id, b]));
-      // TODOS os ids do lote entram, tenha o download vindo ou nao. O codigo
-      // antigo montava o payload a partir de `audios` (a lista inteira), entao
-      // audio que falhava no download ainda viajava so com o id e o servidor
-      // tentava o cache dele. Montando so a partir do que voltou, esse audio
-      // sumiria do payload — regressao silenciosa que eu quase introduzi aqui.
-      let itens = ids.map((mid) => {
-        const a = porId.get(mid) || {};
-        const b = vindos.get(mid);
-        return b ? { msg_id: mid, de: a.de, hora: a.hora, base64: b.base64, mime: b.mime }
-                 : { msg_id: mid, de: a.de, hora: a.hora };
-      });
-      if (itens.length) {
-        await _safeSendMessage({ type: 'analisar_parte', reqId, tipo: 'audios', itens });
+      let r = null;
+      try {
+        // Lotes pequenos: baixar 30 audios de uma vez e o que trava a maquina.
+        r = await _pedirPonte('baixar_audios_ids', { ids }, 90000);
+        const lote = (r && r.audios) || [];
+        if (!lote.length) { _loteFalhou++; continue; }
+        // Uma tentativa a mais so pro lote: antes, audio que nao transcrevia
+        // aqui ainda tinha uma segunda chance porque o base64 seguia junto pra
+        // analise. Agora nao segue — entao a chance extra vem aqui, e continua
+        // custando um lote de memoria, nao a conversa inteira.
+        let tr = await _safeSendMessage({ type: 'transcrever_audios', audios: lote }).catch(() => null);
+        if (!tr || !tr.ok) {
+          await _pausa(800);
+          tr = await _safeSendMessage({ type: 'transcrever_audios', audios: lote }).catch(() => null);
+        }
+        if (!tr || !tr.ok) _loteFalhou++;
+      } catch (e) {
+        _loteFalhou++;
+      } finally {
+        // Solta as referencias ANTES da pausa: e nesta janela ociosa que o
+        // coletor tem chance de recolher os base64 deste lote.
+        try { if (r && Array.isArray(r.audios)) r.audios.length = 0; } catch (e2) {}
+        r = null;
       }
-      // Solta as referencias ANTES da pausa: e nesta janela ociosa que o
-      // coletor tem chance de recolher os base64 deste lote.
-      itens = null;
-      if (r && r.audios) r.audios.length = 0;
-      await new Promise((res) => setTimeout(res, 1200));
+      await _pausa(1200);
     }
 
-    const resp = await _safeSendMessage({ type: 'analisar_executar', reqId });
+    // 3) MODO ECONOMICO: sem imagem e sem PDF. E onde o custo mora, e o que
+    //    preenche o CRM sai da conversa falada.
+    //
+    // O payload leva TODOS os audios da conversa, sempre so com o id — os que
+    // ja tinham cache e os que acabaram de ser transcritos acima. O servidor
+    // resolve o texto pelo msg_id. Audio cujo lote falhou vai sem texto, que e
+    // o mesmo que acontecia antes quando o download falhava.
+    const payloadAudios = audios.map((a) => ({ msg_id: a.msg_id, de: a.de, hora: a.hora }));
+    const resp = await _safeSendMessage({
+      type: 'analisar_varredura',
+      payload: {
+        economico: true,
+        chat_id: alvo.chat_id,
+        telefone: meta.telefone || '',
+        nome: meta.nome || '',
+        lead_id: meta.lead_id || null,
+        // De ONDE veio esta leitura, pra o custo ter procedencia no painel.
+        origem: meta.origem || 'varredura',
+        // E DE ONDE VEIO A DECISAO DE LER — que e outra coisa.
+        //
+        // O servidor usa isto pra decidir se cria lead no CRM. Analise que o
+        // consultor pediu significa que ele ja decidiu que aquilo e lead;
+        // varredura nao significa nada disso — ela le TODA conversa que teve
+        // mensagem, e era por isso que fornecedor, contador e o tecnico do
+        // ar-condicionado viravam lead e enchiam a tela de auditoria.
+        //
+        // Sem este campo a regra nova nao surte efeito nenhum: o padrao do
+        // servidor e 'manual', pra extensao antiga nao mudar de comportamento.
+        origem_analise: 'varredura',
+        lote_id: meta.lote_id || null,
+        usuario_id: usuarioId || null,
+        mensagens: conv.mensagens || [],
+        audios: payloadAudios,
+        audios_sem_transcricao: _loteFalhou,
+        ultima_msg_id: conv.ultima_msg_id || meta.ultima_msg_id || '',
+        ultima_msg_em: meta.ultima_msg_em || 0,
+      },
+    });
     if (!resp || !resp.ok) throw new Error((resp && resp.erro) || 'falha_analise');
     return resp;
   }

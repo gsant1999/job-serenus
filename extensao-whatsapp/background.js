@@ -556,16 +556,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const base = msg.base || {};
     _partesAnalise.set(msg.reqId, {
       _ts: Date.now(),
-      // `...base` PRIMEIRO, defaults DEPOIS. A lista fixa de campos abaixo
-      // descartava tudo que nao estivesse nomeada nela — e a varredura manda
-      // campos que so ela tem (`economico`, `chat_id`, `lote_id`,
-      // `ultima_msg_id`, `origem`, `lead_id` e, o mais perigoso,
-      // `origem_analise`). Sem `origem_analise` o servidor assume 'manual' e
-      // volta a criar lead pra TODA conversa lida — fornecedor, contador e o
-      // tecnico do ar-condicionado viravam lead, que e um bug que ja foi
-      // corrigido uma vez. Por isso a varredura nao podia usar este caminho e
-      // mandava tudo de uma vez; e por isso os base64 se acumulavam.
-      ...base,
       telefone: base.telefone, nome: base.nome,
       mensagens: base.mensagens || [], links: base.links || [],
       usuario_id: base.usuario_id || null, whatsapp_consultor: base.whatsapp_consultor || null,
