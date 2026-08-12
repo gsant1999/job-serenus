@@ -5137,6 +5137,90 @@ def _gestor_bloqueio(conn, proposta_id):
             'tem_snapshot': bool(snap)}
 
 
+def _fin_visao(conn, competencia=''):
+    """LEITURA ÚNICA DO DINHEIRO DE COMISSÃO. Financeiro e Fluxo de Caixa chamam
+    esta função, e só ela — as duas telas discordavam porque cada uma somava de
+    uma tabela diferente, e duas verdades sobre o mesmo dinheiro é o mesmo que
+    nenhuma.
+
+    Lê do razão (fin_evento) e da conciliação. Não duplica lançamento: o razão é
+    append-only e cada fato tem chave única, então somar aqui não pode contar
+    duas vezes o que foi importado duas vezes — porque não foi.
+
+    As colunas são as sete perguntas que a operação faz, nesta ordem:
+      bruto esperado      — o que a régua diz que deveria vir;
+      apurado Affinity    — o que ela emitiu extrato dizendo que vai pagar;
+      entrada confirmada  — o que se provou que entrou na conta;
+      bruto do gestor     — a parte dele, antes de retenção;
+      retenção            — o que sai, com responsável definido;
+      líquido para PIX    — o que ele recebe de fato;
+      saldo Serenus       — o que sobra pra empresa.
+    """
+    onde, params = '', []
+    if competencia:
+        onde, params = 'WHERE competencia = ?', [competencia]
+
+    def _soma(estado, papel=None, sinal=None):
+        sql = f"""SELECT COALESCE(SUM(valor),0) v FROM fin_evento
+                  {onde}{' AND' if onde else 'WHERE'} estado = ?"""
+        p = list(params) + [estado]
+        if papel:
+            sql += " AND papel = ?"; p.append(papel)
+        if sinal is not None:
+            sql += " AND sinal = ?"; p.append(sinal)
+        try:
+            return round(float(conn.execute(sql, p).fetchone()['v'] or 0), 2)
+        except Exception:
+            return 0.0
+
+    visao = {
+        'competencia': competencia,
+        'apurado_affinity': round(_soma('apurado_affinity', 'affinity', 1), 2),
+        'tarifas': round(_soma('apurado_affinity', 'tarifa', -1), 2),
+        'entrada_confirmada': round(_soma('entrada_confirmada'), 2),
+        'bruto_esperado': 0.0, 'bruto_gestor': 0.0, 'retencao_gestor': 0.0,
+        'retencao_serenus': 0.0, 'liquido_pix_gestor': 0.0, 'saldo_serenus': 0.0,
+        'vendas_gestor': 0, 'sem_regra': 0,
+    }
+    # Bruto esperado e a conta do gestor vêm do snapshot congelado de cada venda:
+    # é o que foi COMBINADO, não o que a régua de hoje diria.
+    try:
+        sql = """SELECT s.*, COALESCE(p.comissao_total_corretora,0) comissao
+                 FROM proposta_regra_snapshot s
+                 JOIN propostas p ON p.id = s.proposta_id
+                 WHERE COALESCE(p.status,'') <> 'Excluída' AND COALESCE(p.estornada,0)=0"""
+        for s in conn.execute(sql).fetchall():
+            snap = dict(s)
+            visao['vendas_gestor'] += 1
+            if not snap.get('completa'):
+                visao['sem_regra'] += 1
+                continue
+            r = _gestor_calcular(snap, snap['comissao'])
+            visao['bruto_esperado'] += r['total_recebido']
+            visao['bruto_gestor'] += r['total_bruto_gestor']
+            visao['retencao_gestor'] += r['total_retencao_gestor']
+            visao['retencao_serenus'] += r['total_retencao_serenus']
+            visao['liquido_pix_gestor'] += r['total_liquido_gestor']
+            visao['saldo_serenus'] += r['total_saldo_serenus']
+    except Exception:
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+    for k in ('bruto_esperado', 'bruto_gestor', 'retencao_gestor', 'retencao_serenus',
+              'liquido_pix_gestor', 'saldo_serenus'):
+        visao[k] = round(visao[k], 2)
+    visao['retencao_total'] = round(visao['retencao_gestor'] + visao['retencao_serenus'], 2)
+    # A diferença entre apurado e confirmado é a pergunta que a tela precisa
+    # fazer sozinha: quanto a Affinity disse que paga e ainda não apareceu.
+    visao['aguardando_entrada'] = round(visao['apurado_affinity'] - visao['entrada_confirmada'], 2)
+    try:
+        visao['linhas_sem_vinculo'] = conn.execute(
+            "SELECT COUNT(*) c FROM affinity_conciliacao WHERE estado='sem_vinculo'").fetchone()['c']
+    except Exception:
+        visao['linhas_sem_vinculo'] = 0
+    return visao
+
+
 def _gestor_regras_faltando(conn, limite=400):
     """Resumo das vendas de gestor travadas por regra incompleta, agrupado por
     operadora/variação/plano — que é o que precisa ser cadastrado.
@@ -12299,11 +12383,12 @@ def fluxo_caixa():
         """).fetchall()
 
         regras_faltando = _gestor_regras_faltando(conn)
+        fin_visao = _fin_visao(conn)
         close_db(conn)
         return render_template('fluxo_caixa.html', ciclo=ciclo, totais=totais,
                                antecipacoes=antecipacoes, lote=lote,
                                recebidos=recebidos, pagos=pagos,
-                               regras_faltando=regras_faltando,
+                               regras_faltando=regras_faltando, fin_visao=fin_visao,
                                status_fluxo=STATUS_FLUXO)
     else:
         # Visão do consultor. Mesmo filtro: sem ele, o consultor via (e
@@ -15019,6 +15104,10 @@ def financeiro():
     conferencia = _conferencia_mes(conn, mes)
     previsao = _previsao_meses(conn, mes)
     regras_faltando = _gestor_regras_faltando(conn)
+    # MESMA função que o Fluxo de Caixa chama, de propósito: enquanto cada tela
+    # somava da sua própria consulta, as duas mostravam números diferentes pro
+    # mesmo dinheiro e não havia como saber qual estava certa.
+    fin_visao = _fin_visao(conn)
     close_db(conn)
 
     # O ROTULO ACOMPANHA O NUMERO. Um total que muda de valor sem dizer de que
@@ -15050,6 +15139,7 @@ def financeiro():
         centros_custo=CENTROS_CUSTO, tipos_lancamento=TIPOS_LANCAMENTO,
         canais_midia=CANAIS_MIDIA, status_lancamento=STATUS_LANCAMENTO,
         conferencia=conferencia, previsao=previsao, regras_faltando=regras_faltando,
+        fin_visao=fin_visao,
         calendario=calendario, cal_total=cal_total, cal_rotulo=_cal_rotulo,
         cal_livre=_cal_livre,
         filtros={'faixa': f_faixa, 'centro': f_centro, 'status_lanc': f_status,
@@ -15059,10 +15149,23 @@ def financeiro():
 @login_required
 @admin_required
 def financeiro_exportar():
-    """Exporta o mesmo recorte de custos/fixos exibido no Financeiro."""
+    """Exporta o recorte do Financeiro, dizendo por escrito QUAL recorte é.
+
+    A tela tem mais de uma seção financeira (custos e fixos de um lado, comissão
+    da Affinity de outro) e o arquivo só trazia a primeira, sem dizer isso em
+    lugar nenhum. Quem abria a planilha via um total que não batia com o da tela
+    e não tinha como saber por quê — o número estava certo para um recorte que o
+    arquivo não declarava.
+
+    Agora: o XLSX traz as DUAS seções, uma por aba, e o CSV — que não tem aba —
+    traz a seção pedida com o escopo escrito na primeira linha e os filtros
+    aplicados logo abaixo. O total de cada aba é o total daquela seção na tela."""
     import csv, io
     mes = request.args.get('mes', competencia_atual())
     fmt = (request.args.get('formato') or 'xlsx').lower()
+    secao = (request.args.get('secao') or 'custos').strip().lower()
+    if secao not in ('custos', 'comissao'):
+        secao = 'custos'
     faixa, de, ate = (request.args.get('faixa') or '').strip(), (request.args.get('de') or '').strip(), (request.args.get('ate') or '').strip()
     centro, status, tipo, meio = [(request.args.get(k) or '').strip() for k in ('centro','status_lanc','tipo_lanc','meio')]
     conn = db()
@@ -15082,20 +15185,96 @@ def financeiro_exportar():
     def br(d): return f'{d[8:10]}/{d[5:7]}/{d[:4]}' if d and len(d)>=10 else ''
     dados = [[r.get('descricao',''), r.get('centro_custo',''), r.get('categoria',''), br(r.get('data_emissao') or r.get('data_lancamento')), br(r.get('data_vencimento')), float(r.get('valor') or 0), r.get('pago_por',''), r.get('fonte_pagamento',''), r.get('meio_nome') or r.get('forma_pagamento',''), r.get('status_efetivo','')] for r in rows]
     total = sum(x[5] for x in dados)
+
+    # ESCOPO POR ESCRITO. O que está e o que NÃO está no arquivo, junto do
+    # arquivo. Sem isso, um total que não bate com a tela vira desconfiança na
+    # tela inteira — e o problema quase sempre era só um filtro não declarado.
+    filtros_txt = []
+    if livre:
+        _de_txt = de or 'o começo'
+        _ate_txt = ate or 'hoje'
+        filtros_txt.append(f"vencimento de {_de_txt} a {_ate_txt}")
+    else:
+        filtros_txt.append(f"vencimento na competência {mes}")
+    if faixa and not livre: filtros_txt.append(f"faixa {faixa}")
+    if centro: filtros_txt.append(f"centro de custo {centro}")
+    if tipo: filtros_txt.append(f"tipo {tipo}")
+    if meio: filtros_txt.append(f"meio de pagamento {meio}")
+    if status: filtros_txt.append(f"status {status}")
+    escopo_custos = 'Seção: custos e fixos. Filtros: ' + '; '.join(filtros_txt) + '.'
+
+    # Seção 2: a comissão. Vem do razão, a MESMA fonte do painel da tela — o
+    # arquivo não pode contar uma história diferente da que a tela contou.
+    visao = _fin_visao(conn)
+    cab_com = ['Indicador', 'Valor', 'O que é']
+    dados_com = [
+        ['Bruto esperado', visao['bruto_esperado'],
+         'O que a régua congelada em cada venda diz que deveria vir. Previsão.'],
+        ['Apurado pela Affinity', visao['apurado_affinity'],
+         'Extratos importados. Ela diz que vai pagar. Ainda não é dinheiro na conta.'],
+        ['Tarifas e débitos', visao['tarifas'],
+         'Descontos do próprio extrato, como a tarifa por pagamento. Saída.'],
+        ['Entrada confirmada', visao['entrada_confirmada'],
+         'Provado por identificador Asaas ou confirmação humana registrada.'],
+        ['Aguardando entrada', visao['aguardando_entrada'],
+         'Apurado que ainda não apareceu como entrada confirmada.'],
+        ['Bruto do gestor', visao['bruto_gestor'],
+         'Parte do gestor antes de retenção. Obrigação a pagar.'],
+        ['Retenção do gestor', visao['retencao_gestor'], 'Retenção de responsabilidade do gestor.'],
+        ['Retenção da Serenus', visao['retencao_serenus'], 'Retenção de responsabilidade da empresa.'],
+        ['Líquido para PIX do gestor', visao['liquido_pix_gestor'],
+         'O que o gestor recebe de fato. Só sai após entrada confirmada e liberação.'],
+        ['Saldo Serenus', visao['saldo_serenus'],
+         'Recebido menos bruto do gestor e retenções da empresa.'],
+    ]
+    escopo_com = ('Seção: comissão da Affinity, lida do razão financeiro. '
+                  f"Vendas de gestor com regra completa. {visao['sem_regra']} venda(s) ficaram de "
+                  f"fora por regra incompleta; {visao['linhas_sem_vinculo']} linha(s) de extrato "
+                  'ainda sem venda apontada.')
+
+    def moeda_csv(v):
+        return 'R$ ' + f'{v:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.')
+
     if fmt == 'csv':
-        def moeda_csv(v):
-            return 'R$ ' + f'{v:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.')
-        out = io.StringIO(); wri = csv.writer(out, delimiter=';'); wri.writerow(cab)
-        for linha in dados: wri.writerow(linha[:5] + [moeda_csv(linha[5])] + linha[6:])
-        wri.writerow(['TOTAL','','','','',moeda_csv(total)]); close_db(conn)
-        return Response('\ufeff' + out.getvalue(), mimetype='text/csv', headers={'Content-Disposition': f'attachment; filename=financeiro_serenus_{mes}.csv'})
+        # CSV não tem aba: exporta UMA seção e diz qual, na primeira linha.
+        out = io.StringIO(); wri = csv.writer(out, delimiter=';')
+        if secao == 'comissao':
+            wri.writerow([escopo_com]); wri.writerow([])
+            wri.writerow(cab_com)
+            for linha in dados_com:
+                wri.writerow([linha[0], moeda_csv(linha[1]), linha[2]])
+        else:
+            wri.writerow([escopo_custos]); wri.writerow([])
+            wri.writerow(cab)
+            for linha in dados: wri.writerow(linha[:5] + [moeda_csv(linha[5])] + linha[6:])
+            wri.writerow(['TOTAL', '', '', '', '', moeda_csv(total)])
+            wri.writerow([])
+            wri.writerow(['Este arquivo traz só a seção de custos e fixos. '
+                          'Para a comissão da Affinity, exporte com secao=comissao '
+                          'ou use o XLSX, que traz as duas abas.'])
+        close_db(conn)
+        return Response('\ufeff' + out.getvalue(), mimetype='text/csv',
+                        headers={'Content-Disposition':
+                                 f'attachment; filename=financeiro_serenus_{secao}_{mes}.csv'})
+
     import openpyxl
-    wb = openpyxl.Workbook(); ws = wb.active; ws.title = 'Financeiro'; ws.append(cab)
+    wb = openpyxl.Workbook()
+    ws = wb.active; ws.title = 'Custos e fixos'
+    ws.append([escopo_custos]); ws.append([])
+    ws.append(cab)
     for row in dados: ws.append(row)
-    ws.append(['TOTAL','','','','',total]);
-    for cell in ws['F'][1:]: cell.number_format = 'R$ #,##0.00'
+    ws.append(['TOTAL', '', '', '', '', total])
+    for cell in ws['F'][3:]:
+        cell.number_format = 'R$ #,##0.00'
+    ws2 = wb.create_sheet('Comissao Affinity')
+    ws2.append([escopo_com]); ws2.append([])
+    ws2.append(cab_com)
+    for row in dados_com: ws2.append(row)
+    for cell in ws2['B'][3:]:
+        cell.number_format = 'R$ #,##0.00'
     buf = io.BytesIO(); wb.save(buf); buf.seek(0); close_db(conn)
-    return send_file(buf, as_attachment=True, download_name=f'financeiro_serenus_{mes}.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    return send_file(buf, as_attachment=True, download_name=f'financeiro_serenus_{mes}.xlsx',
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 def _proximo_mes(competencia, n):
     """Soma n meses a uma competência 'YYYY-MM'. Retorna 'YYYY-MM'."""
@@ -15220,6 +15399,32 @@ def fechamento_pagar():
     return jsonify({"ok": True, **resultado})
 
 
+def _venc_parcela(data_iso, i):
+    """Vencimento da parcela i (0-based) a partir do vencimento da primeira.
+
+    POLÍTICA DO DIA 29, 30 E 31, que é a única parte não óbvia disto:
+    o vencimento cai no MESMO DIA do mês seguinte; quando esse dia não existe
+    naquele mês, cai no ÚLTIMO DIA VÁLIDO dele. Vencimento dia 31 em janeiro vira
+    28 (ou 29) em fevereiro e volta pra 31 em março.
+
+    Volta pra 31, e não fica preso em 28, porque a conta é sempre feita a partir
+    da data ORIGINAL — nunca a partir da parcela anterior. Encadear a partir da
+    anterior faria a data escorregar mês a mês (31/01, 28/02, 28/03, 28/04...) e
+    em seis parcelas o vencimento teria andado três dias sozinho.
+
+    Vencimento em branco continua em branco: inventar data de vencimento para um
+    lançamento que não tem é pior que não ter."""
+    if not data_iso or len(data_iso) < 10:
+        return data_iso
+    if not i:
+        return data_iso
+    try:
+        base = datetime.strptime(data_iso[:10], '%Y-%m-%d').date()
+    except ValueError:
+        return data_iso
+    return (base + relativedelta(months=i)).strftime('%Y-%m-%d')
+
+
 @app.route('/lancamento/salvar', methods=['POST'])
 @login_required
 @admin_required
@@ -15266,6 +15471,12 @@ def lancamento_salvar():
         # Última parcela absorve a diferença de arredondamento
         valor_i = round(valor_total - valor_parcela * (num_parcelas - 1), 2) if i == num_parcelas - 1 else valor_parcela
         competencia_i = _proximo_mes(competencia_base, i) if competencia_base else competencia_atual()
+        # VENCIMENTO ANDA COM A PARCELA. Antes as N parcelas nasciam com a MESMA
+        # data de vencimento: a competência avançava mês a mês e o vencimento
+        # ficava parado, então uma compra em 6x aparecia como seis contas
+        # vencendo no mesmo dia — e o Financeiro, que passou a ordenar e somar
+        # por vencimento, mostrava seis meses de despesa caindo num mês só.
+        data_vencimento_i = _venc_parcela(data_vencimento, i)
         desc_i = f"{descricao} ({i+1}/{num_parcelas})" if num_parcelas > 1 else descricao
         # Centro de custo / tipo / canal: só aceita o que está na lista fechada.
         # Valor livre aqui viraria "Midia", "mídia" e "MÍDIA" como três centros
@@ -15292,7 +15503,7 @@ def lancamento_salvar():
              centro_custo,tipo_lancamento,canal_midia)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (tipo, d.get('categoria', ''), desc_i, valor_i, competencia_i,
-             data_emissao or competencia_i, data_emissao or None, data_vencimento or None,
+             data_emissao or competencia_i, data_emissao or None, data_vencimento_i or None,
              d.get('socio', ''), 1 if d.get('recorrente') else 0, _status_ini,
              (d.get('pago_por') or '').strip(), (d.get('fonte_pagamento') or '').strip(),
              forma_pagamento, meio_pagamento_id,
@@ -27730,6 +27941,184 @@ def regra_gestor_salvar():
     falta = _gestor_regra_faltas(regra, ret)
     close_db(conn)
     return jsonify({"ok": True, "id": rid, "falta": falta})
+
+
+@app.route('/comissoes/regra-gestor/simular')
+@login_required
+@admin_required
+def regra_gestor_simular():
+    """SIMULADOR HISTÓRICO. Não escreve nada — em lugar nenhum.
+
+    Mostra, para cada venda de gestor já cadastrada: a regra que a regra de hoje
+    sugeriria, os valores atuais, os valores simulados e a diferença entre eles.
+
+    Existe porque a alternativa seria migrar o histórico de uma vez, e migrar o
+    histórico de comissão sem alguém olhar linha a linha é como recalcular o
+    salário de todo mundo com a fórmula nova e avisar depois. O que o simulador
+    responde é 'quanto mudaria?' — e essa pergunta tem que ter resposta antes de
+    qualquer botão de aplicar aparecer."""
+    conn = db()
+    limite = min(int(request.args.get('limite', 200) or 200), 500)
+    linhas = []
+    for p in conn.execute("""SELECT id, razao_social, consultor, usuario_id, adm_operadora,
+                                    modalidade, tipo_pessoa, status,
+                                    COALESCE(comissao_total_corretora,0) comissao,
+                                    COALESCE(comissao_consultor,0) atual_consultor,
+                                    COALESCE(comissao_corretora_liquida,0) atual_liquido
+                             FROM propostas
+                             WHERE COALESCE(status,'') <> 'Excluída' AND COALESCE(estornada,0)=0
+                             ORDER BY id DESC LIMIT ?""", (limite,)).fetchall():
+        if not _gestor_e_vendedor(conn, p['usuario_id']):
+            continue
+        plano = _plano_from_modalidade(p['modalidade'], p['tipo_pessoa'])
+        regra, retencoes = _gestor_regra_buscar(conn, p['adm_operadora'] or '', plano)
+        falta = _gestor_regra_faltas(regra, retencoes)
+        simulado = {}
+        if not falta:
+            # Snapshot "de mentira", só para simular: a regra de HOJE aplicada à
+            # venda de ontem. Não é gravado e não vira snapshot da proposta.
+            simulado = _gestor_calcular({
+                'completa': 1, 'fracoes_json': regra['fracoes_json'],
+                'gestor_json': regra['gestor_json'],
+                'retencoes_json': json.dumps(retencoes, ensure_ascii=False, default=str),
+            }, p['comissao'])
+        # Congelada quando a parcela já andou: pago, conciliado ou com PIX.
+        travas = _historico_travas(conn, p['id'])
+        linhas.append({
+            'id': p['id'], 'razao_social': p['razao_social'], 'consultor': p['consultor'],
+            'operadora': p['adm_operadora'] or '(sem operadora)', 'plano': plano,
+            'comissao': round(float(p['comissao'] or 0), 2),
+            'atual_consultor': round(float(p['atual_consultor'] or 0), 2),
+            'atual_liquido': round(float(p['atual_liquido'] or 0), 2),
+            'tem_snapshot': bool(_gestor_snapshot(conn, p['id'])),
+            'falta': falta,
+            'simulado': simulado,
+            'sim_gestor': round(simulado.get('total_liquido_gestor', 0.0), 2) if simulado else None,
+            'sim_serenus': round(simulado.get('total_saldo_serenus', 0.0), 2) if simulado else None,
+            'diferenca_gestor': (round(simulado.get('total_liquido_gestor', 0.0)
+                                       - float(p['atual_consultor'] or 0), 2) if simulado else None),
+            'travas': travas,
+            'aplicavel': bool(simulado and not travas),
+        })
+    close_db(conn)
+    total = {
+        'vendas': len(linhas),
+        'aplicaveis': sum(1 for l in linhas if l['aplicavel']),
+        'travadas': sum(1 for l in linhas if l['travas']),
+        'sem_regra': sum(1 for l in linhas if l['falta']),
+        'atual': round(sum(l['atual_consultor'] for l in linhas), 2),
+        'simulado': round(sum(l['sim_gestor'] or 0 for l in linhas), 2),
+    }
+    total['diferenca'] = round(total['simulado'] - total['atual'], 2)
+    return render_template('regra_gestor_simulador.html', linhas=linhas, total=total)
+
+
+def _historico_travas(conn, proposta_id):
+    """O que impede reescrever o histórico DESTA venda. Lista de frases.
+
+    Parcela paga, conciliada ou com PIX iniciado não se toca: o dinheiro já
+    andou, e mudar o número depois só faz o sistema discordar do extrato
+    bancário — que é a fonte que ninguém pode editar."""
+    travas = []
+    try:
+        for pa in conn.execute("""SELECT id, numero, status, asaas_transfer_id
+                                  FROM parcelas WHERE proposta_id=?""", (proposta_id,)).fetchall():
+            if (pa['status'] or '') == 'Pago ao corretor':
+                travas.append(f'Parcela {pa["numero"]} já foi paga ao corretor.')
+            if pa['asaas_transfer_id']:
+                travas.append(f'Parcela {pa["numero"]} tem PIX iniciado no Asaas.')
+    except Exception:
+        pass
+    try:
+        n = conn.execute("""SELECT COUNT(*) c FROM affinity_conciliacao
+                            WHERE proposta_id=? AND estado='entrada_confirmada'""",
+                         (proposta_id,)).fetchone()['c']
+        if n:
+            travas.append(f'{n} linha(s) de extrato já foram conciliadas como entrada confirmada.')
+    except Exception:
+        pass
+    return travas
+
+
+@app.route('/comissoes/regra-gestor/aplicar-historico', methods=['POST'])
+@login_required
+@admin_required
+def regra_gestor_aplicar_historico():
+    """Aplica a regra de hoje a vendas ANTIGAS — só nas escolhidas, uma a uma.
+
+    Três coisas antes de qualquer escrita, e nenhuma delas é opcional:
+      1. seleção explícita: não existe 'aplicar em tudo';
+      2. backup do estado anterior, gravado antes da mudança;
+      3. log com quem, quando e o que mudou.
+
+    E as travas: parcela paga, conciliada ou com PIX iniciado é recusada, mesmo
+    que tenha sido escolhida. Escolher não destrava.
+
+    O que muda: apenas o SNAPSHOT da proposta. Valor de parcela, status
+    financeiro e lançamento não são reescritos por esta rota — recalcular
+    dinheiro que já foi combinado é o que este sistema não faz sozinho."""
+    d = request.json or {}
+    ids = [int(x) for x in (d.get('propostas') or []) if str(x).isdigit()]
+    confirmacao = (d.get('confirmacao') or '').strip().upper()
+    if not ids:
+        return jsonify({"ok": False, "erro": "Escolha ao menos uma venda."}), 400
+    if confirmacao != 'APLICAR':
+        return jsonify({"ok": False, "erro": 'Digite APLICAR para confirmar. Esta ação reescreve '
+                                             'a regra congelada das vendas escolhidas.'}), 400
+    conn = db()
+    aplicadas, recusadas = [], []
+    for pid in ids:
+        p = conn.execute("""SELECT id, razao_social, usuario_id, adm_operadora, modalidade,
+                                   tipo_pessoa FROM propostas WHERE id=?""", (pid,)).fetchone()
+        if not p:
+            recusadas.append((pid, 'venda não encontrada'))
+            continue
+        if not _gestor_e_vendedor(conn, p['usuario_id']):
+            recusadas.append((pid, 'não é venda de gestor'))
+            continue
+        travas = _historico_travas(conn, pid)
+        if travas:
+            recusadas.append((pid, travas[0]))
+            continue
+        plano = _plano_from_modalidade(p['modalidade'], p['tipo_pessoa'])
+        regra, retencoes = _gestor_regra_buscar(conn, p['adm_operadora'] or '', plano)
+        falta = _gestor_regra_faltas(regra, retencoes)
+        if falta:
+            recusadas.append((pid, falta[0]))
+            continue
+        antigo = _gestor_snapshot(conn, pid)
+        # BACKUP antes de escrever: o snapshot anterior vira histórico da
+        # proposta, em texto, e não some. Sem isso, "voltar atrás" seria
+        # reconstruir de memória.
+        conn.execute("""INSERT INTO historico_proposta
+            (proposta_id, usuario_nome, campo, valor_antes, valor_depois, criado_em)
+            VALUES (?,?,?,?,?,?)""",
+            (pid, session.get('nome'), 'Regra do gestor (aplicação histórica)',
+             json.dumps(antigo or {}, ensure_ascii=False, default=str)[:3000],
+             json.dumps({'regra_id': regra['id'], 'fracoes': regra['fracoes_json'],
+                         'gestor': regra['gestor_json']}, ensure_ascii=False)[:3000],
+             _agora_sp()))
+        conn.execute("DELETE FROM proposta_regra_snapshot WHERE proposta_id=?", (pid,))
+        op_nome, op_obs = _split_operadora(p['adm_operadora'] or '')
+        conn.execute("""INSERT INTO proposta_regra_snapshot
+            (proposta_id, regra_id, operadora, obs, plano, fracoes_json, gestor_json,
+             retencoes_json, completa, falta_json, usuario_id, usuario_nome,
+             congelado_por, congelado_em)
+            VALUES (?,?,?,?,?,?,?,?,1,'[]',?,?,?,?)""",
+            (pid, regra['id'], op_nome, op_obs, plano, regra['fracoes_json'],
+             regra['gestor_json'], json.dumps(retencoes, ensure_ascii=False, default=str),
+             p['usuario_id'], session.get('nome'),
+             f"{session.get('nome')} (aplicação histórica)", _agora_sp()))
+        _fin_registrar(conn, f"hist:regra:{pid}:{regra['id']}", 'previsto', 0.0,
+                       papel='serenus', proposta_id=pid, origem='aplicacao_historica',
+                       origem_ref=str(regra['id']),
+                       descricao=f"Regra do gestor aplicada ao histórico por {session.get('nome')}",
+                       usuario_id=session.get('user_id'), usuario_nome=session.get('nome'))
+        aplicadas.append(pid)
+    conn.commit(); close_db(conn)
+    app.logger.info("[REGRA-GESTOR] aplicação histórica por %s: %s aplicada(s), %s recusada(s)",
+                    session.get('nome'), len(aplicadas), len(recusadas))
+    return jsonify({"ok": True, "aplicadas": aplicadas, "recusadas": recusadas})
 
 
 @app.route('/comissoes/regra-gestor/retencao', methods=['POST'])

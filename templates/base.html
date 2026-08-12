@@ -902,6 +902,36 @@
                    font-weight:600; background:var(--amarelo); color:#161a20;
                    text-decoration:none; white-space:nowrap; }
   .rg-alerta-btn:hover { filter:brightness(1.08); }
+
+  /* Painel do razão de comissão (_painel_razao.html). Vive no base pelo mesmo
+     motivo do alerta acima: aparece no Financeiro e no Fluxo de Caixa e tem que
+     ser reconhecivelmente o mesmo painel nas duas. */
+  .pr-box { background:var(--panel); border:1px solid var(--borda); border-radius:14px;
+            padding:16px 18px; margin-bottom:18px; }
+  .pr-cab { display:flex; justify-content:space-between; align-items:flex-start; gap:14px;
+            flex-wrap:wrap; margin-bottom:12px; }
+  .pr-titulo { font-family:'Sora',sans-serif; font-size:13.5px; font-weight:600; color:var(--texto); }
+  .pr-sub { font-size:11.5px; color:var(--cinza); line-height:1.55; margin-top:3px; max-width:640px; }
+  .pr-link { font-size:11.5px; font-weight:600; color:var(--azul); text-decoration:none; white-space:nowrap; }
+  .pr-link:hover { text-decoration:underline; }
+  .pr-linha { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+  .pr-card { flex:1 1 165px; background:var(--panel-2); border:1px solid var(--borda);
+             border-left:3px solid var(--borda-2); border-radius:10px; padding:11px 13px; }
+  /* Verde SÓ para dinheiro que entra. Obrigação a pagar usa a cor de saída — o
+     mesmo critério já aplicado no resto do Financeiro. */
+  .pr-card.pr-entrada { border-left-color:var(--verde); }
+  .pr-card.pr-entrada .pr-v { color:var(--verde); }
+  .pr-card.pr-saida { border-left-color:var(--erro); }
+  .pr-card.pr-saida .pr-v { color:var(--erro); }
+  .pr-lbl { display:flex; align-items:center; font-size:9.5px; font-weight:700; letter-spacing:.5px;
+            text-transform:uppercase; color:var(--cinza-2); margin-bottom:5px; }
+  .pr-v { display:block; font-size:17px; font-weight:700; font-variant-numeric:tabular-nums;
+          color:var(--texto); }
+  .pr-nota { display:block; font-size:10.5px; color:var(--cinza); margin-top:3px; }
+  .pr-pendencia { background:rgba(250,204,21,.08); border:1px solid rgba(250,204,21,.28);
+                  border-radius:10px; padding:10px 12px; font-size:11.5px; color:var(--texto);
+                  line-height:1.75; }
+  .pr-pendencia a { color:var(--amarelo); font-weight:600; text-decoration:underline; }
 </style>
 {% block content %}{% endblock %}
 </div>

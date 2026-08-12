@@ -293,8 +293,12 @@
     <details class="fin-exportar">
       <summary class="btn-ghost">Exportar relatório</summary>
       <div class="fin-exportar-menu">
-        <a href="/financeiro/exportar?mes={{ mes }}{% if filtros.faixa %}&faixa={{ filtros.faixa }}{% endif %}{% if filtros.de %}&de={{ filtros.de }}{% endif %}{% if filtros.ate %}&ate={{ filtros.ate }}{% endif %}{% if filtros.centro %}&centro={{ filtros.centro|urlencode }}{% endif %}{% if filtros.status_lanc %}&status_lanc={{ filtros.status_lanc|urlencode }}{% endif %}{% if filtros.tipo_lanc %}&tipo_lanc={{ filtros.tipo_lanc|urlencode }}{% endif %}{% if filtros.meio %}&meio={{ filtros.meio }}{% endif %}&formato=xlsx">Baixar XLSX</a>
-        <a href="/financeiro/exportar?mes={{ mes }}{% if filtros.faixa %}&faixa={{ filtros.faixa }}{% endif %}{% if filtros.de %}&de={{ filtros.de }}{% endif %}{% if filtros.ate %}&ate={{ filtros.ate }}{% endif %}{% if filtros.centro %}&centro={{ filtros.centro|urlencode }}{% endif %}{% if filtros.status_lanc %}&status_lanc={{ filtros.status_lanc|urlencode }}{% endif %}{% if filtros.tipo_lanc %}&tipo_lanc={{ filtros.tipo_lanc|urlencode }}{% endif %}{% if filtros.meio %}&meio={{ filtros.meio }}{% endif %}&formato=csv">Baixar CSV</a>
+        {# O escopo do arquivo fica no rótulo do botão, não só dentro do arquivo:
+           quem baixa precisa saber o que vem antes de abrir a planilha e comparar
+           um total com a tela. #}
+        <a href="/financeiro/exportar?mes={{ mes }}{% if filtros.faixa %}&faixa={{ filtros.faixa }}{% endif %}{% if filtros.de %}&de={{ filtros.de }}{% endif %}{% if filtros.ate %}&ate={{ filtros.ate }}{% endif %}{% if filtros.centro %}&centro={{ filtros.centro|urlencode }}{% endif %}{% if filtros.status_lanc %}&status_lanc={{ filtros.status_lanc|urlencode }}{% endif %}{% if filtros.tipo_lanc %}&tipo_lanc={{ filtros.tipo_lanc|urlencode }}{% endif %}{% if filtros.meio %}&meio={{ filtros.meio }}{% endif %}&formato=xlsx">XLSX com as duas seções</a>
+        <a href="/financeiro/exportar?mes={{ mes }}{% if filtros.faixa %}&faixa={{ filtros.faixa }}{% endif %}{% if filtros.de %}&de={{ filtros.de }}{% endif %}{% if filtros.ate %}&ate={{ filtros.ate }}{% endif %}{% if filtros.centro %}&centro={{ filtros.centro|urlencode }}{% endif %}{% if filtros.status_lanc %}&status_lanc={{ filtros.status_lanc|urlencode }}{% endif %}{% if filtros.tipo_lanc %}&tipo_lanc={{ filtros.tipo_lanc|urlencode }}{% endif %}{% if filtros.meio %}&meio={{ filtros.meio }}{% endif %}&secao=custos&formato=csv">CSV: só custos e fixos</a>
+        <a href="/financeiro/exportar?mes={{ mes }}{% if filtros.faixa %}&faixa={{ filtros.faixa }}{% endif %}{% if filtros.de %}&de={{ filtros.de }}{% endif %}{% if filtros.ate %}&ate={{ filtros.ate }}{% endif %}{% if filtros.centro %}&centro={{ filtros.centro|urlencode }}{% endif %}{% if filtros.status_lanc %}&status_lanc={{ filtros.status_lanc|urlencode }}{% endif %}{% if filtros.tipo_lanc %}&tipo_lanc={{ filtros.tipo_lanc|urlencode }}{% endif %}{% if filtros.meio %}&meio={{ filtros.meio }}{% endif %}&secao=comissao&formato=csv">CSV: só comissão da Affinity</a>
       </div>
     </details>
   </div>
@@ -303,6 +307,7 @@
 <div class="page" style="max-width:1080px;">
 
   {% include '_alerta_regra_gestor.html' %}
+  {% include '_painel_razao.html' %}
 
 
   {# SEIS NUMEROS DO MESMO TAMANHO NAO SAO SEIS RESPOSTAS — sao seis perguntas.
