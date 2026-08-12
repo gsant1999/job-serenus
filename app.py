@@ -14464,12 +14464,12 @@ def financeiro():
         else:              _cal_rotulo = 'Vencendo até %s' % _br(f_ate)
     else:
         _cal_rotulo = {
-            '01-10': 'Vencendo entre os dias 01 e 10',
-            '11-20': 'Vencendo entre os dias 11 e 20',
-            '21-31': 'Vencendo entre os dias 21 e 31',
-            'proximos7': 'Vencendo nos próximos 7 dias',
+            '01-10': 'A pagar entre os dias 01 e 10',
+            '11-20': 'A pagar entre os dias 11 e 20',
+            '21-31': 'A pagar entre os dias 21 e 31',
+            'proximos7': 'A pagar nos próximos 7 dias',
             'vencidas': 'Já vencido e em aberto',
-        }.get(f_faixa, 'Vencendo neste mês')
+        }.get(f_faixa, 'A pagar neste mês')
 
     return render_template('financeiro.html', mes=mes, futuras=futuras,
         custos=custos, aportes=aportes, fixos=fixos, reembolsos=reembolsos,
