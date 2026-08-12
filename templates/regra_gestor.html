@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Regra do gestor{% endblock %}
+{% block title %}Comissão de sócios e gestores{% endblock %}
 {% block head %}
 <style>
   .panel-box { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 20px; margin-bottom:16px; }
@@ -50,8 +50,8 @@
 {% block content %}
 <div class="topbar">
   <div>
-    <h1>Regra do gestor</h1>
-    <div class="sub">Quanto da comissão é do gestor que vendeu, por operadora, variação e plano.</div>
+    <h1>Comissão de sócios e gestores</h1>
+    <div class="sub">Cadastro exclusivo de quem vende pela gestão: por operadora, variação e plano.</div>
   </div>
   <div>
     <a href="/comissoes/regra-gestor/simular" class="btn-outline">Simular no histórico</a>
@@ -62,6 +62,10 @@
 <div class="page">
 
   <div class="rg-nota">
+    <b>Esta tela não altera os modelos de comissão dos consultores.</b> Sem Lead/Sem Fixo,
+    Com Lead (N1/N2/N3) e Com Fixo + Lead continuam em <a href="/repasses">Repasses</a>.
+    Aqui vale somente para sócios, gestores, supervisores e administradores quando eles vendem.
+    <br><br>
     <b>A regra é comercial, não é da pessoa.</b> Todo admin e todo gestor pode vender, e a mesma venda
     vale a mesma coisa independentemente de quem vendeu. Por isso ela é cadastrada por operadora,
     variação e plano — e não repetida em cada usuário.

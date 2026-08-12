@@ -250,7 +250,7 @@
     <li><strong>Total</strong> — quantas mensalidades o consultor recebe.</li>
     <li><strong>Régua</strong> — como esse total se distribui no tempo, mensalidade a mensalidade (ex.: <code>1;0,5;0,5</code> = uma mensalidade inteira na 1ª parcela e meia nas duas seguintes). É a régua que define quantas parcelas a proposta gera e o valor de cada uma.</li>
     <li><strong>Adesão</strong> é um caso à parte: o repasse é um percentual sobre a taxa de adesão (1ª mensalidade), não uma régua.</li>
-    <li><strong>Gestor Vendedor</strong> ignora a matriz: leva 100% do que a corretora recebe.</li>
+    <li><strong>Sócio, gestor, supervisor ou administrador que vende</strong> não usa a matriz de consultor. A comissão é definida em Comissão de sócios e gestores, por operadora, plano, frações e retenções. O antigo Gestor Vendedor (100%) fica apenas para leitura de histórico.</li>
   </ul>
   <div class="man-box atencao"><b class="rotulo">Atenção</b>Proposta salva sem repasse cadastrado para aquela combinação gera aviso e comissão do consultor zerada. Ao criar uma operadora nova em Operadoras, complete também a linha dela em Repasses.</div>
 
@@ -408,7 +408,7 @@
   <div class="man-tbl-wrap"><table>
     <tr><th>Campo</th><th>Usado em</th></tr>
     <tr><td>Perfil</td><td>Admin ou consultor — define tudo que a pessoa vê e pode fazer.</td></tr>
-    <tr><td>Regime de comissão</td><td>Cálculo automático de comissão e parcelas de cada proposta (Sem Lead/Sem Fixo, Com Lead N1-N3, Com Fixo + Lead, Gestor Vendedor).</td></tr>
+    <tr><td>Regime do consultor</td><td>Aplica-se somente a consultores: Sem Lead/Sem Fixo, Com Lead N1-N3 e Com Fixo + Lead. Sócios e gestores que vendem usam a regra comercial própria, por operadora e plano.</td></tr>
     <tr><td>Chave PIX</td><td>Pagamento de comissão pelo botão Pagar PIX no Fluxo de Caixa.</td></tr>
     <tr><td>Telefone</td><td>Links de WhatsApp que os leads recebem (para quem usa WhatsApp pessoal).</td></tr>
     <tr><td>Foto</td><td>Avatar no sistema — cada usuário pode trocar a própria em Minha Foto.</td></tr>

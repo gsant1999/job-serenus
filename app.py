@@ -358,7 +358,11 @@ MODELO_NOME = {
     'com_lead_sem_fixo': 'Com Lead / Sem Fixo',
     'com_fixo_lead': 'Com Fixo + Lead',
     'com_fixo_sem_lead': 'Com Fixo / Sem Lead',
-    'gestor_vendedor': 'Gestor Vendedor (100%)',
+    # Só existe para propostas antigas. Vendas novas de sócio/gestor usam a
+    # regra comercial por operadora, plano e retenção — nunca esta regra fixa.
+    'gestor_vendedor': 'Gestor Vendedor (legado)',
+    'socio_gestor_regra': 'Sócio/Gestor — regra comercial',
+    'socio_gestor_pendente': 'Sócio/Gestor — regra pendente',
     'n1': 'Nível 1',
     'n2': 'Nível 2',
     'n3': 'Nível 3',
@@ -370,6 +374,8 @@ MODELO_TEM_META = {
     'com_fixo_lead': True,
     'com_fixo_sem_lead': False,
     'gestor_vendedor': False,
+    'socio_gestor_regra': False,
+    'socio_gestor_pendente': False,
     'n1': False,
     'n2': False,
     'n3': False,
@@ -5130,6 +5136,73 @@ def _gestor_congelar_snapshot(conn, proposta_id, operadora, plano, usuario_id, u
     return True
 
 
+def _gestor_calculo_inicial(conn, operadora, modalidade, tipo_pessoa, valor):
+    """Monta as parcelas iniciais de uma venda de sócio/gestor.
+
+    Isso é deliberadamente separado de ``calc_comissao``: aquele motor continua
+    exclusivo dos três regimes de consultor. Para sócio/gestor, a única fonte é
+    a regra comercial cadastrada por operadora, variação e plano.
+
+    Enquanto a regra não estiver completa, a venda pode nascer como rascunho,
+    mas não ganha valores fictícios nem parcelas do modelo Sem Lead/Sem Fixo.
+    """
+    plano = _plano_from_modalidade(modalidade, tipo_pessoa)
+    regra, retencoes = _gestor_regra_buscar(conn, operadora, plano)
+    falta = _gestor_regra_faltas(regra, retencoes)
+    op_nome, _op_obs = _split_operadora(operadora)
+    if falta:
+        return {
+            'codigo': 'socio_gestor_pendente', 'modelo': 'socio_gestor_pendente',
+            'nivel': '', 'plano': plano, 'num_parcelas': 0,
+            'dist_corretora': '', 'regua_mens': [], 'receb_mens': 0.0,
+            'rep_mens': 0.0, 'taxa': 0, 'valor': valor,
+            'total_corretora': 0.0, 'consultor': 0.0, 'liquido': 0.0,
+            'aviso': 'Regra de comissão do sócio/gestor pendente: ' + falta[0],
+            'falta_regra_gestor': falta, 'operadora_regra': op_nome,
+        }
+    snap = {
+        'completa': 1, 'fracoes_json': regra['fracoes_json'],
+        'gestor_json': regra['gestor_json'],
+        'retencoes_json': json.dumps(retencoes, ensure_ascii=False, default=str),
+    }
+    # O valor de recebimento da corretora continua vindo da tabela Operadoras.
+    # A nova regra divide esse recebimento; ela não inventa a comissão total.
+    receb = conn.execute(
+        "SELECT total FROM recebimento WHERE operadora=? AND obs=? AND plano=?",
+        _split_operadora(operadora) + (plano,)).fetchone()
+    if not receb:
+        receb = conn.execute(
+            "SELECT total FROM recebimento WHERE operadora=? AND plano=? ORDER BY (obs='') DESC LIMIT 1",
+            (op_nome, plano)).fetchone()
+    total_corretora = round(float(valor or 0) * float(receb['total'] or 0), 2) if receb else 0.0
+    if not receb:
+        return {
+            'codigo': 'socio_gestor_pendente', 'modelo': 'socio_gestor_pendente',
+            'nivel': '', 'plano': plano, 'num_parcelas': 0,
+            'dist_corretora': '', 'regua_mens': [], 'receb_mens': 0.0,
+            'rep_mens': 0.0, 'taxa': 0, 'valor': valor,
+            'total_corretora': 0.0, 'consultor': 0.0, 'liquido': 0.0,
+            'aviso': f'Falta RECEBIMENTO: {op_nome} / {plano}.',
+            'falta_regra_gestor': [f'Falta cadastrar quanto a corretora recebe de {op_nome} / {plano}.'],
+            'operadora_regra': op_nome,
+        }
+    conta = _gestor_calcular(snap, total_corretora)
+    regua = [f['percentual_recebimento'] / 100.0 for f in conta['fracoes']]
+    return {
+        'codigo': 'socio_gestor_regra', 'modelo': 'socio_gestor_regra',
+        'nivel': '', 'plano': plano, 'num_parcelas': len(regua),
+        'dist_corretora': ';'.join(str(x) for x in regua), 'regua_mens': regua,
+        'receb_mens': float(receb['total'] or 0), 'rep_mens': 0.0, 'taxa': 0,
+        'valor': valor, 'total_corretora': total_corretora,
+        # A coluna histórica continua populada para compatibilidade; o número
+        # definitivo para pagamento vem do snapshot congelado e da retenção.
+        'consultor': conta['total_liquido_gestor'],
+        'liquido': conta['total_saldo_serenus'], 'aviso': '',
+        'fracoes_gestor': conta['fracoes'],
+        'falta_regra_gestor': [], 'operadora_regra': op_nome,
+    }
+
+
 def _gestor_snapshot(conn, proposta_id):
     try:
         r = conn.execute("SELECT * FROM proposta_regra_snapshot WHERE proposta_id=?",
@@ -5320,6 +5393,40 @@ def gerar_parcelas(proposta_id, vigencia, c, dia_vencimento=None, status_overrid
         parcelas.append({
             'proposta_id': proposta_id, 'numero': i + 1, 'percentual': perc,
             'valor': val_c, 'valor_corretora': val_cor, 'perc_cliente': perc,
+            'data_prevista': data,
+            'status': status_override if status_override else 'Pendente de receber',
+            'competencia': mes_ref.strftime('%Y-%m'), 'mensalidade_ref': i + 1,
+        })
+    return parcelas
+
+
+def gerar_parcelas_socio_gestor(proposta_id, vigencia, c, dia_vencimento=None,
+                                status_override=None):
+    """Gera parcelas da régua comercial de sócio/gestor.
+
+    ``parcelas.valor`` continua sendo a quantia líquida a pagar à pessoa, como
+    sempre foi. Diferente dos consultores, ela não pode ser derivada do valor
+    mensal do cliente: vem de cada fração, depois da retenção cadastrada.
+    """
+    from dateutil.relativedelta import relativedelta
+    try:
+        base = datetime.strptime(vigencia[:7], '%Y-%m') if vigencia and len(vigencia) >= 7 else datetime.now(TZ_SP).replace(day=1)
+    except Exception:
+        base = datetime.now(TZ_SP).replace(day=1)
+    dia = int(dia_vencimento) if dia_vencimento else base.day
+    parcelas = []
+    for i, f in enumerate(c.get('fracoes_gestor') or []):
+        mes_ref = base + relativedelta(months=i)
+        try:
+            data = mes_ref.replace(day=min(dia, 28)).strftime('%Y-%m-%d')
+        except Exception:
+            data = mes_ref.strftime('%Y-%m-01')
+        parcelas.append({
+            'proposta_id': proposta_id, 'numero': i + 1,
+            'percentual': round(float(f.get('percentual_recebimento') or 0), 2),
+            'valor': round(float(f.get('liquido_gestor') or 0), 2),
+            'valor_corretora': round(float(f.get('recebido') or 0), 2),
+            'perc_cliente': round(float(f.get('percentual_recebimento') or 0), 2),
             'data_prevista': data,
             'status': status_override if status_override else 'Pendente de receber',
             'competencia': mes_ref.strftime('%Y-%m'), 'mensalidade_ref': i + 1,
@@ -9619,7 +9726,16 @@ def salvar_proposta():
         # Produção do CICLO ANTES desta venda + esta venda = produção que define o nível.
         prod_antes = _producao_mes(conn, session['user_id'], mes_meta)
         prod_acumulada = prod_antes + valor
-        c = calc_comissao(operadora, regime_base, prod_acumulada, valor, modalidade, d.get('tipo_pessoa',''))
+        # Consultores continuam, sem exceção, nos três modelos já existentes:
+        # Sem Lead/Sem Fixo, Com Lead (N1/N2/N3) ou Com Fixo + Lead.
+        # Sócio/gestor/admin não passa por essa matriz: usa a regra comercial
+        # própria, por operadora/variação/plano, com retenção explícita.
+        if _gestor_e_vendedor(conn, session.get('user_id')):
+            c = _gestor_calculo_inicial(conn, operadora, modalidade,
+                                        d.get('tipo_pessoa', ''), valor)
+        else:
+            c = calc_comissao(operadora, regime_base, prod_acumulada, valor,
+                               modalidade, d.get('tipo_pessoa',''))
 
         # status parcelas: bloqueado se sem comprovante
         status_parcela_inicial = 'Bloqueado - Falta Comprovante' if not comprovante_arq else 'Pendente de receber'
@@ -9707,7 +9823,11 @@ def salvar_proposta():
         cur.execute("""UPDATE propostas SET data_nasc_titular=?, dependentes_json=?, tem_repique=?, repique_json=? WHERE id=?""",
             (d.get('data_nasc_titular',''), json.dumps(deps, ensure_ascii=False),
              1 if d.get('tem_repique') else 0, json.dumps(repique, ensure_ascii=False) if repique else None, proposta_id))
-        for parc in gerar_parcelas(proposta_id, d.get('vigencia',''), c, dia_venc, status_override=status_parcela_inicial):
+        gerador_parcelas = (gerar_parcelas_socio_gestor
+                            if c.get('modelo') == 'socio_gestor_regra'
+                            else gerar_parcelas)
+        for parc in gerador_parcelas(proposta_id, d.get('vigencia',''), c, dia_venc,
+                                     status_override=status_parcela_inicial):
             cur.execute("""INSERT INTO parcelas (proposta_id,numero,percentual,valor,valor_corretora,perc_cliente,data_prevista,status,competencia,mensalidade_ref,tipo_origem)
                 VALUES (?,?,?,?,?,?,?,?,?,?,'comissao')""", (parc['proposta_id'],parc['numero'],parc['percentual'],
                                           parc['valor'],parc['valor_corretora'],parc['perc_cliente'],
@@ -9926,7 +10046,14 @@ def editar_consultor(pid):
     # Produção do CICLO (mes_meta) do NOVO consultor (exceto esta proposta) + esta venda
     prod_antes = _producao_mes(conn, novo_uid, p['mes_meta'], excluir_pid=pid)
     prod_acumulada = prod_antes + (p['valor'] or 0)
-    c = calc_comissao(p['adm_operadora'], u['regime_base'], prod_acumulada, p['valor'] or 0, p['modalidade'], p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else '')
+    if _gestor_e_vendedor(conn, novo_uid):
+        c = _gestor_calculo_inicial(conn, p['adm_operadora'], p['modalidade'],
+                                    p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else '',
+                                    p['valor'] or 0)
+    else:
+        c = calc_comissao(p['adm_operadora'], u['regime_base'], prod_acumulada,
+                           p['valor'] or 0, p['modalidade'],
+                           p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else '')
 
     conn.execute("""UPDATE propostas SET usuario_id=?, consultor=?, regime_aplicado=?,
         num_parcelas=?, distribuicao_parcelas=?, comissao_total_corretora=?, comissao_consultor=?,
@@ -9938,11 +10065,18 @@ def editar_consultor(pid):
     pagas = conn.execute("""SELECT COUNT(*) n FROM parcelas WHERE proposta_id=? AND status<>'Pendente de receber'""", (pid,)).fetchone()['n']
     if pagas == 0:
         conn.execute("DELETE FROM parcelas WHERE proposta_id=?", (pid,))
-        for parc in gerar_parcelas(pid, p['vigencia'] or '', c, p['dia_vencimento'] if 'dia_vencimento' in p.keys() else None):
+        gerador_parcelas = (gerar_parcelas_socio_gestor
+                            if c.get('modelo') == 'socio_gestor_regra'
+                            else gerar_parcelas)
+        for parc in gerador_parcelas(pid, p['vigencia'] or '', c,
+                                     p['dia_vencimento'] if 'dia_vencimento' in p.keys() else None):
             conn.execute("""INSERT INTO parcelas (proposta_id,numero,percentual,valor,valor_corretora,perc_cliente,data_prevista,status,competencia,mensalidade_ref,tipo_origem)
                 VALUES (?,?,?,?,?,?,?,?,?,?,'comissao')""", (parc['proposta_id'],parc['numero'],parc['percentual'],
                     parc['valor'],parc['valor_corretora'],parc['perc_cliente'],parc['data_prevista'],parc['status'],
                     parc['competencia'],parc['mensalidade_ref']))
+        if _gestor_e_vendedor(conn, novo_uid):
+            _gestor_congelar_snapshot(conn, pid, p['adm_operadora'], c['plano'],
+                                      novo_uid, u['nome'])
         msg = "Consultor remanejado e comissão recalculada."
     else:
         msg = "Consultor trocado. Parcelas já em fluxo foram mantidas; só novas seguem o novo regime."

@@ -344,9 +344,37 @@ def teste_legado_preservado():
     r = A.calc_comissao('Amil', 'gestor_vendedor', 0, 1000.0, 'PME', '')
     checa('o modelo legado ainda responde', r['modelo'] == 'gestor_vendedor', r['modelo'])
     checa('e continua entregando tudo numa parcela', r['num_parcelas'] == 1, r['num_parcelas'])
-    checa('rotulo do legado preservado',
-          A.MODELO_NOME.get('gestor_vendedor', '').startswith('Gestor Vendedor'),
+    checa('rotulo deixa claro que e legado',
+          'legado' in A.MODELO_NOME.get('gestor_vendedor', '').lower(),
           A.MODELO_NOME.get('gestor_vendedor'))
+
+
+def teste_motor_de_socio_nao_usa_modelo_de_consultor():
+    print('\n[unit] socio/gestor nao nasce no modelo Sem Lead/Sem Fixo')
+    limpar()
+    conn = A.db()
+    cadastrar_regra(conn, operadora='Amil', plano='PME')
+    conn.execute("INSERT OR REPLACE INTO recebimento (operadora,obs,plano,total) VALUES ('Amil','', 'PME', 1.0)")
+    conn.commit()
+    c = A._gestor_calculo_inicial(conn, 'Amil', 'PME', '', 1000.0)
+    A.close_db(conn)
+    checa('usa identificador exclusivo de socio/gestor',
+          c['modelo'] == 'socio_gestor_regra', c['modelo'])
+    checa('gera a quantidade da regua comercial', c['num_parcelas'] == 3, c['num_parcelas'])
+    checa('liquido vem da regra do gestor e nao do repasse de consultor',
+          abs(c['consultor'] - 300.0) < 0.01, c['consultor'])
+    parcelas = A.gerar_parcelas_socio_gestor(99, '2026-01-01', c)
+    checa('parcelas guardam o liquido do socio, nao o valor do cliente',
+          len(parcelas) == 3 and abs(parcelas[0]['valor'] - 300.0) < 0.01 and
+          abs(parcelas[1]['valor']) < 0.01, parcelas)
+    conn = A.db()
+    conn.execute("DELETE FROM gestor_regra WHERE operadora='Amil' AND plano='PME'")
+    conn.commit()
+    pendente = A._gestor_calculo_inicial(conn, 'Amil', 'PME', '', 1000.0)
+    A.close_db(conn)
+    checa('sem regra nao cria parcela ficticia do modelo de consultor',
+          pendente['modelo'] == 'socio_gestor_pendente' and pendente['num_parcelas'] == 0,
+          pendente)
 
 
 def teste_telas():
@@ -417,6 +445,7 @@ if __name__ == '__main__':
     teste_rascunho_passa()
     teste_usuario_gestor_sem_regime_de_consultor()
     teste_legado_preservado()
+    teste_motor_de_socio_nao_usa_modelo_de_consultor()
     teste_telas()
     teste_permissoes()
     print('\n' + '=' * 66)

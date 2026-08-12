@@ -69,7 +69,9 @@
           </td>
           <td class="hide-admin" style="font-size:11.5px; color:var(--cinza);">
             {% if u.perfil == 'gestor_vendedor' %}
-              <span style="color:#a78bfa;">100% corretora</span>
+              <span style="color:#a78bfa;">Regra comercial de sócio/gestor</span>
+            {% elif u.perfil in ('admin', 'supervisor') %}
+              <span style="color:var(--cinza);">Regra comercial ao vender</span>
             {% elif u.regime_base == 'com_fixo_lead' %}Com Fixo + Lead
             {% elif u.regime_base == 'com_lead' %}Com Lead N1/N2/N3
             {% else %}Sem Lead/Fixo{% endif %}
@@ -400,18 +402,19 @@
           <label>Perfil</label>
           <select name="perfil" id="n-perfil" required onchange="toggleRegime('n')">
             <option value="consultor">Consultor (vende)</option>
-            <option value="gestor_vendedor">Gestor Vendedor (100% corretora)</option>
-            <option value="supervisor">Supervisor (não vende)</option>
-            <option value="admin">Administrador (não vende)</option>
+            <option value="gestor_vendedor">Sócio/Gestor (vende)</option>
+            <option value="supervisor">Supervisor (pode vender)</option>
+            <option value="admin">Administrador (pode vender)</option>
           </select>
         </div>
         <div class="campo" id="n-regime-wrap">
-          <label>Regime de comissão</label>
+          <label>Regime do consultor</label>
           <select name="regime_base" id="n-regime">
             <option value="sem_lead_sem_fixo">Sem Lead e Sem Fixo</option>
             <option value="com_lead">Com Lead (escalonado N1/N2/N3)</option>
             <option value="com_fixo_lead">Com Fixo + Com Lead</option>
           </select>
+          <div class="hint">Aplica-se somente a consultores. Sócios, gestores, supervisores e administradores que vendem usam a regra comercial por operadora e plano.</div>
         </div>
       </div>
       <div class="modal-botoes">
@@ -465,18 +468,19 @@
           <label>Perfil</label>
           <select name="perfil" id="e-perfil" onchange="toggleRegime('e'); toggleModulos();">
             <option value="consultor">Consultor (vende)</option>
-            <option value="gestor_vendedor">Gestor Vendedor (100% corretora)</option>
-            <option value="supervisor">Supervisor (não vende)</option>
-            <option value="admin">Administrador (não vende)</option>
+            <option value="gestor_vendedor">Sócio/Gestor (vende)</option>
+            <option value="supervisor">Supervisor (pode vender)</option>
+            <option value="admin">Administrador (pode vender)</option>
           </select>
         </div>
         <div class="campo" id="e-regime-wrap">
-          <label>Regime</label>
+          <label>Regime do consultor</label>
           <select name="regime_base" id="e-regime">
             <option value="sem_lead_sem_fixo">Sem Lead e Sem Fixo</option>
             <option value="com_lead">Com Lead (escalonado N1/N2/N3)</option>
             <option value="com_fixo_lead">Com Fixo + Com Lead</option>
           </select>
+          <div class="hint">Aplica-se somente a consultores. Sócios, gestores, supervisores e administradores que vendem usam a regra comercial por operadora e plano.</div>
         </div>
       </div>
       <div class="campo" style="margin-bottom:12px;">
