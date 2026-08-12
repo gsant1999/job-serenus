@@ -1,0 +1,317 @@
+{% extends 'base.html' %}
+{% block title %}Pré-conferência de extratos{% endblock %}
+{% block head %}
+<style>
+  .panel-box { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 20px; margin-bottom:16px; }
+  .panel-box h2 { font-family:'Sora',sans-serif; font-size:14px; font-weight:600; color:var(--texto); margin:0 0 6px; }
+  .panel-box .vazio { color:var(--cinza-2); font-size:12px; padding:8px 0; }
+  .pv-sub { font-size:12px; color:var(--cinza); margin:0 0 14px; line-height:1.55; }
+
+  table.pnl-tab { width:100%; border-collapse:collapse; font-size:12.5px; }
+  table.pnl-tab th { text-align:left; color:var(--cinza-2); font-size:10px; text-transform:uppercase; letter-spacing:.5px; font-weight:600; padding:0 10px 10px; border-bottom:1px solid var(--borda); }
+  table.pnl-tab td { padding:10px; border-bottom:1px solid var(--borda); color:var(--texto); vertical-align:top; }
+  table.pnl-tab td.num, table.pnl-tab th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  table.pnl-tab tr:last-child td { border-bottom:none; }
+  /* Cada extrato ocupa duas <tr> (o resumo e as linhas). A borda fica so na
+     segunda, senao 33 arquivos parecem 66 registros. */
+  #pvTabela .pv-row td { border-bottom:none; }
+  #pvTabela .pv-row-so td, #pvTabela .pv-row-det td { border-bottom:1px solid var(--borda); }
+
+  .pill { display:inline-block; padding:2px 9px; border-radius:20px; font-size:11px; font-weight:600; white-space:nowrap; }
+  .pill-verde { background:var(--verde-soft); color:var(--verde); }
+  .pill-erro { background:rgba(244,63,94,.12); color:var(--erro); }
+  .pill-cinza { background:rgba(125,133,150,.14); color:var(--cinza); }
+  .pill-amarelo { background:rgba(250,204,21,.14); color:var(--amarelo); }
+  .pill-azul { background:rgba(59,130,246,.14); color:var(--info); }
+
+  .pv-num-linha { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .pv-num { flex:1 1 150px; background:var(--panel-2); border:1px solid var(--borda); border-radius:10px; padding:12px 14px; }
+  .pv-num b { display:block; font-size:19px; font-variant-numeric:tabular-nums; }
+  .pv-num span { display:block; font-size:10px; color:var(--cinza); margin-top:3px; }
+  .pv-num.destaque { border-color:var(--verde); }
+  .pv-num.destaque b { color:var(--verde); }
+
+  .pv-filtros { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .pv-chip { border:1px solid var(--borda); background:var(--panel-2); color:var(--cinza); border-radius:20px;
+             padding:6px 13px; font-size:12px; font-weight:600; cursor:pointer; font-family:inherit; }
+  .pv-chip:hover { border-color:var(--azul); color:var(--texto); }
+  .pv-chip[aria-pressed="true"] { background:var(--azul); border-color:var(--azul); color:#fff; }
+  .pv-chip .c { opacity:.75; font-weight:500; margin-left:4px; }
+
+  .pv-arq { font-family:ui-monospace,Menlo,monospace; font-size:11.5px; }
+  .pv-linha2 { font-size:11px; color:var(--cinza); margin-top:3px; line-height:1.5; }
+  .pv-avisos { margin-top:6px; font-size:11px; color:var(--amarelo); line-height:1.5; }
+  .pv-itens { margin-top:10px; }
+  .pv-itens summary { cursor:pointer; font-size:11.5px; color:var(--azul); }
+  .pv-itens table { width:100%; border-collapse:collapse; font-size:11.5px; margin-top:8px; }
+  .pv-itens th { text-align:left; color:var(--cinza-2); font-size:9.5px; text-transform:uppercase; letter-spacing:.4px; padding:0 8px 6px; border-bottom:1px solid var(--borda); }
+  .pv-itens td { padding:7px 8px; border-bottom:1px solid var(--borda); }
+  .pv-itens td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .pv-div-nao { color:var(--erro); font-weight:700; }
+  /* O app nao define cor de link global: no tema escuro o azul do navegador
+     fica quase invisivel dentro das tabelas. */
+  #pvTabela a, .pv-itens a { color:var(--azul); text-decoration:none; font-weight:600; }
+  #pvTabela a:hover, .pv-itens a:hover { text-decoration:underline; }
+  .pv-parcial { color:var(--cinza); font-size:11px; }
+
+  .pv-nada { background:var(--panel-2); border:1px solid var(--borda); border-left:3px solid var(--verde);
+             border-radius:10px; padding:12px 14px; font-size:12px; color:var(--texto); line-height:1.6; margin-bottom:16px; }
+  /* O azul padrao de link some no fundo escuro deste aviso. */
+  .pv-nada a { color:var(--verde); text-decoration:underline; }
+  .pv-erro { background:rgba(244,63,94,.1); border:1px solid rgba(244,63,94,.3); border-radius:10px;
+             padding:12px 14px; font-size:12.5px; color:var(--erro); margin-bottom:16px; }
+  .pv-form { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .pv-oculta { display:none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Pré-conferência de extratos</h1>
+    <div class="sub">Lê vários PDFs da Affinity de uma vez e mostra o que aconteceria — sem gravar nada.</div>
+  </div>
+  <div><a href="/comissoes/extrato" class="btn-outline">Voltar aos extratos</a></div>
+</div>
+
+<div class="page">
+
+  {# O óbvio dito na tela: esta página não move dinheiro. Quem abre precisa saber
+     disso ANTES de clicar, não depois de procurar o efeito no financeiro. #}
+  <div class="pv-nada">
+    <b>Esta tela não grava nada.</b> Ela lê os PDFs, compara com o que já existe no JOB e mostra o resultado.
+    Nenhuma proposta, parcela, recebimento, repasse ou lançamento é criado ou alterado aqui.
+    Para importar um extrato de verdade, use <a href="/comissoes/extrato">Extratos de comissão</a>, um arquivo por vez.
+  </div>
+
+  {# O que o número significa tem que estar escrito ao lado do número, não na
+     cabeça de quem construiu a tela. #}
+  <div class="pv-nada" style="border-left-color:var(--amarelo);">
+    <b>O extrato é valor apurado, não é dinheiro na conta.</b> O PDF diz o que a Affinity apurou e
+    informa que vai pagar. Ele não prova entrada bancária: o extrato pode estar previsto, ter sido
+    transferido para outro extrato, ser antecipação sobre parcela futura, ou ser pago em data
+    diferente da previsão. A confirmação de que o dinheiro entrou vem da conciliação bancária.
+  </div>
+
+  {% if erro %}<div class="pv-erro">{{ erro }}</div>{% endif %}
+
+  <div class="panel-box">
+    <h2>Conferir um lote de extratos</h2>
+    <p class="pv-sub">
+      Aceita vários PDFs de uma vez (até {{ limite }} por conferência). Só PDF do extrato da Affinity.
+      A leitura é a mesma do importador, então o que aparecer aqui é o que entraria lá.
+    </p>
+    <form method="post" enctype="multipart/form-data" class="pv-form" id="pvForm">
+      <input type="file" name="pdfs" accept="application/pdf" multiple required>
+      <button type="submit" class="btn" id="pvBtn">Ler e conferir sem gravar</button>
+      <span class="pv-linha2" id="pvStatus"></span>
+    </form>
+  </div>
+
+  {% if linhas %}
+  <div class="pv-num-linha">
+    <div class="pv-num"><b>{{ resumo.arquivos }}</b><span>extratos lidos</span></div>
+    <div class="pv-num"><b>{{ resumo.itens }}</b><span>linhas de comissão</span></div>
+    <div class="pv-num"><b>{{ resumo.bruto|moeda }}</b><span>bruto lido</span></div>
+    <div class="pv-num"><b>{{ resumo.debitos|moeda }}</b><span>débitos e tarifas<i class="ajuda-i" title="Descontos que a Affinity aplica no próprio extrato, como a tarifa de R$ 4,00 por pagamento. Já vêm com sinal negativo.">i</i></span></div>
+    <div class="pv-num destaque"><b>{{ resumo.apurado|moeda }}</b><span>apurado pela Affinity<i class="ajuda-i" title="Líquido dos extratos cuja leitura fechou, MENOS os duplicados (que não devem entrar de novo) e MENOS os ajustes (estorno e transferência, que não são dinheiro novo). É o que a Affinity apurou — ainda não é entrada confirmada no banco.">i</i></span></div>
+  </div>
+
+  {% if resumo.nao_fecharam %}
+  <div class="pv-erro">
+    <b>{{ resumo.nao_fecharam }} arquivo{{ '' if resumo.nao_fecharam == 1 else 's' }} com leitura incompleta.</b>
+    A soma das linhas lidas não bate com o total impresso no próprio PDF, ou o PDF não traz total nenhum
+    para conferir. Enquanto não fechar, esse arquivo não pode ser importado: linha perdida não aparece
+    na tela para reclamar de si mesma.
+  </div>
+  {% endif %}
+
+  {% if por_cadastro|length > 1 %}
+  <div class="panel-box">
+    <h2>Por cadastro<i class="ajuda-i" title="Axioma e Serenus são cadastros diferentes na Affinity, com donos diferentes. Somar os dois juntos esconde de quem é o dinheiro.">i</i></h2>
+    <table class="pnl-tab">
+      <thead><tr><th>Cadastro</th><th class="num">Extratos</th><th class="num">Linhas</th><th class="num">Bruto</th><th class="num">Apurado</th></tr></thead>
+      <tbody>
+        {% for c in por_cadastro %}
+        <tr>
+          <td><span class="pill pill-cinza">{{ c.cod }}</span> {{ c.nome }}</td>
+          <td class="num">{{ c.arquivos }}</td>
+          <td class="num">{{ c.itens }}</td>
+          <td class="num">{{ c.bruto|moeda }}</td>
+          <td class="num"><b>{{ c.apurado|moeda }}</b></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <div class="panel-box">
+    <h2>Resultado por arquivo</h2>
+    <p class="pv-sub">
+      Cada extrato cai em uma situação só — a mais grave primeiro. Duplicado vem antes de tudo porque nada
+      abaixo dele deveria ser lançado; ajuste vem em seguida porque um extrato que não é entrada não precisa
+      ter venda casada para estar certo.
+    </p>
+
+    <div class="pv-filtros" role="group" aria-label="Filtrar por situação">
+      <button type="button" class="pv-chip" data-f="todos" aria-pressed="true">Todos<span class="c">{{ resumo.arquivos }}</span></button>
+      <button type="button" class="pv-chip" data-f="pronto" aria-pressed="false">Prontos<span class="c">{{ resumo.prontos }}</span></button>
+      <button type="button" class="pv-chip" data-f="nao_fechou" aria-pressed="false">Leitura incompleta<span class="c">{{ resumo.nao_fecharam }}</span></button>
+      <button type="button" class="pv-chip" data-f="duplicado" aria-pressed="false">Duplicados<span class="c">{{ resumo.duplicados }}</span></button>
+      <button type="button" class="pv-chip" data-f="sem_proposta" aria-pressed="false">Sem proposta<span class="c">{{ resumo.sem_proposta }}</span></button>
+      <button type="button" class="pv-chip" data-f="ambiguo" aria-pressed="false">Ambíguos<span class="c">{{ resumo.ambiguos }}</span></button>
+      <button type="button" class="pv-chip" data-f="ajuste" aria-pressed="false">Estorno/ajuste<span class="c">{{ resumo.ajustes }}</span></button>
+      <button type="button" class="pv-chip" data-f="divergente" aria-pressed="false">Divergentes<span class="c">{{ resumo.divergentes }}</span></button>
+      <button type="button" class="pv-chip" data-f="revisar" aria-pressed="false">A revisar<span class="c">{{ resumo.revisar }}</span></button>
+    </div>
+
+    <table class="pnl-tab" id="pvTabela">
+      <thead>
+        <tr>
+          <th>Extrato</th>
+          <th>Tipo<i class="ajuda-i" title="Normal é venda da tabela por operadora. Antecipação é adiantamento sobre parcela futura — não é entrada bancária confirmada. Estorno e transferência são ajuste: não entram como dinheiro novo.">i</i></th>
+          <th>Datas</th>
+          <th class="num">Linhas</th>
+          <th class="num">Bruto lido</th>
+          <th class="num">Débito</th>
+          <th class="num">Líquido esperado</th>
+          <th>Situação</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for l in linhas %}
+        <tr class="pv-row{{ ' pv-row-so' if not l.itens }}" data-sit="{{ l.situacao }}">
+          <td>
+            <b>{{ l.codigo or 'sem código' }}</b>
+            <div class="pv-linha2 pv-arq">{{ l.arquivo }}</div>
+            {% if l.cadastro_cod %}<div class="pv-linha2"><span class="pill pill-cinza">{{ l.cadastro_cod }}</span> {{ (l.cadastro_nome or '')[:34] }}</div>{% endif %}
+            {% if l.leitura_fechada %}
+            <div class="pv-linha2">leitura confere com o total impresso no PDF</div>
+            {% endif %}
+            {% if l.falhou %}<div class="pv-avisos">Não consegui ler este PDF: {{ l.erro_leitura }}</div>{% endif %}
+            {% for a in l.avisos %}<div class="pv-avisos">{{ a }}</div>{% endfor %}
+            {% if l.transferido_para %}<div class="pv-avisos">Valor transferido para o extrato {{ l.transferido_para }} — este aqui não pagou nada.</div>{% endif %}
+            {% if l.dup_banco %}<div class="pv-avisos">Este código já foi importado antes.</div>{% endif %}
+            {% if l.dup_lote %}<div class="pv-avisos">Este código aparece mais de uma vez neste lote.</div>{% endif %}
+          </td>
+          <td>{% for t in l.tipos %}<span class="pill {{ 'pill-amarelo' if t in ('antecipação','estorno','transferência') else 'pill-cinza' }}">{{ t }}</span> {% endfor %}</td>
+          <td class="pv-linha2" style="color:var(--texto);">
+            {% if l.previsao %}previsão {{ l.previsao }}<br>{% endif %}
+            {% if l.data_pagamento %}pago em {{ l.data_pagamento }}{% else %}<span style="color:var(--cinza);">sem data de pagamento</span>{% endif %}
+          </td>
+          <td class="num">{{ l.n_itens }}</td>
+          <td class="num">{{ l.total_bruto|moeda }}
+            {% if not l.leitura_fechada and l.conf_impresso is not none %}
+            <div class="pv-linha2 pv-div-nao">extrato diz {{ l.conf_impresso|moeda }}</div>
+            {% endif %}
+          </td>
+          <td class="num">{{ l.debitos|moeda }}</td>
+          <td class="num"><b>{{ l.liquido_esperado|moeda }}</b></td>
+          <td>
+            {% if l.situacao == 'pronto' %}<span class="pill pill-verde">pronto</span>
+            {% elif l.situacao == 'nao_fechou' %}<span class="pill pill-erro">leitura incompleta</span>
+            {% elif l.situacao == 'duplicado' %}<span class="pill pill-erro">duplicado</span>
+            {% elif l.situacao == 'ajuste' %}<span class="pill pill-azul">estorno/ajuste</span>
+            {% elif l.situacao == 'revisar' %}<span class="pill pill-amarelo">a revisar</span>
+            {% elif l.situacao == 'sem_proposta' %}<span class="pill pill-erro">sem proposta</span>
+            {% elif l.situacao == 'ambiguo' %}<span class="pill pill-amarelo">ambíguo</span>
+            {% else %}<span class="pill pill-amarelo">divergente</span>{% endif %}
+            <div class="pv-linha2">
+              {{ l.casados }} de {{ l.n_itens }} {{ 'casada' if l.n_itens == 1 else 'casadas' }}
+              {%- if l.com_parcela %} · {{ l.com_parcela }} com parcela exata{% endif %}
+              {%- if l.fracos %} · {{ l.fracos }} por nome{% endif %}
+              {%- if l.ambiguos %} · {{ l.ambiguos }} {{ 'ambígua' if l.ambiguos == 1 else 'ambíguas' }}{% endif %}
+              {%- if l.divergentes %} · {{ l.divergentes }} {{ 'divergente' if l.divergentes == 1 else 'divergentes' }}{% endif %}
+            </div>
+          </td>
+        </tr>
+        {% if l.itens %}
+        <tr class="pv-row-det" data-sit="{{ l.situacao }}">
+          <td colspan="8" style="padding-top:0;">
+            <details class="pv-itens">
+              <summary>{% if l.n_itens == 1 %}Ver a linha{% else %}Ver as {{ l.n_itens }} linhas{% endif %} de {{ l.codigo or l.arquivo }}</summary>
+              <table>
+                <thead><tr>
+                  <th>Cliente</th><th>Proposta no extrato</th><th>Venda no JOB</th>
+                  <th>Parcela</th><th class="num">Affinity</th><th class="num">JOB</th>
+                  <th class="num">Divergência<i class="ajuda-i" title="O JOB guarda a comissão TOTAL da venda. A comparação só vale quando a linha do extrato vale 100% da parcela. Linha de 30%, 15% ou 5% faz parte de uma régua de recebimento que o JOB ainda não tem cadastrada — comparar ali daria divergência falsa em toda linha.">i</i></th>
+                </tr></thead>
+                <tbody>
+                  {% for i in l.itens %}
+                  <tr>
+                    <td>{{ i.cliente }}<div class="pv-linha2">{{ i.operadora }}{% if i.operadora_truncada %}<span title="O PDF cortou o nome da operadora nesta linha. O valor foi lido inteiro; só o nome ficou pela metade."> (nome cortado no PDF)</span>{% endif %} · {{ i.tipo }}</div></td>
+                    <td>{{ i.numero_proposta or '—' }}<div class="pv-linha2">parc {{ i.parcela }}</div></td>
+                    <td>
+                      {% if i.proposta_id %}
+                        <a href="/proposta/{{ i.proposta_id }}">{{ i.razao_social[:36] or ('venda #' ~ i.proposta_id) }}</a>
+                        <div class="pv-linha2">
+                          {% if i.seguro %}<span class="pill pill-verde">pelo número</span>
+                          {% else %}<span class="pill pill-amarelo" title="Casou pelo nome, com um único candidato. Confirme antes de pagar.">pelo nome</span>{% endif %}
+                          {%- if i.consultor %} · {{ i.consultor }}{% endif %}
+                        </div>
+                      {% elif i.ambiguo %}
+                        <span class="pill pill-amarelo">{{ i.candidatos }} candidatos</span>
+                        <div class="pv-linha2">Mais de uma venda bate. O JOB não escolhe sozinho.</div>
+                      {% else %}
+                        <span class="pill pill-erro">sem venda no JOB</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if i.parcela_id %}
+                        <a href="/proposta/{{ i.proposta_id }}">parcela {{ i.parcela }}</a>
+                        <div class="pv-linha2">{{ i.parcela_status }}{% if i.parcela_valor is not none %} · {{ i.parcela_valor|moeda }}{% endif %}</div>
+                      {% elif i.proposta_id and not i.seguro %}
+                        <span class="pv-linha2">só com casamento pelo número</span>
+                      {% else %}
+                        <span class="pv-linha2">—</span>
+                      {% endif %}
+                    </td>
+                    <td class="num">{{ i.bruto|moeda }}
+                      {% if not i.comparavel %}<div class="pv-parcial">{{ ('%g' % i.percentual)|replace('.', ',') }}% da parcela</div>{% endif %}
+                    </td>
+                    <td class="num">{{ i.job_esperado|moeda if i.job_esperado is not none else '—' }}</td>
+                    <td class="num {{ 'pv-div-nao' if i.divergencia is not none and i.divergencia|abs >= 0.01 else '' }}">
+                      {% if i.divergencia is not none %}{{ i.divergencia|moeda }}
+                      {% elif not i.comparavel %}<span class="pv-parcial">não comparável</span>
+                      {% else %}—{% endif %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </details>
+          </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+// Filtro no cliente: o lote nao fica guardado em lugar nenhum, entao refazer o
+// filtro pelo servidor obrigaria a subir os 32 PDFs de novo a cada clique.
+document.querySelectorAll('.pv-chip').forEach(function(b){
+  b.addEventListener('click', function(){
+    var f = b.dataset.f;
+    document.querySelectorAll('.pv-chip').forEach(function(o){
+      o.setAttribute('aria-pressed', o === b ? 'true' : 'false');
+    });
+    document.querySelectorAll('.pv-row, .pv-row-det').forEach(function(tr){
+      tr.classList.toggle('pv-oculta', f !== 'todos' && tr.dataset.sit !== f);
+    });
+  });
+});
+// Ler 32 PDFs leva alguns segundos. Sem reacao imediata a pessoa clica de novo.
+var form = document.getElementById('pvForm');
+if (form) form.addEventListener('submit', function(){
+  var b = document.getElementById('pvBtn');
+  b.disabled = true;
+  b.textContent = 'Lendo os arquivos...';
+  document.getElementById('pvStatus').textContent = 'Nada está sendo gravado — só leitura.';
+});
+</script>
+{% endblock %}

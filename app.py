@@ -150,6 +150,21 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True  # Sem acesso JS (protege de XSS)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # Proteção CSRF
 app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 7  # 7 dias (sistema financeiro)
 
+# ─── MODO DE TESTE EXPLÍCITO (JOB_MODO_TESTE=1) ───────────────────────────────
+# Desliga TUDO que escreve no banco sozinho: APScheduler (backup, import de leads,
+# lembretes, fluxos, conversões) e o auto-pull por requisição.
+#
+# Existe porque o teste de invariância da pré-conferência — o que prova que ler um
+# extrato não move dinheiro — tirava a foto do banco enquanto o importador de
+# leads gravava em thread de fundo. O teste acusava a prévia de um estrago que não
+# era dela, e um teste que acusa errado é pior que teste nenhum: ensina a ignorar.
+#
+# Só liga por variável de ambiente. Produção nunca define JOB_MODO_TESTE, então o
+# comportamento no Railway é byte a byte o mesmo de antes desta linha existir.
+MODO_TESTE = os.environ.get('JOB_MODO_TESTE', '').strip().lower() in ('1', 'true', 'sim', 'yes')
+if MODO_TESTE:
+    print("[MODO_TESTE] Agendadores e auto-pull desligados (JOB_MODO_TESTE ativo).")
+
 # ─── CAPTURA GLOBAL DE ERROS (para diagnóstico de 500) ────────────────────────
 # Guarda os últimos erros em memória para inspeção rápida via /admin/ultimo-erro,
 # e loga o traceback completo no Railway (aparece em "View Logs").
@@ -25812,9 +25827,18 @@ _EXT_RX_ITEM = re.compile(
     + (_EXT_DIN % 'bruto') + r'\s+' + (_EXT_DIN % 'taxa') + r'\s+(?P<pct_adm>[\d,]+)%\s+'
     + (_EXT_DIN % 'desp') + r'\s+' + (_EXT_DIN % 'iss') + r'\s+' + (_EXT_DIN % 'liquido') + r'\s*$')
 
+#    O colchete que fecha a operadora pode FALTAR: quando o nome do cliente é
+#    longo, a coluna estoura e o SisWeb corta o texto no meio ('- [Porto Seguro
+#    R$ 942,69'). Era o caso do extrato 1374214, em que a segunda linha sumia e o
+#    JOB lia R$ 1.706,16 no lugar de R$ 2.648,85 — sem erro nenhum na tela, porque
+#    a linha que faltava não existia para reclamar.
+#    Por isso `\]?` e não `\]`: o fechamento é opcional, mas NADA MAIS afrouxa —
+#    a linha continua exigindo o prefixo [tipo][Parc #n][pct%], o 'Prop. <número>'
+#    e os seis valores monetários até o fim da linha. Uma linha inválida não passa
+#    a caber; só a linha válida que vinha cortada volta a ser lida.
 _EXT_RX_CREDITO = re.compile(
     r'^\[(?P<tipo>[^\]]+)\]\[Parc\s*#?(?P<parc>\d{1,3})\]\[(?P<pct>[\d,]+)%\]\s*'
-    r'Prop\.\s*(?P<proposta>\d{4,20})\s*-\s*(?P<cliente>.+?)\s*-\s*\[(?P<operadora>[^\]]+)\]\s+'
+    r'Prop\.\s*(?P<proposta>\d{4,20})\s*-\s*(?P<cliente>.+?)\s*-\s*\[(?P<operadora>[^\]]+?)(?P<fecha>\])?\s+'
     + (_EXT_DIN % 'bruto') + r'\s+' + (_EXT_DIN % 'taxa') + r'\s+(?P<pct_adm>[\d,]+)%\s+'
     + (_EXT_DIN % 'desp') + r'\s+' + (_EXT_DIN % 'iss') + r'\s+' + (_EXT_DIN % 'liquido') + r'\s*$')
 
@@ -25925,6 +25949,10 @@ def ler_extrato_affinity(caminho_ou_bytes, nome_arquivo=''):
                 'bruto': _ext_num(d['bruto']), 'taxa': _ext_num(d['taxa']),
                 'desp_adm': _ext_num(d['desp']), 'iss': _ext_num(d['iss']),
                 'liquido': _ext_num(d['liquido']), 'tipo': d['tipo'].strip()[:40],
+                # Sem o colchete de fechamento, o nome da operadora veio cortado
+                # pelo próprio PDF. O valor está inteiro; o nome, não. Quem
+                # confere precisa saber a diferença.
+                'operadora_truncada': not d.get('fecha'),
             })
 
     # Debito: a linha 'Total de Créditos e Débitos' fecha creditos MENOS debitos,
@@ -25948,8 +25976,8 @@ def ler_extrato_affinity(caminho_ou_bytes, nome_arquivo=''):
     cab['total_bruto'] = round(sum(i['bruto'] for i in itens), 2)
     cab['total_liquido'] = round(sum(i['liquido'] for i in itens), 2)
 
-    # Conferencia pelo VALOR DA NOTA FISCAL: e o unico total presente em TODOS os
-    # formatos (tabela por operadora, antecipacao, e os dois misturados).
+    # Conferencia pelo VALOR DA NOTA FISCAL: e o total presente em todo extrato
+    # que gerou nota — tabela por operadora, antecipacao, e os dois misturados.
     impresso = None
     mm = re.search(r'VALOR DA NOTA FISCAL:\s*R\$ ?([\d.,]+)', plano)
     if mm:
@@ -25965,11 +25993,56 @@ def ler_extrato_affinity(caminho_ou_bytes, nome_arquivo=''):
             if impresso is not None:
                 break
     cab['total_impresso'] = impresso
-    if impresso is None:
-        avisos.append('Não achei o total impresso no PDF — não deu pra conferir a leitura.')
-    elif abs(impresso - cab['total_bruto']) > 0.01:
-        avisos.append(f"A soma das linhas lidas (R$ {cab['total_bruto']:.2f}) não bate com o total "
-                      f"impresso no extrato (R$ {impresso:.2f}). Alguma linha escapou do leitor.")
+
+    # Extrato transferido nao emite nota: nao tem 'VALOR DA NOTA FISCAL' nenhum, e
+    # exigir esse rotulo o marcaria como leitura falha para sempre. Nele o total
+    # que da pra conferir e o LIQUIDO da linha 'Total de Créditos e Débitos' — o
+    # ultimo valor dela, que ja e creditos menos debitos.
+    # Esse total so serve como ancora quando NAO ha nota: em extrato com tabela
+    # por operadora ele vale so o bloco de creditos (fica -4,00, so a tarifa),
+    # entao compara-lo com o liquido inteiro reprovaria leitura correta.
+    tcd = None
+    for l in linhas:
+        if l.startswith('Total de Créditos e Débitos'):
+            vals = re.findall(r'-?R\$ ?[-\d.,]+', l)
+            if vals:
+                tcd = _ext_num(vals[-1])
+            break
+    liquido_lido = round(cab['total_liquido'] + cab['debitos'], 2)
+
+    # LEITURA FECHADA: a soma das linhas lidas bate com o total impresso pelo
+    # proprio extrato. E a unica prova de que nenhuma linha escapou do leitor —
+    # linha perdida nao aparece na tela para reclamar de si mesma. O extrato 1374214
+    # perdia R$ 942,69 em silencio, e so a conferencia contra o impresso pegaria.
+    if impresso is not None:
+        cab['conf_ancora'] = 'nota_fiscal'
+        cab['conf_impresso'] = impresso
+        cab['conf_lido'] = cab['total_bruto']
+    elif tcd is not None:
+        cab['conf_ancora'] = 'creditos_debitos'
+        cab['conf_impresso'] = tcd
+        cab['conf_lido'] = liquido_lido
+    else:
+        cab['conf_ancora'] = ''
+        cab['conf_impresso'] = None
+        cab['conf_lido'] = cab['total_bruto']
+    cab['conf_diferenca'] = (None if cab['conf_impresso'] is None
+                             else round(cab['conf_lido'] - cab['conf_impresso'], 2))
+    cab['leitura_fechada'] = bool(cab['conf_diferenca'] is not None
+                                  and abs(cab['conf_diferenca']) < 0.01)
+
+    if cab['conf_impresso'] is None:
+        avisos.append('Não achei nenhum total impresso no PDF — não deu pra conferir se a leitura '
+                      'pegou todas as linhas. Confira o arquivo à mão antes de importar.')
+    elif not cab['leitura_fechada']:
+        rotulo = ('total impresso no extrato' if cab['conf_ancora'] == 'nota_fiscal'
+                  else 'total de créditos e débitos do extrato')
+        avisos.append(f"A leitura não fechou: somei R$ {cab['conf_lido']:.2f} e o {rotulo} diz "
+                      f"R$ {cab['conf_impresso']:.2f} (diferença de R$ {cab['conf_diferenca']:.2f}). "
+                      f"Alguma linha escapou do leitor — não importe este arquivo assim.")
+    if any(i.get('operadora_truncada') for i in itens):
+        avisos.append('O PDF cortou o nome de pelo menos uma operadora. O valor foi lido inteiro; '
+                      'só o nome ficou pela metade.')
     if not itens:
         avisos.append('Nenhuma linha de venda reconhecida neste PDF.')
     return cab, itens, avisos
@@ -26158,12 +26231,20 @@ def midia_puxar():
 @login_required
 @admin_required
 def comissao_extrato():
-    """Importa o extrato de comissao da Affinity (PDF) e mostra a conferencia.
+    """LEGADO: importa um extrato da Affinity por vez, gravando na hora.
 
-    O extrato E o dinheiro que entrou — a Affinity paga o que esta nele. O JOB
-    nao corrige o valor: ele mostra ONDE divergiu do calculo proprio e deixa
-    classificar se o erro foi nosso (cadastro) ou dela. Sem isso, uma diferenca
-    some no meio do mes e ninguem nunca descobre quem errou."""
+    Continua no ar porque os extratos ja importados vivem aqui e a tela de
+    detalhe deles depende desta lista. Para lote novo, o caminho e a
+    pre-conferencia — ela mostra o lote inteiro antes de qualquer gravacao.
+
+    O que o extrato E: o valor que a Affinity APUROU e informa que vai pagar. Nao
+    e prova de entrada no banco. Dizer 'dinheiro que entrou' era o erro que fazia
+    a tela parecer conciliacao bancaria sem nunca ter olhado o banco — extrato
+    pode ser transferido para outro extrato, pago em data diferente da previsao,
+    ou ser antecipacao sobre parcela que ainda nem venceu.
+
+    O JOB nao corrige o valor: ele mostra ONDE divergiu do calculo proprio e
+    deixa classificar se o erro foi nosso (cadastro) ou dela."""
     conn = db()
     avisos, erro = [], None
     if request.method == 'POST':
@@ -26181,6 +26262,22 @@ def comissao_extrato():
                     erro = f'Este extrato já foi importado (código {cod}).'
                 elif not itens:
                     erro = 'Não reconheci nenhuma linha de venda neste PDF.'
+                elif not cab.get('leitura_fechada'):
+                    # TRAVA: leitura pela metade nao entra. Era exatamente assim
+                    # que o extrato 1374214 teria entrado valendo R$ 1.706,16 em
+                    # vez de R$ 2.648,85 — com aviso amarelo na tela, gravado do
+                    # mesmo jeito, e ninguem olhando o aviso depois de gravado.
+                    dif = cab.get('conf_diferenca')
+                    if cab.get('conf_impresso') is None:
+                        erro = ('Não achei nenhum total impresso neste PDF, então não dá pra provar '
+                                'que a leitura pegou todas as linhas. Confira o arquivo à mão — '
+                                'importar sem essa prova pode lançar comissão pela metade.')
+                    else:
+                        erro = (f'A leitura não fechou com o extrato: somei R$ {cab.get("conf_lido", 0):.2f} '
+                                f'e o próprio PDF diz R$ {cab.get("conf_impresso", 0):.2f} '
+                                f'(diferença de R$ {dif:.2f}). Alguma linha escapou do leitor, então '
+                                f'importar agora lançaria comissão errada. Use a pré-conferência para ver '
+                                f'o que foi lido antes de decidir.')
                 else:
                     cur = conn.execute("""INSERT INTO comissao_extrato
                         (codigo_comissao, cadastro_cod, cadastro_nome, assistente, geracao, previsao,
@@ -26295,6 +26392,382 @@ def comissao_extrato_motivo(iid):
     conn.execute("UPDATE comissao_extrato_item SET divergencia_motivo=? WHERE id=?", (motivo, iid))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
+
+
+# ═══════ PRE-CONFERENCIA EM LOTE DO EXTRATO DA AFFINITY (SEM EFEITO) ═══════
+# Esta parte do modulo LE E COMPARA. Nao grava nada: nenhum INSERT, nenhum
+# UPDATE, nenhuma proposta, parcela, recebimento, repasse, lancamento ou PIX.
+#
+# Por que separada do importador: o importador de hoje decide e grava no mesmo
+# movimento. Com dezenas de extratos na mesa isso significa descobrir o erro
+# depois que ele ja virou dinheiro. A previa inverte a ordem — primeiro se olha o
+# lote inteiro, depois se decide o que fazer com ele.
+#
+# O QUE O EXTRATO E: o valor que a Affinity APUROU e diz que vai pagar. Nao e
+# prova de entrada no banco. Extrato pode estar previsto, transferido para outro
+# extrato, ou pago em data diferente da previsao. A confirmacao de que o dinheiro
+# chegou vem da conciliacao bancaria (Asaas), nunca do PDF.
+#
+# O que a previa NUNCA faz, mesmo quando pareceria obvio:
+#  - casar por nome havendo mais de um candidato. Ambiguidade e RESULTADO, nao
+#    empate a ser desempatado no chute — quem olha a tela precisa saber a
+#    diferenca entre "nao existe" e "existe demais";
+#  - tratar extrato transferido ou estorno de efeito liquido zero como entrada.
+#    Contaria o mesmo dinheiro duas vezes: no extrato que estornou e no que
+#    recebeu a transferencia;
+#  - apontar parcela a partir de casamento por nome. Precisao falsa aponta
+#    dinheiro pro lugar errado com cara de certeza.
+_EXT_RX_PAGAMENTO = re.compile(r'Pagamento efetuado em\s*(\d{2}/\d{2}/\d{4})', re.I)
+_EXT_RX_TRANSFERIDO = re.compile(r'transferido para (?:o\s+)?extrato\s*n?[º°o.]*\s*(\d+)', re.I)
+_EXT_LOTE_MAX = 60
+
+
+def _ext_data_pagamento(cab):
+    """Data em que a Affinity DIZ que pagou.
+
+    Ela nao tem campo proprio: vem no fim da linha da situacao da nota fiscal
+    ('Nota Fiscal nao recebida. Pagamento efetuado em 03/07/2026 - TED'). E
+    previsao nao serve de substituto — extrato transferido tem previsao e nunca
+    foi pago a ninguem.
+
+    Mesmo com data, isto continua sendo o que a Affinity INFORMA. Entrada
+    confirmada e outra coisa, e mora na conciliacao."""
+    m = _EXT_RX_PAGAMENTO.search(cab.get('nf_situacao') or '')
+    return m.group(1) if m else ''
+
+
+def _ext_tipo_item(it):
+    """Normaliza o rotulo que a Affinity poe entre colchetes na linha de credito
+    ('[Antecipação]', '[Estorno indevido]'). Linha da tabela por operadora nao
+    tem rotulo nenhum — essa e a venda normal."""
+    t = (it.get('tipo') or '').strip().lower()
+    if not t:
+        return 'normal'
+    if 'estorno' in t:
+        return 'estorno'
+    if 'antecip' in t:
+        return 'antecipação'
+    if 'transfer' in t:
+        return 'transferência'
+    return t[:20]
+
+
+def _ext_classificar_extrato(cab, itens):
+    """Diz O QUE e este extrato antes de perguntar quanto ele vale.
+
+    A pergunta que essa funcao responde e "isso e valor apurado a receber?".
+    Extrato transferido para outro numero e extrato de estorno que zera contra a
+    propria antecipacao NAO sao: sao ajuste contabil. Soma-los no total apurado
+    inflaria o mes com dinheiro que nunca vai chegar duas vezes.
+
+    Antecipacao TAMBEM nao e entrada bancaria confirmada — ela e adiantamento
+    sobre parcela futura. Por isso vem marcada em separado, e nao misturada na
+    venda normal."""
+    liquido = round(float(cab.get('total_liquido') or 0) + float(cab.get('debitos') or 0), 2)
+    tipos = []
+    for it in itens:
+        t = _ext_tipo_item(it)
+        if t not in tipos:
+            tipos.append(t)
+    mt = _EXT_RX_TRANSFERIDO.search(cab.get('nf_situacao') or '')
+    transferido_para = mt.group(1) if mt else ''
+    if transferido_para and 'transferência' not in tipos:
+        tipos.append('transferência')
+    tem_estorno = 'estorno' in tipos
+    # Efeito liquido zero e o teste que pega o caso real: o estorno entra como
+    # credito e a antecipacao correspondente sai como debito do mesmo valor.
+    zerado = abs(liquido) < 0.01 and abs(float(cab.get('total_bruto') or 0)) < 0.01
+    ajuste = bool(transferido_para or (tem_estorno and zerado) or (tem_estorno and not liquido))
+    return {
+        'tipos': tipos or ['normal'],
+        'tipo_txt': ' + '.join(tipos) if tipos else 'normal',
+        'transferido_para': transferido_para,
+        'tem_estorno': tem_estorno,
+        'tem_antecipacao': 'antecipação' in tipos,
+        'tem_normal': 'normal' in tipos,
+        'liquido_esperado': liquido,
+        'ajuste': ajuste,
+        'zerado': zerado,
+    }
+
+
+def _ext_casar_previa(conn, item):
+    """Casamento SO PARA CONFERIR. Nao grava e nao decide sozinho.
+
+    Devolve (proposta, criterio, ambiguo, candidatos). A diferenca pro casador do
+    importador e que aqui a ambiguidade e um resultado visivel, com a contagem de
+    candidatos junto — nao um silencio que a tela leria como 'sem venda no JOB'.
+
+    Numero de proposta e o unico criterio SEGURO: o nome do cliente vem truncado
+    no PDF e as vezes com CNPJ colado na frente. Nome so casa quando existe
+    exatamente UM candidato, e ainda assim entra marcado como casamento fraco."""
+    num = (item.get('numero_proposta') or '').strip()
+    if num:
+        p = conn.execute("""SELECT * FROM propostas
+                            WHERE REPLACE(REPLACE(COALESCE(numero_proposta,''),'.',''),'-','') = ?
+                              AND COALESCE(status,'') <> 'Excluída'
+                            ORDER BY id DESC LIMIT 2""", (num,)).fetchall()
+        if len(p) == 1:
+            return p[0], 'numero_proposta', False, 1
+        if len(p) > 1:
+            # Duas vendas com o mesmo numero e problema de cadastro nosso. Nao da
+            # pra escolher uma: escolher errado paga o consultor errado.
+            return None, '', True, len(p)
+    nome = re.sub(r'^[\d.\-/]+\s*', '', (item.get('cliente') or '')).strip()
+    if len(nome) >= 10:
+        cand = conn.execute("""SELECT * FROM propostas
+                               WHERE UPPER(COALESCE(razao_social,'')) LIKE ?
+                                 AND COALESCE(status,'') <> 'Excluída'
+                               ORDER BY id DESC LIMIT 3""", (nome.upper() + '%',)).fetchall()
+        if len(cand) == 1:
+            return cand[0], 'razao_social', False, 1
+        if len(cand) > 1:
+            return None, '', True, len(cand)
+    return None, '', False, 0
+
+
+def _ext_parcela_exata(conn, proposta_id, numero, criterio):
+    """Aponta a parcela SO quando o casamento veio pelo numero da proposta.
+
+    Vindo de casamento por nome, apontar parcela seria dar aparencia de precisao
+    a um palpite. E quando a proposta tem duas parcelas com o mesmo numero, a
+    previa prefere nao apontar nenhuma a apontar a errada."""
+    if criterio != 'numero_proposta' or not proposta_id or not numero:
+        return None
+    try:
+        n = int(numero)
+    except (TypeError, ValueError):
+        return None
+    r = conn.execute("""SELECT id, numero, valor, status, data_prevista
+                        FROM parcelas WHERE proposta_id=? AND numero=?
+                        ORDER BY id LIMIT 2""", (proposta_id, n)).fetchall()
+    return dict(r[0]) if len(r) == 1 else None
+
+
+def _ext_conferir_lote(conn, arquivos):
+    """Le uma lista de (nome, bytes) e devolve a analise linha a linha, SEM GRAVAR.
+
+    Separada da rota de proposito: a importacao controlada (que grava) precisa
+    conferir exatamente o mesmo que a previa mostrou. Duas leituras diferentes
+    para a mesma decisao e como ter dois relogios — nunca se sabe qual esta certo."""
+    linhas = []
+    for nome, dados in arquivos:
+        try:
+            cab, itens, avisos = ler_extrato_affinity(dados, nome)
+        except Exception as e:
+            app.logger.exception('[EXTRATO-PREVIA] falha ao ler %s', nome)
+            linhas.append({'arquivo': nome, 'falhou': True, 'erro_leitura': str(e)[:180],
+                           'codigo': '', 'itens': [], 'avisos': [], 'situacao': 'nao_fechou',
+                           'precisa_revisao': True, 'tipo_txt': '—', 'n_itens': 0, 'tipos': [],
+                           'total_bruto': 0.0, 'total_liquido': 0.0, 'debitos': 0.0,
+                           'liquido_esperado': 0.0, 'total_impresso': None,
+                           'leitura_fechada': False, 'conf_ancora': '', 'conf_impresso': None,
+                           'conf_lido': 0.0, 'conf_diferenca': None,
+                           'cadastro_cod': '', 'cadastro_nome': '', 'geracao': '',
+                           'previsao': '', 'data_pagamento': '', 'nf_situacao': '',
+                           'transferido_para': '', 'ajuste': False, 'sem_proposta': 0,
+                           'ambiguos': 0, 'divergentes': 0, 'casados': 0, 'fracos': 0,
+                           'com_parcela': 0})
+            continue
+        cls = _ext_classificar_extrato(cab, itens)
+        det = []
+        for it in itens:
+            p, criterio, ambiguo, cand = _ext_casar_previa(conn, it)
+            esperado = float(p['comissao_total_corretora'] or 0) if p else None
+            # O JOB guarda a comissao TOTAL da venda. Comparar contra ela
+            # so faz sentido quando a linha do extrato vale 100% — numa
+            # regua de parcelas (1,2,3,5%...) a linha de 15% "divergiria"
+            # sempre, e 15 divergencias falsas escondem a de verdade.
+            # A comparacao parcela a parcela depende da regua de
+            # recebimento, que nao existe ainda: ate la, nao se compara.
+            pct = float(it.get('percentual') or 0)
+            comparavel = pct >= 99.99
+            div = (round(float(it.get('bruto') or 0) - esperado, 2)
+                   if (esperado is not None and comparavel) else None)
+            parc = _ext_parcela_exata(conn, p['id'] if p else None, it.get('parcela'), criterio)
+            det.append({
+                'operadora': it.get('operadora') or '—',
+                'operadora_truncada': bool(it.get('operadora_truncada')),
+                'cliente': it.get('cliente') or '',
+                'numero_proposta': it.get('numero_proposta') or '',
+                'parcela': it.get('parcela'),
+                'percentual': pct,
+                'comparavel': comparavel,
+                'bruto': float(it.get('bruto') or 0),
+                'liquido': float(it.get('liquido') or 0),
+                'tipo': _ext_tipo_item(it),
+                'proposta_id': p['id'] if p else None,
+                'razao_social': (p['razao_social'] if p else '') or '',
+                'consultor': (p['consultor'] if p else '') or '',
+                'criterio': criterio,
+                'seguro': criterio == 'numero_proposta',
+                'ambiguo': ambiguo,
+                'candidatos': cand,
+                'parcela_id': (parc or {}).get('id'),
+                'parcela_status': (parc or {}).get('status') or '',
+                'parcela_valor': (parc or {}).get('valor'),
+                'job_esperado': esperado,
+                'divergencia': div,
+            })
+        l = {
+            'arquivo': nome, 'falhou': False, 'erro_leitura': '',
+            'codigo': cab.get('codigo_comissao') or '',
+            'cadastro_cod': cab.get('cadastro_cod') or '',
+            'cadastro_nome': cab.get('cadastro_nome') or '',
+            'geracao': cab.get('geracao') or '',
+            'previsao': cab.get('previsao') or '',
+            'data_pagamento': _ext_data_pagamento(cab),
+            'nf_situacao': cab.get('nf_situacao') or '',
+            'total_bruto': float(cab.get('total_bruto') or 0),
+            'total_liquido': float(cab.get('total_liquido') or 0),
+            'debitos': float(cab.get('debitos') or 0),
+            'total_impresso': cab.get('total_impresso'),
+            'leitura_fechada': bool(cab.get('leitura_fechada')),
+            'conf_ancora': cab.get('conf_ancora') or '',
+            'conf_impresso': cab.get('conf_impresso'),
+            'conf_lido': cab.get('conf_lido'),
+            'conf_diferenca': cab.get('conf_diferenca'),
+            'liquido_esperado': cls['liquido_esperado'],
+            'tipo_txt': cls['tipo_txt'], 'tipos': cls['tipos'],
+            'transferido_para': cls['transferido_para'],
+            'ajuste': cls['ajuste'],
+            'itens': det, 'n_itens': len(det), 'avisos': list(avisos),
+            'sem_proposta': sum(1 for d in det if not d['proposta_id'] and not d['ambiguo']),
+            'ambiguos': sum(1 for d in det if d['ambiguo']),
+            'casados': sum(1 for d in det if d['proposta_id']),
+            'fracos': sum(1 for d in det if d['criterio'] == 'razao_social'),
+            'com_parcela': sum(1 for d in det if d['parcela_id']),
+            'divergentes': sum(1 for d in det
+                               if d['divergencia'] is not None and abs(d['divergencia']) >= 0.01),
+        }
+        # 'Revisar' e o balde do que nao tem nome proprio: extrato sem codigo ou
+        # sem nenhuma linha reconhecida. Leitura que nao fechou tem situacao
+        # propria, porque a acao e outra — ali nao adianta revisar o casamento,
+        # o arquivo inteiro esta lido pela metade.
+        l['precisa_revisao'] = bool(not l['codigo'] or not det)
+        linhas.append(l)
+
+    # Duplicidade por codigo: dentro do proprio lote e contra o que ja
+    # foi importado. As duas contam — subir de novo o mesmo extrato paga
+    # duas vezes, e o lote com o arquivo repetido dobraria o total aqui.
+    vistos = {}
+    for l in linhas:
+        if l['codigo']:
+            vistos.setdefault(l['codigo'], []).append(l)
+    ja = set()
+    codigos = [c for c in vistos if c]
+    if codigos:
+        marcas = ','.join('?' for _ in codigos)
+        ja = {str(r['codigo_comissao']) for r in conn.execute(
+            f"SELECT codigo_comissao FROM comissao_extrato WHERE codigo_comissao IN ({marcas})",
+            codigos).fetchall()}
+    for cod, grupo in vistos.items():
+        for l in grupo:
+            l['dup_lote'] = len(grupo) > 1
+            l['dup_banco'] = cod in ja
+            l['duplicado'] = l['dup_lote'] or l['dup_banco']
+    for l in linhas:
+        l.setdefault('dup_lote', False)
+        l.setdefault('dup_banco', False)
+        l.setdefault('duplicado', False)
+        # A ordem importa e e a ordem da gravidade.
+        # 1) Leitura que nao fechou vem antes de tudo: o arquivo esta lido pela
+        #    metade e qualquer conclusao tirada dele esta errada por construcao.
+        # 2) Duplicado, porque nada abaixo dele deve ser lancado.
+        # 3) Ajuste, porque um extrato que nao e entrada nao precisa ter proposta
+        #    casada pra estar certo.
+        if not l['leitura_fechada']:
+            l['situacao'] = 'nao_fechou'
+        elif l['duplicado']:
+            l['situacao'] = 'duplicado'
+        elif l['ajuste']:
+            l['situacao'] = 'ajuste'
+        elif l['precisa_revisao']:
+            l['situacao'] = 'revisar'
+        elif l['sem_proposta']:
+            l['situacao'] = 'sem_proposta'
+        elif l['ambiguos']:
+            l['situacao'] = 'ambiguo'
+        elif l['divergentes']:
+            l['situacao'] = 'divergente'
+        else:
+            l['situacao'] = 'pronto'
+    linhas.sort(key=lambda x: (x['codigo'] or 'zzzz'))
+    return linhas
+
+
+def _ext_resumo_lote(linhas):
+    """Totais da conferencia. 'Apurado' nao soma duplicado nem ajuste: um seria
+    dinheiro contado duas vezes, o outro nunca foi dinheiro novo."""
+    def _soma(campo, filtro=None):
+        return round(sum(l.get(campo) or 0 for l in linhas if (filtro is None or filtro(l))), 2)
+    conta = lambda s: sum(1 for l in linhas if l.get('situacao') == s)
+    resumo = {
+        'arquivos': len(linhas),
+        'itens': sum(l.get('n_itens') or 0 for l in linhas),
+        'bruto': _soma('total_bruto'),
+        'debitos': _soma('debitos'),
+        'liquido_esperado': _soma('liquido_esperado'),
+        'apurado': _soma('liquido_esperado',
+                         lambda l: l.get('leitura_fechada') and not l.get('duplicado')
+                         and not l.get('ajuste')),
+        'prontos': conta('pronto'),
+        'nao_fecharam': conta('nao_fechou'),
+        'duplicados': conta('duplicado'),
+        'sem_proposta': conta('sem_proposta'),
+        'ambiguos': conta('ambiguo'),
+        'ajustes': conta('ajuste'),
+        'divergentes': conta('divergente'),
+        'revisar': conta('revisar'),
+        'casados': sum(l.get('casados') or 0 for l in linhas),
+        'com_parcela': sum(l.get('com_parcela') or 0 for l in linhas),
+        'fracos': sum(l.get('fracos') or 0 for l in linhas),
+        'itens_sem_proposta': sum(l.get('sem_proposta') or 0 for l in linhas),
+        'itens_ambiguos': sum(l.get('ambiguos') or 0 for l in linhas),
+        'itens_divergentes': sum(l.get('divergentes') or 0 for l in linhas),
+    }
+    # Axioma e Serenus sao bolsos de donos diferentes: somar junto esconde de quem
+    # e o dinheiro (a Axioma esta sendo encerrada e o total dela nao e da Serenus).
+    por_cadastro = {}
+    for l in linhas:
+        c = l.get('cadastro_cod') or '—'
+        d = por_cadastro.setdefault(c, {'cod': c, 'nome': (l.get('cadastro_nome') or '')[:40],
+                                        'arquivos': 0, 'itens': 0, 'bruto': 0.0, 'apurado': 0.0})
+        d['arquivos'] += 1
+        d['itens'] += l.get('n_itens') or 0
+        d['bruto'] += l.get('total_bruto') or 0
+        if l.get('leitura_fechada') and not l.get('duplicado') and not l.get('ajuste'):
+            d['apurado'] += l.get('liquido_esperado') or 0
+    for d in por_cadastro.values():
+        d['bruto'] = round(d['bruto'], 2)
+        d['apurado'] = round(d['apurado'], 2)
+    return resumo, sorted(por_cadastro.values(), key=lambda x: -x['apurado'])
+
+
+@app.route('/comissoes/extrato/lote/previsualizar', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def comissao_extrato_lote_previa():
+    """PRE-CONFERENCIA: le varios extratos de uma vez e nao grava nada.
+
+    A tela responde tres perguntas antes de qualquer dinheiro se mover: quanto o
+    lote diz que a Affinity apurou, quanto disso o JOB consegue apontar para uma
+    venda, e o que precisa de olho humano antes de virar lancamento."""
+    conn = db()
+    erro, linhas = None, []
+    if request.method == 'POST':
+        arquivos = [a for a in request.files.getlist('pdfs') if a and a.filename]
+        if not arquivos:
+            erro = 'Escolha pelo menos um PDF de extrato.'
+        elif len(arquivos) > _EXT_LOTE_MAX:
+            erro = (f'São {len(arquivos)} arquivos de uma vez. O limite por conferência é '
+                    f'{_EXT_LOTE_MAX} — divida em duas levas.')
+        else:
+            linhas = _ext_conferir_lote(conn, [(a.filename, a.read()) for a in arquivos])
+    close_db(conn)
+    resumo, por_cadastro = _ext_resumo_lote(linhas)
+    return render_template('comissao_extrato_previa.html', linhas=linhas, resumo=resumo,
+                           por_cadastro=por_cadastro, erro=erro, limite=_EXT_LOTE_MAX)
 
 
 @app.route('/lead/<int:lid>')
@@ -40247,6 +40720,8 @@ def _enviar_conversoes_automatico():
 
 def _auto_pull_leads_throttled():
     global _ULTIMO_AUTO_PULL
+    if MODO_TESTE:
+        return
     try:
         agora = time.time()
         if agora - _ULTIMO_AUTO_PULL < _AUTO_PULL_INTERVALO:
@@ -40297,6 +40772,12 @@ def _iniciar_scheduler_backup():
     """Liga agendador de backup automático JSON (22:00 SP todo dia)."""
     global _SCHEDULER_INICIADO
     if _SCHEDULER_INICIADO:
+        return
+    if MODO_TESTE:
+        # Ver MODO_TESTE no topo do arquivo: teste não pode disputar o banco com
+        # job de fundo. Marca como iniciado para não tentar de novo a cada request.
+        _SCHEDULER_INICIADO = True
+        app.logger.info("[SCHEDULER] desligado por JOB_MODO_TESTE")
         return
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
