@@ -92,6 +92,24 @@ Legenda: [ ] pendente · [~] em andamento · [x] feito · (?) aguardando decisã
 - [ ] Testes automatizados mínimos (smoke test de rotas) rodando antes do deploy — confirmado: zero arquivos de teste no repo hoje
 - (?) **Migrar Postgres do Railway pra banco na VPS** (pedido do Gabriel via PDF, 04/07/2026) — mais segurança e possibilidade de escala. Guilherme confirmou: não é pra agora, "vamos conversar mais pra frente" — só registrar como pendência, não iniciar sem sinal verde
 
+## Biblioteca de Conteúdo (reorganização de 12/08/2026)
+
+Feito na branch `worktree-biblioteca-conteudo` (fases 0 a 3 do handoff). Relatório
+de auditoria, decisões e passo a passo de reprodução em
+[handoff/biblioteca-conteudo-relatorio.md](handoff/biblioteca-conteudo-relatorio.md).
+
+- [x] **Rede de segurança antes de mexer**: inventário de quem lê e escreve nas tabelas da biblioteca (`handoff/biblioteca-conteudo-inventario.md`), `scripts/inspecionar_biblioteca.py` (foto somente leitura, compara antes/depois) e `testes/testar_biblioteca.py` (92 verificações em SQLite, banco novo a cada rodada)
+- [x] **APIs por proprietário**: árvore (Compartilhado + pasta-mãe por consultor, criadas de forma idempotente), listagem por pasta/canal/busca paginada, e mover, transferir, copiar e duplicar com efeitos distintos. Mover e transferir preservam o ID — é o que mantém `fluxo_passos.template = upload_<id>` válido
+- [x] **Transferência de funil valida as dependências**: funil que usa mensagem de outro dono devolve a lista e exige escolher entre transferir ou copiar as mensagens; nunca cria funil quebrado em silêncio
+- [x] **Tela `/crm/modelos` reconstruída**: árvore de proprietários fechada por padrão, canal como filtro (WhatsApp, SMS e e-mail convivem na mesma pasta), vínculos "usado em N funis/fluxos" visíveis, e mover/transferir/copiar/excluir em folha própria, sem `alert()`/`confirm()`
+- [x] **Buraco de permissão fechado**: editar, excluir, desativar, favoritar e mover de pasta passaram a checar o dono. Antes, consultor com o módulo liberado mexia no conteúdo de qualquer colega pelo site
+- [x] **Extensão alinhada**: Mensagens e Funis abrem em Minha biblioteca e Compartilhado, com as pastas do JOB fechadas; busca e filtro abrem as pastas com resultado. Medido com 400 mensagens: mediana 4ms antes e depois, p95 8ms → 5ms, resposta +4,3%
+- [x] **Bancada de telas do site** (`scripts/bancada_biblioteca.py`): renderiza a tela com o Flask de verdade e fotografa nos dois temas em 1440, 1024, 768 e 375
+- [ ] Fase 4 — busca contextual no compositor da extensão (sugerir conteúdo enquanto digita, nunca enviar sozinho)
+- [ ] Fase 5 — gatilhos e Fluxos como dois projetos separados (nunca ativos por padrão; persistência e log antes de qualquer grafo visual)
+- [ ] Fase 6 — governança (rascunho/aprovado/arquivado, detecção de duplicado sugerindo, nunca removendo) e recomendação de conteúdo
+- [ ] Publicar a extensão: a mudança de Mensagens/Funis exige subir versão no `manifest.json` (hoje 4.94.0) e enviar manualmente à Chrome Web Store
+
 ## Extensão — memória e travamento (levantamento iniciado 10/08/2026)
 
 > Guilherme, 10/08/2026: *"como deixamos a extensão melhor em termos de não
