@@ -13977,8 +13977,9 @@ def _lanc_faixa_where(faixa, coluna='l.data_vencimento', de=None, ate=None):
     if f == 'vencidas':
         # Em aberto E com vencimento no passado. Sem o status, um lançamento
         # já pago apareceria como vencido só por ter data antiga.
-        return (" AND COALESCE(l.status,'') <> 'Pago' AND {c} IS NOT NULL AND {c} <> ''"
-                " AND {c} < ?".format(c=coluna), [hoje.strftime('%Y-%m-%d')])
+        status_coluna = 'l.status' if str(coluna).startswith('l.') else 'status'
+        return (" AND COALESCE({s},'') <> 'Pago' AND {c} IS NOT NULL AND {c} <> ''"
+                " AND {c} < ?".format(s=status_coluna, c=coluna), [hoje.strftime('%Y-%m-%d')])
     if f == 'proximos7':
         return (" AND {c} >= ? AND {c} <= ?".format(c=coluna),
                 [hoje.strftime('%Y-%m-%d'), (hoje + timedelta(days=7)).strftime('%Y-%m-%d')])
@@ -14295,10 +14296,11 @@ def financeiro():
 
     _mes_where = "" if _cal_livre else " AND substr(COALESCE(l.data_vencimento,''),1,7)=?"
     _mes_params = [] if _cal_livre else [mes]
-    custos = conn.execute("""SELECT l.*, mp.nome AS meio_nome, mp.tipo AS meio_tipo, mp.banco AS meio_banco,
+    custos = conn.execute("""SELECT l.*, u.nome AS consultor_nome, mp.nome AS meio_nome, mp.tipo AS meio_tipo, mp.banco AS meio_banco,
             mp.titular AS meio_titular, mp.final_cartao AS meio_final_cartao,
             mp.dia_vencimento_fatura AS meio_dia_vencimento
-        FROM lancamentos l LEFT JOIN meios_pagamento mp ON mp.id = l.meio_pagamento_id
+        FROM lancamentos l LEFT JOIN usuarios u ON u.id=l.usuario_id
+        LEFT JOIN meios_pagamento mp ON mp.id = l.meio_pagamento_id
         WHERE l.tipo IN ('custo','fixo')""" + _mes_where + _w + " ORDER BY l.id DESC",
         _mes_params + _p).fetchall()
     custos = [dict(c) for c in custos]
@@ -14308,8 +14310,10 @@ def financeiro():
         custos = [c for c in custos if c['status_efetivo'] == 'Vencido']
     aportes = conn.execute("SELECT * FROM lancamentos WHERE tipo='aporte' AND data_competencia=? ORDER BY id DESC", (mes,)).fetchall()
     reembolsos = conn.execute("SELECT * FROM lancamentos WHERE tipo='reembolso' AND data_competencia=? ORDER BY id DESC", (mes,)).fetchall()
-    fixos = conn.execute("""SELECT l.*, u.nome consultor_nome FROM lancamentos l
-        LEFT JOIN usuarios u ON u.id=l.usuario_id WHERE l.tipo='fixo' AND l.data_competencia=? ORDER BY l.data_lancamento""", (mes,)).fetchall()
+    # A aba de fixos e o resumo usam exatamente a mesma lista filtrada da
+    # tabela. Antes ela consultava data_competencia separadamente e podia
+    # mostrar julho numa tela aberta em agosto.
+    fixos = [c for c in custos if (c.get('tipo') or '') == 'fixo']
     # dict (não Row) — precisa ir serializado como JSON pro JS do template
     # montar o preview do meio selecionado sem chamada extra ao servidor.
     meios_pagamento = [dict(m) for m in conn.execute(
@@ -14317,12 +14321,12 @@ def financeiro():
     # Totais do mês
     receber_mes = conn.execute("""SELECT COALESCE(SUM(p.valor_corretora),0) v FROM parcelas p
         JOIN propostas pr ON pr.id = p.proposta_id
-        WHERE p.competencia=? AND p.status NOT IN ('Pago ao corretor', 'Cancelada / Estornada')
+        WHERE substr(COALESCE(p.data_prevista,''),1,7)=? AND p.status NOT IN ('Pago ao corretor', 'Cancelada / Estornada')
           AND COALESCE(pr.estornada, 0) = 0
           AND COALESCE(pr.status, '') <> 'Excluída'""", (mes,)).fetchone()['v']
     pagar_consultor = conn.execute("""SELECT COALESCE(SUM(p.valor),0) v FROM parcelas p
         JOIN propostas pr ON pr.id = p.proposta_id
-        WHERE p.competencia=? AND p.status NOT IN ('Pago ao corretor', 'Cancelada / Estornada')
+        WHERE substr(COALESCE(p.data_prevista,''),1,7)=? AND p.status NOT IN ('Pago ao corretor', 'Cancelada / Estornada')
           AND COALESCE(pr.estornada, 0) = 0
           AND COALESCE(pr.status, '') <> 'Excluída'""", (mes,)).fetchone()['v']
     # A LISTA PASSOU A MOSTRAR CUSTO E FIXO, o total NAO pode somar os dois.
@@ -14349,13 +14353,13 @@ def financeiro():
     tot_mes = conn.execute("""SELECT COALESCE(SUM(p.valor),0) consultor,
             COALESCE(SUM(p.valor_corretora),0) corretora FROM parcelas p
         JOIN propostas pr ON pr.id = p.proposta_id
-        WHERE p.competencia=?
+        WHERE substr(COALESCE(p.data_prevista,''),1,7)=?
           AND p.status <> 'Cancelada / Estornada'
           AND COALESCE(pr.estornada, 0) = 0
           AND COALESCE(pr.status, '') <> 'Excluída'""", (mes,)).fetchone()
     repasse_pago = conn.execute("""SELECT COALESCE(SUM(p.valor),0) v FROM parcelas p
         JOIN propostas pr ON pr.id = p.proposta_id
-        WHERE p.competencia=? AND p.status='Pago ao corretor'
+        WHERE substr(COALESCE(p.data_prevista,''),1,7)=? AND p.status='Pago ao corretor'
           AND COALESCE(pr.estornada, 0) = 0
           AND COALESCE(pr.status, '') <> 'Excluída'""", (mes,)).fetchone()['v']
     dre = {
@@ -14510,7 +14514,11 @@ def financeiro_exportar():
     dados = [[r.get('descricao',''), r.get('centro_custo',''), r.get('categoria',''), br(r.get('data_emissao') or r.get('data_lancamento')), br(r.get('data_vencimento')), float(r.get('valor') or 0), r.get('pago_por',''), r.get('fonte_pagamento',''), r.get('meio_nome') or r.get('forma_pagamento',''), r.get('status_efetivo','')] for r in rows]
     total = sum(x[5] for x in dados)
     if fmt == 'csv':
-        out = io.StringIO(); wri = csv.writer(out, delimiter=';'); wri.writerow(cab); wri.writerows(dados); wri.writerow(['TOTAL','','','','',total]); close_db(conn)
+        def moeda_csv(v):
+            return 'R$ ' + f'{v:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.')
+        out = io.StringIO(); wri = csv.writer(out, delimiter=';'); wri.writerow(cab)
+        for linha in dados: wri.writerow(linha[:5] + [moeda_csv(linha[5])] + linha[6:])
+        wri.writerow(['TOTAL','','','','',moeda_csv(total)]); close_db(conn)
         return Response('\ufeff' + out.getvalue(), mimetype='text/csv', headers={'Content-Disposition': f'attachment; filename=financeiro_serenus_{mes}.csv'})
     import openpyxl
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = 'Financeiro'; ws.append(cab)

@@ -129,6 +129,13 @@
 .mp-campo-cartao, .mp-campo-credito { display:none; }
 .mes-nav { display:flex; align-items:center; gap:12px; margin-bottom:18px; }
 .mes-nav input { padding:9px 12px; }
+.fin-exportar { position:relative; }
+.fin-exportar summary { list-style:none; cursor:pointer; }
+.fin-exportar summary::-webkit-details-marker { display:none; }
+.fin-exportar-menu { position:absolute; z-index:5; right:0; top:calc(100% + 6px); min-width:140px;
+  padding:6px; border:1px solid var(--borda); border-radius:10px; background:var(--panel); box-shadow:0 10px 26px rgba(0,0,0,.16); }
+.fin-exportar-menu a { display:block; padding:8px 10px; color:var(--texto); text-decoration:none; border-radius:7px; font-size:12px; }
+.fin-exportar-menu a:hover, .fin-exportar-menu a:focus-visible { background:var(--panel-2); outline:none; }
 /* No celular, a topbar reserva 60px de padding a esquerda pro icone do menu —
    sobra menos espaco, e "Competencia" + o seletor de mes lado a lado nao
    cabem mais. Rotulo em cima, input embaixo: mesmo padrao ja usado em todo
@@ -283,7 +290,13 @@
   <div class="mes-nav">
     <label style="font-size:12px; color:var(--cinza);">Competência</label>
     <input type="month" value="{{ mes }}" onchange="location.href='/financeiro?mes='+this.value">
-    <a class="btn-ghost" href="/financeiro/exportar?mes={{ mes }}{% if filtros.faixa %}&faixa={{ filtros.faixa }}{% endif %}{% if filtros.de %}&de={{ filtros.de }}{% endif %}{% if filtros.ate %}&ate={{ filtros.ate }}{% endif %}{% if filtros.centro %}&centro={{ filtros.centro|urlencode }}{% endif %}{% if filtros.status_lanc %}&status_lanc={{ filtros.status_lanc|urlencode }}{% endif %}{% if filtros.tipo_lanc %}&tipo_lanc={{ filtros.tipo_lanc|urlencode }}{% endif %}{% if filtros.meio %}&meio={{ filtros.meio }}{% endif %}" download>Exportar relatório</a>
+    <details class="fin-exportar">
+      <summary class="btn-ghost">Exportar relatório</summary>
+      <div class="fin-exportar-menu">
+        <a href="/financeiro/exportar?mes={{ mes }}{% if filtros.faixa %}&faixa={{ filtros.faixa }}{% endif %}{% if filtros.de %}&de={{ filtros.de }}{% endif %}{% if filtros.ate %}&ate={{ filtros.ate }}{% endif %}{% if filtros.centro %}&centro={{ filtros.centro|urlencode }}{% endif %}{% if filtros.status_lanc %}&status_lanc={{ filtros.status_lanc|urlencode }}{% endif %}{% if filtros.tipo_lanc %}&tipo_lanc={{ filtros.tipo_lanc|urlencode }}{% endif %}{% if filtros.meio %}&meio={{ filtros.meio }}{% endif %}&formato=xlsx">Baixar XLSX</a>
+        <a href="/financeiro/exportar?mes={{ mes }}{% if filtros.faixa %}&faixa={{ filtros.faixa }}{% endif %}{% if filtros.de %}&de={{ filtros.de }}{% endif %}{% if filtros.ate %}&ate={{ filtros.ate }}{% endif %}{% if filtros.centro %}&centro={{ filtros.centro|urlencode }}{% endif %}{% if filtros.status_lanc %}&status_lanc={{ filtros.status_lanc|urlencode }}{% endif %}{% if filtros.tipo_lanc %}&tipo_lanc={{ filtros.tipo_lanc|urlencode }}{% endif %}{% if filtros.meio %}&meio={{ filtros.meio }}{% endif %}&formato=csv">Baixar CSV</a>
+      </div>
+    </details>
   </div>
 </div>
 
@@ -513,7 +526,7 @@
           {% for s in status_lancamento %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
         </select></div>
     </div>
-    <div style="font-size:11px; color:var(--cinza-2); margin:-6px 0 4px;">A competência do lançamento é sempre a do mês de <b>emissão</b> — não do mês que você está vendo agora. Parcelado em N vezes gera N lançamentos, um por mês a partir da emissão.</div>
+    <div style="font-size:11px; color:var(--cinza-2); margin:-6px 0 4px;">Esta tela organiza contas pelo mês de <b>vencimento</b>. Parcelas entram no mês em que vencem.</div>
     </details>
 
     {# ── Calendário de vencimentos (PRD 5) ──────────────────────────────────
