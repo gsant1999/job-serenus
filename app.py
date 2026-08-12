@@ -23432,6 +23432,19 @@ def api_whatsapp_enviar_direto():
     if not usuario_id:
         close_db(conn)
         return _wa_cors(jsonify({"ok": False, "erro": "Selecione seu usuário no popup da extensão antes de mandar mensagem"})), 400
+    try:
+        modelo_id = int(d.get('modelo_id'))
+    except (TypeError, ValueError):
+        modelo_id = None
+    if modelo_id:
+        # A extensão só pode disparar o conteúdo do próprio usuário, mesmo que
+        # alguém tente forçar um id de modelo fora da biblioteca exibida.
+        permitido = conn.execute("""SELECT 1 FROM modelos_conteudo
+            WHERE id=? AND tipo='whatsapp' AND ativo=1 AND dono_consultor_id=?""",
+                                 (modelo_id, usuario_id)).fetchone()
+        if not permitido:
+            close_db(conn)
+            return _wa_cors(jsonify({"ok": False, "erro": "Você só pode enviar suas próprias mensagens pela extensão"})), 403
 
     _sem_numero_reportar = False
     tel_norm = _normalizar_telefone(telefone)
@@ -23478,11 +23491,6 @@ def api_whatsapp_enviar_direto():
     # Se veio de um modelo salvo com MÍDIA (áudio/imagem), a fila manda a mídia
     # (item A) — texto vira legenda. Sem mídia, é texto puro como antes.
     tipo, midia_arquivo = 'texto', None
-    modelo_id = None
-    try:
-        modelo_id = int(d.get('modelo_id'))
-    except (TypeError, ValueError):
-        modelo_id = None
     if modelo_id:
         mod = conn.execute("SELECT midia_arquivo, midia_tipo FROM modelos_conteudo WHERE id=? AND tipo='whatsapp'", (modelo_id,)).fetchone()
         if mod and mod['midia_arquivo'] and mod['midia_tipo'] in ('audio', 'imagem', 'video', 'documento'):
@@ -23625,30 +23633,18 @@ def api_whatsapp_extensao_modelos():
     seção Mensagens do painel. Monta a URL de mídia pronta pra extensão não
     precisar saber o padrão de rota.
 
-    A identidade vem do token do aparelho. Devolve só a pasta daquele
-    consultor + itens compartilhados (dono_consultor_id NULL). Cada consultora vê os
-    áudios da própria voz + o material compartilhado, não a biblioteca de todo
-    mundo — filtra por dono_consultor_id (organização por pasta), não mais por
-    criado_por (que só registrava quem CADASTROU, sem relação com de quem é o
-    conteúdo — os 641 modelos importados em massa tinham todos criado_por do
-    admin que rodou a importação)."""
+    A identidade vem do token do aparelho. A extensão é uma biblioteca pessoal:
+    devolve SOMENTE o conteúdo cujo dono é a pessoa autenticada, inclusive para
+    gestores. Supervisão de equipe e conteúdo compartilhado pertencem ao site
+    do JOB, não à aba do WhatsApp que está aberta."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     if not getattr(g, 'usuario_id', None) or not getattr(g, 'usuario', None):
         return _wa_cors(jsonify({'ok': False, 'erro': 'Entre no JOB pelo popup da extensão'})), 401
     uid = g.usuario_id
     conn = db()
-    # Gestor (admin/supervisor/gestor_vendedor) enxerga a biblioteca de TODO
-    # mundo, organizada por dono — pra supervisionar. Consultor continua vendo
-    # só a pasta dele + o compartilhado. Pedido do Guilherme: "eu como gestor
-    # quero ter acesso às mensagens e funis de todos, em pasta, organizado".
-    perfil = g.usuario['perfil'] if getattr(g, 'usuario', None) else None
-    eh_gestor = perfil in ('admin', 'supervisor', 'gestor_vendedor')
-    where = "m.tipo='whatsapp' AND m.ativo=1"
-    params = []
-    if uid and not eh_gestor:
-        where += " AND (m.dono_consultor_id = ? OR m.dono_consultor_id IS NULL)"
-        params.append(uid)
+    where = "m.tipo='whatsapp' AND m.ativo=1 AND m.dono_consultor_id = ?"
+    params = [uid]
     rows = conn.execute(f"""SELECT m.id, m.nome, m.corpo_texto, m.variante, m.midia_arquivo, m.midia_tipo,
         m.categoria, m.favorito, m.vezes_usado, m.dono_consultor_id, u.nome AS dono_nome
         FROM modelos_conteudo m LEFT JOIN usuarios u ON u.id = m.dono_consultor_id
@@ -23664,10 +23660,10 @@ def api_whatsapp_extensao_modelos():
             "categoria": md.get('categoria') or '', "favorito": bool(md.get('favorito')),
             "vezes_usado": md.get('vezes_usado') or 0,
             "dono_nome": md.get('dono_nome') or 'Compartilhado',
-            "pode_editar": eh_gestor or md.get('dono_consultor_id') == uid,
+            "pode_editar": True,
             "midia_url": (f"{_SITE_BASE_URL}/crm/modelos/midia/{md['midia_arquivo']}" if md['midia_arquivo'] else None),
         })
-    return _wa_cors(jsonify({"ok": True, "gestor": eh_gestor, "modelos": modelos}))
+    return _wa_cors(jsonify({"ok": True, "gestor": False, "modelos": modelos}))
 
 
 @app.route('/api/whatsapp/extensao/modelos/novo', methods=['POST', 'OPTIONS'])
@@ -23733,12 +23729,11 @@ def api_whatsapp_extensao_modelo_favorito(mid):
     if not getattr(g, 'usuario_id', None) or not getattr(g, 'usuario', None):
         return _wa_cors(jsonify({'ok': False, 'erro': 'Entre no JOB pelo popup da extensão'})), 401
     conn = db()
-    eh_gestor = g.usuario['perfil'] in ('admin', 'supervisor', 'gestor_vendedor')
     m = conn.execute("""SELECT favorito, dono_consultor_id FROM modelos_conteudo
         WHERE id=? AND tipo='whatsapp'""", (mid,)).fetchone()
     if not m:
         close_db(conn); return _wa_cors(jsonify({"ok": False, "erro": "Modelo não encontrado"})), 404
-    if not eh_gestor and m['dono_consultor_id'] != g.usuario_id:
+    if m['dono_consultor_id'] != g.usuario_id:
         close_db(conn)
         return _wa_cors(jsonify({"ok": False, "erro": "Você só pode alterar suas mensagens"})), 403
     novo = 0 if m['favorito'] else 1
@@ -23757,12 +23752,11 @@ def api_whatsapp_extensao_modelo_excluir(mid):
     if not getattr(g, 'usuario_id', None) or not getattr(g, 'usuario', None):
         return _wa_cors(jsonify({'ok': False, 'erro': 'Entre no JOB pelo popup da extensão'})), 401
     conn = db()
-    eh_gestor = g.usuario['perfil'] in ('admin', 'supervisor', 'gestor_vendedor')
     m = conn.execute("""SELECT id, dono_consultor_id FROM modelos_conteudo
         WHERE id=? AND tipo='whatsapp'""", (mid,)).fetchone()
     if not m:
         close_db(conn); return _wa_cors(jsonify({"ok": False, "erro": "Modelo não encontrado"})), 404
-    if not eh_gestor and m['dono_consultor_id'] != g.usuario_id:
+    if m['dono_consultor_id'] != g.usuario_id:
         close_db(conn)
         return _wa_cors(jsonify({"ok": False, "erro": "Você só pode excluir suas mensagens"})), 403
     conn.execute("DELETE FROM modelos_conteudo WHERE id=? AND tipo='whatsapp'", (mid,))
@@ -23812,11 +23806,10 @@ def api_whatsapp_extensao_modelo_duplicar(mid):
     conn = db()
     origem = conn.execute("""SELECT dono_consultor_id FROM modelos_conteudo
         WHERE id=? AND tipo='whatsapp' AND ativo=1""", (mid,)).fetchone()
-    eh_gestor = g.usuario['perfil'] in ('admin', 'supervisor', 'gestor_vendedor')
     if not origem:
         close_db(conn)
         return _wa_cors(jsonify({'ok': False, 'erro': 'Mensagem não encontrada'})), 404
-    if not eh_gestor and origem['dono_consultor_id'] not in (None, g.usuario_id):
+    if origem['dono_consultor_id'] != g.usuario_id:
         close_db(conn)
         return _wa_cors(jsonify({'ok': False, 'erro': 'Você não tem acesso a esta mensagem'})), 403
     novo_id, erro = _duplicar_modelo_whatsapp(conn, mid, g.usuario_id)
@@ -23839,19 +23832,18 @@ def api_whatsapp_extensao_funis():
         return _wa_cors(Response(status=204))
     if not getattr(g, 'usuario_id', None) or not getattr(g, 'usuario', None):
         return _wa_cors(jsonify({'ok': False, 'erro': 'Entre no JOB pelo popup da extensão'})), 401
-    # Mesmo filtro por identidade autenticada dos modelos: pasta pessoal mais
-    # funis compartilhados (NULL = material da corretora).
+    # A extensão é pessoal: mesmo um gestor vê aqui apenas os próprios funis.
     uid = g.usuario_id
     conn = db()
-    # Gestor vê os funis de todo mundo (organizado por dono); consultor vê só o
-    # dele + compartilhado — mesma regra dos modelos.
-    perfil = g.usuario['perfil'] if getattr(g, 'usuario', None) else None
-    eh_gestor = perfil in ('admin', 'supervisor', 'gestor_vendedor')
-    where_f = "f.ativo=1"
-    params_f = []
-    if uid and not eh_gestor:
-        where_f += " AND (f.dono_consultor_id = ? OR f.dono_consultor_id IS NULL)"
-        params_f.append(uid)
+    # Não devolve um funil pessoal que ainda aponte para mensagem sem dono ou
+    # de outra pessoa: isso vazaria o conteúdo pelo passo, apesar do cabeçalho
+    # do funil ser próprio.
+    where_f = """f.ativo=1 AND f.dono_consultor_id = ? AND NOT EXISTS (
+        SELECT 1 FROM whatsapp_funil_passos px
+        JOIN modelos_conteudo mx ON mx.id=px.modelo_id
+        WHERE px.funil_id=f.id AND (mx.dono_consultor_id IS NULL OR mx.dono_consultor_id != ?)
+    )"""
+    params_f = [uid, uid]
     funis = conn.execute(f"""SELECT f.id, f.nome, f.categoria, f.favorito, f.vezes_disparado,
             f.dono_consultor_id, u.nome AS dono_nome
         FROM whatsapp_funis f LEFT JOIN usuarios u ON u.id = f.dono_consultor_id
@@ -23885,10 +23877,10 @@ def api_whatsapp_extensao_funis():
             "categoria": fd.get('categoria') or '', "favorito": bool(fd.get('favorito')),
             "vezes_disparado": fd.get('vezes_disparado') or 0,
             "dono_nome": fd.get('dono_nome') or 'Compartilhado',
-            "pode_editar": eh_gestor or fd.get('dono_consultor_id') == uid,
+            "pode_editar": True,
             "passos": por_funil.get(fd['id'], []),
         })
-    return _wa_cors(jsonify({"ok": True, "gestor": eh_gestor, "pode_criar": True, "funis": out}))
+    return _wa_cors(jsonify({"ok": True, "gestor": False, "pode_criar": True, "funis": out}))
 
 
 # --- FILA DE COTAÇÃO SERVIDOR ---
@@ -37860,7 +37852,7 @@ def crm_modelos():
     uid = session.get('user_id')
     eh_gestor = session.get('perfil') in ('admin', 'supervisor', 'gestor_vendedor')
     conn = db()
-    where = '' if eh_gestor else "WHERE m.tipo='whatsapp' AND (m.dono_consultor_id=? OR m.dono_consultor_id IS NULL)"
+    where = '' if eh_gestor else "WHERE m.tipo='whatsapp' AND m.dono_consultor_id=?"
     params = () if eh_gestor else (uid,)
     modelos = [dict(m) for m in conn.execute(
         """SELECT m.*, u.nome AS dono_nome FROM modelos_conteudo m
@@ -37925,7 +37917,7 @@ def crm_modelo_duplicar(mid):
     if not origem:
         close_db(conn)
         return jsonify({'ok': False, 'erro': 'Mensagem não encontrada'}), 404
-    if not eh_gestor and origem['dono_consultor_id'] not in (None, uid):
+    if not eh_gestor and origem['dono_consultor_id'] != uid:
         close_db(conn)
         return jsonify({'ok': False, 'erro': 'Você não tem acesso a esta mensagem'}), 403
     novo_id, erro = _duplicar_modelo_whatsapp(conn, mid, uid)
@@ -38462,8 +38454,7 @@ def _construir_arvore_pastas(conn, usuario_id=None, eh_gestor=True):
             raizes.append(p)
     if eh_gestor:
         return raizes
-    return [p for p in raizes
-            if p.get('consultor_id') == usuario_id or p.get('nome') == 'Compartilhado']
+    return [p for p in raizes if p.get('consultor_id') == usuario_id]
 
 
 @app.route('/crm/pastas/nova', methods=['POST'])
@@ -38862,18 +38853,31 @@ def api_whatsapp_extensao_funil_salvar():
         return _wa_cors(Response(status=204))
     if not getattr(g, 'usuario_id', None) or not getattr(g, 'usuario', None):
         return _wa_cors(jsonify({'ok': False, 'erro': 'Entre no JOB pelo popup da extensão'})), 401
-    perfil = (g.usuario['perfil'] if getattr(g, 'usuario', None) else None)
-    eh_gestor = perfil in ('admin', 'supervisor', 'gestor_vendedor')
     dados = request.json or {}
     funil_id = _funil_num(dados.get('id'), 0, 0, 2_000_000_000) or None
     conn = db()
-    if funil_id and not eh_gestor:
+    if funil_id:
         atual = conn.execute("SELECT dono_consultor_id FROM whatsapp_funis WHERE id=?", (funil_id,)).fetchone()
         if not atual or atual['dono_consultor_id'] != g.usuario_id:
             close_db(conn)
             return _wa_cors(jsonify({'ok': False, 'erro': 'Você só pode editar seus funis'})), 403
+    # A tela só lista mensagens próprias, mas a rota também precisa manter a
+    # regra quando alguém tentar postar um id de outro dono diretamente.
+    passos = dados.get('passos') if isinstance(dados.get('passos'), list) else []
+    modelo_ids = sorted({_funil_num(p.get('modelo_id'), 0, 0, 2_000_000_000)
+                         for p in passos if isinstance(p, dict) and p.get('modelo_id')})
+    modelo_ids = [mid for mid in modelo_ids if mid]
+    if modelo_ids:
+        marcadores = ','.join('?' for _ in modelo_ids)
+        meus = conn.execute(
+            f"SELECT id FROM modelos_conteudo WHERE id IN ({marcadores}) "
+            "AND tipo='whatsapp' AND ativo=1 AND dono_consultor_id=?",
+            (*modelo_ids, g.usuario_id)).fetchall()
+        if {r['id'] for r in meus} != set(modelo_ids):
+            close_db(conn)
+            return _wa_cors(jsonify({'ok': False, 'erro': 'Você só pode usar suas mensagens no funil'})), 403
     salvo_id, erro = _funil_salvar_completo(
-        conn, dados, g.usuario_id, funil_id, None if eh_gestor else g.usuario_id)
+        conn, dados, g.usuario_id, funil_id, g.usuario_id)
     if erro:
         close_db(conn)
         return _wa_cors(jsonify({'ok': False, 'erro': erro})), 400
@@ -38887,8 +38891,13 @@ def crm_funis():
     uid = session.get('user_id')
     eh_gestor = session.get('perfil') in ('admin', 'supervisor', 'gestor_vendedor')
     conn = db()
-    where = "ativo=1" if eh_gestor else "ativo=1 AND (dono_consultor_id=? OR dono_consultor_id IS NULL)"
-    params = () if eh_gestor else (uid,)
+    where = "ativo=1" if eh_gestor else """ativo=1 AND dono_consultor_id=? AND NOT EXISTS (
+        SELECT 1 FROM whatsapp_funil_passos px
+        JOIN modelos_conteudo mx ON mx.id=px.modelo_id
+        WHERE px.funil_id=whatsapp_funis.id
+          AND (mx.dono_consultor_id IS NULL OR mx.dono_consultor_id != ?)
+    )"""
+    params = () if eh_gestor else (uid, uid)
     funis = [dict(f) for f in conn.execute(
         f"SELECT * FROM whatsapp_funis WHERE {where} ORDER BY favorito DESC, (categoria IS NULL), categoria, nome", params).fetchall()]
     ids_funis = [f['id'] for f in funis]
@@ -38910,7 +38919,7 @@ def crm_funis():
         SELECT id, nome, midia_tipo, categoria, corpo_texto FROM modelos_conteudo
         WHERE tipo='whatsapp' AND ativo=1
         %s ORDER BY (categoria IS NULL), categoria, nome""" %
-        ('' if eh_gestor else 'AND (dono_consultor_id=? OR dono_consultor_id IS NULL)'),
+        ('' if eh_gestor else 'AND dono_consultor_id=?'),
         () if eh_gestor else (uid,)).fetchall()]
     arvore_pastas = _construir_arvore_pastas(conn, uid, eh_gestor)
     close_db(conn)
@@ -38957,7 +38966,7 @@ def crm_funil_duplicar(fid):
     if not origem:
         close_db(conn)
         return jsonify({'ok': False, 'erro': 'Funil não encontrado'}), 404
-    if not eh_gestor and origem['dono_consultor_id'] not in (None, uid):
+    if not eh_gestor and origem['dono_consultor_id'] != uid:
         close_db(conn)
         return jsonify({'ok': False, 'erro': 'Você não tem acesso a este funil'}), 403
     novo_id, erro = _duplicar_funil(conn, fid, uid)
@@ -38977,11 +38986,10 @@ def api_whatsapp_extensao_funil_duplicar(fid):
         return _wa_cors(jsonify({'ok': False, 'erro': 'Entre no JOB pelo popup da extensão'})), 401
     conn = db()
     origem = conn.execute("SELECT dono_consultor_id FROM whatsapp_funis WHERE id=? AND ativo=1", (fid,)).fetchone()
-    eh_gestor = g.usuario['perfil'] in ('admin', 'supervisor', 'gestor_vendedor')
     if not origem:
         close_db(conn)
         return _wa_cors(jsonify({'ok': False, 'erro': 'Funil não encontrado'})), 404
-    if not eh_gestor and origem['dono_consultor_id'] not in (None, g.usuario_id):
+    if origem['dono_consultor_id'] != g.usuario_id:
         close_db(conn)
         return _wa_cors(jsonify({'ok': False, 'erro': 'Você não tem acesso a este funil'})), 403
     novo_id, erro = _duplicar_funil(conn, fid, g.usuario_id)
