@@ -16,6 +16,48 @@
 (function () {
   'use strict';
 
+  // Uma geracao nova so pode assumir depois de a anterior entregar tudo que
+  // deixou pendurado no document/window. Recarregar a extensao invalida a API
+  // chrome da geracao velha, mas nao desconecta observer nem remove listener.
+  if (window.__JOB_CONTENT && window.__JOB_CONTENT_VIVO && window.__JOB_CONTENT_VIVO()) return;
+  try {
+    if (typeof window.__JOB_CONTENT_LIMPAR === 'function') window.__JOB_CONTENT_LIMPAR();
+  } catch (e) {}
+  const _limpezasGeracao = [];
+  let _geracaoLimpa = false;
+  function _aoLimpar(fn) { _limpezasGeracao.push(fn); return fn; }
+  function _ouvir(alvo, tipo, fn, opcoes) {
+    alvo.addEventListener(tipo, fn, opcoes);
+    _aoLimpar(() => { try { alvo.removeEventListener(tipo, fn, opcoes); } catch (e) {} });
+    return fn;
+  }
+  function _observar(obs) {
+    _aoLimpar(() => { try { obs.disconnect(); } catch (e) {} });
+    return obs;
+  }
+  function _escutarChrome(evento, fn) {
+    evento.addListener(fn);
+    _aoLimpar(() => { try { evento.removeListener(fn); } catch (e) {} });
+    return fn;
+  }
+  function _limparGeracao() {
+    if (_geracaoLimpa) return;
+    _geracaoLimpa = true;
+    while (_limpezasGeracao.length) {
+      try { _limpezasGeracao.pop()(); } catch (e) {}
+    }
+    try { window.__jobSerenusCarregado = false; } catch (e) {}
+  }
+  window.__JOB_CONTENT = 1;
+  window.__JOB_CONTENT_VIVO = function () {
+    try { return !!(chrome && chrome.runtime && chrome.runtime.id); }
+    catch (e) { return false; }
+  };
+  window.__JOB_CONTENT_LIMPAR = _limparGeracao;
+  // Primeira atualizacao vinda de uma versao que ainda nao tinha o protocolo
+  // acima: o contexto morreu, mas a flag antiga ficou no window.
+  window.__jobSerenusCarregado = false;
+
   // ── A PONTE DA PÁGINA É INJETADA POR AQUI, NÃO PELO MANIFEST ──────────────
   //
   // Pelo manifest, o mundo MAIN só é injetado quando a página carrega. Se a
@@ -39,7 +81,7 @@
     } catch (e) { /* extensão recarregada no meio: a próxima rodada tenta */ }
   }
 
-  window.addEventListener('message', (ev) => {
+  _ouvir(window, 'message', (ev) => {
     if (ev.source !== window) return;
     const d = ev.data;
     if (!d || d.source !== 'JOB_INJETOR') return;
@@ -54,6 +96,7 @@
     if (_ponteConfirmada || ++_tentativasPonte > 12) { clearInterval(_vigia); return; }
     _injetarPonteNaPagina();
   }, 5000);
+  _aoLimpar(() => clearInterval(_vigia));
   // TRAVA DE INJECAO DUPLA.
   //
   // Quando a extensao e recarregada, o service worker reinjeta os scripts nas
@@ -70,13 +113,6 @@
   // — mas morto: qualquer chamada a chrome.* estoura. Uma trava booleana pura
   // bloquearia justamente a reinjecao que conserta, e o conserto viraria
   // enfeite silencioso.
-  if (window.__JOB_CONTENT && window.__JOB_CONTENT_VIVO()) return;
-  window.__JOB_CONTENT = 1;
-  window.__JOB_CONTENT_VIVO = function () {
-    try { return !!(chrome && chrome.runtime && chrome.runtime.id); }
-    catch (e) { return false; }
-  };
-
   if (window.__jobSerenusCarregado) return;
   window.__jobSerenusCarregado = true;
 
@@ -129,7 +165,7 @@
     });
   } catch (e) { /* começa fechado se falhar */ }
   function _pastaAberta(key) { return _pastasAbertas.has(key); }
-  document.addEventListener('toggle', (e) => {
+  _ouvir(document, 'toggle', (e) => {
     const el = e.target;
     if (!el || !el.classList || !(el.classList.contains('job-pasta') || el.classList.contains('job-subpasta'))) return;
     const key = el.dataset.pastaKey;
@@ -160,13 +196,13 @@
       } catch (e) { /* best-effort, nunca deixa um erro virar outro erro */ }
     }).catch(() => {});
   }
-  window.addEventListener('error', (e) => {
+  _ouvir(window, 'error', (e) => {
     if (e && _ehContextoInvalidado(e.message || (e.error && e.error.message))) { _marcarContextoMorto(); return; }
     if (e && e.filename && /content\.js|wpp-bridge\.js/.test(e.filename)) {
       _reportarErro(e.message, e.error && e.error.stack);
     }
   });
-  window.addEventListener('unhandledrejection', (e) => {
+  _ouvir(window, 'unhandledrejection', (e) => {
     const msg = e && e.reason && (e.reason.message || String(e.reason));
     if (_ehContextoInvalidado(msg)) { _marcarContextoMorto(); return; }
     // Sem filtro de origem aqui (rejection não expõe filename) — só reporta
@@ -314,6 +350,7 @@
   function _pararLoops() {
     _idsLoops.forEach((id) => { try { clearInterval(id); } catch (e) {} });
     _idsLoops.length = 0;
+    _limparGeracao();
   }
   let _avisoContextoMostrado = false;
   function _mostrarAvisoRecarregarGlobal() {
@@ -954,7 +991,7 @@
   let _usuarioIdPopup = null;
   try {
     chrome.storage.local.get(['usuarioId']).then(({ usuarioId }) => { _usuarioIdPopup = usuarioId || null; });
-    chrome.storage.onChanged.addListener((mud, area) => {
+    _escutarChrome(chrome.storage.onChanged, (mud, area) => {
       if (area === 'local' && mud.usuarioId) _usuarioIdPopup = mud.usuarioId.newValue || null;
     });
   } catch (e) { /* contexto invalidado — segue sem cache */ }
@@ -1062,7 +1099,7 @@
     aplicarClassesHtml();
   }
   if (chrome.storage.onChanged) {
-    chrome.storage.onChanged.addListener((changes, area) => {
+    _escutarChrome(chrome.storage.onChanged, (changes, area) => {
       if (area === 'local' && changes.railSide) {
         _railSide = changes.railSide.newValue === 'esquerda' ? 'esquerda' : 'direita';
         aplicarClassesHtml();
@@ -1112,7 +1149,7 @@
 
   // Redimensionar e o momento em que a medida REALMENTE muda — reavalia na
   // hora, em vez de o usuario esperar ate 12s pelo trilho se ajeitar.
-  window.addEventListener('resize', () => {
+  _ouvir(window, 'resize', () => {
     try { aplicarOffsetVizinhos(); } catch (e) {}
     // A barra do trilho é medida em pixels: se o trilho muda de altura (janela
     // redimensionada, item Dev entrando ou saindo), a medida velha aponta pro
@@ -1144,7 +1181,7 @@
     }
   }
   let _resizeTimer = null;
-  window.addEventListener('resize', () => {
+  _ouvir(window, 'resize', () => {
     clearTimeout(_resizeTimer);
     _resizeTimer = setTimeout(aplicarClassesHtml, 150);
   });
@@ -1307,7 +1344,10 @@
     // O trilho pode ganhar/perder o item Dev depois de montado; a barra precisa
     // remedir quando isso acontecer.
     try {
-      new ResizeObserver(() => { try { _trilhoMarcaSincronizar(); } catch (e) {} }).observe(trilho);
+      const obsTamanho = _observar(new ResizeObserver(() => {
+        try { _trilhoMarcaSincronizar(); } catch (e) {}
+      }));
+      obsTamanho.observe(trilho);
     } catch (e) { /* navegador sem ResizeObserver: o resize da janela cobre */ }
     // A fonte da marca carrega depois do primeiro desenho e muda a altura dos
     // itens: quem mediu antes fica com a pílula em cima do item errado. A
@@ -1523,7 +1563,7 @@
   // quando o painel está aberto — e aí segura o ESC pra ele não vazar pro
   // WhatsApp Web (que fecharia a conversa). Painel fechado: ESC segue normal.
   // Capture (true) pra pegar antes do handler do WhatsApp.
-  document.addEventListener('keydown', (e) => {
+  _ouvir(document, 'keydown', (e) => {
     if (e.key !== 'Escape') return;
     // Prioridade: primeiro fecha o painel da bolha de funis (se estiver
     // aberto) — não cancela nenhum envio, só recolhe a bolha pro pontinho.
@@ -1735,7 +1775,7 @@
   // Voltar pra aba e o momento certo de reconferir: e quando a pessoa vai
   // usar, e e quando ela descobriria do jeito ruim.
   try {
-    document.addEventListener('visibilitychange', () => {
+    _ouvir(document, 'visibilitychange', () => {
       if (!document.hidden) _confirmarSessaoNoServidor(false);
     });
   } catch (e) { /* sem isso, ainda confere na abertura */ }
@@ -1762,7 +1802,7 @@
 
   // Reconfere quando a credencial muda (login feito noutra aba, por exemplo).
   try {
-    chrome.storage.onChanged.addListener((mud) => {
+    _escutarChrome(chrome.storage.onChanged, (mud) => {
       if (mud.extToken || mud.extKey || mud.extensaoAtiva) _conferirPortao();
     });
   } catch (e) { /* sem storage, o portão só é avaliado na carga */ }
@@ -1833,7 +1873,7 @@
 
   // O popup manda abrir a configuração aqui — é onde ela mora.
   try {
-    chrome.runtime.onMessage.addListener((msg, remetente, responder) => {
+    _escutarChrome(chrome.runtime.onMessage, (msg, remetente, responder) => {
       if (msg && msg.type === 'abrir_config') {
         abrirSecao('config');
         // RESPONDE. Sem isto o popup nao distingue "o painel abriu" de "esta
@@ -4180,7 +4220,7 @@
     setTimeout(() => { canarioRodar('na abertura'); }, 40000);
     // De 6 em 6 horas. Nao e monitoramento de segundo a segundo — e detectar
     // uma atualizacao do WhatsApp no mesmo dia, em vez de na semana seguinte.
-    setInterval(() => { canarioRodar('rodada periodica'); }, 6 * 60 * 60 * 1000);
+    _registrarLoop(setInterval(() => { canarioRodar('rodada periodica'); }, 6 * 60 * 60 * 1000));
   }
 
   function trIniciar() {
@@ -4205,7 +4245,7 @@
       // closest a mais por registro custaria caro justamente nos momentos de
       // rolagem, que e quando ha milhares deles.
       const _MEU = '.job-doc-slot, .job-tr-slot, .job-barra-conv, .job-painel, .job-modal';
-      const obs = new MutationObserver((regs) => {
+      const obs = _observar(new MutationObserver((regs) => {
         // Set, nao array: rolar a conversa gera milhares de registros que
         // apontam pra mesma meia duzia de linhas. Sem isto, a mesma linha era
         // varrida centenas de vezes na mesma passada.
@@ -4250,13 +4290,13 @@
         }
         TR.perf.regs += regs.length;
         if (novos.size) trAgendarInjecao([...novos]);
-      });
+      }));
       obs.observe(main, { childList: true, subtree: true });
       // Troca de conversa troca o #main inteiro: reobserva sem drama.
       // Ronda so pra reatar o observer quando a CONVERSA troca (#main e
       // recriado). Nao varre mais a conversa inteira a cada 4s: se nada mudou,
       // nao ha o que injetar, e o observer avisa quando muda.
-      setInterval(() => {
+      _registrarLoop(setInterval(() => {
         const m = document.querySelector('#main');
         if (m && !m._jobTrObservado) {
           m._jobTrObservado = true;
@@ -4270,7 +4310,7 @@
             try { _conferirBlocosDaConversa(); } catch (e) {}
           }, 5000);
         }
-      }, 4000);
+      }, 4000));
       try { canarioIniciar(); } catch (e) { /* canario nao pode derrubar a extensao */ }
       // O SINO. Dois minutos e o intervalo do sino do site — mesma fonte,
       // mesmo ritmo, pra nao existir "o site ja avisou e a extensao nao".
@@ -4830,12 +4870,12 @@
     // 4 minutos pra primeira checagem e 5 em 5 depois. A checagem em si é um GET
     // de config; se estiver desligada (o padrão), o custo é isso e mais nada.
     setTimeout(() => { varreduraRodar(false); }, 240000);
-    setInterval(() => { varreduraRodar(false); }, 5 * 60 * 1000);
+    _registrarLoop(setInterval(() => { varreduraRodar(false); }, 5 * 60 * 1000));
     // O vínculo roda ANTES da varredura (90s), porque a varredura por leads
     // depende dele. E fora do horário comercial também: ligar identidade não
     // incomoda ninguém e não gasta IA.
     setTimeout(() => { _sincLidAuto(); }, 90000);
-    setInterval(() => { _sincLidAuto(); }, 6 * 60 * 60 * 1000);
+    _registrarLoop(setInterval(() => { _sincLidAuto(); }, 6 * 60 * 60 * 1000));
   }
 
   // ═══════════════ Ficha do lead (CRM dentro do WhatsApp) ═══════════════
@@ -7210,7 +7250,7 @@
     el.classList.add('on');
     _iBalao = b; _iDono = el;
   }
-  document.addEventListener('click', (ev) => {
+  _ouvir(document, 'click', (ev) => {
     const alvo = ev.target && ev.target.closest && ev.target.closest('.job-i');
     if (alvo) {
       ev.preventDefault(); ev.stopPropagation();
@@ -7220,8 +7260,8 @@
     }
     if (_iBalao) _iFechar();
   }, true);
-  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') _iFechar(); }, true);
-  window.addEventListener('scroll', _iFechar, true);
+  _ouvir(document, 'keydown', (ev) => { if (ev.key === 'Escape') _iFechar(); }, true);
+  _ouvir(window, 'scroll', _iFechar, true);
 
   // TOPO DE NAVEGACAO: seta de voltar + onde estamos + o que ja foi cotado.
   //
@@ -7292,7 +7332,7 @@
   // estao na frente e o que esta acontecendo agora. COMO o JOB busca o preco e
   // problema do JOB.
   try {
-    chrome.runtime.onMessage.addListener((msg) => {
+    _escutarChrome(chrome.runtime.onMessage, (msg) => {
       if (!msg || msg.type !== 'fila_andamento') return;
       _cotFilaSinal = Date.now();
       const cx = document.getElementById('job-cot-fila');
@@ -9120,7 +9160,7 @@
   function filaVarreduraIniciar() {
     // Comeca depois da extensao assentar; o relogio real e o proximaEm.
     setTimeout(() => { filaVarreduraTick(); }, 60000);
-    setInterval(() => { filaVarreduraTick(); }, 15000);
+    _registrarLoop(setInterval(() => { filaVarreduraTick(); }, 15000));
     _retomarSeFoiReloadDeMemoria();
   }
 
@@ -9318,6 +9358,7 @@
         });
       }
     }, 20000);
+    _registrarLoop(_inboxTimer);
   }
 
   function setCorpoSecao(html) {
@@ -11144,7 +11185,7 @@
       offX = e.clientX - r.left; offY = e.clientY - r.top;
       e.preventDefault();
     });
-    document.addEventListener('mousemove', (e) => {
+    _ouvir(document, 'mousemove', (e) => {
       if (!arrastando) return;
       el.dataset.arrastou = '1';
       const left = Math.min(Math.max(4, e.clientX - offX), window.innerWidth - 60);
@@ -11153,7 +11194,7 @@
       el.style.left = left + 'px'; el.style.top = top + 'px';
       el.style.right = 'auto'; el.style.bottom = 'auto';
     });
-    document.addEventListener('mouseup', () => { arrastando = false; });
+    _ouvir(document, 'mouseup', () => { arrastando = false; });
   }
 
   function esc(s) {
@@ -11459,7 +11500,7 @@
 
   // Copia a pergunta que falta com um clique. Delegado no documento porque a
   // ficha é remontada inteira a cada análise — listener por elemento morreria.
-  document.addEventListener('click', (ev) => {
+  _ouvir(document, 'click', (ev) => {
     const el = ev.target && ev.target.closest && ev.target.closest('.job-falta');
     if (!el || !el.dataset.q) return;
     navigator.clipboard.writeText(el.dataset.q).then(() => {
@@ -12085,9 +12126,9 @@
     // O portão é avaliado assim que a barra existe. Sem credencial nenhuma, o
     // WhatsApp fica embaçado até a pessoa entrar (ou desligar a extensão).
     _conferirPortao();
-    const obs = new MutationObserver(() => {
+    const obs = _observar(new MutationObserver(() => {
       if (!document.getElementById('job-trilho')) criarTrilho();
-    });
+    }));
     obs.observe(document.body, { childList: true, subtree: false });
     // Transcrição colada no áudio. Best-effort: se qualquer coisa aqui falhar, o
     // resto da extensão continua funcionando — transcrição é ganho, não requisito.
@@ -12332,7 +12373,7 @@
   // A ponte avisa quando ENTRA uma mensagem (só o chatId). Se for de um número em
   // vigília, reporta a resposta ao JOB e tira da vigília.
   // O site do JOB pediu pra abrir uma conversa NESTA aba (via background).
-  chrome.runtime.onMessage.addListener((msg, _rem, responder) => {
+  _escutarChrome(chrome.runtime.onMessage, (msg, _rem, responder) => {
     if (!msg || msg.type !== 'abrir_chat_aqui') return;
     (async () => {
       try {
@@ -12351,7 +12392,7 @@
   // periodica (6h) ou reabrir o WhatsApp — e enquanto isso a tela continuava
   // dizendo "quebrou" mesmo depois da correcao ter subido. Diagnostico que so
   // atualiza sozinho nao serve pra confirmar conserto.
-  chrome.runtime.onMessage.addListener((msg, _rem, responder) => {
+  _escutarChrome(chrome.runtime.onMessage, (msg, _rem, responder) => {
     if (!msg || msg.type !== 'canario_agora') return;
     (async () => {
       try {
@@ -12369,7 +12410,7 @@
     return true;
   });
 
-  window.addEventListener('message', async (ev) => {
+  _ouvir(window, 'message', async (ev) => {
     if (ev.source !== window) return;
     const d = ev.data;
     if (!d || d.source !== 'JOB_EXT_EVT' || !d.chatId) return;
@@ -12692,7 +12733,7 @@
   // Trocou o consultor (ou chave/URL) no popup → joga fora o cache das listas,
   // senão a biblioteca/funis do consultor anterior ficam na tela por até 5 min.
   try {
-    chrome.storage.onChanged.addListener((mud, area) => {
+    _escutarChrome(chrome.storage.onChanged, (mud, area) => {
       if (area !== 'local') return;
       if (mud.usuarioId || mud.extKey || mud.jobUrl) {
         _modelosCache = null;
