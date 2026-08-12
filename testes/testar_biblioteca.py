@@ -170,10 +170,21 @@ print('── 1. A biblioteca abre e mostra os tres canais ───────
 r = c_admin.get('/crm/modelos')
 ok(r.status_code == 200, '1a. /crm/modelos abre para o gestor', 'status=%d' % r.status_code)
 html = r.get_data(as_text=True)
-ok('Ana - primeiro contato' in html, '1b. mostra conteudo de WhatsApp')
-ok('E-mail de renovacao' in html, '1c. mostra conteudo de e-mail')
-ok('SMS de reforco' in html, '1d. mostra conteudo de SMS')
-ok('Legado sem pasta' in html, '1e. mostra o item legado sem pasta (nao some)')
+ok('Compartilhado' in html and 'Ana Consultora' in html and 'Bruno Consultor' in html,
+   '1b. a arvore de proprietarios vem pronta do servidor')
+# A pasta compartilhada tem os tres canais juntos — canal e filtro, nao gaveta.
+r = c_admin.get('/crm/modelos?escopo=pasta&pasta_id=%d' % DADOS['sub_comp'])
+html = r.get_data(as_text=True)
+ok('Compartilhado - tabela Amil' in html, '1c. mostra conteudo de WhatsApp da pasta')
+ok('E-mail de renovacao' in html, '1d. mostra conteudo de e-mail da mesma pasta')
+ok('SMS de reforco' in html, '1e. mostra conteudo de SMS da mesma pasta')
+r = c_admin.get('/crm/modelos?escopo=sem-localizacao&dono=compartilhado')
+ok('Legado sem pasta' in r.get_data(as_text=True),
+   '1f. o item legado sem pasta continua alcancavel (nao some)')
+r = c_ana.get('/crm/modelos')
+html_ana = r.get_data(as_text=True)
+ok(r.status_code == 200 and 'Bruno Consultor' not in html_ana,
+   '1g. consultor nao ve o proprietario colega na tela')
 
 print('')
 print('── 2. Extensao: proprio + compartilhado, nunca o do colega ─────────────')

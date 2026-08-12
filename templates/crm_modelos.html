@@ -1,619 +1,965 @@
 {% extends "base.html" %}
-{% block title %}Modelos de E-mail/SMS/WhatsApp{% endblock %}
+{% block title %}Biblioteca{% endblock %}
 
 {% block head %}
 <style>
-  /* Abas por canal — E-mail/SMS vazios não viram mais seção rolável, só existem ao clicar. */
-  .mo-tabs { display:flex; gap:22px; border-bottom:1px solid var(--borda); max-width:1100px; margin-bottom:22px; }
-  .mo-tab { background:none; border:none; padding:10px 2px; font-family:'Sora',sans-serif; font-size:13px; font-weight:600;
-            color:var(--cinza); cursor:pointer; position:relative; display:flex; align-items:center; gap:7px; }
-  .mo-tab-n { font-size:11px; font-weight:600; color:var(--cinza-2); font-variant-numeric:tabular-nums; }
-  .mo-tab.on { color:var(--texto); }
-  .mo-tab:hover:not(.on) { color:var(--texto); }
-  .mo-tab.on::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; border-radius:2px; background:var(--grad-frio); }
+  /* BIBLIOTECA — proprietário primeiro.
+     Duas colunas: a árvore de quem é dono do quê, e a lista do que está na
+     pasta aberta. Canal (WhatsApp, SMS, e-mail) é filtro, não gaveta: o mesmo
+     assunto costuma existir nos três, e separar por canal antes de separar por
+     dono era o que deixava a tela antiga ilegível. */
+  .bib { display:grid; grid-template-columns:270px minmax(0,1fr); gap:22px; align-items:start; max-width:1240px; }
+  .bib-lado { background:var(--panel); border:1px solid var(--borda); border-radius:12px; padding:12px 10px 14px;
+              position:sticky; top:14px; max-height:calc(100vh - 40px); overflow:auto; }
+  .bib-lado-topo { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:2px 6px 10px; }
+  .bib-lado-titulo { font-size:11px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--cinza-2); }
 
-  /* Toolbar do canal: busca + filtros com contagem embutida (substitui a barra de 6 estatísticas). */
-  .mo-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:20px; max-width:1100px; }
-  .wa-busca { flex:0 0 260px; min-width:200px; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:9px 12px; font-size:13px; color:var(--texto); }
-  .wa-busca:focus { outline:none; border-color:var(--azul); }
-  .wa-filtros { display:flex; gap:6px; flex-wrap:wrap; flex:1; }
-  .wa-fchip { background:var(--panel); color:var(--cinza); border:1px solid var(--borda); border-radius:20px; padding:6px 12px;
-              font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:5px; }
-  .wa-fchip span { font-size:10.5px; color:var(--cinza-2); font-variant-numeric:tabular-nums; }
-  .wa-fchip.on { background:var(--azul); color:#fff; border-color:var(--azul); }
-  .wa-fchip.on span { color:rgba(255,255,255,.75); }
-  .mo-toolbar-acoes { display:flex; gap:8px; margin-left:auto; }
+  /* Pasta fechada por padrão: com centenas de itens, tudo aberto é ruído. */
+  .bib-no > summary { list-style:none; cursor:pointer; display:flex; align-items:center; gap:7px;
+                      padding:7px 8px; border-radius:8px; font-size:13px; color:var(--texto);
+                      transition:background .12s; }
+  .bib-no > summary::-webkit-details-marker { display:none; }
+  .bib-no > summary:hover { background:var(--panel-2); }
+  .bib-no > summary:focus-visible { outline:2px solid var(--azul); outline-offset:1px; }
+  .bib-seta { width:12px; flex-shrink:0; color:var(--cinza-2); transition:transform .15s ease; display:inline-block; }
+  .bib-no[open] > summary .bib-seta { transform:rotate(90deg); }
+  .bib-no-nome { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bib-no-n { font-size:11px; color:var(--cinza-2); font-variant-numeric:tabular-nums; }
+  .bib-raiz > summary { font-weight:700; }
+  .bib-filhas { padding-left:14px; border-left:1px solid var(--borda); margin-left:13px; }
+  .bib-pasta-btn { display:flex; align-items:center; gap:7px; width:100%; text-align:left; background:none; border:none;
+               padding:7px 8px; border-radius:8px; font:inherit; font-size:13px; color:var(--texto); cursor:pointer; }
+  .bib-pasta-btn:hover { background:var(--panel-2); }
+  .bib-pasta-btn:focus-visible { outline:2px solid var(--azul); outline-offset:1px; }
+  .bib-pasta-btn.on, .bib-no > summary.on { background:rgba(59,130,246,.14); color:var(--texto); }
+  .bib-pasta-btn.virtual .bib-no-nome { color:var(--cinza); font-style:italic; }
 
-  /* Lista de linhas com detalhe sob demanda — escanear 432 itens é leitura
-     vertical (ícone + nome + meta), não parsear 6 elementos por card. */
-  .mo-lista { display:flex; flex-direction:column; max-width:1100px; margin-bottom:28px; }
-  /* Pasta = consultor (recolhível) */
-  .pasta-wa { border:1px solid var(--borda); border-radius:12px; overflow:hidden; margin-bottom:12px; background:var(--panel); }
-  .pasta-wa-nome { cursor:pointer; list-style:none; user-select:none; font-size:13.5px; font-weight:700; color:var(--texto); padding:12px 16px; background:var(--panel-2); display:flex; align-items:center; gap:8px; }
-  .pasta-wa-nome::-webkit-details-marker { display:none; }
-  .pasta-wa-nome::before { content:'▸'; color:var(--cinza-2); font-size:11px; transition:transform .15s; }
-  .pasta-wa[open] > .pasta-wa-nome::before { transform:rotate(90deg); }
-  .pasta-wa-nome span { color:var(--cinza-2); font-weight:600; font-size:12px; margin-left:auto; }
-  /* Sub-pasta = categoria manual (operadora/material) dentro do consultor */
-  .subpasta-wa { border:1px solid var(--borda); border-radius:9px; overflow:hidden; margin:8px 12px; background:var(--panel-2); }
-  .subpasta-wa-nome { cursor:pointer; list-style:none; user-select:none; font-size:12px; font-weight:700; color:var(--texto); padding:9px 13px; display:flex; align-items:center; gap:7px; }
-  .subpasta-wa-nome::-webkit-details-marker { display:none; }
-  .subpasta-wa-nome::before { content:'▸'; color:var(--cinza-2); font-size:10px; transition:transform .15s; }
-  .subpasta-wa[open] > .subpasta-wa-nome::before { transform:rotate(90deg); }
-  .subpasta-wa-nome span { color:var(--cinza-2); font-weight:600; font-size:11px; margin-left:auto; }
-  /* Tipo = áudio/texto/PDF/imagem/vídeo (dentro da sub-pasta) */
-  .wa-tipo-header { font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza); padding:12px 16px 6px; }
-  .wa-tipo-header span { color:var(--cinza-2); }
-  .wa-item { border-bottom:1px solid var(--borda); background:var(--panel); }
-  .wa-item:last-child { border-bottom:none; }
-  .wa-row { display:flex; align-items:center; gap:12px; padding:13px 16px; cursor:pointer; }
-  .wa-row:hover { background:var(--panel-2); }
-  .wa-tico { width:26px; height:26px; border-radius:7px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
-  .wa-tico svg { width:14px; height:14px; }
-  .wa-tico.t-texto { background:rgba(59,130,246,.14); color:var(--azul); }
-  .wa-tico.t-audio { background:rgba(139,92,246,.16); color:var(--roxo); }
-  .wa-tico.t-imagem { background:var(--verde-soft); color:var(--verde); }
-  .wa-tico.t-video { background:rgba(245,158,11,.14); color:#f59e0b; }
-  .wa-tico.t-documento { background:rgba(250,204,21,.16); color:var(--amarelo); }
-  .wa-row-corpo { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
-  .wa-row-nome { font-size:13.5px; font-weight:700; color:var(--texto); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .wa-row-meta { font-size:11.5px; color:var(--cinza-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .mo-chip.off { font-size:10.5px; font-weight:700; padding:2px 9px; border-radius:20px; background:rgba(244,63,94,.15); color:var(--erro); flex-shrink:0; }
-  .mo-variante { font-size:10.5px; font-weight:700; padding:2px 9px; border-radius:20px; background:var(--panel-2); color:var(--cinza); flex-shrink:0; }
-  .wa-fav { background:none; border:none; color:var(--cinza-2); font-size:16px; cursor:pointer; line-height:1; padding:2px; flex-shrink:0; opacity:0; transition:opacity .12s; }
-  .wa-row:hover .wa-fav, .wa-fav.ativo { opacity:1; }
-  .wa-fav.ativo { color:#f5c518; }
-  .wa-row-seta { color:var(--cinza-2); font-size:14px; flex-shrink:0; transition:transform .15s; }
-  .wa-item.aberto .wa-row-seta { transform:rotate(90deg); }
-  .wa-row-detalhe { padding:0 16px 16px 54px; }
-  .mo-preview { font-size:12px; color:var(--cinza-2); background:var(--panel-2); border-radius:8px; padding:10px 12px; white-space:pre-wrap; }
-  .mo-acoes { display:flex; gap:8px; margin-top:10px; align-items:center; }
+  .bib-atalhos { display:flex; flex-direction:column; gap:2px; margin-bottom:10px; }
 
-  /* Estado vazio de canal: card de ação (padrão já aprovado nos Fluxos), não texto cinza solto. */
-  .mo-empty-card { max-width:1100px; background:var(--azul); border:1px solid var(--azul); border-radius:14px; padding:36px 24px;
-                   display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; color:#fff;
-                   cursor:pointer; transition:transform .1s; }
-  .mo-empty-card:hover { transform:translateY(-2px); }
-  .mo-empty-card svg { width:32px; height:32px; }
-  .mo-empty-label { font-size:14.5px; font-weight:700; }
-  .mo-empty-sub { font-size:12px; opacity:.85; }
+  /* Barra compacta: identidade, busca e UMA ação principal. */
+  .bib-barra { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .bib-busca { flex:1 1 260px; min-width:190px; max-width:470px; display:flex; align-items:center; gap:8px;
+               background:var(--input-bg); border:1px solid var(--borda-2); border-radius:10px; padding:0 12px; min-height:38px; }
+  .bib-busca input { flex:1; background:none; border:none; color:var(--texto); font:inherit; font-size:13px; min-width:0; }
+  .bib-busca input:focus { outline:none; }
+  .bib-busca svg { width:15px; height:15px; color:var(--cinza-2); flex-shrink:0; }
 
-  .modal-bg { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:200; align-items:center; justify-content:center; overflow-y:auto; padding:30px 0; }
-  .modal-bg.aberto { display:flex; }
-  .modal-card { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:24px; width:560px; max-width:92vw; margin:auto; }
-  .modal-card h3 { margin:0 0 14px; font-size:15px; color:var(--texto); }
-  .modal-card input, .modal-card textarea, .modal-card select { width:100%; box-sizing:border-box; background:var(--panel-2); border:1px solid var(--borda);
-                      border-radius:8px; padding:10px 12px; font-size:13px; color:var(--texto); margin-bottom:10px; font-family:inherit; }
-  .modal-card label.campo-label { display:block; font-size:11px; font-weight:700; color:var(--cinza); text-transform:uppercase; letter-spacing:.4px; margin:10px 0 5px; }
-  .modal-acoes { display:flex; justify-content:flex-end; gap:8px; margin-top:6px; }
-  .btn-azul { background:var(--azul); color:#fff; border:none; padding:10px 20px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
-  .mo-nota { font-size:11.5px; color:var(--cinza-2); line-height:1.5; margin-bottom:10px; }
+  .bib-caminho { display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:12.5px; color:var(--cinza); margin-bottom:12px; }
+  .bib-caminho b { color:var(--texto); font-weight:700; }
+  .bib-caminho span { color:var(--cinza-2); }
+
+  .bib-chips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
+  .bib-chip { background:var(--panel); color:var(--cinza); border:1px solid var(--borda-2); border-radius:20px;
+              padding:6px 13px; font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+  .bib-chip:hover { color:var(--texto); }
+  .bib-chip:focus-visible { outline:2px solid var(--azul); outline-offset:1px; }
+  .bib-chip.on { background:var(--azul); color:#fff; border-color:var(--azul); }
+  .bib-chip.on b { color:rgba(255,255,255,.8); }
+  .bib-chip b { font-weight:600; color:var(--cinza-2); font-variant-numeric:tabular-nums; }
+
+  .bib-lista { border:1px solid var(--borda); border-radius:12px; overflow:hidden; background:var(--panel); }
+  .bib-linha { display:flex; align-items:center; gap:12px; padding:12px 14px; border-bottom:1px solid var(--borda); }
+  .bib-linha:last-child { border-bottom:none; }
+  .bib-linha:hover { background:var(--panel-2); }
+  .bib-ico { width:28px; height:28px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .bib-ico svg { width:14px; height:14px; }
+  .t-whatsapp { background:rgba(31,216,164,.14); color:var(--verde); }
+  .t-sms { background:rgba(59,130,246,.14); color:var(--azul); }
+  .t-email { background:rgba(139,92,246,.16); color:var(--roxo); }
+  .t-funil { background:rgba(250,204,21,.16); color:var(--amarelo); }
+  [data-theme="light"] .t-funil { background:rgba(194,65,12,.12); color:var(--amarelo); }
+  .bib-corpo { flex:1; min-width:0; }
+  .bib-nome { font-size:13.5px; font-weight:600; color:var(--texto); display:flex; align-items:center; gap:7px; }
+  .bib-nome span.bib-tag { font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:20px;
+                           background:var(--panel-3); color:var(--cinza); }
+  .bib-previa { font-size:12px; color:var(--cinza); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bib-meta { font-size:11px; color:var(--cinza-2); margin-top:3px; display:flex; gap:10px; flex-wrap:wrap; }
+  .bib-acoes { display:flex; align-items:center; gap:2px; flex-shrink:0; }
+  .bib-icobtn { background:none; border:none; color:var(--cinza-2); cursor:pointer; padding:6px; border-radius:8px; line-height:0; }
+  .bib-icobtn:hover { color:var(--texto); background:var(--panel-3); }
+  .bib-icobtn:focus-visible { outline:2px solid var(--azul); outline-offset:1px; }
+  .bib-icobtn svg { width:16px; height:16px; }
+  .bib-icobtn.fav-on { color:#f5c518; }
+
+  .bib-vazio { padding:34px 20px; text-align:center; color:var(--cinza); font-size:13px; }
+  .bib-vazio b { display:block; color:var(--texto); font-size:14px; margin-bottom:4px; }
+  .bib-paginacao { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:12px;
+                   font-size:12px; color:var(--cinza-2); }
+
+  /* Menu de ações: só aparece ao pedir. */
+  .bib-menu { position:fixed; z-index:300; min-width:196px; background:var(--panel); border:1px solid var(--borda-2);
+              border-radius:12px; padding:6px; box-shadow:0 18px 40px rgba(0,0,0,.35); }
+  .bib-menu button { display:flex; align-items:center; gap:9px; width:100%; text-align:left; background:none; border:none;
+                     color:var(--texto); font:inherit; font-size:13px; padding:8px 10px; border-radius:8px; cursor:pointer; }
+  .bib-menu button:hover { background:var(--panel-2); }
+  .bib-menu button:focus-visible { outline:2px solid var(--azul); outline-offset:-2px; }
+  .bib-menu .sep { height:1px; background:var(--borda); margin:6px 4px; }
+  .bib-menu .perigo { color:var(--erro); }
+
+  /* Folha própria: nada de alert()/confirm() do navegador. */
+  .bib-folha-bg { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:400; display:none;
+                  align-items:center; justify-content:center; padding:20px; overflow-y:auto; }
+  .bib-folha-bg.aberta { display:flex; }
+  .bib-folha-card { background:var(--panel); border:1px solid var(--borda-2); border-radius:16px; width:560px;
+                    max-width:100%; margin:auto; padding:20px 22px 18px; animation:bibSobe .16s ease both; }
+  @keyframes bibSobe { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+  .bib-folha-card h3 { font-family:'Sora',sans-serif; font-size:15.5px; margin-bottom:4px; color:var(--texto); }
+  .bib-folha-sub { font-size:12.5px; color:var(--cinza); line-height:1.5; margin-bottom:14px; }
+  .bib-folha-card label.campo { display:block; font-size:11px; font-weight:700; color:var(--cinza);
+                                text-transform:uppercase; letter-spacing:.4px; margin:12px 0 5px; }
+  .bib-folha-card input[type=text], .bib-folha-card input[type=file], .bib-folha-card select, .bib-folha-card textarea {
+    width:100%; background:var(--input-bg); border:1px solid var(--borda-2); border-radius:9px;
+    padding:9px 11px; font:inherit; font-size:13px; color:var(--texto); }
+  .bib-folha-card textarea { min-height:96px; resize:vertical; }
+  .bib-folha-acoes { display:flex; justify-content:flex-end; gap:8px; margin-top:18px; flex-wrap:wrap; }
+  .bib-destino { max-height:230px; overflow:auto; border:1px solid var(--borda); border-radius:10px; padding:6px; margin-top:6px; }
+  .bib-consequencia { background:var(--panel-2); border:1px solid var(--borda); border-radius:10px;
+                      padding:10px 12px; font-size:12.5px; color:var(--cinza); line-height:1.55; margin-top:12px; }
+  .bib-consequencia b { color:var(--texto); }
+  .bib-dep { display:flex; align-items:center; gap:8px; padding:7px 9px; border-radius:8px; background:var(--panel-2);
+             font-size:12.5px; color:var(--texto); margin-top:6px; }
+  .bib-dep span { color:var(--cinza-2); font-size:11.5px; }
+
+  /* "i": toda regra que não é óbvia fica escrita na tela, não na cabeça de quem programou. */
+  .bib-i { background:none; border:1px solid var(--borda-2); color:var(--cinza); width:19px; height:19px;
+           border-radius:50%; font-size:11px; font-weight:700; cursor:pointer; line-height:1; flex-shrink:0; }
+  .bib-i:hover { color:var(--texto); border-color:var(--cinza); }
+  .bib-ajuda { display:none; background:var(--panel-2); border:1px solid var(--borda); border-radius:10px;
+               padding:12px 14px; font-size:12.5px; color:var(--cinza); line-height:1.6; margin-bottom:14px; }
+  .bib-ajuda.aberta { display:block; }
+  .bib-ajuda b { color:var(--texto); }
+
+  .bib-erro { background:rgba(244,63,94,.12); border:1px solid rgba(244,63,94,.35); color:var(--erro);
+              border-radius:10px; padding:9px 12px; font-size:12.5px; margin-top:12px; display:none; }
+  .bib-erro.aparece { display:block; }
+
+  @media (max-width:900px) {
+    .bib { grid-template-columns:minmax(0,1fr); }
+    .bib-lado { position:static; max-height:340px; }
+  }
+  @media (max-width:480px) {
+    .bib-linha { align-items:flex-start; }
+    .bib-acoes { align-self:flex-start; }
+  }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="topbar">
   <div>
-    <h1 style="margin:0;">Modelos de E-mail/SMS/WhatsApp</h1>
-    <div class="sub">Suba um modelo pronto (HTML de e-mail, texto de SMS ou mensagem de WhatsApp) e ele já aparece na hora de montar um passo de Fluxo — sem precisar mandar o conteúdo pelo chat</div>
+    <h1 style="margin:0;">Biblioteca</h1>
+    <div class="sub">Conteúdo pronto de WhatsApp, SMS e e-mail, organizado por proprietário. O que está em Compartilhado todo consultor enxerga na extensão.</div>
   </div>
   <div style="display:flex; gap:8px;">
-    <button class="btn-outline btn-sm" onclick="location.href='/crm/fluxos'">Voltar aos Fluxos</button>
+    <button class="btn-outline btn-sm" onclick="location.href='/crm/funis'">Funis</button>
+    {% if pode_gerir %}<a class="btn-outline btn-sm" href="/crm/modelos/exportar-backup">Criar backup</a>{% endif %}
   </div>
 </div>
 
 <div class="page">
-<div class="mo-tabs">
-  <button class="mo-tab on" data-canal="whatsapp" onclick="mudarAba(this)">WhatsApp <span class="mo-tab-n">{{ modelos_whatsapp|length }}</span></button>
-  {% if pode_gerir %}
-  <button class="mo-tab" data-canal="email" onclick="mudarAba(this)">E-mail <span class="mo-tab-n">{{ modelos_email|length }}</span></button>
-  <button class="mo-tab" data-canal="sms" onclick="mudarAba(this)">SMS <span class="mo-tab-n">{{ modelos_sms|length }}</span></button>
-  {% endif %}
+<div class="bib-barra">
+  <div class="bib-busca">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.65" y2="16.65"/></svg>
+    <input type="search" id="bib-busca" placeholder="Buscar em toda a biblioteca" value="{{ filtros.busca }}"
+           aria-label="Buscar conteúdo em toda a biblioteca">
+  </div>
+  <button class="bib-i" id="bib-i-acoes" aria-label="O que cada ação faz" title="O que cada ação faz">i</button>
+  <button class="btn" id="bib-novo">Novo conteúdo</button>
 </div>
 
-<!-- ═══ Canal WhatsApp (aba padrão — é 99% do uso) ═══ -->
-<div class="canal-painel" data-canal="whatsapp">
-  {% if modelos_whatsapp %}
-  <div class="mo-toolbar">
-    <input type="text" id="wa-busca" class="wa-busca" placeholder="Buscar por nome ou texto…" oninput="filtrarWpp()">
-    <div class="wa-filtros">
-      <button class="wa-fchip on" data-f="todos" onclick="setFiltroWpp(this)">Todos <span>{{ modelos_whatsapp|length }}</span></button>
-      <button class="wa-fchip" data-f="favoritos" onclick="setFiltroWpp(this)">Favoritos <span>{{ modelos_whatsapp|selectattr('favorito')|list|length }}</span></button>
-      <button class="wa-fchip" data-f="texto" onclick="setFiltroWpp(this)">Texto <span>{{ stats_wpp.texto }}</span></button>
-      <button class="wa-fchip" data-f="audio" onclick="setFiltroWpp(this)">Áudio <span>{{ stats_wpp.audio }}</span></button>
-      <button class="wa-fchip" data-f="imagem" onclick="setFiltroWpp(this)">Imagem <span>{{ stats_wpp.imagem }}</span></button>
-      <button class="wa-fchip" data-f="documento" onclick="setFiltroWpp(this)">PDF <span>{{ stats_wpp.documento or 0 }}</span></button>
+<div class="bib-ajuda" id="bib-ajuda">
+  <b>Mover</b> troca só a pasta: o conteúdo continua do mesmo dono e todo funil e fluxo que usam ele seguem funcionando.<br>
+  <b>Transferir</b> troca o dono e a pasta, mantendo o mesmo conteúdo — funis e fluxos continuam válidos, mas quem era dono deixa de ver.<br>
+  <b>Copiar</b> cria um conteúdo novo e independente no destino; o original fica onde está.<br>
+  <b>Duplicar</b> é copiar no mesmo lugar, para partir de algo pronto sem alterar o original.
+</div>
+
+<div class="bib">
+  <aside class="bib-lado" aria-label="Proprietários e pastas">
+    <div class="bib-lado-topo">
+      <span class="bib-lado-titulo">Proprietários</span>
+      {% if pode_gerir %}<button class="bib-icobtn" id="bib-nova-pasta" title="Nova pasta dentro da pasta aberta" aria-label="Nova pasta">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20h16a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-7.5L10 4H4a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+      </button>{% endif %}
     </div>
-    <div class="mo-toolbar-acoes">
-      {% if eh_serenus %}
-      {% if pode_gerir %}
-      <select id="zv-destino" aria-label="Destino da importação" style="min-height:36px;border:1px solid var(--borda);border-radius:8px;background:var(--panel-2);color:var(--texto);padding:6px 9px;font:600 11.5px inherit;">
-        <option value="compartilhado">Pasta compartilhada</option>
-        {% for u in usuarios_destino %}<option value="usuario:{{ u.id }}">{{ u.nome }}</option>{% endfor %}
-      </select>
+    <div class="bib-atalhos">
+      <button class="bib-pasta-btn" data-escopo="favoritos">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;flex-shrink:0"><polygon points="12 2 15 9 22 9.5 17 14.5 18.5 21.5 12 18 5.5 21.5 7 14.5 2 9.5 9 9"/></svg>
+        <span class="bib-no-nome">Favoritos</span><span class="bib-no-n">{{ atalhos.favoritos }}</span>
+      </button>
+      {% if atalhos.sem_localizacao %}
+      <button class="bib-pasta-btn virtual" data-escopo="sem-localizacao" data-dono="compartilhado">
+        <span class="bib-seta" aria-hidden="true"></span>
+        <span class="bib-no-nome">Sem localização</span><span class="bib-no-n">{{ atalhos.sem_localizacao }}</span>
+      </button>
       {% endif %}
-      <button class="btn-outline btn-sm" onclick="document.getElementById('zv-arquivo').click()">Importar backup</button>
-      {% if pode_gerir %}<a class="btn-outline btn-sm" href="/crm/modelos/exportar-backup">Criar backup</a>{% endif %}
-      {% endif %}
-      <button class="btn-azul" style="padding:8px 16px; font-size:12.5px;" onclick="document.getElementById('modal-whatsapp').classList.add('aberto')">Novo modelo</button>
     </div>
-  </div>
-  {% endif %}
-  <input type="file" id="zv-arquivo" accept=".json" style="display:none" onchange="importarZapVoice(this)">
-  <div id="zv-status" style="display:none; max-width:1100px; margin:0 0 14px; font-size:13px; color:var(--cinza); background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:12px 14px;"></div>
-  <div id="bc-status" style="display:none; max-width:1100px; margin:0 0 14px; font-size:13px; color:var(--cinza); background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:12px 14px;"></div>
+    <div id="bib-arvore"></div>
+  </aside>
 
-  {% if modelos_whatsapp %}
-  <div id="wa-lista" class="mo-lista">
-    {% for g in wpp_grupos %}
-    <details class="pasta-wa">
-      <summary class="pasta-wa-nome">{{ g.dono }} <span>({{ g.total }})</span></summary>
-      {% for sp in g.subpastas %}
-      {% set mostra_sub = g.subpastas|length > 1 or sp.nome != 'Geral' %}
-      {% if mostra_sub %}<details class="subpasta-wa"><summary class="subpasta-wa-nome">{{ sp.nome }} <span>({{ sp.total }})</span></summary>{% endif %}
-      {% for ts in sp.tipos %}
-      <div class="wa-tipo-header">{{ ts.tipo }} <span>({{ ts.itens|length }})</span></div>
-      {% for m in ts.itens %}
-    {% set t = m.midia_tipo if m.midia_tipo in ('audio','imagem','video','documento') else 'texto' %}
-    <div class="wa-item"
-         data-nome="{{ (m.nome or '')|lower }}"
-         data-texto="{{ (m.corpo_texto or '')|lower }}"
-         data-tipo="{{ m.midia_tipo or 'texto' }}"
-         data-fav="{{ 1 if m.favorito else 0 }}">
-      <div class="wa-row" onclick="toggleLinha(this)">
-        <span class="wa-tico t-{{ t }}">
-          {%- if t == 'audio' -%}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
-          {%- elif t == 'imagem' -%}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-          {%- elif t == 'video' -%}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
-          {%- elif t == 'documento' -%}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-          {%- else -%}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          {%- endif -%}
-        </span>
-        <div class="wa-row-corpo">
-          <span class="wa-row-nome">{{ m.nome }}</span>
-          <span class="wa-row-meta">{{ m.categoria or '' }}{{ ' · usado ' ~ m.vezes_usado ~ '×' if m.vezes_usado else '' }}</span>
-        </div>
-        {% if not m.ativo %}<span class="mo-chip off">Desativado</span>{% endif %}
-        {% if pode_gerir or m.dono_consultor_id == usuario_id %}<button class="wa-fav {{ 'ativo' if m.favorito else '' }}" onclick="event.stopPropagation(); toggleFavorito({{ m.id }}, this)" title="Favoritar">★</button>{% endif %}
-        <span class="wa-row-seta">›</span>
-      </div>
-      <div class="wa-row-detalhe" hidden>
-        {% if m.corpo_texto %}<div class="mo-preview">{{ m.corpo_texto }}</div>{% endif %}
-        {% if m.midia_tipo == 'audio' and m.midia_arquivo %}
-        <audio controls preload="none" src="/crm/modelos/midia/{{ m.midia_arquivo }}" style="width:100%; margin:8px 0 0; height:34px;"></audio>
-        {% elif m.midia_tipo == 'imagem' and m.midia_arquivo %}
-        <img src="/crm/modelos/midia/{{ m.midia_arquivo }}" alt="" loading="lazy" style="max-width:100%; max-height:160px; border-radius:8px; margin:8px 0 0;">
-        {% elif m.midia_tipo in ('documento','video') and m.midia_arquivo %}
-        <a href="/crm/modelos/midia/{{ m.midia_arquivo }}" target="_blank" rel="noopener" class="btn-ghost" style="font-size:11.5px; display:inline-block; margin-top:8px;">Abrir {{ 'PDF' if m.midia_tipo == 'documento' else 'vídeo' }}</a>
-        {% endif %}
-        <div class="mo-acoes">
-          <button class="btn-ghost" style="font-size:11.5px; color:var(--azul);" onclick="duplicarModelo({{ m.id }}, this)">Duplicar</button>
-          {% if pode_gerir %}
-          <button class="btn-ghost" style="font-size:11.5px; color:var(--teal);" onclick="editarModelo({{ m.id }})">Editar</button>
-          <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
-          <button class="btn-ghost" style="font-size:11.5px; color:var(--erro);" data-nome="{{ m.nome|e }}" onclick="excluirModelo({{ m.id }}, this)">Excluir modelo</button>
-          {% endif %}
-        </div>
-        {% if pode_gerir %}
-        <div class="mo-editar" id="ed-{{ m.id }}" hidden style="margin-top:8px;">
-          <input id="edn-{{ m.id }}" class="job-inp" value="{{ m.nome|e }}" placeholder="Nome do modelo" style="width:100%; box-sizing:border-box; margin-bottom:6px; padding:8px 10px; font-size:12.5px; background:var(--fundo-2,#15151e); border:1px solid var(--borda); border-radius:8px; color:var(--texto);">
-          <textarea id="edt-{{ m.id }}" placeholder="Texto da mensagem" style="width:100%; box-sizing:border-box; min-height:72px; padding:8px 10px; font-size:12.5px; background:var(--fundo-2,#15151e); border:1px solid var(--borda); border-radius:8px; color:var(--texto); resize:vertical;">{{ m.corpo_texto or '' }}</textarea>
-          <div style="margin-top:8px; font-size:11.5px; color:var(--cinza-2);">{{ 'Trocar arquivo (imagem/áudio/vídeo/PDF) — deixe vazio pra manter o atual' if m.midia_tipo else 'Anexar arquivo (opcional)' }}</div>
-          <input type="file" id="edf-{{ m.id }}" accept="image/*,audio/*,video/*,application/pdf" style="margin-top:4px; font-size:12px; color:var(--cinza);">
-          <div style="display:flex; gap:8px; margin-top:6px;">
-            <button class="btn-ghost" style="font-size:11.5px; color:var(--teal);" onclick="salvarEdicaoModelo({{ m.id }})">Salvar</button>
-            <button class="btn-ghost" style="font-size:11.5px;" onclick="editarModelo({{ m.id }})">Cancelar</button>
-          </div>
-        </div>
-        {% endif %}
-      </div>
+  <section aria-label="Conteúdo da pasta">
+    <div class="bib-caminho" id="bib-caminho"></div>
+    <div class="bib-chips" id="bib-canais">
+      <button class="bib-chip {{ 'on' if filtros.canal == 'todos' else '' }}" data-canal="todos">Todos</button>
+      <button class="bib-chip {{ 'on' if filtros.canal == 'whatsapp' else '' }}" data-canal="whatsapp">WhatsApp</button>
+      <button class="bib-chip {{ 'on' if filtros.canal == 'sms' else '' }}" data-canal="sms">SMS</button>
+      <button class="bib-chip {{ 'on' if filtros.canal == 'email' else '' }}" data-canal="email">E-mail</button>
     </div>
-      {% endfor %}
-      {% endfor %}
-      {% if mostra_sub %}</details>{% endif %}
-      {% endfor %}
-    </details>
-    {% endfor %}
-    <div id="wa-vazio-filtro" style="display:none; text-align:center; padding:24px; color:var(--cinza-2); font-size:13px;">Nenhum modelo bate com esse filtro.</div>
-  </div>
-  {% else %}
-  <div class="mo-empty-card" onclick="document.getElementById('modal-whatsapp').classList.add('aberto')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-    <div class="mo-empty-label">Nenhum modelo de WhatsApp ainda</div>
-    <div class="mo-empty-sub">Crie o primeiro modelo de WhatsApp.</div>
-  </div>
-  {% if eh_serenus %}<div style="max-width:1100px; text-align:center; margin-top:12px;">
-    <button class="btn-outline btn-sm" onclick="document.getElementById('zv-arquivo').click()">Importar backup do ZapVoice</button>
-  </div>{% endif %}
-  {% endif %}
+    <div id="bib-conteudo"></div>
+  </section>
+</div>
 </div>
 
-<!-- ═══ Canal E-mail ═══ -->
-{% if pode_gerir %}<div class="canal-painel" data-canal="email" style="display:none;">
-  {% if modelos_email %}
-  <div class="mo-toolbar">
-    <div class="mo-toolbar-acoes">
-      <button class="btn-azul" style="padding:8px 16px; font-size:12.5px;" onclick="document.getElementById('modal-email').classList.add('aberto')">+ Subir modelo de e-mail</button>
-    </div>
-  </div>
-  <div class="mo-lista">
-    {% for m in modelos_email %}
-    <div class="wa-item">
-      <div class="wa-row" onclick="toggleLinha(this)">
-        <span class="wa-tico t-texto">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-        </span>
-        <div class="wa-row-corpo">
-          <span class="wa-row-nome">{{ m.nome }}</span>
-          <span class="wa-row-meta">{{ m.assunto or '(sem assunto)' }}</span>
-        </div>
-        {% if m.variante %}<span class="mo-variante">Variante {{ m.variante }}</span>{% endif %}
-        {% if not m.ativo %}<span class="mo-chip off">Desativado</span>{% endif %}
-        <span class="wa-row-seta">›</span>
-      </div>
-      <div class="wa-row-detalhe" hidden>
-        <div class="mo-acoes" style="margin-top:0;">
-          <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
-          <button class="btn-ghost" style="font-size:11.5px; color:var(--erro);" data-nome="{{ m.nome|e }}" onclick="excluirModelo({{ m.id }}, this)">Excluir modelo</button>
-        </div>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-  {% else %}
-  <div class="mo-empty-card" onclick="document.getElementById('modal-email').classList.add('aberto')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-    <div class="mo-empty-label">Nenhum modelo de e-mail ainda</div>
-    <div class="mo-empty-sub">Suba um HTML pronto pra usar em Fluxos</div>
-  </div>
-  {% endif %}
-</div>
-
-<!-- ═══ Canal SMS ═══ -->
-<div class="canal-painel" data-canal="sms" style="display:none;">
-  {% if modelos_sms %}
-  <div class="mo-toolbar">
-    <div class="mo-toolbar-acoes">
-      <button class="btn-azul" style="padding:8px 16px; font-size:12.5px;" onclick="document.getElementById('modal-sms').classList.add('aberto')">+ Subir modelo de SMS</button>
-    </div>
-  </div>
-  <div class="mo-lista">
-    {% for m in modelos_sms %}
-    <div class="wa-item">
-      <div class="wa-row" onclick="toggleLinha(this)">
-        <span class="wa-tico t-texto">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-        </span>
-        <div class="wa-row-corpo">
-          <span class="wa-row-nome">{{ m.nome }}</span>
-          <span class="wa-row-meta">{{ (m.corpo_texto or '')|truncate(70) }}</span>
-        </div>
-        {% if m.variante %}<span class="mo-variante">Variante {{ m.variante }}</span>{% endif %}
-        {% if not m.ativo %}<span class="mo-chip off">Desativado</span>{% endif %}
-        <span class="wa-row-seta">›</span>
-      </div>
-      <div class="wa-row-detalhe" hidden>
-        {% if m.corpo_texto %}<div class="mo-preview">{{ m.corpo_texto }}</div>{% endif %}
-        <div class="mo-acoes">
-          <button class="btn-ghost" style="font-size:11.5px; color:var(--teal);" onclick="editarModelo({{ m.id }})">Editar</button>
-          <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
-          <button class="btn-ghost" style="font-size:11.5px; color:var(--erro);" data-nome="{{ m.nome|e }}" onclick="excluirModelo({{ m.id }}, this)">Excluir modelo</button>
-        </div>
-        <div class="mo-editar" id="ed-{{ m.id }}" hidden style="margin-top:8px;">
-          <input id="edn-{{ m.id }}" class="job-inp" value="{{ m.nome|e }}" placeholder="Nome do modelo" style="width:100%; box-sizing:border-box; margin-bottom:6px; padding:8px 10px; font-size:12.5px; background:var(--fundo-2,#15151e); border:1px solid var(--borda); border-radius:8px; color:var(--texto);">
-          <textarea id="edt-{{ m.id }}" placeholder="Texto da mensagem" style="width:100%; box-sizing:border-box; min-height:72px; padding:8px 10px; font-size:12.5px; background:var(--fundo-2,#15151e); border:1px solid var(--borda); border-radius:8px; color:var(--texto); resize:vertical;">{{ m.corpo_texto or '' }}</textarea>
-          <div style="margin-top:8px; font-size:11.5px; color:var(--cinza-2);">{{ 'Trocar arquivo (imagem/áudio/vídeo/PDF) — deixe vazio pra manter o atual' if m.midia_tipo else 'Anexar arquivo (opcional)' }}</div>
-          <input type="file" id="edf-{{ m.id }}" accept="image/*,audio/*,video/*,application/pdf" style="margin-top:4px; font-size:12px; color:var(--cinza);">
-          <div style="display:flex; gap:8px; margin-top:6px;">
-            <button class="btn-ghost" style="font-size:11.5px; color:var(--teal);" onclick="salvarEdicaoModelo({{ m.id }})">Salvar</button>
-            <button class="btn-ghost" style="font-size:11.5px;" onclick="editarModelo({{ m.id }})">Cancelar</button>
-          </div>
-        </div>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-  {% else %}
-  <div class="mo-empty-card" onclick="document.getElementById('modal-sms').classList.add('aberto')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-    <div class="mo-empty-label">Nenhum modelo de SMS ainda</div>
-    <div class="mo-empty-sub">Texto curto pra usar em Fluxos</div>
-  </div>
-  {% endif %}
-</div>
-{% endif %}
-</div>
-
-<!-- Modal: novo modelo de e-mail -->
-<div class="modal-bg" id="modal-email">
-  <div class="modal-card">
-    <h3>Novo modelo de e-mail</h3>
-    <div class="mo-nota">Cole o HTML completo do e-mail (ou envie o arquivo .html). Use <code>{{nome}}</code> no texto — é substituído automaticamente pelo primeiro nome do lead na hora do envio. Se o HTML usa os tokens <code>[URL_LOGO_SERENUS]</code> e/ou <code>[URL_IMAGEM_HERO]</code>, suba as imagens correspondentes abaixo que eles são substituídos sozinhos.</div>
-    <label class="campo-label">Nome do modelo</label>
-    <input type="text" id="em-nome" placeholder="Ex: MEI 6 Meses - E-mail 1 - Variante A">
-    <label class="campo-label">Assunto</label>
-    <input type="text" id="em-assunto" placeholder="Ex: {{nome}}, você chegou a ver minha mensagem?">
-    <label class="campo-label">Variante (opcional — pra teste A/B)</label>
-    <input type="text" id="em-variante" placeholder="Ex: A ou B">
-    <label class="campo-label">HTML (cole aqui, ou envie um arquivo .html abaixo)</label>
-    <textarea id="em-html" rows="8" placeholder="&lt;!DOCTYPE html&gt;..."></textarea>
-    <label class="campo-label">Ou envie o arquivo .html</label>
-    <input type="file" id="em-arquivo" accept=".html,.htm">
-    <label class="campo-label">Logo (opcional — substitui [URL_LOGO_SERENUS])</label>
-    <input type="file" id="em-logo" accept=".png,.jpg,.jpeg,.webp">
-    <label class="campo-label">Imagem de banner/hero (opcional — substitui [URL_IMAGEM_HERO])</label>
-    <input type="file" id="em-hero" accept=".png,.jpg,.jpeg,.webp">
-    <div class="modal-acoes">
-      <button class="btn-outline btn-sm" onclick="document.getElementById('modal-email').classList.remove('aberto')">Cancelar</button>
-      <button class="btn-azul" onclick="salvarModeloEmail()">Salvar modelo</button>
-    </div>
-  </div>
-</div>
-
-<!-- Modal: novo modelo de SMS -->
-<div class="modal-bg" id="modal-sms">
-  <div class="modal-card">
-    <h3>Novo modelo de SMS</h3>
-    <div class="mo-nota">Texto livre — use <code>{{nome}}</code> para o nome do lead. Atenção: modelos fora dos aprovados pela operadora podem ser filtrados como spam e não chegar, mesmo a API confirmando envio (já aconteceu em produção). Prefira modelos já aprovados quando possível.</div>
-    <label class="campo-label">Nome do modelo</label>
-    <input type="text" id="sm-nome" placeholder="Ex: MEI 6 Meses - SMS reforço">
-    <label class="campo-label">Variante (opcional)</label>
-    <input type="text" id="sm-variante" placeholder="Ex: A ou B">
-    <label class="campo-label">Texto do SMS (máx. ~160 caracteres por segmento)</label>
-    <textarea id="sm-texto" rows="5" placeholder="{{nome}}, tudo bem? ..."></textarea>
-    <div class="modal-acoes">
-      <button class="btn-outline btn-sm" onclick="document.getElementById('modal-sms').classList.remove('aberto')">Cancelar</button>
-      <button class="btn-azul" onclick="salvarModeloSms()">Salvar modelo</button>
-    </div>
-  </div>
-</div>
-
-<!-- Modal: novo modelo de WhatsApp -->
-<div class="modal-bg" id="modal-whatsapp">
-  <div class="modal-card">
-    <h3>Novo modelo de WhatsApp</h3>
-    <div class="mo-nota">Vira item da biblioteca da extensão e passo de funil. Mídia é opcional — só áudio OU imagem, nunca as duas. Áudio é enviado como nota de voz; imagem vai com o texto como legenda.</div>
-    <label class="campo-label">Nome do modelo</label>
-    <input type="text" id="wa-nome" placeholder="Ex: Boas-vindas - primeiro contato">
-    <label class="campo-label">Pasta (opcional — organiza dentro do consultor, ex: Amil, Carência, Rede de Atendimento)</label>
-    <input type="text" id="wa-categoria" list="wa-cats" placeholder="Ex: Amil, Coparticipação, Rede…">
-    <datalist id="wa-cats">
-      {% for c in stats_wpp.categorias if stats_wpp %}<option value="{{ c }}">{% endfor %}
-    </datalist>
-    <label class="campo-label">Variante (opcional)</label>
-    <input type="text" id="wa-variante" placeholder="Ex: A ou B">
-    <label class="campo-label">Texto da mensagem</label>
-    <textarea id="wa-texto" rows="5" placeholder="Oi {{nome}}, tudo bem?"></textarea>
-    <label class="campo-label">Mídia (opcional — imagem: jpg/png/webp, áudio: mp3/ogg/m4a/opus/wav, máx. 8MB)</label>
-    <input type="file" id="wa-midia" accept=".jpg,.jpeg,.png,.webp,.gif,.mp3,.ogg,.oga,.m4a,.opus,.wav,.mp4,.mov,.m4v,.3gp,.pdf">
-    <div class="modal-acoes">
-      <button class="btn-outline btn-sm" onclick="document.getElementById('modal-whatsapp').classList.remove('aberto')">Cancelar</button>
-      <button class="btn-azul" onclick="salvarModeloWhatsapp()">Salvar modelo</button>
-    </div>
+<div class="bib-folha-bg" id="bib-folha-bg" role="dialog" aria-modal="true" aria-labelledby="bib-folha-titulo">
+  <div class="bib-folha-card">
+    <h3 id="bib-folha-titulo"></h3>
+    <div class="bib-folha-sub" id="bib-folha-sub"></div>
+    <div id="bib-folha-corpo"></div>
+    <div class="bib-erro" id="bib-folha-erro" role="alert"></div>
+    <div class="bib-folha-acoes" id="bib-folha-acoes"></div>
   </div>
 </div>
 
 <script>
-function escapar(t){ const d=document.createElement('div'); d.textContent=t==null?'':String(t); return d.innerHTML; }
-// Pastas agora são automáticas (consultor → tipo, agrupado no servidor) — a
-// árvore manual, o filtro por pasta e o mover-pasta foram aposentados.
+const BIB_ARVORE = {{ arvore|tojson }};
+const BIB_PODE_GERIR = {{ 'true' if pode_gerir else 'false' }};
+const BIB_PROPRIETARIOS = {{ proprietarios|tojson }};
+const BIB_USUARIO_ID = {{ usuario_id|tojson }};
+let BIB_ESTADO = {
+  escopo: {{ filtros.escopo|tojson }},
+  pastaId: {{ filtros.pasta_id|tojson }},
+  dono: null,
+  canal: {{ filtros.canal|tojson }},
+  busca: {{ filtros.busca|tojson }},
+  pagina: 1
+};
+let BIB_LISTAGEM = {{ listagem|tojson }};
 
-function mudarAba(btn){
-  document.querySelectorAll('.mo-tab').forEach(function(b){ b.classList.remove('on'); });
-  btn.classList.add('on');
-  document.querySelectorAll('.canal-painel').forEach(function(p){
-    p.style.display = (p.dataset.canal === btn.dataset.canal) ? '' : 'none';
+function esc(t) { const d = document.createElement('div'); d.textContent = t == null ? '' : String(t); return d.innerHTML; }
+
+const BIB_ICO = {
+  whatsapp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+  sms: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/></svg>',
+  email: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="22,6 12,13 2,6"/></svg>',
+  funil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>',
+  seta: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="width:9px;height:9px"><polyline points="9 18 15 12 9 6"/></svg>',
+  estrela: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15 9 22 9.5 17 14.5 18.5 21.5 12 18 5.5 21.5 7 14.5 2 9.5 9 9"/></svg>',
+  mais: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>'
+};
+const BIB_ROTULO_CANAL = { whatsapp: 'WhatsApp', sms: 'SMS', email: 'E-mail' };
+const BIB_ROTULO_MIDIA = { audio: 'Áudio', imagem: 'Imagem', video: 'Vídeo', documento: 'PDF' };
+
+// ─── Árvore ───────────────────────────────────────────────────────────────
+function bibNoHtml(no, nivel) {
+  const chaveSel = String(BIB_ESTADO.pastaId || '');
+  if (no.virtual) {
+    const ligada = BIB_ESTADO.escopo === 'sem-localizacao' && String(BIB_ESTADO.dono || 'compartilhado') === String(no.dono_id == null ? 'compartilhado' : no.dono_id);
+    return '<button class="bib-pasta-btn virtual ' + (ligada ? 'on' : '') + '" data-escopo="sem-localizacao" data-dono="' +
+      (no.dono_id == null ? 'compartilhado' : no.dono_id) + '">' +
+      '<span class="bib-seta" aria-hidden="true"></span><span class="bib-no-nome">' + esc(no.nome) + '</span>' +
+      '<span class="bib-no-n">' + (no.total || 0) + '</span></button>';
+  }
+  const temFilhas = (no.filhas || []).length > 0;
+  const selecionada = chaveSel === String(no.id) && BIB_ESTADO.escopo === 'pasta';
+  const rotuloDono = no.dono_nome ? ' — ' + no.dono_nome : '';
+  if (!temFilhas) {
+    return '<button class="bib-pasta-btn ' + (selecionada ? 'on' : '') + '" data-pasta="' + no.id + '">' +
+      '<span class="bib-seta" aria-hidden="true"></span>' +
+      '<span class="bib-no-nome">' + esc(no.nome) + '</span>' +
+      '<span class="bib-no-n">' + (no.total || 0) + '</span></button>';
+  }
+  return '<details class="bib-no ' + (nivel === 0 ? 'bib-raiz' : '') + '">' +
+    '<summary class="' + (selecionada ? 'on' : '') + '" data-pasta="' + no.id + '" title="' +
+      esc(no.nome + rotuloDono) + '">' +
+      '<span class="bib-seta">' + BIB_ICO.seta + '</span>' +
+      '<span class="bib-no-nome">' + esc(no.nome) + '</span>' +
+      '<span class="bib-no-n">' + (no.total || 0) + '</span></summary>' +
+    '<div class="bib-filhas">' + no.filhas.map((f) => bibNoHtml(f, nivel + 1)).join('') + '</div>' +
+    '</details>';
+}
+
+function bibDesenharArvore() {
+  const alvo = document.getElementById('bib-arvore');
+  if (!BIB_ARVORE.length) {
+    alvo.innerHTML = '<div class="bib-vazio" style="padding:18px 8px"><b>Sem pasta ainda</b>Seu conteúdo aparece em Sem localização até você criar a primeira pasta.</div>';
+    return;
+  }
+  alvo.innerHTML = BIB_ARVORE.map((r) => bibNoHtml(r, 0)).join('');
+  // Clicar no nome de uma pasta com filhas seleciona a pasta; a seta abre.
+  alvo.querySelectorAll('summary[data-pasta]').forEach((s) => {
+    s.addEventListener('click', (ev) => {
+      const jaAberta = s.parentElement.open;
+      const soSelecionar = !ev.target.closest('.bib-seta') && !jaAberta;
+      if (soSelecionar) { /* deixa abrir e também seleciona */ }
+      bibAbrirPasta(s.dataset.pasta);
+    });
+  });
+  alvo.querySelectorAll('.bib-pasta-btn[data-pasta]').forEach((b) => {
+    b.addEventListener('click', () => bibAbrirPasta(b.dataset.pasta));
+  });
+  alvo.querySelectorAll('.bib-pasta-btn[data-escopo]').forEach((b) => {
+    b.addEventListener('click', () => bibAbrirEscopo(b.dataset.escopo, b.dataset.dono));
   });
 }
 
-// Um item expandido por vez — abre o clicado, fecha qualquer outro.
-function toggleLinha(row){
-  var item = row.closest('.wa-item');
-  var det = item.querySelector('.wa-row-detalhe');
-  if (!det) return;
-  var vaiAbrir = det.hasAttribute('hidden');
-  document.querySelectorAll('.wa-item.aberto').forEach(function(o){
-    o.classList.remove('aberto');
-    var d = o.querySelector('.wa-row-detalhe');
-    if (d) d.setAttribute('hidden','');
-  });
-  if (vaiAbrir) {
-    item.classList.add('aberto'); det.removeAttribute('hidden');
+document.querySelectorAll('.bib-atalhos .bib-pasta-btn').forEach((b) => {
+  b.addEventListener('click', () => bibAbrirEscopo(b.dataset.escopo, b.dataset.dono));
+});
+
+// ─── Carregar a lista ─────────────────────────────────────────────────────
+function bibParams() {
+  const p = new URLSearchParams();
+  p.set('escopo', BIB_ESTADO.escopo);
+  if (BIB_ESTADO.pastaId) p.set('pasta_id', BIB_ESTADO.pastaId);
+  if (BIB_ESTADO.dono) p.set('dono', BIB_ESTADO.dono);
+  p.set('canal', BIB_ESTADO.canal);
+  if (BIB_ESTADO.busca) p.set('busca', BIB_ESTADO.busca);
+  p.set('pagina', BIB_ESTADO.pagina);
+  return p;
+}
+
+let _bibCarregando = false;
+async function bibCarregar() {
+  if (_bibCarregando) return;
+  _bibCarregando = true;
+  const alvo = document.getElementById('bib-conteudo');
+  alvo.setAttribute('aria-busy', 'true');
+  try {
+    const r = await fetch('/crm/biblioteca/itens?' + bibParams().toString());
+    const d = await r.json();
+    if (!d.ok) { alvo.innerHTML = '<div class="bib-vazio"><b>Não deu para abrir</b>' + esc(d.erro || 'Tente de novo.') + '</div>'; return; }
+    BIB_LISTAGEM = d;
+    bibDesenharLista();
+    bibDesenharArvore();
+    const url = new URL(location.href);
+    url.search = bibParams().toString();
+    history.replaceState(null, '', url);
+  } catch (e) {
+    alvo.innerHTML = '<div class="bib-vazio"><b>Sem conexão com o JOB</b>Recarregue a página para tentar de novo.</div>';
+  } finally {
+    _bibCarregando = false;
+    alvo.removeAttribute('aria-busy');
   }
 }
 
-function salvarModeloEmail(){
-  var nome = document.getElementById('em-nome').value.trim();
-  var html = document.getElementById('em-html').value.trim();
-  var arquivo = document.getElementById('em-arquivo').files[0];
-  if (!nome) { alert('Digite o nome do modelo'); return; }
-  if (!html && !arquivo) { alert('Cole o HTML ou envie um arquivo .html'); return; }
-  var fd = new FormData();
-  fd.append('nome', nome);
-  fd.append('assunto', document.getElementById('em-assunto').value.trim());
-  fd.append('variante', document.getElementById('em-variante').value.trim());
-  if (html) fd.append('html', html);
-  if (arquivo) fd.append('arquivo_html', arquivo);
-  var logo = document.getElementById('em-logo').files[0];
-  var hero = document.getElementById('em-hero').files[0];
-  if (logo) fd.append('arquivo_logo', logo);
-  if (hero) fd.append('arquivo_hero', hero);
-  fetch('/crm/modelos/email/novo', {method:'POST', body: fd})
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if (d.ok) {
-        if (d.placeholders_pendentes && d.placeholders_pendentes.length) {
-          alert('Modelo salvo, mas faltou subir: ' + d.placeholders_pendentes.join(', ') + '. O e-mail vai sair com esse token literal até você editar.');
+function bibAbrirPasta(pastaId) {
+  BIB_ESTADO.escopo = 'pasta';
+  BIB_ESTADO.pastaId = pastaId;
+  BIB_ESTADO.dono = null;
+  BIB_ESTADO.pagina = 1;
+  BIB_ESTADO.busca = '';
+  document.getElementById('bib-busca').value = '';
+  bibCarregar();
+}
+
+function bibAbrirEscopo(escopo, dono) {
+  BIB_ESTADO.escopo = escopo;
+  BIB_ESTADO.dono = dono || null;
+  BIB_ESTADO.pastaId = '';
+  BIB_ESTADO.pagina = 1;
+  bibCarregar();
+}
+
+document.getElementById('bib-canais').addEventListener('click', (ev) => {
+  const b = ev.target.closest('.bib-chip');
+  if (!b) return;
+  document.querySelectorAll('#bib-canais .bib-chip').forEach((x) => x.classList.remove('on'));
+  b.classList.add('on');
+  BIB_ESTADO.canal = b.dataset.canal;
+  BIB_ESTADO.pagina = 1;
+  bibCarregar();
+});
+
+let _bibTimerBusca = null;
+document.getElementById('bib-busca').addEventListener('input', (ev) => {
+  clearTimeout(_bibTimerBusca);
+  const v = ev.target.value.trim();
+  _bibTimerBusca = setTimeout(() => {
+    if (!v) { BIB_ESTADO.escopo = 'inicio'; BIB_ESTADO.busca = ''; bibCarregar(); return; }
+    BIB_ESTADO.escopo = 'busca';
+    BIB_ESTADO.busca = v;
+    BIB_ESTADO.pagina = 1;
+    bibCarregar();
+  }, 250);
+});
+
+document.getElementById('bib-i-acoes').addEventListener('click', () => {
+  document.getElementById('bib-ajuda').classList.toggle('aberta');
+});
+
+// ─── Desenhar a lista ─────────────────────────────────────────────────────
+function bibCaminhoHtml() {
+  const c = document.getElementById('bib-caminho');
+  if (BIB_ESTADO.escopo === 'busca') {
+    c.innerHTML = '<b>Busca</b><span>·</span>' + esc(BIB_ESTADO.busca) + '<span>·</span>' + (BIB_LISTAGEM.total || 0) + ' resultado(s) em toda a biblioteca';
+    return;
+  }
+  if (BIB_ESTADO.escopo === 'favoritos') { c.innerHTML = '<b>Favoritos</b>'; return; }
+  if (BIB_ESTADO.escopo === 'sem-localizacao') {
+    c.innerHTML = '<b>Sem localização</b><span>·</span>conteúdo que ainda não foi colocado numa pasta';
+    return;
+  }
+  const caminho = BIB_LISTAGEM.caminho || [];
+  if (!caminho.length) { c.innerHTML = '<span>Escolha uma pasta à esquerda</span>'; return; }
+  c.innerHTML = caminho.map((n, i) => (i === caminho.length - 1 ? '<b>' + esc(n) + '</b>' : esc(n) + ' <span>/</span> ')).join('');
+}
+
+function bibLinhaItem(it) {
+  const vinculos = [];
+  if (it.usos_funis) vinculos.push('Usado em ' + it.usos_funis + ' funil' + (it.usos_funis > 1 ? 's' : ''));
+  if (it.usos_fluxos) vinculos.push('Usado em ' + it.usos_fluxos + ' fluxo' + (it.usos_fluxos > 1 ? 's' : ''));
+  if (it.vezes_usado) vinculos.push('Enviado ' + it.vezes_usado + 'x');
+  const tags = [];
+  if (it.midia_tipo) tags.push(BIB_ROTULO_MIDIA[it.midia_tipo] || it.midia_tipo);
+  if (it.variante) tags.push('Variante ' + it.variante);
+  // O primeiro nível do caminho é a pasta-mãe do dono, que já está escrita ao
+  // lado: repetir "Compartilhado / Compartilhado / Operadoras" é ruído.
+  const caminho = it.pasta_caminho || [];
+  const local = (caminho[0] === it.dono_nome ? caminho.slice(1) : caminho).join(' / ');
+  return '<div class="bib-linha" data-id="' + it.id + '">' +
+    '<span class="bib-ico t-' + it.tipo + '" title="' + (BIB_ROTULO_CANAL[it.tipo] || it.tipo) + '">' + (BIB_ICO[it.tipo] || '') + '</span>' +
+    '<div class="bib-corpo">' +
+      '<div class="bib-nome">' + esc(it.nome) + tags.map((t) => '<span class="bib-tag">' + esc(t) + '</span>').join('') + '</div>' +
+      '<div class="bib-previa">' + esc(it.previa || '(sem texto)') + '</div>' +
+      '<div class="bib-meta"><span>' + esc(it.dono_nome) + '</span>' +
+        (local ? '<span>' + esc(local) + '</span>' : '') +
+        vinculos.map((v) => '<span>' + esc(v) + '</span>').join('') + '</div>' +
+    '</div>' +
+    '<div class="bib-acoes">' +
+      (it.pode_gerir ? '<button class="bib-icobtn ' + (it.favorito ? 'fav-on' : '') + '" data-acao="favoritar" data-id="' + it.id + '" aria-label="' + (it.favorito ? 'Tirar dos favoritos' : 'Marcar como favorito') + '" title="' + (it.favorito ? 'Tirar dos favoritos' : 'Marcar como favorito') + '">' + BIB_ICO.estrela + '</button>' : '') +
+      '<button class="bib-icobtn" data-acao="menu" data-id="' + it.id + '" aria-label="Ações do conteúdo ' + esc(it.nome) + '" aria-haspopup="menu">' + BIB_ICO.mais + '</button>' +
+    '</div></div>';
+}
+
+function bibLinhaFunil(f) {
+  return '<div class="bib-linha" data-funil="' + f.id + '">' +
+    '<span class="bib-ico t-funil" title="Funil">' + BIB_ICO.funil + '</span>' +
+    '<div class="bib-corpo">' +
+      '<div class="bib-nome">' + esc(f.nome) + '<span class="bib-tag">Funil</span></div>' +
+      '<div class="bib-previa">' + f.passos + ' mensagem(ns) em sequência</div>' +
+      '<div class="bib-meta"><span>' + esc(f.dono_nome) + '</span><span>Editar a sequência é em Funis</span></div>' +
+    '</div>' +
+    '<div class="bib-acoes">' +
+      '<button class="bib-icobtn" data-acao="menu-funil" data-id="' + f.id + '" aria-label="Ações do funil ' + esc(f.nome) + '" aria-haspopup="menu">' + BIB_ICO.mais + '</button>' +
+    '</div></div>';
+}
+
+function bibDesenharLista() {
+  bibCaminhoHtml();
+  const alvo = document.getElementById('bib-conteudo');
+  const itens = BIB_LISTAGEM.itens || [];
+  const funis = BIB_LISTAGEM.funis || [];
+  if (BIB_ESTADO.escopo === 'inicio') {
+    alvo.innerHTML = '<div class="bib-lista"><div class="bib-vazio">' +
+      '<b>Escolha uma pasta para ver o conteúdo</b>' +
+      'As pastas começam fechadas de propósito: a biblioteca tem centenas de itens, e abrir tudo de uma vez atrapalha mais do que ajuda. ' +
+      'Para procurar em todas as pastas de uma vez, use a busca lá em cima.' +
+      '</div></div>';
+    return;
+  }
+  if (!itens.length && !funis.length) {
+    alvo.innerHTML = '<div class="bib-lista"><div class="bib-vazio"><b>Nada aqui</b>' +
+      (BIB_LISTAGEM.aviso ? esc(BIB_LISTAGEM.aviso) :
+        (BIB_ESTADO.escopo === 'busca' ? 'Nenhum conteúdo bate com essa busca. Tente outra palavra do nome ou do texto.'
+                                       : 'Esta pasta está vazia. Use Novo conteúdo para criar o primeiro, ou mova algo para cá.')) +
+      '</div></div>';
+    return;
+  }
+  const total = BIB_LISTAGEM.total || itens.length;
+  const porPagina = BIB_LISTAGEM.por_pagina || 60;
+  let html = '<div class="bib-lista">' + funis.map(bibLinhaFunil).join('') + itens.map(bibLinhaItem).join('') + '</div>';
+  if (total > porPagina) {
+    const primeiro = (BIB_ESTADO.pagina - 1) * porPagina + 1;
+    const ultimo = Math.min(total, BIB_ESTADO.pagina * porPagina);
+    html += '<div class="bib-paginacao"><span>Mostrando ' + primeiro + '–' + ultimo + ' de ' + total + '</span><span>' +
+      (BIB_ESTADO.pagina > 1 ? '<button class="btn-outline btn-sm" data-pag="-1">Anterior</button> ' : '') +
+      (ultimo < total ? '<button class="btn-outline btn-sm" data-pag="1">Próxima</button>' : '') +
+      '</span></div>';
+  }
+  alvo.innerHTML = html;
+  alvo.querySelectorAll('[data-pag]').forEach((b) => b.addEventListener('click', () => {
+    BIB_ESTADO.pagina += Number(b.dataset.pag);
+    bibCarregar();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }));
+  alvo.querySelectorAll('[data-acao]').forEach((b) => b.addEventListener('click', (ev) => {
+    const id = Number(b.dataset.id);
+    if (b.dataset.acao === 'favoritar') return bibFavoritar(id, b);
+    if (b.dataset.acao === 'menu') return bibMenu(ev, itens.find((i) => i.id === id), 'conteudo');
+    if (b.dataset.acao === 'menu-funil') return bibMenu(ev, funis.find((f) => f.id === id), 'funil');
+  }));
+}
+
+// ─── Menu de ações ────────────────────────────────────────────────────────
+let _bibMenuAberto = null;
+function bibFecharMenu() {
+  if (_bibMenuAberto) { _bibMenuAberto.remove(); _bibMenuAberto = null; }
+}
+document.addEventListener('click', (ev) => {
+  if (_bibMenuAberto && !ev.target.closest('.bib-menu') && !ev.target.closest('[data-acao]')) bibFecharMenu();
+});
+document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { bibFecharMenu(); bibFecharFolha(); } });
+
+function bibMenu(ev, item, tipo) {
+  ev.stopPropagation();
+  bibFecharMenu();
+  if (!item) return;
+  const m = document.createElement('div');
+  m.className = 'bib-menu';
+  m.setAttribute('role', 'menu');
+  const linhas = [];
+  if (tipo === 'conteudo') {
+    if (item.pode_gerir) linhas.push(['editar', 'Editar']);
+    if (item.pode_gerir) linhas.push(['duplicar', 'Duplicar aqui']);
+    if (item.pode_gerir) linhas.push(['mover', 'Mover para outra pasta']);
+    if (BIB_PODE_GERIR) linhas.push(['transferir', 'Transferir para outro proprietário']);
+    if (item.pode_gerir) linhas.push(['copiar', 'Copiar para outra pasta']);
+    if (item.midia_url) linhas.push(['abrir', 'Abrir a mídia']);
+  } else {
+    linhas.push(['abrir-funil', 'Abrir em Funis']);
+    if (item.pode_gerir) linhas.push(['mover-funil', 'Mover para outra pasta']);
+    if (BIB_PODE_GERIR) linhas.push(['transferir-funil', 'Transferir para outro proprietário']);
+    if (item.pode_gerir) linhas.push(['copiar-funil', 'Copiar para outra pasta']);
+  }
+  m.innerHTML = linhas.map(([acao, rot]) => '<button data-m="' + acao + '">' + rot + '</button>').join('') +
+    (item.pode_gerir && tipo === 'conteudo'
+      ? '<div class="sep"></div><button class="perigo" data-m="excluir">Excluir conteúdo</button>' : '');
+  document.body.appendChild(m);
+  const r = ev.target.closest('button').getBoundingClientRect();
+  m.style.top = Math.min(r.bottom + 6, window.innerHeight - m.offsetHeight - 10) + 'px';
+  m.style.left = Math.max(10, Math.min(r.left - 150, window.innerWidth - m.offsetWidth - 10)) + 'px';
+  _bibMenuAberto = m;
+  m.querySelectorAll('[data-m]').forEach((b) => b.addEventListener('click', () => {
+    const acao = b.dataset.m;
+    bibFecharMenu();
+    if (acao === 'abrir') return window.open(item.midia_url, '_blank', 'noopener');
+    if (acao === 'abrir-funil') return location.assign('/crm/funis');
+    if (acao === 'duplicar') return bibDuplicar(item);
+    if (acao === 'editar') return bibFolhaEditar(item);
+    if (acao === 'excluir') return bibFolhaExcluir(item);
+    if (acao === 'mover') return bibFolhaDestino(item, 'mover', 'conteudo');
+    if (acao === 'copiar') return bibFolhaDestino(item, 'copiar', 'conteudo');
+    if (acao === 'transferir') return bibFolhaTransferir(item, 'conteudo');
+    if (acao === 'mover-funil') return bibFolhaDestino(item, 'mover', 'funil');
+    if (acao === 'copiar-funil') return bibFolhaDestino(item, 'copiar', 'funil');
+    if (acao === 'transferir-funil') return bibFolhaTransferir(item, 'funil');
+  }));
+  m.querySelector('button').focus();
+}
+
+// ─── Folha própria ────────────────────────────────────────────────────────
+let _bibFoco = null;
+function bibAbrirFolha(titulo, sub, corpoHtml, acoes) {
+  _bibFoco = document.activeElement;
+  document.getElementById('bib-folha-titulo').textContent = titulo;
+  document.getElementById('bib-folha-sub').innerHTML = sub;
+  document.getElementById('bib-folha-corpo').innerHTML = corpoHtml;
+  const erro = document.getElementById('bib-folha-erro');
+  erro.className = 'bib-erro'; erro.textContent = '';
+  const cAcoes = document.getElementById('bib-folha-acoes');
+  cAcoes.innerHTML = '';
+  acoes.forEach((a) => {
+    const b = document.createElement('button');
+    b.className = a.classe || 'btn-outline btn-sm';
+    b.textContent = a.rotulo;
+    b.addEventListener('click', () => a.aoClicar(b));
+    cAcoes.appendChild(b);
+  });
+  document.getElementById('bib-folha-bg').classList.add('aberta');
+  const primeiro = document.querySelector('#bib-folha-corpo input, #bib-folha-corpo select, #bib-folha-corpo textarea, #bib-folha-acoes button');
+  if (primeiro) primeiro.focus();
+}
+function bibFecharFolha() {
+  document.getElementById('bib-folha-bg').classList.remove('aberta');
+  if (_bibFoco && _bibFoco.focus) _bibFoco.focus();
+}
+document.getElementById('bib-folha-bg').addEventListener('click', (ev) => {
+  if (ev.target.id === 'bib-folha-bg') bibFecharFolha();
+});
+function bibFolhaErro(msg) {
+  const e = document.getElementById('bib-folha-erro');
+  e.textContent = msg;
+  e.classList.add('aparece');
+}
+
+// Árvore de destino dentro da folha: as mesmas pastas, sem os itens.
+function bibDestinoHtml(soDoDono) {
+  function no(n, nivel) {
+    if (n.virtual) return '';
+    const filhas = (n.filhas || []).map((f) => no(f, nivel + 1)).join('');
+    return '<div style="padding-left:' + (nivel * 12) + 'px">' +
+      '<label style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:8px;cursor:pointer;font-size:13px">' +
+      '<input type="radio" name="bib-destino" value="' + n.id + '" style="width:auto;margin:0">' +
+      '<span>' + esc(n.nome) + '</span><span style="color:var(--cinza-2);font-size:11px">' + (n.total || 0) + '</span>' +
+      '</label>' + filhas + '</div>';
+  }
+  const raizes = (soDoDono === undefined || soDoDono === null)
+    ? BIB_ARVORE
+    : BIB_ARVORE.filter((r) => String(r.dono_id == null ? 'compartilhado' : r.dono_id) === String(soDoDono));
+  if (!raizes.length) return '<div class="bib-consequencia">Esse proprietário ainda não tem pasta. O conteúdo vai para a pasta-mãe dele.</div>';
+  return '<div class="bib-destino">' + raizes.map((r) => no(r, 0)).join('') + '</div>';
+}
+
+function bibDestinoEscolhido() {
+  const r = document.querySelector('input[name="bib-destino"]:checked');
+  return r ? r.value : null;
+}
+
+async function bibPost(url, corpo) {
+  const r = await fetch(url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(corpo || {})
+  });
+  let d = {};
+  try { d = await r.json(); } catch (e) { d = { ok: false, erro: 'O JOB não respondeu como esperado.' }; }
+  return { status: r.status, dados: d };
+}
+
+function bibComOcupado(botao, rotuloOcupado, fn) {
+  const original = botao.textContent;
+  botao.disabled = true;
+  botao.textContent = rotuloOcupado;
+  return Promise.resolve(fn()).finally(() => { botao.disabled = false; botao.textContent = original; });
+}
+
+function bibFolhaDestino(item, acao, tipo) {
+  const ehFunil = tipo === 'funil';
+  const consequencia = acao === 'mover'
+    ? '<div class="bib-consequencia"><b>Mover</b> troca só a pasta. O dono continua <b>' + esc(item.dono_nome) +
+      '</b> e nada que usa este ' + (ehFunil ? 'funil' : 'conteúdo') + ' deixa de funcionar. Para trocar o dono, use Transferir.</div>'
+    : '<div class="bib-consequencia"><b>Copiar</b> cria ' + (ehFunil ? 'um funil novo' : 'um conteúdo novo') +
+      ' e independente no destino. O original fica onde está, e nenhum funil ou fluxo passa a apontar para a cópia.' +
+      (ehFunil ? ' Se o destino for de outro proprietário, as mensagens que ele não enxerga são copiadas junto.' : '') + '</div>';
+  const donoAtual = acao === 'mover' ? (item.dono_id == null ? 'compartilhado' : item.dono_id) : null;
+  bibAbrirFolha(
+    (acao === 'mover' ? 'Mover ' : 'Copiar ') + (ehFunil ? 'funil' : 'conteúdo'),
+    esc(item.nome),
+    '<label class="campo">Pasta de destino</label>' + bibDestinoHtml(acao === 'mover' ? donoAtual : null) + consequencia,
+    [
+      { rotulo: 'Cancelar', aoClicar: bibFecharFolha },
+      {
+        rotulo: acao === 'mover' ? 'Mover para esta pasta' : 'Copiar para esta pasta',
+        classe: 'btn',
+        aoClicar: (b) => {
+          const destino = bibDestinoEscolhido();
+          if (!destino) return bibFolhaErro('Escolha a pasta de destino.');
+          const base = ehFunil ? '/crm/biblioteca/funil/' : '/crm/biblioteca/conteudo/';
+          return bibComOcupado(b, acao === 'mover' ? 'Movendo…' : 'Copiando…', async () => {
+            const { dados } = await bibPost(base + item.id + '/' + acao, { pasta_id: destino });
+            if (!dados.ok) return bibFolhaErro(dados.erro || 'Não deu para concluir.');
+            bibFecharFolha();
+            toast(acao === 'mover' ? 'Movido para a pasta escolhida' : 'Cópia criada na pasta escolhida', 'ok');
+            bibRecarregarTudo();
+          });
         }
-        location.reload();
-      } else alert(d.erro || 'Erro ao salvar modelo');
+      }
+    ]
+  );
+}
+
+function bibFolhaTransferir(item, tipo, dependencias) {
+  const ehFunil = tipo === 'funil';
+  const opcoes = ['<option value="compartilhado">Compartilhado (todo consultor enxerga)</option>']
+    .concat(BIB_PROPRIETARIOS.map((p) => '<option value="' + p.id + '">' + esc(p.nome) + '</option>')).join('');
+  let corpo = '<label class="campo" for="bib-dono-destino">Novo proprietário</label>' +
+    '<select id="bib-dono-destino">' + opcoes + '</select>' +
+    '<label class="campo">Pasta de destino <span style="text-transform:none;font-weight:400;color:var(--cinza-2)">— sem escolher, vai para a pasta-mãe dele</span></label>' +
+    '<div id="bib-destino-slot">' + bibDestinoHtml('compartilhado') + '</div>' +
+    '<div class="bib-consequencia"><b>Transferir</b> mantém o mesmo ' + (ehFunil ? 'funil' : 'conteúdo') +
+    ' (mesmo identificador): funis e fluxos que já usam ele continuam funcionando. O que muda é quem enxerga — ' +
+    'quem era dono deixa de ver na extensão.</div>';
+  if (dependencias && dependencias.length) {
+    corpo += '<div class="bib-consequencia" style="border-color:rgba(244,63,94,.4)">' +
+      '<b>Este funil usa mensagem de outro proprietário.</b> Transferir só o funil deixaria a sequência quebrada para quem recebe. Escolha:' +
+      dependencias.map((d) => '<div class="bib-dep">' + esc(d.nome) + '<span>de ' + esc(d.dono_nome) + '</span></div>').join('') +
+      '</div>';
+  }
+  const acoes = [{ rotulo: 'Cancelar', aoClicar: bibFecharFolha }];
+  if (dependencias && dependencias.length) {
+    // O caminho seguro é copiar: o dono atual continua com as mensagens dele.
+    // Por isso é ele que leva a cor cheia; transferir junto tira de quem tinha.
+    acoes.push({
+      rotulo: 'Transferir as mensagens junto', classe: 'btn-outline btn-sm',
+      aoClicar: (b) => bibTransferir(item, tipo, b, 'transferir')
     });
-}
-
-function salvarModeloSms(){
-  var nome = document.getElementById('sm-nome').value.trim();
-  var texto = document.getElementById('sm-texto').value.trim();
-  if (!nome || !texto) { alert('Preencha nome e texto'); return; }
-  fetch('/crm/modelos/sms/novo', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({nome: nome, texto: texto, variante: document.getElementById('sm-variante').value.trim()})})
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if (d.ok) location.reload();
-      else alert(d.erro || 'Erro ao salvar modelo');
+    acoes.push({
+      rotulo: 'Copiar as mensagens para o destino', classe: 'btn',
+      aoClicar: (b) => bibTransferir(item, tipo, b, 'copiar')
     });
+  } else {
+    acoes.push({ rotulo: 'Transferir', classe: 'btn', aoClicar: (b) => bibTransferir(item, tipo, b, null) });
+  }
+  bibAbrirFolha('Transferir ' + (ehFunil ? 'funil' : 'conteúdo'), esc(item.nome), corpo, acoes);
+  const sel = document.getElementById('bib-dono-destino');
+  if (sel) sel.addEventListener('change', () => {
+    document.getElementById('bib-destino-slot').innerHTML = bibDestinoHtml(sel.value);
+  });
 }
 
-function importarZapVoice(inp){
-  var f = inp.files[0];
-  if (!f) return;
-  var st = document.getElementById('zv-status');
-  st.style.display = 'block';
-  var mb = (f.size/1024/1024).toFixed(0);
-  st.innerHTML = 'Importando <b>' + f.name + '</b> (' + mb + ' MB)… arquivos grandes podem levar alguns minutos. Não feche a página.';
-  var fd = new FormData();
-  fd.append('arquivo', f);
-  var destino = document.getElementById('zv-destino');
-  if (destino && destino.value === 'compartilhado') fd.append('destino', 'compartilhado');
-  else if (destino && destino.value.indexOf('usuario:') === 0) fd.append('destino_usuario_id', destino.value.split(':')[1]);
-  fetch('/crm/modelos/importar-zapvoice', {method:'POST', body: fd})
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if (!d.ok) { st.innerHTML = 'Erro: ' + (d.erro || 'falha na importação'); return; }
-      var c = d.contagem;
-      st.innerHTML = 'Importado na pasta <b>' + d.pasta + '</b>: <b>' + c.texto + '</b> textos, <b>' + c.audio + '</b> áudios, <b>' +
-        c.imagem + '</b> imagens, <b>' + c.documento + '</b> documentos, <b>' + c.funis + '</b> funis e <b>' + c.passos + '</b> passos' +
-        (c.pulados ? ' · ' + c.pulados + ' itens sem conteúdo foram ignorados' : '') +
-        (c.erros ? ' · ' + c.erros + ' com erro' : '') + '. Recarregando…';
-      setTimeout(function(){ location.reload(); }, 1500);
-    })
-    .catch(function(e){ st.innerHTML = 'Erro: ' + e.message + ' (se o arquivo for muito grande, pode ter estourado o limite de upload).'; });
-  inp.value = '';
+function bibTransferir(item, tipo, botao, politica) {
+  const dono = (document.getElementById('bib-dono-destino') || {}).value || 'compartilhado';
+  const destino = bibDestinoEscolhido();
+  const base = tipo === 'funil' ? '/crm/biblioteca/funil/' : '/crm/biblioteca/conteudo/';
+  const corpo = { dono: dono };
+  if (destino) corpo.pasta_id = destino;
+  if (politica) corpo.dependencias = politica;
+  return bibComOcupado(botao, 'Transferindo…', async () => {
+    const { status, dados } = await bibPost(base + item.id + '/transferir', corpo);
+    if (status === 409 && dados.precisa_decidir) {
+      bibFecharFolha();
+      return bibFolhaTransferir(item, tipo, dados.dependencias || []);
+    }
+    if (!dados.ok) return bibFolhaErro(dados.erro || 'Não deu para transferir.');
+    bibFecharFolha();
+    toast('Transferido. O identificador continua o mesmo, então funis e fluxos seguem valendo.', 'ok');
+    bibRecarregarTudo();
+  });
 }
 
-function duplicarModelo(id, btn){
-  var original = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Duplicando...';
-  fetch('/crm/modelos/' + id + '/duplicar', {method:'POST'})
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if (!d.ok) throw new Error(d.erro || 'Não consegui duplicar');
-      btn.textContent = 'Duplicado';
-      setTimeout(function(){ location.reload(); }, 700);
-    })
-    .catch(function(e){
-      btn.disabled = false; btn.textContent = original;
-      var st = document.getElementById('zv-status');
-      st.style.display = 'block'; st.textContent = e.message;
+function bibFolhaExcluir(item) {
+  const usos = [];
+  if (item.usos_funis) usos.push(item.usos_funis + ' funil(is)');
+  if (item.usos_fluxos) usos.push(item.usos_fluxos + ' fluxo(s)');
+  const aviso = usos.length
+    ? '<div class="bib-consequencia" style="border-color:rgba(244,63,94,.4)">Este conteúdo é usado em <b>' + usos.join(' e ') +
+      '</b>. Excluindo, esses passos passam a falhar no próximo envio, com erro registrado no log. Considere transferir ou desativar.</div>'
+    : '<div class="bib-consequencia">Nenhum funil ou fluxo usa este conteúdo hoje.</div>';
+  bibAbrirFolha('Excluir conteúdo', 'Esta ação não tem desfazer.',
+    '<div style="font-size:13.5px;color:var(--texto);font-weight:600">' + esc(item.nome) + '</div>' + aviso,
+    [
+      { rotulo: 'Cancelar', aoClicar: bibFecharFolha },
+      {
+        rotulo: 'Excluir definitivamente', classe: 'btn btn-danger',
+        aoClicar: (b) => bibComOcupado(b, 'Excluindo…', async () => {
+          const { dados } = await bibPost('/crm/modelos/' + item.id + '/excluir', {});
+          if (!dados.ok) return bibFolhaErro(dados.erro || 'Não foi possível excluir.');
+          bibFecharFolha();
+          toast('Conteúdo excluído', 'ok');
+          bibRecarregarTudo();
+        })
+      }
+    ]);
+}
+
+function bibFolhaEditar(item) {
+  const ehEmail = item.tipo === 'email';
+  const corpo = '<label class="campo" for="bib-ed-nome">Nome</label>' +
+    '<input type="text" id="bib-ed-nome" value="' + esc(item.nome) + '">' +
+    (ehEmail
+      ? '<div class="bib-consequencia">O corpo do e-mail é HTML pronto. Para trocar o desenho, suba um modelo novo em Novo conteúdo e transfira os fluxos para ele — assim o e-mail antigo continua disponível enquanto você confere.</div>'
+      : '<label class="campo" for="bib-ed-texto">Texto</label><textarea id="bib-ed-texto" placeholder="Carregando o texto…"></textarea>' +
+        '<label class="campo" for="bib-ed-midia">' + (item.midia_tipo ? 'Trocar o arquivo (deixe vazio para manter o atual)' : 'Anexar arquivo (opcional)') + '</label>' +
+        '<input type="file" id="bib-ed-midia" accept="image/*,audio/*,video/*,application/pdf">');
+  bibAbrirFolha('Editar conteúdo', (BIB_ROTULO_CANAL[item.tipo] || item.tipo) + ' · ' + esc(item.dono_nome), corpo, [
+    { rotulo: 'Cancelar', aoClicar: bibFecharFolha },
+    {
+      rotulo: 'Salvar alterações', classe: 'btn',
+      aoClicar: (b) => {
+        const nome = (document.getElementById('bib-ed-nome').value || '').trim();
+        if (!nome) return bibFolhaErro('Dê um nome ao conteúdo.');
+        const fd = new FormData();
+        fd.append('nome', nome);
+        const txt = document.getElementById('bib-ed-texto');
+        if (txt) fd.append('corpo_texto', txt.value);
+        const arq = document.getElementById('bib-ed-midia');
+        if (arq && arq.files && arq.files[0]) fd.append('arquivo_midia', arq.files[0]);
+        return bibComOcupado(b, 'Salvando…', async () => {
+          const r = await fetch('/crm/modelos/' + item.id + '/editar', { method: 'POST', body: fd });
+          const d = await r.json().catch(() => ({ ok: false }));
+          if (!d.ok) return bibFolhaErro(d.erro || 'Não deu para salvar.');
+          bibFecharFolha();
+          toast('Conteúdo atualizado', 'ok');
+          bibRecarregarTudo();
+        });
+      }
+    }
+  ]);
+  // O texto completo não vem na listagem (a prévia é curta de propósito):
+  // busca só quando alguém abre a edição, e só desse item.
+  if (!ehEmail) {
+    fetch('/crm/biblioteca/conteudo/' + item.id)
+      .then((r) => r.json())
+      .then((d) => {
+        const txt = document.getElementById('bib-ed-texto');
+        if (d.ok && txt) { txt.value = d.item.corpo_texto || ''; txt.placeholder = 'Texto da mensagem'; }
+      })
+      .catch(() => {
+        const txt = document.getElementById('bib-ed-texto');
+        if (txt) txt.placeholder = 'Não deu para carregar o texto — recarregue a página antes de salvar.';
+      });
+  }
+}
+
+function bibDuplicar(item) {
+  bibPost('/crm/biblioteca/conteudo/' + item.id + '/duplicar', {}).then(({ dados }) => {
+    if (!dados.ok) return toast(dados.erro || 'Não deu para duplicar', 'err');
+    toast('Cópia criada nesta mesma pasta', 'ok');
+    bibRecarregarTudo();
+  });
+}
+
+function bibFavoritar(id, botao) {
+  botao.disabled = true;
+  bibPost('/crm/modelos/' + id + '/favorito', {}).then(({ dados }) => {
+    botao.disabled = false;
+    if (!dados.ok) return toast(dados.erro || 'Não deu para favoritar', 'err');
+    botao.classList.toggle('fav-on', dados.favorito);
+    botao.setAttribute('aria-label', dados.favorito ? 'Tirar dos favoritos' : 'Marcar como favorito');
+  });
+}
+
+// ─── Novo conteúdo ────────────────────────────────────────────────────────
+function bibFolhaNovo() {
+  const canais = [['whatsapp', 'Mensagem de WhatsApp', 'Texto, áudio, imagem, vídeo ou PDF. Aparece na extensão e pode virar passo de funil.']];
+  if (BIB_PODE_GERIR) {
+    canais.push(['sms', 'SMS', 'Texto curto usado nos fluxos do CRM. Máximo de 320 caracteres.']);
+    canais.push(['email', 'E-mail', 'HTML pronto, com assunto e imagens. Usado nos fluxos do CRM.']);
+  }
+  const corpo = canais.map(([k, titulo, desc]) =>
+    '<button class="bib-pasta-btn" data-canal-novo="' + k + '" style="align-items:flex-start;padding:11px 10px;border:1px solid var(--borda);margin-bottom:8px">' +
+    '<span class="bib-ico t-' + k + '" style="margin-top:1px">' + BIB_ICO[k] + '</span>' +
+    '<span class="bib-no-nome" style="white-space:normal"><b style="display:block;font-size:13.5px">' + titulo + '</b>' +
+    '<span style="font-size:12px;color:var(--cinza)">' + desc + '</span></span></button>').join('') +
+    (BIB_PODE_GERIR ? '' : '<div class="bib-consequencia">Modelos de SMS e de e-mail são criados pelo gestor, porque alimentam os fluxos automáticos do CRM.</div>');
+  bibAbrirFolha('Novo conteúdo', 'Escolha o canal. Na próxima tela você diz em qual pasta ele vai ficar.', corpo,
+    [{ rotulo: 'Cancelar', aoClicar: bibFecharFolha }]);
+  document.querySelectorAll('[data-canal-novo]').forEach((b) => b.addEventListener('click', () => bibFolhaNovoCanal(b.dataset.canalNovo)));
+}
+
+function bibFolhaNovoCanal(canal) {
+  const pastaAtual = BIB_ESTADO.escopo === 'pasta' ? BIB_ESTADO.pastaId : '';
+  let campos = '<label class="campo" for="bib-n-nome">Nome do conteúdo</label>' +
+    '<input type="text" id="bib-n-nome" placeholder="Ex: Boas-vindas - primeiro contato">';
+  if (canal === 'email') {
+    campos += '<label class="campo" for="bib-n-assunto">Assunto do e-mail</label>' +
+      '<input type="text" id="bib-n-assunto" placeholder="Ex: {{ '{{nome}}' }}, sua cotação está pronta">' +
+      '<label class="campo" for="bib-n-variante">Variante (opcional, para teste A/B)</label>' +
+      '<input type="text" id="bib-n-variante" placeholder="Ex: A">' +
+      '<label class="campo" for="bib-n-html">HTML do e-mail</label>' +
+      '<textarea id="bib-n-html" placeholder="Cole aqui o HTML completo"></textarea>' +
+      '<label class="campo" for="bib-n-arquivo">Ou envie o arquivo .html</label>' +
+      '<input type="file" id="bib-n-arquivo" accept=".html,.htm">' +
+      '<label class="campo" for="bib-n-logo">Logo (substitui [URL_LOGO_SERENUS])</label>' +
+      '<input type="file" id="bib-n-logo" accept=".png,.jpg,.jpeg,.webp">' +
+      '<label class="campo" for="bib-n-hero">Banner (substitui [URL_IMAGEM_HERO])</label>' +
+      '<input type="file" id="bib-n-hero" accept=".png,.jpg,.jpeg,.webp">';
+  } else if (canal === 'sms') {
+    campos += '<label class="campo" for="bib-n-variante">Variante (opcional)</label>' +
+      '<input type="text" id="bib-n-variante" placeholder="Ex: A">' +
+      '<label class="campo" for="bib-n-texto">Texto do SMS</label>' +
+      '<textarea id="bib-n-texto" maxlength="320" placeholder="{{ '{{nome}}' }}, consegue falar hoje?"></textarea>' +
+      '<div class="bib-consequencia">Máximo de 320 caracteres (dois segmentos). Modelo fora dos aprovados pela operadora pode ser filtrado como spam mesmo com a API confirmando envio.</div>';
+  } else {
+    campos += '<label class="campo" for="bib-n-texto">Texto da mensagem</label>' +
+      '<textarea id="bib-n-texto" placeholder="Oi {{ '{{nome}}' }}, tudo bem?"></textarea>' +
+      '<label class="campo" for="bib-n-midia">Arquivo (opcional: imagem, áudio, vídeo ou PDF)</label>' +
+      '<input type="file" id="bib-n-midia" accept="image/*,audio/*,video/*,application/pdf">' +
+      '<div class="bib-consequencia">Com arquivo, o texto vai como legenda. Áudio sai como nota de voz.</div>';
+  }
+  campos += '<label class="campo">Onde vai ficar</label>' + bibDestinoHtml(BIB_PODE_GERIR ? null : (BIB_USUARIO_ID || 'compartilhado'));
+  bibAbrirFolha('Novo ' + (BIB_ROTULO_CANAL[canal] || canal), 'O destino define quem enxerga: em Compartilhado, todo consultor vê na extensão.',
+    campos, [
+      { rotulo: 'Cancelar', aoClicar: bibFecharFolha },
+      { rotulo: 'Salvar conteúdo', classe: 'btn', aoClicar: (b) => bibSalvarNovo(canal, b) }
+    ]);
+  if (pastaAtual) {
+    const alvo = document.querySelector('input[name="bib-destino"][value="' + pastaAtual + '"]');
+    if (alvo) { alvo.checked = true; alvo.scrollIntoView({ block: 'center' }); }
+  }
+}
+
+function bibSalvarNovo(canal, botao) {
+  const nome = (document.getElementById('bib-n-nome').value || '').trim();
+  if (!nome) return bibFolhaErro('Dê um nome ao conteúdo.');
+  const destino = bibDestinoEscolhido();
+  if (canal === 'sms') {
+    const texto = (document.getElementById('bib-n-texto').value || '').trim();
+    if (!texto) return bibFolhaErro('Escreva o texto do SMS.');
+    return bibComOcupado(botao, 'Salvando…', async () => {
+      const { dados } = await bibPost('/crm/modelos/sms/novo', {
+        nome: nome, texto: texto, pasta_id: destino,
+        variante: (document.getElementById('bib-n-variante').value || '').trim()
+      });
+      if (!dados.ok) return bibFolhaErro(dados.erro || 'Não deu para salvar.');
+      bibFecharFolha(); toast('SMS salvo na biblioteca', 'ok'); bibRecarregarTudo();
     });
-}
-
-
-
-function salvarModeloWhatsapp(){
-  var nome = document.getElementById('wa-nome').value.trim();
-  var texto = document.getElementById('wa-texto').value.trim();
-  if (!nome || !texto) { alert('Preencha nome e texto'); return; }
-  var fd = new FormData();
+  }
+  const fd = new FormData();
   fd.append('nome', nome);
+  if (destino) fd.append('pasta_id', destino);
+  if (canal === 'email') {
+    const html = (document.getElementById('bib-n-html').value || '').trim();
+    const arq = document.getElementById('bib-n-arquivo').files[0];
+    if (!html && !arq) return bibFolhaErro('Cole o HTML ou envie um arquivo .html.');
+    fd.append('assunto', (document.getElementById('bib-n-assunto').value || '').trim());
+    fd.append('variante', (document.getElementById('bib-n-variante').value || '').trim());
+    if (html) fd.append('html', html);
+    if (arq) fd.append('arquivo_html', arq);
+    const logo = document.getElementById('bib-n-logo').files[0];
+    const hero = document.getElementById('bib-n-hero').files[0];
+    if (logo) fd.append('arquivo_logo', logo);
+    if (hero) fd.append('arquivo_hero', hero);
+    return bibComOcupado(botao, 'Salvando…', async () => {
+      const r = await fetch('/crm/modelos/email/novo', { method: 'POST', body: fd });
+      const d = await r.json().catch(() => ({ ok: false }));
+      if (!d.ok) return bibFolhaErro(d.erro || 'Não deu para salvar.');
+      bibFecharFolha();
+      toast(d.placeholders_pendentes && d.placeholders_pendentes.length
+        ? 'E-mail salvo. Faltou subir: ' + d.placeholders_pendentes.join(', ')
+        : 'E-mail salvo na biblioteca', 'ok');
+      bibRecarregarTudo();
+    });
+  }
+  const texto = (document.getElementById('bib-n-texto').value || '').trim();
+  if (!texto) return bibFolhaErro('Escreva o texto da mensagem.');
   fd.append('texto', texto);
-  fd.append('categoria', document.getElementById('wa-categoria').value.trim());
-  fd.append('variante', document.getElementById('wa-variante').value.trim());
-  var midia = document.getElementById('wa-midia').files[0];
+  const midia = document.getElementById('bib-n-midia').files[0];
   if (midia) fd.append('arquivo_midia', midia);
-  fetch('/crm/modelos/whatsapp/novo', {method:'POST', body: fd})
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if (d.ok) location.reload();
-      else alert(d.erro || 'Erro ao salvar modelo');
-    });
-}
-
-var _waFiltro = 'todos';
-function setFiltroWpp(btn){
-  document.querySelectorAll('.wa-fchip').forEach(function(b){ b.classList.remove('on'); });
-  btn.classList.add('on');
-  _waFiltro = btn.dataset.f;
-  filtrarWpp();
-}
-function filtrarWpp(){
-  var q = (document.getElementById('wa-busca').value || '').trim().toLowerCase();
-  var visiveis = 0;
-  document.querySelectorAll('#wa-lista .wa-item').forEach(function(card){
-    var bateBusca = !q || card.dataset.nome.indexOf(q) >= 0 || card.dataset.texto.indexOf(q) >= 0;
-    var bateFiltro = _waFiltro === 'todos'
-      || (_waFiltro === 'favoritos' && card.dataset.fav === '1')
-      || (card.dataset.tipo === _waFiltro);
-    var mostra = bateBusca && bateFiltro;
-    card.style.display = mostra ? '' : 'none';
-    if (mostra) visiveis++;
+  return bibComOcupado(botao, 'Salvando…', async () => {
+    const r = await fetch('/crm/modelos/whatsapp/novo', { method: 'POST', body: fd });
+    const d = await r.json().catch(() => ({ ok: false }));
+    if (!d.ok) return bibFolhaErro(d.erro || 'Não deu para salvar.');
+    bibFecharFolha(); toast('Mensagem salva na biblioteca', 'ok'); bibRecarregarTudo();
   });
-  // Esconde cabeçalho de TIPO sem card visível e pasta de consultor vazia.
-  document.querySelectorAll('#wa-lista .wa-tipo-header').forEach(function(h){
-    var vis = false, n = h.nextElementSibling;
-    while (n && n.classList && n.classList.contains('wa-item')) { if (n.style.display !== 'none') vis = true; n = n.nextElementSibling; }
-    h.style.display = vis ? '' : 'none';
-  });
-  document.querySelectorAll('#wa-lista .subpasta-wa, #wa-lista .pasta-wa').forEach(function(p){
-    var algum = false;
-    p.querySelectorAll('.wa-item').forEach(function(c){ if (c.style.display !== 'none') algum = true; });
-    p.style.display = algum ? '' : 'none';
-  });
-  var vazio = document.getElementById('wa-vazio-filtro');
-  if (vazio) vazio.style.display = visiveis ? 'none' : '';
-}
-function toggleFavorito(id, btn){
-  fetch('/crm/modelos/' + id + '/favorito', {method:'POST'})
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if (!d.ok) { alert(d.erro || 'Erro'); return; }
-      var card = btn.closest('.wa-item');
-      btn.classList.toggle('ativo', d.favorito);
-      card.dataset.fav = d.favorito ? '1' : '0';
-      filtrarWpp();
-    });
 }
 
-function toggleModelo(id){
-  fetch('/crm/modelos/' + id + '/toggle', {method:'POST'})
-    .then(function(r){ return r.json(); })
-    .then(function(d){ if (d.ok) location.reload(); else alert(d.erro || 'Erro'); })
-    .catch(function(){ alert('Erro de conexão ao alterar o modelo.'); });
+document.getElementById('bib-novo').addEventListener('click', bibFolhaNovo);
+
+const btnNovaPasta = document.getElementById('bib-nova-pasta');
+if (btnNovaPasta) btnNovaPasta.addEventListener('click', () => {
+  bibAbrirFolha('Nova pasta', 'A pasta nasce dentro do proprietário que você escolher — é ele que define quem enxerga o conteúdo dela.',
+    '<label class="campo" for="bib-p-nome">Nome da pasta</label><input type="text" id="bib-p-nome" placeholder="Ex: Operadoras">' +
+    '<label class="campo">Dentro de qual pasta</label>' + bibDestinoHtml(null),
+    [
+      { rotulo: 'Cancelar', aoClicar: bibFecharFolha },
+      {
+        rotulo: 'Criar pasta', classe: 'btn',
+        aoClicar: (b) => {
+          const nome = (document.getElementById('bib-p-nome').value || '').trim();
+          const pai = bibDestinoEscolhido();
+          if (!nome) return bibFolhaErro('Dê um nome à pasta.');
+          if (!pai) return bibFolhaErro('Escolha dentro de qual pasta ela vai ficar.');
+          return bibComOcupado(b, 'Criando…', async () => {
+            const { dados } = await bibPost('/crm/pastas/nova', { nome: nome, parent_id: Number(pai) });
+            if (!dados.ok) return bibFolhaErro(dados.erro || 'Não deu para criar a pasta.');
+            bibFecharFolha(); toast('Pasta criada', 'ok'); location.reload();
+          });
+        }
+      }
+    ]);
+});
+
+function bibRecarregarTudo() {
+  // A árvore muda de contagem a cada operação; recarregar a página inteira
+  // seria mais simples e mais lento — aqui só o que mudou volta do servidor.
+  fetch('/crm/biblioteca/arvore').then((r) => r.json()).then((d) => {
+    if (d.ok) { BIB_ARVORE.length = 0; (d.raizes || []).forEach((x) => BIB_ARVORE.push(x)); }
+    bibDesenharArvore();
+  }).catch(() => {});
+  bibCarregar();
 }
 
-function excluirModelo(id, el){
-  var nome = (el && el.getAttribute && el.getAttribute('data-nome')) || 'este modelo';
-  if (!confirm('Excluir o modelo "' + nome + '"? Passos de fluxo que usam ele vão falhar no próximo envio.')) return;
-  fetch('/crm/modelos/' + id + '/excluir', {method:'POST'})
-    .then(function(r){ return r.json(); })
-    .then(function(d){ if (d.ok) location.reload(); else alert(d.erro || 'Não foi possível excluir.'); })
-    .catch(function(){ alert('Erro ao excluir (conexão ou servidor).'); });
-}
-
-function editarModelo(id){
-  var el = document.getElementById('ed-' + id);
-  if (el) el.hidden = !el.hidden;
-}
-
-function salvarEdicaoModelo(id){
-  var nome = (document.getElementById('edn-' + id).value || '').trim();
-  var texto = document.getElementById('edt-' + id).value;
-  if (!nome) { alert('Dê um nome ao modelo.'); return; }
-  var fd = new FormData();
-  fd.append('nome', nome);
-  fd.append('corpo_texto', texto);
-  var fin = document.getElementById('edf-' + id);
-  if (fin && fin.files && fin.files[0]) fd.append('arquivo_midia', fin.files[0]);
-  fetch('/crm/modelos/' + id + '/editar', {method:'POST', body: fd})
-    .then(function(r){ return r.json(); })
-    .then(function(d){ if (d.ok) location.reload(); else alert(d.erro || 'Erro ao salvar'); })
-    .catch(function(){ alert('Erro de conexão ao salvar.'); });
-}
-
+bibDesenharArvore();
+bibDesenharLista();
 </script>
 {% endblock %}

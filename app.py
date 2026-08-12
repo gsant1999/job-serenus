@@ -37847,61 +37847,44 @@ def _salvar_imagem_modelo(fstorage, prefixo):
 @app.route('/crm/modelos')
 @login_required
 def crm_modelos():
+    """Biblioteca de Conteúdo — proprietário primeiro, canal como filtro.
+
+    A árvore e a primeira lista vêm prontas do servidor: a tela abre mostrando
+    conteúdo em vez de esperar o JavaScript, e o filtro por dono é feito aqui,
+    não escondido no HTML. As pastas nascem fechadas — com centenas de itens,
+    abrir tudo é ruído, não ajuda."""
     uid = session.get('user_id')
-    eh_gestor = session.get('perfil') in ('admin', 'supervisor', 'gestor_vendedor')
+    eh_gestor = _bib_eh_gestor()
     conn = db()
-    where = '' if eh_gestor else "WHERE m.tipo='whatsapp' AND m.dono_consultor_id=?"
-    params = () if eh_gestor else (uid,)
-    modelos = [dict(m) for m in conn.execute(
-        """SELECT m.*, u.nome AS dono_nome FROM modelos_conteudo m
-           LEFT JOIN usuarios u ON u.id = m.dono_consultor_id
-           %s ORDER BY m.tipo, m.nome""" % where, params).fetchall()]
-    usuarios_destino = [dict(u) for u in conn.execute(
-        "SELECT id,nome FROM usuarios WHERE ativo=1 AND perfil='consultor' ORDER BY nome").fetchall()] if eh_gestor else []
-    close_db(conn)
-    wpp = [m for m in modelos if m['tipo'] == 'whatsapp']
-    # Favorito primeiro, depois nome — dentro de cada tipo.
-    wpp.sort(key=lambda m: (0 if m.get('favorito') else 1, (m.get('nome') or '').lower()))
-    stats_wpp = {
-        'total': len(wpp),
-        'texto': sum(1 for m in wpp if not m.get('midia_tipo')),
-        'audio': sum(1 for m in wpp if m.get('midia_tipo') == 'audio'),
-        'imagem': sum(1 for m in wpp if m.get('midia_tipo') == 'imagem'),
-        'documento': sum(1 for m in wpp if m.get('midia_tipo') == 'documento'),
-        'video': sum(1 for m in wpp if m.get('midia_tipo') == 'video'),
-        # nomes de sub-pasta (categoria) já usados — sugestão no datalist
-        'categorias': sorted({(m.get('categoria') or '').strip() for m in wpp if (m.get('categoria') or '').strip()}),
+    arvore = _bib_arvore(conn, uid, eh_gestor)
+    conn.commit()   # raízes que faltavam nascem aqui, uma vez só
+    dados, erro, _ = _bib_listagem(conn, uid, eh_gestor, request.args)
+    if erro:
+        dados = {'itens': [], 'funis': [], 'total': 0, 'pagina': 1, 'caminho': [], 'erro': erro}
+    onde_fav = "COALESCE(favorito,0)=1 AND COALESCE(ativo,1)=1"
+    onde_sem = "pasta_id IS NULL AND COALESCE(ativo,1)=1"
+    params_extra = ()
+    if not eh_gestor:
+        onde_fav += " AND dono_consultor_id=?"
+        onde_sem += " AND dono_consultor_id=?"
+        params_extra = (uid,)
+    atalhos = {
+        'favoritos': conn.execute(
+            "SELECT COUNT(*) AS n FROM modelos_conteudo WHERE " + onde_fav, params_extra).fetchone()['n'],
+        'sem_localizacao': conn.execute(
+            "SELECT COUNT(*) AS n FROM modelos_conteudo WHERE " + onde_sem, params_extra).fetchone()['n'],
     }
-    # PASTA = consultor -> SUB-PASTA manual (categoria: operadora/material) -> TIPO
-    # (Áudio/Texto/PDF/Imagem/Vídeo). Consultor e tipo são automáticos; a
-    # sub-pasta é o rótulo que o consultor cria. Sem árvore/cascata.
-    _ORDEM_TIPO = ['Texto', 'Áudio', 'Imagem', 'PDF', 'Vídeo']
-    def _tipo_lbl(m):
-        return {'audio': 'Áudio', 'imagem': 'Imagem', 'video': 'Vídeo',
-                'documento': 'PDF'}.get(m.get('midia_tipo'), 'Texto')
-    donos = {}
-    for m in wpp:
-        d = (m.get('dono_nome') or 'Compartilhado')
-        cat = (m.get('categoria') or '').strip() or 'Geral'
-        donos.setdefault(d, {}).setdefault(cat, {}).setdefault(_tipo_lbl(m), []).append(m)
-    def _ordena_cats(cats):
-        return sorted(cats, key=lambda c: (1, '') if c == 'Geral' else (0, c.lower()))
-    wpp_grupos = []
-    for dono in sorted(donos, key=lambda x: x.lower()):
-        subpastas = []
-        total_dono = 0
-        for cat in _ordena_cats(donos[dono].keys()):
-            tipos = [{'tipo': t, 'itens': donos[dono][cat][t]} for t in _ORDEM_TIPO if t in donos[dono][cat]]
-            n = sum(len(x['itens']) for x in tipos)
-            total_dono += n
-            subpastas.append({'nome': cat, 'total': n, 'tipos': tipos})
-        wpp_grupos.append({'dono': dono, 'total': total_dono, 'subpastas': subpastas})
-    return render_template('crm_modelos.html',
-                           modelos_email=[m for m in modelos if m['tipo'] == 'email'],
-                           modelos_sms=[m for m in modelos if m['tipo'] == 'sms'],
-                           modelos_whatsapp=wpp, wpp_grupos=wpp_grupos, stats_wpp=stats_wpp,
-                           pode_gerir=eh_gestor, usuario_id=uid,
-                           usuarios_destino=usuarios_destino)
+    proprietarios = [dict(u) for u in conn.execute(
+        "SELECT id, nome FROM usuarios WHERE ativo=1 AND perfil='consultor' ORDER BY nome").fetchall()] \
+        if eh_gestor else []
+    close_db(conn)
+    return render_template('crm_modelos.html', arvore=arvore, listagem=dados,
+                           atalhos=atalhos, pode_gerir=eh_gestor, usuario_id=uid,
+                           proprietarios=proprietarios,
+                           filtros={'escopo': request.args.get('escopo') or 'inicio',
+                                    'pasta_id': request.args.get('pasta_id') or '',
+                                    'canal': request.args.get('canal') or 'todos',
+                                    'busca': request.args.get('busca') or ''})
 
 
 @app.route('/crm/modelos/<int:mid>/duplicar', methods=['POST'])
@@ -38054,9 +38037,17 @@ def crm_modelo_email_novo():
         html = html.replace('[URL_IMAGEM_HERO]', f"{_SITE_BASE_URL}/crm/modelos/imagem/{hero_nome}")
 
     conn = db()
-    conn.execute("""INSERT INTO modelos_conteudo (tipo, nome, assunto, corpo_html, variante, ativo, criado_por)
-                    VALUES ('email',?,?,?,?,1,?)""",
-                 (nome, assunto, html, variante, session.get('user_id')))
+    pasta_id, dono, erro = (None, None, None)
+    if request.form.get('pasta_id'):
+        pasta_id, dono, erro = _bib_destino(conn, request.form.get('pasta_id'),
+                                            session.get('user_id'), _bib_eh_gestor())
+        if erro:
+            close_db(conn)
+            return jsonify({"ok": False, "erro": erro}), 400
+    conn.execute("""INSERT INTO modelos_conteudo (tipo, nome, assunto, corpo_html, variante, ativo,
+                    criado_por, pasta_id, dono_consultor_id)
+                    VALUES ('email',?,?,?,?,1,?,?,?)""",
+                 (nome, assunto, html, variante, session.get('user_id'), pasta_id, dono))
     mid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
            else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
     conn.commit(); close_db(conn)
@@ -38081,9 +38072,17 @@ def crm_modelo_sms_novo():
     if len(texto) > 320:
         return jsonify({"ok": False, "erro": "Texto longo demais pra SMS (máx. 320 caracteres, ~2 segmentos)"}), 400
     conn = db()
-    conn.execute("""INSERT INTO modelos_conteudo (tipo, nome, corpo_texto, variante, ativo, criado_por)
-                    VALUES ('sms',?,?,?,1,?)""",
-                 (nome, texto, variante, session.get('user_id')))
+    pasta_id, dono, erro = (None, None, None)
+    if d.get('pasta_id'):
+        pasta_id, dono, erro = _bib_destino(conn, d.get('pasta_id'),
+                                            session.get('user_id'), _bib_eh_gestor())
+        if erro:
+            close_db(conn)
+            return jsonify({"ok": False, "erro": erro}), 400
+    conn.execute("""INSERT INTO modelos_conteudo (tipo, nome, corpo_texto, variante, ativo,
+                    criado_por, pasta_id, dono_consultor_id)
+                    VALUES ('sms',?,?,?,1,?,?,?)""",
+                 (nome, texto, variante, session.get('user_id'), pasta_id, dono))
     mid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
            else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
     conn.commit(); close_db(conn)
@@ -38149,11 +38148,20 @@ def crm_modelo_whatsapp_novo():
 
     categoria = (request.form.get('categoria') or '').strip()[:80] or None
     conn = db()
+    # Sem pasta escolhida, o conteúdo nasce do próprio autor, como sempre foi.
+    # Com pasta, quem manda é a pasta: o dono dela passa a ser o dono do item.
+    pasta_id, dono = None, session.get('user_id')
+    if request.form.get('pasta_id'):
+        pasta_id, dono, erro = _bib_destino(conn, request.form.get('pasta_id'),
+                                            session.get('user_id'), _bib_eh_gestor())
+        if erro:
+            close_db(conn)
+            return jsonify({"ok": False, "erro": erro}), 400
     conn.execute("""INSERT INTO modelos_conteudo
-                    (tipo,nome,corpo_texto,variante,ativo,criado_por,midia_arquivo,midia_tipo,categoria,dono_consultor_id)
-                    VALUES ('whatsapp',?,?,?,1,?,?,?,?,?)""",
+                    (tipo,nome,corpo_texto,variante,ativo,criado_por,midia_arquivo,midia_tipo,categoria,pasta_id,dono_consultor_id)
+                    VALUES ('whatsapp',?,?,?,1,?,?,?,?,?,?)""",
                  (nome, texto, variante, session.get('user_id'), midia_arquivo,
-                  midia_tipo, categoria, session.get('user_id')))
+                  midia_tipo, categoria, pasta_id, dono))
     mid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
            else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
     conn.commit(); close_db(conn)
@@ -38568,6 +38576,9 @@ def crm_pasta_nova():
     conn = db()
     if not conn.execute("SELECT id FROM pastas WHERE id=?", (parent_id,)).fetchone():
         close_db(conn); return jsonify({"ok": False, "erro": "Pasta pai não encontrada"}), 400
+    if not _bib_eh_gestor() and _pasta_dono(conn, parent_id) != session.get('user_id'):
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Você só pode criar pasta dentro das suas"}), 403
     conn.execute("INSERT INTO pastas (nome, parent_id, consultor_id) VALUES (?,?,NULL)", (nome, parent_id))
     pid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
            else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
@@ -38586,6 +38597,9 @@ def crm_pasta_renomear(pid):
     conn = db()
     if not conn.execute("SELECT id FROM pastas WHERE id=?", (pid,)).fetchone():
         close_db(conn); return jsonify({"ok": False, "erro": "Pasta não encontrada"}), 404
+    if not _bib_eh_gestor() and _pasta_dono(conn, pid) != session.get('user_id'):
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Você só pode renomear as suas pastas"}), 403
     conn.execute("UPDATE pastas SET nome=? WHERE id=?", (nome, pid))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
@@ -38609,6 +38623,9 @@ def crm_pasta_mover(pid):
         close_db(conn); return jsonify({"ok": False, "erro": "Pasta não encontrada"}), 404
     if not pasta['parent_id']:
         close_db(conn); return jsonify({"ok": False, "erro": "Essa é uma pasta raiz — não pode ser movida"}), 400
+    if not _bib_eh_gestor() and _pasta_dono(conn, pid) != session.get('user_id'):
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Você só pode mover as suas pastas"}), 403
     novo_parent = int(novo_parent)
     if novo_parent == pid:
         close_db(conn); return jsonify({"ok": False, "erro": "Uma pasta não pode ser pai dela mesma"}), 400
@@ -38637,6 +38654,9 @@ def crm_pasta_excluir(pid):
         close_db(conn); return jsonify({"ok": False, "erro": "Pasta não encontrada"}), 404
     if not pasta['parent_id']:
         close_db(conn); return jsonify({"ok": False, "erro": "Essa é uma pasta raiz — não pode ser excluída"}), 400
+    if not _bib_eh_gestor() and _pasta_dono(conn, pid) != session.get('user_id'):
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Você só pode excluir as suas pastas"}), 403
     if conn.execute("SELECT id FROM pastas WHERE parent_id=?", (pid,)).fetchone():
         close_db(conn); return jsonify({"ok": False, "erro": "Essa pasta tem subpastas — mova ou exclua elas primeiro"}), 400
     if conn.execute("SELECT id FROM modelos_conteudo WHERE pasta_id=?", (pid,)).fetchone():
@@ -39117,24 +39137,21 @@ def crm_biblioteca_arvore():
     return jsonify({'ok': True, 'raizes': arvore, 'pode_gerir': eh_gestor})
 
 
-@app.route('/crm/biblioteca/itens')
-@login_required
-def crm_biblioteca_itens():
+def _bib_listagem(conn, uid, eh_gestor, args):
     """Conteúdo de uma pasta (ou de uma busca), já filtrado pelo servidor.
 
-    Paginado porque a biblioteca real tem centenas de itens e a extensão e a
-    tela não podem depender de baixar tudo para depois esconder no navegador."""
-    uid = session.get('user_id')
-    eh_gestor = _bib_eh_gestor()
-    escopo = (request.args.get('escopo') or 'pasta').strip()
-    canal = (request.args.get('canal') or 'todos').strip()
-    busca = (request.args.get('busca') or '').strip().lower()
+    Paginado porque a biblioteca real tem centenas de itens: nem a tela nem a
+    extensão podem depender de baixar tudo para depois esconder no navegador.
+    Devolve (dados, erro, codigo) — a rota e a tela usam a mesma função, para
+    não existirem duas regras de permissão diferentes para a mesma listagem."""
+    escopo = (args.get('escopo') or 'pasta').strip()
+    canal = (args.get('canal') or 'todos').strip()
+    busca = (args.get('busca') or '').strip().lower()
     try:
-        pagina = max(1, int(request.args.get('pagina') or 1))
+        pagina = max(1, int(args.get('pagina') or 1))
     except (TypeError, ValueError):
         pagina = 1
     por_pagina = 60
-    conn = db()
     mapa = _bib_mapa_pastas(conn)
 
     onde, params = ["COALESCE(m.ativo,1)=1"], []
@@ -39145,12 +39162,13 @@ def crm_biblioteca_itens():
         onde.append("m.dono_consultor_id=?")
         params.append(uid)
 
-    dono_pedido = request.args.get('dono')
+    dono_pedido = args.get('dono')
+    pasta_id = 0
+    vazio = {'ok': True, 'itens': [], 'funis': [], 'total': 0, 'pagina': 1,
+             'por_pagina': por_pagina, 'escopo': escopo}
     if escopo == 'busca':
         if len(busca) < 2:
-            close_db(conn)
-            return jsonify({'ok': True, 'itens': [], 'funis': [], 'total': 0, 'pagina': 1,
-                            'aviso': 'Digite pelo menos duas letras para buscar'})
+            return dict(vazio, aviso='Digite pelo menos duas letras para buscar'), None, 200
         onde.append("(LOWER(m.nome) LIKE ? OR LOWER(COALESCE(m.corpo_texto,'')) LIKE ? "
                     "OR LOWER(COALESCE(m.assunto,'')) LIKE ?)")
         params += ['%%%s%%' % busca] * 3
@@ -39163,22 +39181,19 @@ def crm_biblioteca_itens():
                 onde.append("m.dono_consultor_id IS NULL")
             else:
                 try:
-                    onde.append("m.dono_consultor_id=?")
                     params.append(int(dono_pedido))
+                    onde.append("m.dono_consultor_id=?")
                 except (TypeError, ValueError):
-                    close_db(conn)
-                    return _bib_erro('Proprietário inválido')
+                    return None, 'Proprietário inválido', 400
     else:
         try:
-            pasta_id = int(request.args.get('pasta_id') or 0)
+            pasta_id = int(args.get('pasta_id') or 0)
         except (TypeError, ValueError):
             pasta_id = 0
         if not pasta_id or pasta_id not in mapa:
-            close_db(conn)
-            return jsonify({'ok': True, 'itens': [], 'funis': [], 'total': 0, 'pagina': 1})
+            return vazio, None, 200
         if not eh_gestor and _bib_dono_pela_raiz(mapa, pasta_id) != uid:
-            close_db(conn)
-            return _bib_erro('Essa pasta não é sua', 403)
+            return None, 'Essa pasta não é sua', 403
         onde.append("m.pasta_id=?")
         params.append(pasta_id)
 
@@ -39229,9 +39244,11 @@ def crm_biblioteca_itens():
             'pode_gerir': _bib_pode_gerir(i.get('dono_consultor_id'), uid, eh_gestor),
         })
 
+    # Funil aparece no contexto próprio (a pasta onde ele mora), sem transformar
+    # a Biblioteca em editor de sequência: aqui é onde ele está, não como ele é.
     funis = []
-    if escopo == 'pasta' and canal in ('todos', 'whatsapp'):
-        onde_f, params_f = ["COALESCE(f.ativo,1)=1", "f.pasta_id=?"], [int(request.args.get('pasta_id') or 0)]
+    if escopo == 'pasta' and canal in ('todos', 'whatsapp') and pasta_id:
+        onde_f, params_f = ["COALESCE(f.ativo,1)=1", "f.pasta_id=?"], [pasta_id]
         if not eh_gestor:
             onde_f.append("f.dono_consultor_id=?")
             params_f.append(uid)
@@ -39246,9 +39263,44 @@ def crm_biblioteca_itens():
                           'dono_nome': fd.get('dono_nome') or 'Compartilhado',
                           'favorito': bool(fd['favorito']),
                           'pode_gerir': _bib_pode_gerir(fd['dono_consultor_id'], uid, eh_gestor)})
+    return {'ok': True, 'itens': saida, 'funis': funis, 'total': total, 'escopo': escopo,
+            'pagina': pagina, 'por_pagina': por_pagina,
+            'caminho': _bib_caminho(mapa, pasta_id) if pasta_id else []}, None, 200
+
+
+@app.route('/crm/biblioteca/itens')
+@login_required
+def crm_biblioteca_itens():
+    conn = db()
+    dados, erro, codigo = _bib_listagem(conn, session.get('user_id'), _bib_eh_gestor(), request.args)
     close_db(conn)
-    return jsonify({'ok': True, 'itens': saida, 'funis': funis, 'total': total,
-                    'pagina': pagina, 'por_pagina': por_pagina})
+    if erro:
+        return _bib_erro(erro, codigo)
+    return jsonify(dados)
+
+
+@app.route('/crm/biblioteca/conteudo/<int:mid>')
+@login_required
+def crm_biblioteca_conteudo(mid):
+    """Um conteúdo inteiro, com o texto completo — a listagem só manda a prévia
+    curta de propósito, e a tela de edição precisa do texto todo."""
+    uid = session.get('user_id')
+    eh_gestor = _bib_eh_gestor()
+    conn = db()
+    item = _bib_conteudo(conn, mid)
+    close_db(conn)
+    if not item:
+        return _bib_erro('Conteúdo não encontrado', 404)
+    if not _bib_pode_gerir(item.get('dono_consultor_id'), uid, eh_gestor):
+        return _bib_erro('Você não tem acesso a este conteúdo', 403)
+    return jsonify({'ok': True, 'item': {
+        'id': item['id'], 'tipo': item['tipo'], 'nome': item['nome'],
+        'assunto': item.get('assunto') or '', 'corpo_texto': item.get('corpo_texto') or '',
+        'midia_tipo': item.get('midia_tipo') or '',
+        'midia_url': ('/crm/modelos/midia/%s' % item['midia_arquivo']) if item.get('midia_arquivo') else None,
+        'variante': item.get('variante') or '', 'pasta_id': item.get('pasta_id'),
+        'dono_id': item.get('dono_consultor_id'),
+    }})
 
 
 @app.route('/crm/biblioteca/conteudo/<int:mid>/mover', methods=['POST'])
