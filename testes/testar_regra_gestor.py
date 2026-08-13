@@ -391,6 +391,32 @@ def teste_venda_de_consultor_nao_entra_na_regra_de_gestor():
     limpar()
 
 
+def teste_migracao_unitaria_de_venda_legada_de_gestor():
+    print('\n[unit] migra somente venda antiga de gestor, com histórico e parcelas novas')
+    limpar()
+    conn = A.db()
+    uid = criar_gestor(conn)
+    cadastrar_regra(conn, operadora='Amil', plano='PME')
+    conn.execute("INSERT OR REPLACE INTO recebimento (operadora,obs,plano,total) VALUES ('Amil','', 'PME', 1.0)")
+    cur = conn.execute("""INSERT INTO propostas
+        (usuario_id,consultor,razao_social,status,comissao_total_corretora,comissao_consultor,
+         comissao_corretora_liquida,valor,adm_operadora,modalidade,regime_aplicado,vigencia)
+        VALUES (?,?,?,'Ativo',1000,900,100,1000,'Amil','PME','sem_lead_sem_fixo','2026-01-01')""",
+        (uid, 'Gestor Teste', 'TESTE REGRA MIGRACAO GESTOR'))
+    pid = A._last_insert_id(cur)
+    ok, msg = A._migrar_venda_legada_para_gestor(conn, pid, 'Administrador Teste')
+    conn.commit()
+    p = conn.execute("SELECT regime_aplicado,comissao_consultor FROM propostas WHERE id=?", (pid,)).fetchone()
+    parcelas = conn.execute("SELECT * FROM parcelas WHERE proposta_id=?", (pid,)).fetchall()
+    hist = conn.execute("SELECT * FROM historico_proposta WHERE proposta_id=?", (pid,)).fetchall()
+    A.close_db(conn)
+    checa('migração de gestor ocorre', ok, msg)
+    checa('regime novo fica gravado', p and p['regime_aplicado'] == 'socio_gestor_regra', p)
+    checa('parcelas saem da regra de gestor', len(parcelas) == 3, len(parcelas))
+    checa('estado anterior fica no histórico', any('Migração para regra' in (h['campo'] or '') for h in hist))
+    limpar()
+
+
 def teste_motor_de_socio_nao_usa_modelo_de_consultor():
     print('\n[unit] socio/gestor nao nasce no modelo Sem Lead/Sem Fixo')
     limpar()
@@ -489,6 +515,7 @@ if __name__ == '__main__':
     teste_usuario_gestor_sem_regime_de_consultor()
     teste_legado_preservado()
     teste_venda_de_consultor_nao_entra_na_regra_de_gestor()
+    teste_migracao_unitaria_de_venda_legada_de_gestor()
     teste_motor_de_socio_nao_usa_modelo_de_consultor()
     teste_telas()
     teste_permissoes()

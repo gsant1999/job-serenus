@@ -5217,6 +5217,76 @@ def _gestor_calculo_inicial(conn, operadora, modalidade, tipo_pessoa, valor):
     }
 
 
+def _migrar_venda_legada_para_gestor(conn, proposta_id, usuario_executor):
+    """Troca UMA venda antiga de gestor do regime de consultor para a regra nova.
+
+    Não é recálculo em massa. É uma decisão explícita na própria proposta e só
+    é permitida antes de dinheiro andar: parcela paga, PIX iniciado ou extrato
+    conciliado tornam a venda imutável. Antes de substituir o snapshot acidental
+    ou legado, o estado anterior é guardado no histórico da proposta.
+    """
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (proposta_id,)).fetchone()
+    if not p:
+        return False, 'Venda não encontrada.'
+    if not _gestor_e_vendedor(conn, p['usuario_id']):
+        return False, 'O vendedor desta proposta não é gestor/admin. O regime de consultor foi preservado.'
+    if (p['regime_aplicado'] or '') in ('socio_gestor_regra', 'socio_gestor_pendente'):
+        return False, 'Esta venda já usa a regra de sócio/gestor.'
+    travas = _historico_travas(conn, proposta_id)
+    if travas:
+        return False, 'Esta venda já tem financeiro em andamento: ' + travas[0]
+    # Mesmo sem PIX ou conciliação, uma parcela liberada já foi conferida pela
+    # equipe; não mudamos sua origem silenciosamente.
+    fora_da_fila = conn.execute("""SELECT numero,status FROM parcelas WHERE proposta_id=?
+                                  AND COALESCE(status,'') NOT IN
+                                  ('Pendente de receber','Bloqueado - Falta Comprovante')
+                                  ORDER BY numero LIMIT 1""", (proposta_id,)).fetchone()
+    if fora_da_fila:
+        return False, f"Parcela {fora_da_fila['numero']} já saiu da fila inicial ({fora_da_fila['status']})."
+    c = _gestor_calculo_inicial(conn, p['adm_operadora'] or '', p['modalidade'] or '',
+                                p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else '', p['valor'] or 0)
+    if c.get('modelo') != 'socio_gestor_regra':
+        aviso = (c.get('falta_regra_gestor') or [c.get('aviso') or 'Regra incompleta.'])[0]
+        return False, 'A migração não foi feita: ' + aviso
+    anterior = {
+        'regime_aplicado': p['regime_aplicado'], 'num_parcelas': p['num_parcelas'],
+        'distribuicao_parcelas': p['distribuicao_parcelas'],
+        'comissao_total_corretora': p['comissao_total_corretora'],
+        'comissao_consultor': p['comissao_consultor'],
+        'comissao_corretora_liquida': p['comissao_corretora_liquida'],
+        'snapshot': _gestor_snapshot(conn, proposta_id),
+    }
+    conn.execute("""INSERT INTO historico_proposta
+        (proposta_id,usuario_nome,campo,valor_antes,valor_depois,criado_em)
+        VALUES (?,?,?,?,?,?)""",
+        (proposta_id, usuario_executor, 'Migração para regra de sócio/gestor',
+         json.dumps(anterior, ensure_ascii=False, default=str)[:3000],
+         json.dumps({'regime_aplicado': c['codigo'], 'recebimento': c['total_corretora'],
+                     'repasse_gestor': c['consultor'], 'saldo_serenus': c['liquido']},
+                    ensure_ascii=False)[:3000], _agora_sp()))
+    conn.execute("""UPDATE propostas SET regime_aplicado=?,num_parcelas=?,distribuicao_parcelas=?,
+                    comissao_total_corretora=?,comissao_consultor=?,comissao_corretora_liquida=?
+                    WHERE id=?""",
+                 (c['codigo'], c['num_parcelas'], c['dist_corretora'], c['total_corretora'],
+                  c['consultor'], c['liquido'], proposta_id))
+    conn.execute("DELETE FROM parcelas WHERE proposta_id=?", (proposta_id,))
+    for parc in gerar_parcelas_socio_gestor(proposta_id, p['vigencia'] or '', c,
+                                             p['dia_vencimento'] if 'dia_vencimento' in p.keys() else None):
+        conn.execute("""INSERT INTO parcelas
+            (proposta_id,numero,percentual,valor,valor_corretora,perc_cliente,data_prevista,status,
+             competencia,mensalidade_ref,tipo_origem)
+            VALUES (?,?,?,?,?,?,?,?,?,?,'comissao')""",
+            (parc['proposta_id'], parc['numero'], parc['percentual'], parc['valor'],
+             parc['valor_corretora'], parc['perc_cliente'], parc['data_prevista'], parc['status'],
+             parc['competencia'], parc['mensalidade_ref']))
+    # Alguns cadastros feitos na transição receberam snapshot mesmo usando o
+    # regime de consultor. Ele não é apagado sem rastro: está no histórico acima.
+    conn.execute("DELETE FROM proposta_regra_snapshot WHERE proposta_id=?", (proposta_id,))
+    _gestor_congelar_snapshot(conn, proposta_id, p['adm_operadora'] or '', c['plano'],
+                              p['usuario_id'], p['consultor'] or usuario_executor)
+    return True, 'Venda atualizada para a regra de sócio/gestor.'
+
+
 def _gestor_snapshot(conn, proposta_id):
     try:
         r = conn.execute("SELECT * FROM proposta_regra_snapshot WHERE proposta_id=?",
@@ -10060,6 +10130,27 @@ def ver_proposta(pid):
         conta_gestor = _gestor_calcular(_gestor_snapshot(conn3, pid),
                                         p.get('comissao_total_corretora') if isinstance(p, dict)
                                         else p['comissao_total_corretora'])
+    pode_migrar_gestor = False
+    motivo_migracao_gestor = ''
+    if _gestor_e_vendedor(conn3, p['usuario_id']) and (p['regime_aplicado'] or '') not in (
+            'socio_gestor_regra', 'socio_gestor_pendente'):
+        travas_migracao = _historico_travas(conn3, pid)
+        fora_da_fila = conn3.execute("""SELECT numero,status FROM parcelas WHERE proposta_id=?
+                                       AND COALESCE(status,'') NOT IN
+                                       ('Pendente de receber','Bloqueado - Falta Comprovante')
+                                       ORDER BY numero LIMIT 1""", (pid,)).fetchone()
+        plano_migracao = _plano_from_modalidade(p['modalidade'],
+                                                p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else '')
+        regra_migracao, ret_migracao = _gestor_regra_buscar(conn3, p['adm_operadora'] or '', plano_migracao)
+        faltas_migracao = _gestor_regra_faltas(regra_migracao, ret_migracao)
+        if travas_migracao:
+            motivo_migracao_gestor = travas_migracao[0]
+        elif fora_da_fila:
+            motivo_migracao_gestor = f"Parcela {fora_da_fila['numero']} já saiu da fila inicial."
+        elif faltas_migracao:
+            motivo_migracao_gestor = faltas_migracao[0]
+        else:
+            pode_migrar_gestor = True
     close_db(conn3)
     # Os cartões sempre mostram a mesma fonte usada pelo fluxo financeiro. Para
     # gestor, não reutilizam as colunas legadas de "consultor" por conveniência.
@@ -10081,7 +10172,31 @@ def ver_proposta(pid):
                            lead_crm=lead_crm, lead_wa=lead_wa,
                            bloqueio_gestor=bloqueio_gestor, conta_gestor=conta_gestor, vendedor=vendedor,
                            comissao_exibicao=comissao_exibicao,
+                           pode_migrar_gestor=pode_migrar_gestor,
+                           motivo_migracao_gestor=motivo_migracao_gestor,
                            etiquetas_sugeridas=_etiquetas_do_momento(p, lead_crm))
+
+
+@app.route('/proposta/<int:pid>/migrar-regra-gestor', methods=['POST'])
+@login_required
+@admin_required
+def migrar_regra_gestor_proposta(pid):
+    """Migração manual e unitária de venda antiga de gestor para a régua nova."""
+    conn = db()
+    try:
+        ok, msg = _migrar_venda_legada_para_gestor(conn, pid, session.get('nome') or 'Administrador')
+        if not ok:
+            conn.rollback()
+            return jsonify({'ok': False, 'erro': msg}), 409
+        conn.commit()
+        return jsonify({'ok': True, 'msg': msg})
+    except Exception:
+        try: conn.rollback()
+        except Exception: pass
+        app.logger.exception('[REGRA-GESTOR] migração da proposta %s falhou', pid)
+        return jsonify({'ok': False, 'erro': 'Não foi possível migrar esta venda. Nenhum valor foi alterado.'}), 500
+    finally:
+        close_db(conn)
 
 @app.route('/proposta/<int:pid>/consultor', methods=['POST'])
 @login_required

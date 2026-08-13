@@ -276,6 +276,19 @@
         </div>
         {% endif %}
       </div>
+      {% if pode_migrar_gestor or motivo_migracao_gestor %}
+      <div class="card" style="margin-bottom:16px;padding:16px 18px;border-left:4px solid var(--info);">
+        <div style="font-family:'Sora',sans-serif;font-size:14px;font-weight:700;margin-bottom:5px;">Regra de sócio/gestor nesta venda<i class="ajuda-i" title="Vendas antigas de gestores podiam usar o regime de consultor. A migração troca somente esta venda para a regra comercial atual da operadora, preserva o estado anterior no histórico e só é liberada antes de qualquer pagamento, PIX ou conciliação.">i</i></div>
+        {% if pode_migrar_gestor %}
+        <p style="font-size:12.5px;color:var(--cinza);line-height:1.55;margin:0 0 12px;">O vendedor é gestor/admin e esta proposta ainda usa <b>{{ regime.nome }}</b>. Você pode migrá-la para a regra de sócio/gestor da operadora. O valor atual, as parcelas e o regime anterior ficarão registrados no histórico.</p>
+        <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--cinza);line-height:1.45;margin:0 0 10px;cursor:pointer;"><input type="checkbox" id="confirmarMigracaoGestor" style="margin-top:2px;"> Conferi a regra desta operadora. Entendo que as parcelas pendentes desta venda serão refeitas pela regra de sócio/gestor.</label>
+        <button type="button" class="btn-outline" id="migrarRegraGestor" disabled>Migrar esta venda para a regra de sócio/gestor</button>
+        <div id="migrarRegraMsg" style="font-size:12px;margin-top:9px;color:var(--cinza);"></div>
+        {% else %}
+        <p style="font-size:12.5px;color:var(--cinza);line-height:1.55;margin:0;">Esta venda antiga usa <b>{{ regime.nome }}</b>, mas não pode ser migrada automaticamente: {{ motivo_migracao_gestor }} O histórico e os valores atuais foram preservados.</p>
+        {% endif %}
+      </div>
+      {% endif %}
       {% else %}
       <div class="card" style="margin-bottom:16px;">
         <div class="card-header"><h3>Minha comissão</h3></div>
@@ -1022,6 +1035,17 @@
 
 {% block scripts %}
 <script>
+const btMigrarRegra=document.getElementById('migrarRegraGestor');
+const ckMigrarRegra=document.getElementById('confirmarMigracaoGestor');
+if(ckMigrarRegra&&btMigrarRegra){ckMigrarRegra.addEventListener('change',()=>{btMigrarRegra.disabled=!ckMigrarRegra.checked;});}
+if(btMigrarRegra){btMigrarRegra.addEventListener('click',async()=>{
+  const msg=document.getElementById('migrarRegraMsg');
+  btMigrarRegra.disabled=true; btMigrarRegra.textContent='Migrando regra...';
+  try{const r=await fetch('/proposta/{{ p.id }}/migrar-regra-gestor',{method:'POST'});const d=await r.json();
+    if(!r.ok||!d.ok){msg.textContent=d.erro||'Não foi possível migrar a venda.';btMigrarRegra.disabled=false;btMigrarRegra.textContent='Migrar esta venda para a regra de sócio/gestor';return;}
+    msg.textContent=d.msg+' Recarregando...';setTimeout(()=>location.reload(),900);
+  }catch(e){msg.textContent='Não foi possível migrar a venda. Nenhum valor foi alterado.';btMigrarRegra.disabled=false;btMigrarRegra.textContent='Migrar esta venda para a regra de sócio/gestor';}
+});}
 const PROP_ID = {{ p.id }};
 const DEPS_JSON = {{ p.dependentes_json|tojson if p.dependentes_json else '"[]"' }};
 const REP = {{ p.repique_json|tojson if p.repique_json else 'null' }};
