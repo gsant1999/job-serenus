@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block title %}Central de comissões{% endblock %}
+{% block head %}
+<style>
+  .cc-intro { background:var(--panel); border:1px solid var(--borda); border-left:4px solid var(--info); border-radius:14px; padding:17px 19px; margin-bottom:18px; color:var(--cinza); font-size:13px; line-height:1.65; }
+  .cc-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(245px,1fr)); gap:14px; }
+  .cc-card { display:flex; flex-direction:column; gap:10px; min-height:188px; background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px; }
+  .cc-card h2 { margin:0; font:700 16px 'Sora',sans-serif; color:var(--texto); }
+  .cc-card p { margin:0; color:var(--cinza); font-size:12.5px; line-height:1.55; flex:1; }
+  .cc-num { color:var(--azul); font:700 22px 'Sora',sans-serif; }
+  .cc-alert { border-left-color:var(--amarelo); }
+  .cc-alert .cc-num { color:var(--amarelo); }
+  .cc-foot { margin-top:20px; color:var(--cinza); font-size:12px; line-height:1.65; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Central de comissões</h1>
+    <div class="sub">Uma cadeia, quatro perguntas. Cada número tem uma fonte definida.</div>
+  </div>
+  <div><a class="btn-outline" href="/financeiro">Abrir Financeiro</a></div>
+</div>
+<div class="page" style="max-width:1120px;">
+  <div class="cc-intro">
+    <b style="color:var(--texto);">Caminho da venda:</b> Operadora define <b>quanto a corretora recebe</b>; o regime do vendedor define <b>quem recebe quanto</b>; a proposta congela o acordo; extrato e conciliação registram o que a Affinity apurou e o que entrou. <i class="ajuda-i" title="A tabela histórica de comissões não participa mais do cálculo. Ela foi preservada para consulta, mas não deve ser usada para cadastrar ou alterar valores.">i</i>
+  </div>
+  <div class="cc-grid">
+    <section class="cc-card"><h2>1. Recebimento da corretora</h2><div class="cc-num">{{ resumo.recebimentos }}</div><p>Quanto a operadora paga à Serenus, por operadora, variação e plano. É a base comum para consultor e gestor.</p><a class="btn-outline" href="/operadoras">Configurar recebimento</a></section>
+    <section class="cc-card"><h2>2. Repasse de consultores</h2><div class="cc-num">{{ resumo.repasses }}</div><p>Somente para consultores: Sem Lead/Sem Fixo, Com Lead N1/N2/N3 e Com Fixo + Lead. Não usar para gestor/admin vendedor.</p><a class="btn-outline" href="/repasses">Configurar repasses</a></section>
+    <section class="cc-card"><h2>3. Regra de sócio/gestor</h2><div class="cc-num">{{ resumo.regras_gestor }}</div><p>Distribui cada fração recebida entre gestor, retenções e saldo Serenus. É exclusiva de vendas feitas por gestor/admin.</p><a class="btn" href="/comissoes/regra-gestor">Configurar regra de gestor</a></section>
+    <section class="cc-card cc-alert"><h2>4. Pendências para revisar</h2><div class="cc-num">{{ resumo.regras_pendentes + resumo.gestor_legado + resumo.extratos_sem_vinculo }}</div><p>{{ resumo.regras_pendentes }} regra(s) incompleta(s), {{ resumo.gestor_legado }} venda(s) antiga(s) de gestor e {{ resumo.extratos_sem_vinculo }} linha(s) de extrato sem vínculo.</p><a class="btn-outline" href="/comissoes/conciliacao">Abrir conciliação</a></section>
+  </div>
+  <div class="cc-foot">Vendas antigas não são recalculadas em massa. Quando uma venda antiga de gestor ainda estiver no regime de consultor, abra a proposta e use a migração individual somente se não houver pagamento, PIX, conciliação ou parcela liberada.</div>
+</div>
+{% endblock %}

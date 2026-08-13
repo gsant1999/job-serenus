@@ -4265,7 +4265,8 @@ def init_db():
         print(f"[REGRA-GESTOR] criação pulada: {e}")
 
     # ─── REGISTRO DE NOMES DE OPERADORA: preenche a tabela 'operadoras' com o
-    # display único de TODA operadora que já existe em recebimento, repasse_corretor
+    # display único de TODA operadora que já existe em recebimento, repasse, regra
+    # de gestor
     # ou nas propostas — assim o registro de nomes fica completo e nenhum nome
     # some das listas. 100% aditivo (INSERT ... DO NOTHING): nunca apaga nem
     # renomeia nada. Roda toda subida, é idempotente. ───
@@ -4275,6 +4276,9 @@ def init_db():
             d = _op_display(r['operadora'], r['obs'])
             if d: nomes.add(d)
         for r in conn.execute("SELECT DISTINCT operadora, obs FROM repasse_corretor").fetchall():
+            d = _op_display(r['operadora'], r['obs'])
+            if d: nomes.add(d)
+        for r in conn.execute("SELECT DISTINCT operadora, obs FROM gestor_regra").fetchall():
             d = _op_display(r['operadora'], r['obs'])
             if d: nomes.add(d)
         for r in conn.execute("SELECT DISTINCT adm_operadora FROM propostas WHERE adm_operadora IS NOT NULL AND adm_operadora<>''").fetchall():
@@ -4726,12 +4730,13 @@ def _resolver_nome_operadora(conn, op_nome, plano):
     try:
         existe = conn.execute(
             "SELECT 1 FROM recebimento WHERE operadora=? AND plano=? "
-            "UNION SELECT 1 FROM repasse_corretor WHERE operadora=? AND plano=? LIMIT 1",
-            (op_nome, plano, op_nome, plano)).fetchone()
+            "UNION SELECT 1 FROM repasse_corretor WHERE operadora=? AND plano=? "
+            "UNION SELECT 1 FROM gestor_regra WHERE operadora=? AND plano=? LIMIT 1",
+            (op_nome, plano, op_nome, plano, op_nome, plano)).fetchone()
         if existe:
             return op_nome
         nomes = set()
-        for tab in ('recebimento', 'repasse_corretor'):
+        for tab in ('recebimento', 'repasse_corretor', 'gestor_regra'):
             for r in conn.execute(f"SELECT DISTINCT operadora FROM {tab} WHERE plano=?", (plano,)).fetchall():
                 if _op_casa(r['operadora'], op_nome):
                     nomes.add(r['operadora'])
@@ -4771,6 +4776,11 @@ def _operadoras_lista(conn):
         pass
     try:
         for r in conn.execute("SELECT DISTINCT operadora, obs FROM repasse_corretor").fetchall():
+            _add(r['operadora'], r['obs'])
+    except Exception:
+        pass
+    try:
+        for r in conn.execute("SELECT DISTINCT operadora, obs FROM gestor_regra").fetchall():
             _add(r['operadora'], r['obs'])
     except Exception:
         pass
@@ -10307,7 +10317,7 @@ def comissoes_problemas():
     negativo ou falta de cadastro) dizendo EXATAMENTE o que falta em cada operadora,
     e um resumo dos cadastros faltantes agrupados. Read-only — não altera nada."""
     conn = db()
-    props = conn.execute("""SELECT p.*, u.regime_base FROM propostas p
+    props = conn.execute("""SELECT p.*, u.regime_base, u.perfil FROM propostas p
         LEFT JOIN usuarios u ON u.id=p.usuario_id
         WHERE COALESCE(p.estornada,0)=0 AND p.status<>'Excluída' ORDER BY p.id DESC""").fetchall()
     quebradas = []
@@ -10318,8 +10328,22 @@ def comissoes_problemas():
             continue
         tp = p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else ''
         prod = _producao_mes(conn, p['usuario_id'], p['mes_meta'], excluir_pid=p['id']) + valor
-        cc = calc_comissao(p['adm_operadora'], (p['regime_base'] or 'sem_lead_sem_fixo'),
-                           prod, valor, p['modalidade'], tp)
+        # A tela de diagnóstico não pode consultar o motor de consultor para
+        # uma venda de gestor: isso criava um falso "falta repasse" e induzia
+        # o usuário a cadastrar a regra no lugar errado.
+        eh_gestor = (p['perfil'] or '') in _GESTOR_PERFIS
+        if (p['regime_aplicado'] or '') in ('socio_gestor_regra', 'socio_gestor_pendente'):
+            b = _gestor_bloqueio(conn, p['id'])
+            aviso = ' · '.join(b['falta']) if b['bloqueia'] else ''
+            cc = {'plano': b['plano'], 'liquido': p['comissao_corretora_liquida'] or 0,
+                  'aviso': aviso}
+        elif eh_gestor:
+            plano = _plano_from_modalidade(p['modalidade'], tp)
+            cc = {'plano': plano, 'liquido': p['comissao_corretora_liquida'] or 0,
+                  'aviso': 'Venda de gestor ainda usa regime legado de consultor. Abra a proposta e revise a migração individual para a regra de sócio/gestor.'}
+        else:
+            cc = calc_comissao(p['adm_operadora'], (p['regime_base'] or 'sem_lead_sem_fixo'),
+                               prod, valor, p['modalidade'], tp)
         aviso = cc.get('aviso') or ''
         if not aviso and (cc.get('liquido') or 0) >= 0:
             continue
@@ -14352,28 +14376,45 @@ def comissoes():
     close_db(conn)
     return render_template('comissoes.html', comissoes=rows)
 
+
+@app.route('/comissoes/central')
+@login_required
+@admin_required
+def central_comissoes():
+    """Porta única para configurar e conferir a cadeia de comissão.
+
+    Não soma valores e não recalcula propostas. A função desta tela é mostrar
+    qual cadastro responde cada pergunta, evitando editar tabela legada ou
+    configurar repasse de consultor para uma venda de gestor.
+    """
+    conn = db()
+    try:
+        resumo = {
+            'recebimentos': conn.execute("SELECT COUNT(*) c FROM recebimento").fetchone()['c'],
+            'repasses': conn.execute("SELECT COUNT(*) c FROM repasse_corretor").fetchone()['c'],
+            'regras_gestor': conn.execute("SELECT COUNT(*) c FROM gestor_regra WHERE COALESCE(ativo,1)=1").fetchone()['c'],
+            'extratos_sem_vinculo': conn.execute("SELECT COUNT(*) c FROM affinity_conciliacao WHERE estado='sem_vinculo'").fetchone()['c'],
+            'gestor_legado': conn.execute("""SELECT COUNT(*) c FROM propostas p
+                JOIN usuarios u ON u.id=p.usuario_id
+                WHERE COALESCE(p.status,'') <> 'Excluída' AND COALESCE(p.estornada,0)=0
+                  AND u.perfil IN ('admin','supervisor','gestor_vendedor')
+                  AND COALESCE(p.regime_aplicado,'') NOT IN ('socio_gestor_regra','socio_gestor_pendente')""").fetchone()['c'],
+        }
+        resumo['regras_pendentes'] = len(_gestor_regras_faltando(conn))
+    finally:
+        close_db(conn)
+    return render_template('central_comissoes.html', resumo=resumo)
+
 @app.route('/comissao/salvar', methods=['POST'])
 @login_required
 @admin_required
 def comissao_salvar():
-    d = request.form
-    def num(k):
-        v=(d.get(k,'0') or '0').replace(',','.')
-        try: return float(v)
-        except: return 0.0
-    conn = db()
-    if d.get('id'):
-        conn.execute("""UPDATE comissoes SET operadora=?,perc_total=?,perc_sem_leads=?,
-            perc_n1=?,perc_n2=?,perc_n3=?,perc_com_fixo=?,observacao=? WHERE id=?""",
-            (d['operadora'],num('perc_total'),num('perc_sem_leads'),num('perc_n1'),
-             num('perc_n2'),num('perc_n3'),num('perc_com_fixo'),d.get('observacao'),d['id']))
-    else:
-        conn.execute("""INSERT INTO comissoes (operadora,perc_total,perc_sem_leads,
-            perc_n1,perc_n2,perc_n3,perc_com_fixo,observacao) VALUES (?,?,?,?,?,?,?,?)""",
-            (d['operadora'],num('perc_total'),num('perc_sem_leads'),num('perc_n1'),
-             num('perc_n2'),num('perc_n3'),num('perc_com_fixo'),d.get('observacao')))
-    conn.commit(); close_db(conn)
-    return redirect(url_for('comissoes'))
+    # Esta tabela é anterior a recebimento/repasse_corretor e nunca é lida pelo
+    # motor atual. Aceitar edição aqui produz uma alteração aparente sem efeito
+    # em proposta, parcelas ou Financeiro; preservar o dado histórico é seguro,
+    # continuar aceitando escrita não é.
+    return jsonify({"ok": False,
+                    "erro": "Esta é uma tabela histórica. Para alterar cálculo, use Operadoras, Repasses ou a Regra de sócio/gestor."}), 410
 
 # ─── CAMPOS PERSONALIZADOS (FORM BUILDER) ────────────────────────────────────────
 @app.route('/campos')
@@ -14529,6 +14570,13 @@ def operadora_excluir():
     conn = db()
     n_props = conn.execute("SELECT COUNT(*) c FROM propostas WHERE adm_operadora=? AND status<>'Excluída'",
                            (display,)).fetchone()['c']
+    n_regras_gestor = conn.execute("SELECT COUNT(*) c FROM gestor_regra WHERE operadora=? AND obs=?",
+                                   (op, obs)).fetchone()['c']
+    if n_regras_gestor > 0:
+        close_db(conn)
+        return jsonify({"ok": False, "bloqueado": True, "regras_gestor": n_regras_gestor,
+                        "msg": f"{n_regras_gestor} regra(s) de sócio/gestor usam \"{display}\". "
+                               "Renomeie ou desative essas regras antes de excluir a operadora."}), 409
     if n_props > 0:
         close_db(conn)
         return jsonify({"ok": False, "bloqueado": True, "propostas": n_props,
@@ -14566,6 +14614,7 @@ def operadora_renomear():
     # alvo já existe? (em qualquer uma das fontes) -> bloqueia a fusão
     existe = (conn.execute("SELECT 1 FROM recebimento WHERE operadora=? AND obs=? LIMIT 1", (op_new, obs_new)).fetchone()
               or conn.execute("SELECT 1 FROM repasse_corretor WHERE operadora=? AND obs=? LIMIT 1", (op_new, obs_new)).fetchone()
+              or conn.execute("SELECT 1 FROM gestor_regra WHERE operadora=? AND obs=? LIMIT 1", (op_new, obs_new)).fetchone()
               or conn.execute("SELECT 1 FROM operadoras WHERE operadora=? LIMIT 1", (disp_new,)).fetchone())
     if existe and not d.get('fundir'):
         close_db(conn)
@@ -14577,6 +14626,15 @@ def operadora_renomear():
         # (colisão: o destino já tem aquele plano/modelo/nível -> mantém o do destino),
         # reatribui as propostas pro nome do destino SEM recalcular comissão (mantém o
         # que está salvo, como o admin pediu) e remove a origem. Tudo numa transação.
+        # Regras de gestor podem ter snapshots de propostas apontando para elas.
+        # Fundi-las por conveniência apagaria a explicação de uma venda antiga;
+        # por isso esse caso pede ajuste explícito da regra, nunca descarte.
+        if conn.execute("SELECT 1 FROM gestor_regra WHERE operadora=? AND obs=? LIMIT 1",
+                        (op_old, obs_old)).fetchone():
+            close_db(conn)
+            return jsonify({"ok": False, "bloqueado": True,
+                            "msg": "Esta operadora tem regra de sócio/gestor. Para preservar os snapshots das vendas, "
+                                   "não é possível fundi-la automaticamente; renomeie sem fusão ou ajuste as regras primeiro."}), 409
         try:
             for tab, keys in (('recebimento', ['plano']),
                               ('repasse_corretor', ['plano', 'modelo', 'nivel'])):
@@ -14616,6 +14674,8 @@ def operadora_renomear():
         conn.execute("UPDATE recebimento SET operadora=?, obs=? WHERE operadora=? AND obs=?",
                      (op_new, obs_new, op_old, obs_old))
         conn.execute("UPDATE repasse_corretor SET operadora=?, obs=? WHERE operadora=? AND obs=?",
+                     (op_new, obs_new, op_old, obs_old))
+        conn.execute("UPDATE gestor_regra SET operadora=?, obs=? WHERE operadora=? AND obs=?",
                      (op_new, obs_new, op_old, obs_old))
         conn.execute("UPDATE operadoras SET operadora=? WHERE operadora=?", (disp_new, disp_old))
         # registro pode não existir ainda pro nome antigo — garante o novo
