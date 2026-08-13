@@ -54,6 +54,7 @@
      width:100% em todo select. Aqui eles voltam ao tamanho do conteúdo. */
   .toolbar select { width:auto; flex:0 0 auto; min-width:150px; }
   .toolbar input { flex:1 1 260px; }
+  .topbar .exportar-tipo { width:auto; min-width:175px; margin-right:6px; }
 
   /* DINHEIRO NUNCA QUEBRA. "R$ 2.187,50" virando duas linhas era o que fazia
      a linha inteira ter 100px de altura. */
@@ -210,7 +211,12 @@
     </label>
     <button class="btn-outline" onclick="recalcularTodas(this)">Recalcular comissões</button>
     <a href="/admin/comissoes-problemas" class="btn-outline" style="text-decoration:none;">Comissões com problema</a>{% endif %}
-    <button class="btn-outline" onclick="exportar()">Exportar CSV</button>
+    <select id="tipo-exportacao" class="exportar-tipo" aria-label="Dados a exportar" title="Escolha quais informações das propostas devem entrar no arquivo. Os filtros da tela continuam valendo.">
+      <option value="resumo">Resumo das propostas</option>
+      <option value="contatos">Contatos de contratação</option>
+      <option value="completo">Dados completos</option>
+    </select>
+    <button class="btn-outline" onclick="exportar()" title="Baixar um CSV apenas com as propostas que correspondem aos filtros atuais">Exportar CSV</button>
     <a href="/nova-proposta" class="btn">Nova proposta</a>
   </div>
 </div>
@@ -307,6 +313,8 @@
             data-cl="{{ p.comissao_corretora_liquida or 0 }}"
             data-id="{{ p.id }}" data-cli="{{ p.razao_social }}" data-vidas="{{ p.total_vidas or 0 }}"
             data-leadid="{{ p.lead_id or '' }}" data-prod="{{ p.produto or '' }}"
+            data-cnpj="{{ p.cnpj or '' }}" data-resp="{{ p.resp_contrato or '' }}"
+            data-telresp="{{ p.tel_resp_contrato or '' }}" data-emailresp="{{ p.email_resp_contrato or '' }}"
             data-s="{{ p.razao_social|lower }} {{ p.consultor|lower }} {{ p.adm_operadora|lower }}">
 
           {# QUEM: numero, nome, quando entrou, e o vinculo com o CRM #}
@@ -475,7 +483,7 @@ function limparFiltros() {
 // grudado nao da pra somar nem filtrar no Excel.
 // Agora cada campo sai na sua coluna, venha ou nao junto na tela. Nada se perde
 // no caminho da tela pro arquivo.
-const CSV_COLS = [
+const CSV_COLS_RESUMO = [
   ['id',      'ID',                (d) => d.id],
   ['cliente', 'Cliente',           (d) => d.cli],
   ['data',    'Data do cadastro',  (d) => _dataBR(d.dt)],
@@ -493,21 +501,39 @@ const CSV_COLS = [
   ['vig',     'Vigencia',          (d) => _dataBR(d.vig)],
   ['lead',    'Lead no CRM',       (d) => d.leadid || 'sem lead'],
 ];
+const CSV_COLS_CONTATOS = [
+  ['id',       'ID da proposta',                (d) => d.id],
+  ['cliente',  'Cliente / razão social',         (d) => d.cli],
+  ['cnpj',     'CPF / CNPJ',                    (d) => d.cnpj],
+  ['cons',     'Vendedor responsável',          (d) => d.c],
+  ['oper',     'Operadora',                     (d) => d.o],
+  ['prod',     'Produto / plano',               (d) => d.prod],
+  ['status',   'Situação da proposta',          (d) => d.st],
+  ['resp',     'Responsável pela contratação',  (d) => d.resp],
+  ['telresp',  'Telefone do responsável',       (d) => d.telresp],
+  ['emailresp','E-mail do responsável',         (d) => d.emailresp],
+];
+const CSV_COLS_COMPLETO = [...CSV_COLS_RESUMO, ...CSV_COLS_CONTATOS.filter(([chave]) =>
+  !CSV_COLS_RESUMO.some(([chaveResumo]) => chaveResumo === chave)
+)];
 function _dataBR(s){ if(!s) return ''; const p = s.split('-'); return p.length===3 ? p[2]+'/'+p[1]+'/'+p[0] : s; }
 // Vírgula decimal: é o que o Excel em português entende como número.
 function _num(v){ return (Number(v)||0).toFixed(2).replace('.', ','); }
 function exportar() {
-  const linhas = [CSV_COLS.map(c => '"' + c[1] + '"').join(';')];
+  const tipo = document.getElementById('tipo-exportacao')?.value || 'resumo';
+  const cols = tipo === 'contatos' ? CSV_COLS_CONTATOS : (tipo === 'completo' ? CSV_COLS_COMPLETO : CSV_COLS_RESUMO);
+  const rotulo = tipo === 'contatos' ? 'contatos_contratacao' : (tipo === 'completo' ? 'dados_completos' : 'resumo');
+  const linhas = [cols.map(c => '"' + c[1] + '"').join(';')];
   let n = 0;
   document.querySelectorAll('#t tbody tr').forEach((tr) => {
     if (tr.style.display === 'none') return;   // exporta o RECORTE, não a lista toda
     n++;
-    linhas.push(CSV_COLS.map((c) => '"' + String(c[2](tr.dataset) ?? '').replace(/"/g, '""') + '"').join(';'));
+    linhas.push(cols.map((c) => '"' + String(c[2](tr.dataset) ?? '').replace(/"/g, '""') + '"').join(';'));
   });
   // Ponto e vírgula: separador que o Excel brasileiro abre sem pedir nada.
   const a = document.createElement('a');
   a.href = 'data:text/csv;charset=utf-8,\uFEFF' + encodeURIComponent(linhas.join('\n'));
-  a.download = 'propostas_' + new Date().toISOString().slice(0,10) + (n ? '_' + n + 'reg' : '') + '.csv';
+  a.download = 'propostas_' + rotulo + '_' + new Date().toISOString().slice(0,10) + (n ? '_' + n + 'reg' : '') + '.csv';
   a.click();
 }
 async function recalcularTodas(btn) {
