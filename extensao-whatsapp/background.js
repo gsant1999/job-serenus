@@ -143,20 +143,17 @@ function _filaAvisarTela(id, s) {
 
 // ── O LADO TRABALHADOR ─────────────────────────────────────────────────
 //
-// Esta maquina pergunta ao JOB se ha trabalho. Se ela nao for a marcada, o
-// servidor responde `nao_e_trabalhador` — e ai ela pergunta muito de vez em
-// quando, pra nao gastar rede das outras sete a toa. Nao existe rota separada
-// pra "sou eu?": a propria resposta do /proximo ja diz.
-let _trabRitmo = 2000;            // enquanto e trabalhadora
-const _TRAB_RITMO_LENTO = 300000; // 5 min, quando nao e
+// Esta maquina pergunta ao JOB se ha trabalho. Uma consulta por minuto deixa o
+// service worker dormir entre rodadas. A versao anterior abria uma janela de
+// 55 segundos e consultava a cada 2 segundos: na maquina trabalhadora o worker
+// ficava acordado praticamente o tempo inteiro, mesmo sem nenhuma cotacao.
 let _trabOcupado = false;
 
 function _trabalhadorTick() {
   if (_trabOcupado) return;
   chamarJob('/api/whatsapp/cotacao/fila/proximo', 'GET', null, 12000).then((r) => {
     if (!r) return;
-    if (r.motivo === 'nao_e_trabalhador') { _trabRitmo = _TRAB_RITMO_LENTO; return; }
-    _trabRitmo = 2000;
+    if (r.motivo === 'nao_e_trabalhador') return;
     if (!r.ok || !r.id) return;
     _trabOcupado = true;
     _trabalhadorExecutar(r.id, r.pedido);
@@ -253,31 +250,23 @@ function _anotarBatida(temPainel, r) {
 // servidor, uma maquina ligada, logada e configurada certo parecia morta, e a
 // fila responderia "sem_trabalhador" pra todo mundo.
 //
-// `chrome.alarms` e o unico relogio que sobrevive: ele RESSUSCITA o worker.
-// O minimo e 1 minuto, e cotar nao pode esperar um minuto — entao o alarme faz
-// duas coisas: bate o sinal de vida e, se esta maquina for a marcada, abre uma
-// janela curta em que ela pergunta de 2 em 2 segundos. Enquanto essa janela
-// roda ha rede saindo, e rede saindo mantem o worker de pe. As outras sete
-// nao pagam nada por isso: quem nao e a trabalhadora fecha a janela no
-// primeiro "nao_e_trabalhador".
+// `chrome.alarms` e o unico relogio que sobrevive: ele acorda o worker uma vez,
+// faz uma rodada curta e deixa o Chrome suspende-lo de novo. A fila aceita essa
+// latencia: o pedinte espera ate 2 minutos e o proximo alarme acontece em no
+// maximo 1 minuto.
 const _ALARME = 'job-fila';
-const _JANELA_MS = 55000;   // fecha antes do proximo alarme, sem sobrepor
 
-let _janelaAte = 0;
-function _abrirJanela() {
-  const agora = Date.now();
-  const jaAberta = _janelaAte > agora;
-  _janelaAte = agora + _JANELA_MS;
-  if (jaAberta) return;      // ja ha um passo em cadeia rodando
-  const passo = () => {
-    if (Date.now() > _janelaAte) return;
-    try { _trabalhadorTick(); } catch (e) {}
-    // Quem nao e a trabalhadora descobre isso na primeira resposta: o ritmo
-    // vai pra 5 min e a janela fecha sozinha no proximo passo.
-    if (_trabRitmo > 10000) { _janelaAte = 0; return; }
-    setTimeout(passo, _trabRitmo);
-  };
-  passo();
+async function _extensaoLigada() {
+  try {
+    const c = await chrome.storage.local.get(['extensaoAtiva']);
+    return c.extensaoAtiva !== false;
+  } catch (e) { return true; }
+}
+
+async function _rodadaDeFundo() {
+  if (!await _extensaoLigada()) return;
+  try { _trabalhadorVivo(); } catch (e) {}
+  try { _trabalhadorTick(); } catch (e) {}
 }
 
 // NADA DISTO PODE DERRUBAR O WORKER INTEIRO.
@@ -293,8 +282,7 @@ if (chrome.alarms && chrome.alarms.create) {
     chrome.alarms.create(_ALARME, { periodInMinutes: 1 });
     chrome.alarms.onAlarm.addListener((al) => {
       if (al.name !== _ALARME) return;
-      try { _trabalhadorVivo(); } catch (e) {}
-      try { _abrirJanela(); } catch (e) {}
+      _rodadaDeFundo().catch(() => {});
     });
   } catch (e) { _relogioVelho(); }
 } else {
@@ -306,15 +294,13 @@ if (chrome.alarms && chrome.alarms.create) {
 // worker esta de pe (que e quando alguem esta usando a extensao) ele funciona,
 // e e melhor que silencio.
 function _relogioVelho() {
-  const passo = () => { try { _trabalhadorTick(); } catch (e) {} setTimeout(passo, _trabRitmo); };
-  setTimeout(passo, 8000);
-  setInterval(() => { try { _trabalhadorVivo(); } catch (e) {} }, 60000);
+  setTimeout(() => { _rodadaDeFundo().catch(() => {}); }, 8000);
+  setInterval(() => { _rodadaDeFundo().catch(() => {}); }, 60000);
 }
 
 // O worker tambem acorda por outros motivos (uma mensagem da aba, por
 // exemplo). Quando isso acontece, nao ha razao pra esperar o proximo alarme.
-try { _trabalhadorVivo(); } catch (e) {}
-try { _abrirJanela(); } catch (e) {}
+_rodadaDeFundo().catch(() => {});
 
 // CAIXA-PRETA DO WORKER.
 //

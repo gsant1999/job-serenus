@@ -91,12 +91,18 @@
   // Vigia barato: a cada 5s, enquanto a ponte não confirmar, tenta de novo.
   // Para depois de 12 tentativas (1 minuto) pra não ficar batendo pra sempre
   // numa aba onde o WhatsApp nem terminou de abrir.
-  _injetarPonteNaPagina();
-  const _vigia = setInterval(() => {
-    if (_ponteConfirmada || ++_tentativasPonte > 12) { clearInterval(_vigia); return; }
+  let _vigia = null;
+  function _iniciarPonte() {
+    if (_vigia) return;
     _injetarPonteNaPagina();
-  }, 5000);
-  _aoLimpar(() => clearInterval(_vigia));
+    _vigia = setInterval(() => {
+      if (_ponteConfirmada || ++_tentativasPonte > 12) {
+        clearInterval(_vigia); _vigia = null; return;
+      }
+      _injetarPonteNaPagina();
+    }, 5000);
+  }
+  _aoLimpar(() => { if (_vigia) clearInterval(_vigia); });
   // TRAVA DE INJECAO DUPLA.
   //
   // Quando a extensao e recarregada, o service worker reinjeta os scripts nas
@@ -130,6 +136,11 @@
   }).catch(() => _bootJobSerenus()); // sem storage acessível: não trava o consultor, liga normal
 
   function _bootJobSerenus() {
+
+  // A extensao desligada no popup nao injeta a biblioteca pesada da ponte nem
+  // acorda seus observadores. Antes, a ponte era iniciada antes de ler o toggle:
+  // a interface sumia, mas o trabalho caro continuava invisivel na pagina.
+  _iniciarPonte();
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -214,6 +225,12 @@
   let _contextoMorto = false;
   const _idsLoops = [];
   function _registrarLoop(id) { _idsLoops.push(id); return id; }
+  function _soComAbaVisivel(fn) {
+    return function () {
+      if (document.hidden || _contextoMorto) return;
+      return fn.apply(this, arguments);
+    };
+  }
   // Diferente de uma pausa curta dentro de uma ação em andamento, estes são
   // agendamentos de fundo. Eles precisam pertencer à geração atual: recarregar
   // a extensão não pode deixar uma geração morta acordando minutos depois para
@@ -1790,7 +1807,15 @@
   // usar, e e quando ela descobriria do jeito ruim.
   try {
     _ouvir(document, 'visibilitychange', () => {
-      if (!document.hidden) _confirmarSessaoNoServidor(false);
+      if (document.hidden) { try { _pausarLoopInbox(); } catch (e) {} return; }
+      try { ligarLoopInbox(); } catch (e) {}
+      _confirmarSessaoNoServidor(false);
+      // O que ficou pausado nao precisa disparar tudo no mesmo milissegundo.
+      // Atualiza primeiro o que aparece na tela e espalha as consultas leves.
+      _registrarTimeout(() => { try { filaVarreduraTick(); } catch (e) {} }, 300);
+      _registrarTimeout(() => { try { buscarInbox(); } catch (e) {} }, 1200);
+      _registrarTimeout(() => { try { _sinoBuscar(); } catch (e) {} }, 2200);
+      _registrarTimeout(() => { try { checarCampanhaAguardando(); } catch (e) {} }, 3500);
     });
   } catch (e) { /* sem isso, ainda confere na abertura */ }
 
@@ -4234,7 +4259,9 @@
     _registrarTimeout(() => { canarioRodar('na abertura'); }, 40000);
     // De 6 em 6 horas. Nao e monitoramento de segundo a segundo — e detectar
     // uma atualizacao do WhatsApp no mesmo dia, em vez de na semana seguinte.
-    _registrarLoop(setInterval(() => { canarioRodar('rodada periodica'); }, 6 * 60 * 60 * 1000));
+    _registrarLoop(setInterval(_soComAbaVisivel(() => {
+      canarioRodar('rodada periodica');
+    }), 6 * 60 * 60 * 1000));
   }
 
   function trIniciar() {
@@ -4311,6 +4338,7 @@
       // recriado). Nao varre mais a conversa inteira a cada 4s: se nada mudou,
       // nao ha o que injetar, e o observer avisa quando muda.
       _registrarLoop(setInterval(() => {
+        if (document.hidden) return;
         const m = document.querySelector('#main');
         if (m && !m._jobTrObservado) {
           m._jobTrObservado = true;
@@ -4330,7 +4358,7 @@
       // mesmo ritmo, pra nao existir "o site ja avisou e a extensao nao".
       try {
         _sinoBuscar();
-        _registrarLoop(setInterval(() => { _sinoBuscar(); }, 2 * 60 * 1000));
+        _registrarLoop(setInterval(_soComAbaVisivel(() => { _sinoBuscar(); }), 2 * 60 * 1000));
       } catch (e) { /* sem sino a extensao segue igual */ }
     }, 6000);
   }
@@ -4916,13 +4944,13 @@
   function varreduraIniciar() {
     // 4 minutos pra primeira checagem e 5 em 5 depois. A checagem em si é um GET
     // de config; se estiver desligada (o padrão), o custo é isso e mais nada.
-    _registrarTimeout(() => { varreduraRodar(false); }, 240000);
-    _registrarLoop(setInterval(() => { varreduraRodar(false); }, 5 * 60 * 1000));
+    _registrarTimeout(_soComAbaVisivel(() => { varreduraRodar(false); }), 240000);
+    _registrarLoop(setInterval(_soComAbaVisivel(() => { varreduraRodar(false); }), 5 * 60 * 1000));
     // O vínculo roda ANTES da varredura (90s), porque a varredura por leads
     // depende dele. E fora do horário comercial também: ligar identidade não
     // incomoda ninguém e não gasta IA.
-    _registrarTimeout(() => { _sincLidAuto(); }, 90000);
-    _registrarLoop(setInterval(() => { _sincLidAuto(); }, 6 * 60 * 60 * 1000));
+    _registrarTimeout(_soComAbaVisivel(() => { _sincLidAuto(); }), 90000);
+    _registrarLoop(setInterval(_soComAbaVisivel(() => { _sincLidAuto(); }), 6 * 60 * 60 * 1000));
   }
 
   // ═══════════════ Ficha do lead (CRM dentro do WhatsApp) ═══════════════
@@ -5250,7 +5278,7 @@
     if (segs >= 432000) el.classList.add('parado');
     else if (segs >= 86400) el.classList.add('morno');
   }
-  _registrarLoop(setInterval(_tickCronFicha, 1000));
+  _registrarLoop(setInterval(_soComAbaVisivel(_tickCronFicha), 1000));
 
   let _chatAberto = '';
   // Se a conversa aberta ja foi marcada como pessoal. Vem do servidor com a
@@ -9221,7 +9249,7 @@
   function filaVarreduraIniciar() {
     // Comeca depois da extensao assentar; o relogio real e o proximaEm.
     _registrarTimeout(() => { filaVarreduraTick(); }, 60000);
-    _registrarLoop(setInterval(() => { filaVarreduraTick(); }, 15000));
+    _registrarLoop(setInterval(_soComAbaVisivel(() => { filaVarreduraTick(); }), 15000));
     _retomarSeFoiReloadDeMemoria();
   }
 
@@ -9414,8 +9442,9 @@
 
   // Atualiza o tempo/cor a cada 20s (client-side) e re-busca a lista a cada 45s.
   function ligarLoopInbox() {
-    if (_inboxTimer) return;
+    if (_inboxTimer || document.hidden) return;
     _inboxTimer = setInterval(function () {
+      if (document.hidden) return;
       // tick visual do tempo, se a seção estiver aberta
       if (_secaoAtiva === 'inbox') {
         document.querySelectorAll('.job-inbox-tempo').forEach(function (el) {
@@ -9428,6 +9457,13 @@
       }
     }, 20000);
     _registrarLoop(_inboxTimer);
+  }
+  function _pausarLoopInbox() {
+    if (!_inboxTimer) return;
+    clearInterval(_inboxTimer);
+    const i = _idsLoops.indexOf(_inboxTimer);
+    if (i >= 0) _idsLoops.splice(i, 1);
+    _inboxTimer = null;
   }
 
   function setCorpoSecao(html) {
@@ -12720,9 +12756,9 @@
     // achava atualização, então uma aba aberta por horas sem update na hora
     // do primeiro check nunca mais avisava depois (hora que "demora" pra
     // avisar era essa: aba antiga, sem re-checagem nenhuma agendada).
-    _registrarLoop(setInterval(verificarVersaoExtensao, 20 * 60 * 1000));
+    _registrarLoop(setInterval(_soComAbaVisivel(verificarVersaoExtensao), 20 * 60 * 1000));
     carregarSeletoresRemotos();
-    _registrarLoop(setInterval(carregarSeletoresRemotos, 15 * 60 * 1000));
+    _registrarLoop(setInterval(_soComAbaVisivel(carregarSeletoresRemotos), 15 * 60 * 1000));
   });
 
   // ── Aviso de versão nova ──────────────────────────────────────────────────
@@ -12869,7 +12905,7 @@
       await _safeSendMessage({ type: 'metricas', metricas: lote });
     } catch (e) { /* perdeu a medida, nao o trabalho */ }
   }
-  _registrarLoop(setInterval(_enviarMetricas, 120000));
+  _registrarLoop(setInterval(_soComAbaVisivel(_enviarMetricas), 120000));
 
   let _filaTimer = null;
   function _agendarFila(segundos) {
@@ -12880,6 +12916,10 @@
 
   async function checarFilaDeEnvio() {
     if (_contextoMorto) return;
+    // A fila precisa continuar existindo em segundo plano, mas nao precisa
+    // acordar o WhatsApp a cada 20 segundos sem ninguem olhando. Uma rodada por
+    // minuto preserva os envios agendados e deixa a aba descansar.
+    if (document.hidden) { _agendarFila(60); return; }
     if (_filaOcupada) return;
     const { extKey, usuarioId } = await _safeStorageGet(['extKey', 'usuarioId']);
     if (!extKey || !usuarioId) return;
@@ -12920,11 +12960,15 @@
         _agendarFila(1);
       } finally { _jobGateSoltar(); }
     } catch (e) { /* próxima rodada tenta de novo */ }
-    finally { _filaOcupada = false; }
+    finally {
+      _filaOcupada = false;
+      if (!_filaTimer) _agendarFila(document.hidden ? 60 : 20);
+    }
   }
-  // Batida de seguranca: se nada agendar (aba dormiu, erro engolido), a fila
-  // volta a andar sozinha. O caminho normal e o _agendarFila.
-  _registrarLoop(setInterval(checarFilaDeEnvio, 20000));
+  // Um unico relogio recursivo. O setInterval antigo continuava acordando a
+  // pagina a cada 20 segundos mesmo quando a funcao decidia nao fazer nada.
+  _agendarFila(20);
+  _aoLimpar(() => { if (_filaTimer) clearTimeout(_filaTimer); });
 
   // ═══════════════ Campanha (Fase 2): vigília de resposta + limpeza ═══════════════
   // Vigia os números que ESTE consultor disparou numa campanha: quando um deles
@@ -13164,8 +13208,8 @@
       } catch (e) { /* próxima rodada tenta de novo */ }
     }
   }
-  _registrarTimeout(checarCampanhaAguardando, 8000);
-  _registrarLoop(setInterval(checarCampanhaAguardando, 60000));
+  _registrarTimeout(_soComAbaVisivel(checarCampanhaAguardando), 8000);
+  _registrarLoop(setInterval(_soComAbaVisivel(checarCampanhaAguardando), 60000));
 
   // ── Bate ponto pro painel de aptidão do disparo: versão, número do WhatsApp
   //    logado e se a wa-js está de pé. O admin vê na aba Disparos quem está apto. ──
@@ -13179,13 +13223,20 @@
       await chrome.runtime.sendMessage({ type: 'presenca', usuario_id: usuarioId, versao, numero, wpp_ok: !!numero });
     } catch (e) { /* próxima batida tenta de novo */ }
   }
-  _registrarTimeout(baterPontoDisparo, 6000);
-  _registrarLoop(setInterval(baterPontoDisparo, 60000));
+  function _agendarPresenca(ms) {
+    _registrarTimeout(async () => {
+      try { await baterPontoDisparo(); }
+      finally { _agendarPresenca(document.hidden ? 180000 : 60000); }
+    }, ms);
+  }
+  // Visivel: 1 min. Oculta: 3 min, suficiente para o painel saber que a sessao
+  // existe sem acordar a ponte do WhatsApp a cada minuto.
+  _agendarPresenca(6000);
 
-  // Inbox de leads novos: busca a cada 45s (mesmo com a seção fechada, pra o
-  // badge do trilho avisar) + tick visual do tempo.
-  _registrarTimeout(buscarInbox, 9000);
-  _registrarLoop(setInterval(buscarInbox, 45000));
+  // Inbox de leads novos: busca a cada 45s enquanto o WhatsApp esta visivel.
+  // Ao voltar para a aba, o listener de visibilidade atualiza o badge na hora.
+  _registrarTimeout(_soComAbaVisivel(buscarInbox), 9000);
+  _registrarLoop(setInterval(_soComAbaVisivel(buscarInbox), 45000));
   ligarLoopInbox();
 
   // ── VARREDURA DO CATALOGO, UM PEDACO POR VEZ ─────────────────────────────
@@ -13209,6 +13260,7 @@
   let _varreOcupada = false;
 
   async function varreduraDeFundo() {
+    if (document.hidden) return;
     if (_varreOcupada) return;
     _varreOcupada = true;
     try {
@@ -13238,11 +13290,11 @@
 
   // Primeira tentativa bem depois de abrir: os primeiros minutos do WhatsApp
   // ja sao disputados, e isto nao tem pressa nenhuma.
-  _registrarTimeout(varreduraDeFundo, 4 * 60 * 1000);
+  _registrarTimeout(_soComAbaVisivel(varreduraDeFundo), 4 * 60 * 1000);
   _registrarLoop(setInterval(() => {
     // Intervalo irregular: um relogio certinho de 22 em 22 minutos, todo dia,
     // e um padrao. Somar um tanto aleatorio nao custa nada e tira o padrao.
-    if (Math.random() < 0.75) varreduraDeFundo();
+    if (!document.hidden && Math.random() < 0.75) varreduraDeFundo();
   }, _VARRE_MIN));
 
   // Formata o telefone (dígitos) num rótulo BR legível pro aviso de limpeza.

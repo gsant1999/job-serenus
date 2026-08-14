@@ -58,6 +58,27 @@ if [ -n "$_faltando" ]; then
 fi
 echo "constantes de icone: todas definidas"
 
+# ── TRABALHO INVISIVEL EM SEGUNDO PLANO ──────────────────────────────────
+#
+# 14/08/2026: a maquina trabalhadora mantinha o service worker acordado por
+# 55s de cada minuto e consultava a fila a cada 2s. Ao mesmo tempo, a aba do
+# WhatsApp mantinha relogios de envio e presenca a cada 20s/60s mesmo oculta.
+# O renderer chegou a 4,4 GB e RESULT_CODE_HUNG. Estas assinaturas nao podem
+# voltar silenciosamente.
+if grep -qE '_JANELA_MS|_abrirJanela|_trabRitmo[[:space:]]*=[[:space:]]*2000' background.js; then
+  echo "ALERTA: o polling continuo do service worker voltou."
+  erro=1
+fi
+if grep -qE 'setInterval\((checarFilaDeEnvio|baterPontoDisparo)' content.js; then
+  echo "ALERTA: fila ou presenca voltou a usar intervalo fixo em segundo plano."
+  erro=1
+fi
+if ! grep -q '_soComAbaVisivel' content.js || ! grep -q '_agendarFila(60)' content.js; then
+  echo "ALERTA: faltam as travas de pausa da aba oculta."
+  erro=1
+fi
+[ $erro -eq 0 ] && echo "segundo plano: polling continuo bloqueado"
+
 
 [ $erro -eq 0 ] && echo "todos os JS da extensao compilam"
 exit $erro
