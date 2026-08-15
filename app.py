@@ -6292,6 +6292,7 @@ SUBABAS = [
     ]},
     {'grupo': 'Regras de comissão', 'itens': [
         {'label': 'Operadoras',   'href': '/operadoras', 'admin': True},
+        {'label': 'Tabela Affinity','href': '/comissoes/tabela', 'admin': True},
         {'label': 'Repasses',     'href': '/repasses',   'admin': True},
         {'label': 'Níveis',       'href': '/niveis',     'admin': True},
         {'label': 'Regimes',      'href': '/regimes',    'admin': True},
@@ -16865,6 +16866,182 @@ def api_comissao_conferencia():
                           limite=limite)
     close_db(conn)
     return jsonify(r)
+
+
+# ═══════════ IMPORTAÇÃO ASSISTIDA DA TABELA DA ADMINISTRADORA ═══════════
+# O sistema guarda a variação da operadora em três formatos diferentes
+# ('Affix' + obs 'Hapvida', 'Affix (Hapvida)', 'Allcare Humana'), enquanto a
+# tabela publicada sempre separa empresa e produto. Por isso o casamento é por
+# CONJUNTO DE PALAVRAS, e não por igualdade de string.
+#
+# E o `total` do sistema NÃO é a tabela: a Amil está com 2,8 (a promoção de
+# 280%) contra 240% publicados. Sobrescrever rebaixaria o valor negociado —
+# então a diferença a maior é tratada como PROMOÇÃO, nunca como correção.
+
+def _tokens_op(*partes):
+    """Conjunto de palavras significativas de um nome de operadora."""
+    txt = ' '.join(str(p) for p in partes if p)
+    txt = txt.replace('–', ' ').replace('—', ' ').replace('/', ' ')
+    txt = re.sub(r'[()\-.,]', ' ', txt)
+    txt = _normaliza_op(txt)
+    # Palavras que não distinguem ninguém
+    corte = {'saude', 'saúde', 'ltda', 'sa', 's', 'de', 'da', 'do', 'e', 'rj', 'sp',
+             'adm', 'administradora', 'plano', 'planos', 'seguros', 'seguro'}
+    return {t for t in txt.split() if t and t not in corte and len(t) > 1}
+
+
+def _score_match(a, b):
+    """0 a 1: quanto dois conjuntos de palavras se sobrepõem (Jaccard)."""
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def casar_tabela_recebimento(conn, vigencia=None):
+    """Propõe, para cada configuração de recebimento, a linha da tabela publicada.
+
+    Não grava nada. Devolve a proposta para conferência humana — o nome da
+    operadora é evidência fraca, e dinheiro não se ajusta por palpite."""
+    vig = vigencia or _TABELA_VIGENCIA
+    tab = [dict(r) for r in conn.execute(
+        "SELECT * FROM tabela_operadora WHERE vigencia=?", (vig,)).fetchall()]
+    if not tab:
+        return {'ok': False, 'erro': f'Tabela da vigência {vig} ainda não foi carregada.'}
+    for t in tab:
+        t['_tok'] = _tokens_op(t.get('empresa'), t.get('sub'))
+
+    # ODONTO_* da tabela não tem plano equivalente no sistema; cai em PME/PF.
+    equiv = {'PME': ('PME', 'ODONTO_PME'), 'PF': ('PF', 'ODONTO_PF'), 'ADESAO': ('ADESAO',)}
+
+    linhas = []
+    for r in conn.execute("SELECT * FROM recebimento ORDER BY operadora, plano").fetchall():
+        d = dict(r)
+        tok = _tokens_op(d.get('operadora'), d.get('obs'))
+        planos_ok = equiv.get((d.get('plano') or '').upper(), ())
+        cands = []
+        for t in tab:
+            if t.get('plano') not in planos_ok:
+                continue
+            s = _score_match(tok, t['_tok'])
+            if s > 0:
+                cands.append((s, t))
+        cands.sort(key=lambda x: -x[0])
+        melhor = cands[0] if cands else None
+        empatados = [c for c in cands if melhor and abs(c[0] - melhor[0]) < 0.001]
+
+        item = {
+            'recebimento_id': d['id'], 'operadora': d.get('operadora'),
+            'obs': d.get('obs') or '', 'plano': d.get('plano'),
+            'total_sistema': float(d.get('total') or 0),
+            'ja_tem_regua': bool((d.get('regua_json') or '').strip() not in ('', '[]')),
+            'candidatos': len(cands),
+        }
+        if not melhor or melhor[0] < 0.34:
+            item.update({'situacao': 'sem_match', 'confianca': 0,
+                         'motivo': 'Nenhuma linha da tabela publicada tem nome parecido neste plano.'})
+        else:
+            s, t = melhor
+            total_tab = float(t.get('total') or 0) / 100.0   # tabela em %, sistema em mensalidades
+            item.update({
+                'tabela_id': t['id'], 'tabela_nome': (t.get('empresa') or '')
+                    + ((' — ' + t['sub']) if t.get('sub') else ''),
+                'tabela_faixa': t.get('faixa') or '', 'tabela_plano': t.get('plano'),
+                'total_tabela': round(total_tab, 4),
+                'regua': t.get('regua_json') or '[]',
+                'obs_tabela': t.get('obs') or '',
+                'confianca': round(s, 2),
+            })
+            if len(empatados) > 1:
+                item['situacao'] = 'ambiguo'
+                item['motivo'] = (f'{len(empatados)} linhas da tabela empatam para este nome. '
+                                  f'Escolha manualmente antes de aplicar.')
+            elif s >= 0.75:
+                item['situacao'] = 'exato'; item['motivo'] = 'Nome e plano batem.'
+            else:
+                item['situacao'] = 'provavel'
+                item['motivo'] = 'Nome parecido, não idêntico. Confira antes de aplicar.'
+
+            # O total do sistema é a verdade comercial; o da tabela é a referência.
+            dif = item['total_sistema'] - total_tab
+            if abs(dif) < 0.005:
+                item['acao'] = 'so_regua'
+                item['acao_txt'] = 'Preenche só a régua (total já bate com a tabela).'
+            elif dif > 0:
+                item['acao'] = 'promo'
+                item['acao_txt'] = (f"Total do sistema ({item['total_sistema']:.2f}) é MAIOR que a tabela "
+                                    f"({total_tab:.2f}) — trata como promoção: tabela vira a base e a "
+                                    f"diferença cai numa parcela extra.")
+            else:
+                item['acao'] = 'revisar'
+                item['acao_txt'] = (f"Total do sistema ({item['total_sistema']:.2f}) é MENOR que a tabela "
+                                    f"({total_tab:.2f}). Não mexo no total: confira se é desconto "
+                                    f"negociado ou cadastro desatualizado.")
+        linhas.append(item)
+
+    resumo = {'total': len(linhas)}
+    for k in ('exato', 'provavel', 'ambiguo', 'sem_match'):
+        resumo[k] = sum(1 for x in linhas if x.get('situacao') == k)
+    resumo['com_regua'] = sum(1 for x in linhas if x.get('ja_tem_regua'))
+    return {'ok': True, 'vigencia': vig, 'resumo': resumo, 'linhas': linhas}
+
+
+@app.route('/comissoes/tabela')
+@login_required
+@admin_required
+def comissoes_tabela():
+    """Conferência do casamento entre a tabela publicada e o cadastro do sistema."""
+    conn = db()
+    tem = conn.execute("SELECT COUNT(*) c FROM tabela_operadora").fetchone()['c']
+    dados = casar_tabela_recebimento(conn) if tem else {'ok': False,
+        'erro': 'A tabela publicada ainda não foi carregada no banco.'}
+    close_db(conn)
+    return render_template('comissoes_tabela.html', dados=dados, tem_tabela=tem,
+                           vigencia=_TABELA_VIGENCIA)
+
+
+@app.route('/comissoes/tabela/aplicar', methods=['POST'])
+@login_required
+@admin_required
+def comissoes_tabela_aplicar():
+    """Grava a régua SÓ nas linhas aprovadas. Nunca em lote cego."""
+    d = request.json or {}
+    ids = d.get('ids') or []
+    if not ids:
+        return jsonify({'ok': False, 'erro': 'Nada selecionado.'}), 400
+    conn = db()
+    prop = casar_tabela_recebimento(conn)
+    if not prop.get('ok'):
+        close_db(conn); return jsonify({'ok': False, 'erro': prop.get('erro')}), 400
+    porid = {x['recebimento_id']: x for x in prop['linhas']}
+    aplicados, promos, pulados = 0, 0, 0
+    for rid in ids:
+        try:
+            item = porid.get(int(rid))
+        except (TypeError, ValueError):
+            continue
+        if not item or item.get('situacao') == 'sem_match' or not item.get('regua'):
+            pulados += 1; continue
+        fonte = f"affinity {prop['vigencia']}"
+        if item.get('acao') == 'promo':
+            # Base = tabela; a diferença negociada vira promoção numa parcela extra.
+            try:
+                fr = json.loads(item['regua'] or '[]')
+                ultimo = max(int(f.get('mes') or f.get('ordem') or 0) for f in fr) if fr else 0
+            except Exception:
+                ultimo = 0
+            conn.execute("""UPDATE recebimento SET regua_json=?, total=?, promo_total=?,
+                                promo_parcela=?, fonte_tabela=? WHERE id=?""",
+                (item['regua'], item['total_tabela'], item['total_sistema'],
+                 (ultimo + 1) or None, fonte, item['recebimento_id']))
+            promos += 1
+        else:
+            # Só a régua. Total do sistema permanece intocado.
+            conn.execute("UPDATE recebimento SET regua_json=?, fonte_tabela=? WHERE id=?",
+                         (item['regua'], fonte, item['recebimento_id']))
+        aplicados += 1
+    conn.commit(); close_db(conn)
+    app.logger.info(f"[TABELA] regua aplicada em {aplicados} config(s); {promos} como promocao")
+    return jsonify({'ok': True, 'aplicados': aplicados, 'promocoes': promos, 'pulados': pulados})
 
 
 @app.route('/proposta/<int:pid>/estorno/aplicar', methods=['POST'])
