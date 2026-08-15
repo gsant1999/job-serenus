@@ -799,6 +799,18 @@ def init_db():
             #   total_repassado    — % sobre tudo que foi repassado
             #   prorata            — proporcional aos dias usados (Prevent Senior)
             # unidade: parcela | mes | dia — o que a faixa conta.
+            # Antes de aplicar a tabela em lote, guarda como cada linha estava.
+            # 91 configurações de comissão mudando de uma vez sem volta é o tipo
+            # de operação que só se faz com desfazer pronto.
+            """CREATE TABLE IF NOT EXISTS recebimento_backup (
+                id SERIAL PRIMARY KEY,
+                lote TEXT NOT NULL,
+                recebimento_id INTEGER NOT NULL,
+                total REAL, promo_total REAL, promo_parcela INTEGER,
+                regua_json TEXT, fonte_tabela TEXT,
+                criado_por TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS estorno_regra (
                 id SERIAL PRIMARY KEY,
                 operadora TEXT NOT NULL,
@@ -2092,6 +2104,15 @@ def init_db():
             perc_estorno REAL DEFAULT 100,
             ate_mensalidade INTEGER DEFAULT 3,
             observacao TEXT
+        );
+        CREATE TABLE IF NOT EXISTS recebimento_backup (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lote TEXT NOT NULL,
+            recebimento_id INTEGER NOT NULL,
+            total REAL, promo_total REAL, promo_parcela INTEGER,
+            regua_json TEXT, fonte_tabela TEXT,
+            criado_por TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS estorno_regra (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -16994,9 +17015,10 @@ def comissoes_tabela():
     tem = conn.execute("SELECT COUNT(*) c FROM tabela_operadora").fetchone()['c']
     dados = casar_tabela_recebimento(conn) if tem else {'ok': False,
         'erro': 'A tabela publicada ainda não foi carregada no banco.'}
+    ultimo = _tabela_ultimo_lote(conn)
     close_db(conn)
     return render_template('comissoes_tabela.html', dados=dados, tem_tabela=tem,
-                           vigencia=_TABELA_VIGENCIA)
+                           vigencia=_TABELA_VIGENCIA, ultimo_lote=ultimo)
 
 
 @app.route('/comissoes/tabela/aplicar', methods=['POST'])
@@ -17014,6 +17036,8 @@ def comissoes_tabela_aplicar():
         close_db(conn); return jsonify({'ok': False, 'erro': prop.get('erro')}), 400
     porid = {x['recebimento_id']: x for x in prop['linhas']}
     aplicados, promos, pulados = 0, 0, 0
+    lote = datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')
+    quem = session.get('nome', 'admin')
     for rid in ids:
         try:
             item = porid.get(int(rid))
@@ -17022,6 +17046,16 @@ def comissoes_tabela_aplicar():
         if not item or item.get('situacao') == 'sem_match' or not item.get('regua'):
             pulados += 1; continue
         fonte = f"affinity {prop['vigencia']}"
+        # Guarda como estava ANTES de escrever. Sem isso não há volta.
+        ant = conn.execute("""SELECT total, promo_total, promo_parcela, regua_json, fonte_tabela
+                                FROM recebimento WHERE id=?""", (item['recebimento_id'],)).fetchone()
+        if ant:
+            a = dict(ant)
+            conn.execute("""INSERT INTO recebimento_backup
+                    (lote,recebimento_id,total,promo_total,promo_parcela,regua_json,fonte_tabela,criado_por)
+                    VALUES (?,?,?,?,?,?,?,?)""",
+                (lote, item['recebimento_id'], a.get('total'), a.get('promo_total'),
+                 a.get('promo_parcela'), a.get('regua_json'), a.get('fonte_tabela'), quem))
         if item.get('acao') == 'promo':
             # Base = tabela; a diferença negociada vira promoção numa parcela extra.
             try:
@@ -17040,8 +17074,49 @@ def comissoes_tabela_aplicar():
                          (item['regua'], fonte, item['recebimento_id']))
         aplicados += 1
     conn.commit(); close_db(conn)
-    app.logger.info(f"[TABELA] regua aplicada em {aplicados} config(s); {promos} como promocao")
-    return jsonify({'ok': True, 'aplicados': aplicados, 'promocoes': promos, 'pulados': pulados})
+    app.logger.info(f"[TABELA] lote {lote}: regua aplicada em {aplicados} config(s); {promos} como promocao")
+    return jsonify({'ok': True, 'aplicados': aplicados, 'promocoes': promos,
+                    'pulados': pulados, 'lote': lote})
+
+
+@app.route('/comissoes/tabela/desfazer', methods=['POST'])
+@login_required
+@admin_required
+def comissoes_tabela_desfazer():
+    """Volta as configurações ao estado anterior ao último lote aplicado."""
+    d = request.json or {}
+    conn = db()
+    lote = (d.get('lote') or '').strip()
+    if not lote:
+        r = conn.execute("SELECT lote FROM recebimento_backup ORDER BY id DESC LIMIT 1").fetchone()
+        lote = dict(r)['lote'] if r else ''
+    if not lote:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Não há aplicação para desfazer.'}), 400
+    linhas = conn.execute("SELECT * FROM recebimento_backup WHERE lote=? ORDER BY id", (lote,)).fetchall()
+    n = 0
+    for r in linhas:
+        a = dict(r)
+        conn.execute("""UPDATE recebimento SET total=?, promo_total=?, promo_parcela=?,
+                            regua_json=?, fonte_tabela=? WHERE id=?""",
+            (a.get('total'), a.get('promo_total'), a.get('promo_parcela'),
+             a.get('regua_json'), a.get('fonte_tabela'), a['recebimento_id']))
+        n += 1
+    conn.execute("DELETE FROM recebimento_backup WHERE lote=?", (lote,))
+    conn.commit(); close_db(conn)
+    app.logger.info(f"[TABELA] lote {lote} desfeito: {n} config(s) restauradas")
+    return jsonify({'ok': True, 'restauradas': n, 'lote': lote})
+
+
+def _tabela_ultimo_lote(conn):
+    """Último lote aplicado, para a tela poder oferecer o desfazer."""
+    try:
+        r = conn.execute("""SELECT lote, COUNT(*) qtd, MIN(criado_em) quando, MIN(criado_por) quem
+                              FROM recebimento_backup
+                             GROUP BY lote ORDER BY MIN(id) DESC LIMIT 1""").fetchone()
+        return dict(r) if r else None
+    except Exception:
+        return None
 
 
 @app.route('/proposta/<int:pid>/estorno/aplicar', methods=['POST'])

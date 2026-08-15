@@ -73,6 +73,18 @@
 </div>
 {% else %}
 
+{% if ultimo_lote %}
+<div class="tb-info" style="border-color:rgba(31,216,164,.3);background:rgba(31,216,164,.06);
+     display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
+  <div style="flex:1;min-width:240px;">
+    Última aplicação: <b>{{ ultimo_lote.qtd }} configuração(ões)</b> por {{ ultimo_lote.quem or 'admin' }}.
+    Se algum número ficou estranho, dá para voltar tudo ao estado anterior.
+  </div>
+  <button class="btn-sel" style="color:var(--erro);border-color:rgba(244,63,94,.35);"
+          onclick="desfazer(this)">Desfazer última aplicação</button>
+</div>
+{% endif %}
+
 <div class="tb-info">
   O que este import faz: preenche a <b>régua de recebimento</b> — em que meses a operadora paga —
   que hoje não existe em quase nenhuma configuração. Sem ela o sistema sabe <i>quanto</i> recebe,
@@ -178,6 +190,15 @@ function carregarTabela(btn){
       if (d.ok) { toast(d.gravados + ' linhas carregadas.', 'ok'); setTimeout(()=>location.reload(), 900); }
       else { btn.disabled=false; btn.textContent='Carregar a tabela publicada'; toast(d.erro||'Erro','err'); }
     }).catch(()=>{ btn.disabled=false; btn.textContent='Carregar a tabela publicada'; toast('Erro de conexão','err'); });
+}
+function desfazer(btn){
+  if (!confirm('Voltar todas as configurações do último lote ao estado anterior?')) return;
+  btn.disabled = true; btn.textContent = 'Desfazendo...';
+  fetch('/comissoes/tabela/desfazer', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+    .then(r=>r.json()).then(d=>{
+      if (d.ok) { toast(d.restauradas + ' configuração(ões) restaurada(s).', 'ok'); setTimeout(()=>location.reload(), 1200); }
+      else { btn.disabled=false; btn.textContent='Desfazer última aplicação'; toast(d.erro||'Erro','err'); }
+    }).catch(()=>{ btn.disabled=false; btn.textContent='Desfazer última aplicação'; toast('Erro de conexão','err'); });
 }
 function aplicar(){
   var ids = [...document.querySelectorAll('.chk:checked')].map(c=>c.value);
