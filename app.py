@@ -30332,15 +30332,98 @@ def comissao_conciliacao_vincular(cid):
                         vinculo_observacao=?, estado='apurado_affinity', atualizado_em=?
                     WHERE id=?""",
                  (pid, session.get('nome'), agora, obs[:400], agora, cid))
-    _fin_registrar(conn, f"afy:vinculo:{cid}", 'apurado_affinity', c['liquido'],
-                   papel='affinity', proposta_id=pid, conciliacao_id=cid,
-                   competencia=_fin_competencia(c['data_pagamento_informada'] or c['previsao']),
-                   data_evento=c['data_pagamento_informada'] or c['previsao'] or '',
-                   sinal=1, origem='vinculo_manual', origem_ref=c['codigo_comissao'],
-                   descricao=f"Vínculo manual: {obs[:150]}",
-                   usuario_id=session.get('user_id'), usuario_nome=session.get('nome'))
+    # CONTAGEM DUPLA: a importação já registrou este dinheiro no razão, mesmo
+    # quando a linha veio sem vínculo (o evento nasce com proposta_id NULL).
+    # Criar um evento novo aqui somava o mesmo valor duas vezes em
+    # SUM(valor*sinal) — e vincular à mão é o caminho NORMAL, não a exceção:
+    # a auditoria de 12/08 achou 10 casamentos exatos contra 22 sem vínculo.
+    #
+    # Vincular não é um fato financeiro novo, é a identificação do fato que já
+    # existe. Então aqui se completa o evento, não se cria outro.
+    lig = conn.execute("""UPDATE fin_evento SET proposta_id=?
+                           WHERE conciliacao_id=? AND estado='apurado_affinity'
+                             AND papel='affinity' AND proposta_id IS NULL""",
+                       (pid, cid)).rowcount
+    if not lig:
+        # Sem evento para completar (linha importada antes do razão existir, ou
+        # evento já vinculado a outra proposta). Aí sim o fato precisa nascer.
+        _fin_registrar(conn, f"afy:vinculo:{cid}", 'apurado_affinity', c['liquido'],
+                       papel='affinity', proposta_id=pid, conciliacao_id=cid,
+                       competencia=_fin_competencia(c['data_pagamento_informada'] or c['previsao']),
+                       data_evento=c['data_pagamento_informada'] or c['previsao'] or '',
+                       sinal=1, origem='vinculo_manual', origem_ref=c['codigo_comissao'],
+                       descricao=f"Vínculo manual: {obs[:150]}",
+                       usuario_id=session.get('user_id'), usuario_nome=session.get('nome'))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "razao_social": p['razao_social']})
+
+
+@app.route('/admin/razao/duplicidade', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def razao_duplicidade():
+    """Acha (GET) e corrige (POST) o dinheiro contado duas vezes no razão.
+
+    Uma linha importada sem vínculo e depois vinculada à mão gerava DOIS eventos
+    'apurado_affinity' para a mesma conciliação. Como o razão é append-only, a
+    correção é um contraevento de sinal -1 — apagar destruiria a prova de que
+    houve correção."""
+    conn = db()
+    dups = conn.execute("""
+        SELECT conciliacao_id, COUNT(*) qtd, SUM(valor) total
+          FROM fin_evento
+         WHERE estado='apurado_affinity' AND papel='affinity'
+           AND conciliacao_id IS NOT NULL AND COALESCE(sinal,1) = 1
+         GROUP BY conciliacao_id HAVING COUNT(*) > 1""").fetchall()
+    itens = [dict(r) for r in dups]
+
+    if request.method == 'GET':
+        # O excesso é LÍQUIDO: contraevento já lançado abate. Sem isso o
+        # diagnóstico continuaria acusando duplicidade depois de reparada.
+        excesso, pendentes = 0.0, []
+        for it in itens:
+            liquido = conn.execute("""SELECT COALESCE(SUM(valor*COALESCE(sinal,1)),0) v
+                                        FROM fin_evento
+                                       WHERE conciliacao_id=? AND estado='apurado_affinity'
+                                         AND papel='affinity'""", (it['conciliacao_id'],)).fetchone()['v']
+            primeiro = conn.execute("""SELECT valor FROM fin_evento
+                                        WHERE conciliacao_id=? AND estado='apurado_affinity'
+                                          AND papel='affinity' AND COALESCE(sinal,1)=1
+                                        ORDER BY id LIMIT 1""", (it['conciliacao_id'],)).fetchone()
+            legitimo = float(dict(primeiro)['valor'] or 0) if primeiro else 0.0
+            sobra = round(float(liquido or 0) - legitimo, 2)
+            if sobra > 0.01:
+                excesso += sobra
+                pendentes.append({**it, 'contado_a_mais': sobra})
+        close_db(conn)
+        return jsonify({'ok': True, 'conciliacoes_duplicadas': len(pendentes),
+                        'valor_contado_a_mais': round(excesso, 2), 'itens': pendentes[:50]})
+
+    quem = session.get('nome', 'admin')
+    anulados, valor_anulado = 0, 0.0
+    for it in itens:
+        ev = conn.execute("""SELECT id, valor, competencia, data_evento, origem_ref
+                               FROM fin_evento
+                              WHERE conciliacao_id=? AND estado='apurado_affinity'
+                                AND papel='affinity' AND COALESCE(sinal,1)=1
+                              ORDER BY id""", (it['conciliacao_id'],)).fetchall()
+        for extra in [dict(x) for x in ev][1:]:      # mantém o primeiro, anula o resto
+            criou = _fin_registrar(conn, f"anula:dup:{extra['id']}", 'apurado_affinity',
+                                   extra['valor'], papel='affinity',
+                                   conciliacao_id=it['conciliacao_id'],
+                                   competencia=extra.get('competencia') or '',
+                                   data_evento=extra.get('data_evento') or '',
+                                   sinal=-1, origem='correcao_duplicidade',
+                                   origem_ref=extra.get('origem_ref') or '',
+                                   descricao=f"Anula evento {extra['id']} contado em duplicidade",
+                                   usuario_id=session.get('user_id'), usuario_nome=quem)
+            if criou:
+                anulados += 1
+                valor_anulado += float(extra['valor'] or 0)
+    conn.commit(); close_db(conn)
+    app.logger.info(f"[RAZAO] duplicidade corrigida: {anulados} contraevento(s), {valor_anulado:.2f}")
+    return jsonify({'ok': True, 'contraeventos': anulados,
+                    'valor_corrigido': round(valor_anulado, 2)})
 
 
 @app.route('/comissoes/conciliacao/<int:cid>/confirmar-entrada', methods=['POST'])
