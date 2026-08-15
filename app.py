@@ -6324,7 +6324,6 @@ SUBABAS = [
     {'grupo': 'Dinheiro', 'itens': [
         {'label': 'Financeiro',   'href': '/financeiro',           'admin': True},
         {'label': 'Fluxo de Caixa','href': '/fluxo-caixa',         'admin': False},
-        {'label': 'Conferência',  'href': '/comissoes/conferencia', 'admin': True},
         {'label': 'Extrato Affinity','href': '/comissoes/extrato',    'admin': True},
         {'label': 'Conciliação',  'href': '/comissoes/conciliacao','admin': True},
         {'label': 'Estornos',     'href': '/estornos',             'admin': True},
@@ -6332,7 +6331,6 @@ SUBABAS = [
     ]},
     {'grupo': 'Regras de comissão', 'itens': [
         {'label': 'Operadoras',   'href': '/operadoras', 'admin': True},
-        {'label': 'Tabela Affinity','href': '/comissoes/tabela', 'admin': True},
         {'label': 'Repasses',     'href': '/repasses',   'admin': True},
         {'label': 'Níveis',       'href': '/niveis',     'admin': True},
         {'label': 'Regimes',      'href': '/regimes',    'admin': True},
@@ -14456,7 +14454,7 @@ def bi():
     por_midia = _comissao_por_midia(conn, f_mes) if ea else []
     # Antes de fechar a conexão — senão a consulta falha calada e a seção
     # simplesmente não aparece, que foi exatamente o que aconteceu aqui.
-    saude = _bi_saude_dinheiro(conn, f_mes) if ea else None
+    saude = _bi_saude_dinheiro(conn, f_mes) if (ea and FINANCEIRO_NOVO) else None
     close_db(conn)
     return render_template('bi.html', por_mes=por_mes, por_operadora=por_operadora,
                            por_modalidade=por_modalidade, por_consultor=por_consultor,
@@ -15948,7 +15946,7 @@ def financeiro():
     # Pergunta DIFERENTE da conferência acima: aquela compara o previsto com o
     # status interno ("marcamos como recebido?"); esta compara com o extrato da
     # Affinity, no líquido ("a administradora pagou o que devia?").
-    saude = _bi_saude_dinheiro(conn, mes)
+    saude = _bi_saude_dinheiro(conn, mes) if FINANCEIRO_NOVO else None
     # MESMA função que o Fluxo de Caixa chama, de propósito: enquanto cada tela
     # somava da sua própria consulta, as duas mostravam números diferentes pro
     # mesmo dinheiro e não havia como saber qual estava certa.
@@ -16562,6 +16560,19 @@ def regra_estorno_salvar():
 # Faltava o primeiro elo: sem ele não dá pra dizer se o extrato veio certo,
 # porque não havia contra o que conferir.
 
+# ─── CHAVE: telas financeiras novas (14/08/2026) ─────────────────────────────
+# DESLIGADAS de propósito. Elas foram construídas lendo `parcelas` e
+# `affinity_conciliacao` direto, em vez do razão `fin_evento` que o
+# COMISSOES_DOMINIO.md define como fonte de verdade. Resultado: números que não
+# conversam com os do Financeiro — o item 5 do checklist daquele documento
+# ("Financeiro e Fluxo de Caixa continuam lendo a mesma fonte?") foi violado.
+#
+# O motor por trás (régua de recebimento, curvas de estorno, promoção) continua
+# ligado e testado — o que sai de cena é a INTERFACE paralela.
+# Para religar depois de reescrever em cima de fin_evento: FINANCEIRO_NOVO = True
+# ou variável de ambiente FINANCEIRO_NOVO=1.
+FINANCEIRO_NOVO = os.environ.get('FINANCEIRO_NOVO', '0') == '1'
+
 _TABELA_ARQ = os.path.join(BASE_DIR, 'dados', 'tabela_affinity_2026-08.json')
 _TABELA_VIGENCIA = '2026-08'
 _ESTORNO_ARQ = os.path.join(BASE_DIR, 'dados', 'estorno_affinity_2026-08.json')
@@ -16884,6 +16895,10 @@ def conferir_comissao(conn, competencia=None, proposta_id=None, limite=500):
 def comissao_conferencia_tela():
     """Esperado × recebido × repassado, mês a mês. Sem mês escolhido mostra o
     histórico inteiro — é a lista dos erros anteriores."""
+    # Tela desligada até ser reescrita lendo o razão fin_evento. Enquanto isso
+    # manda para a porta única, que é onde a cadeia de comissão se explica.
+    if not FINANCEIRO_NOVO:
+        return redirect('/comissoes/central')
     comp = (request.args.get('competencia') or '').strip()
     conn = db()
     dados = conferir_comissao(conn, competencia=comp or None, limite=1000)
@@ -17039,6 +17054,10 @@ def casar_tabela_recebimento(conn, vigencia=None):
 @admin_required
 def comissoes_tabela():
     """Conferência do casamento entre a tabela publicada e o cadastro do sistema."""
+    # Tela desligada até ser reescrita lendo o razão fin_evento. Enquanto isso
+    # manda para a porta única, que é onde a cadeia de comissão se explica.
+    if not FINANCEIRO_NOVO:
+        return redirect('/comissoes/central')
     conn = db()
     # Tela de configuração de dinheiro não pode cair com 500: se faltar tabela
     # ou coluna, ela precisa DIZER o que falta em vez de sumir.
