@@ -1937,12 +1937,20 @@ def init_db():
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
         ]
+        # UM COMMIT POR TABELA, de propósito. No PostgreSQL, um erro deixa a
+        # transação em estado abortado e TODO comando seguinte falha junto —
+        # então um único CREATE ruim no meio da lista fazia todas as tabelas
+        # depois dele deixarem de ser criadas, em silêncio. O log dizia "Erro
+        # SQL" uma vez e escondia as outras trinta.
         for sql in tables_sql:
             try:
                 cur.execute(sql)
+                conn.commit()
             except Exception as e:
-                app.logger.error(f"[INIT_DB] Erro SQL: {e}")
-        conn.commit()
+                try: conn.rollback()
+                except Exception: pass
+                nome = re.search(r'CREATE TABLE IF NOT EXISTS (\w+)', sql or '')
+                app.logger.error(f"[INIT_DB] Erro ao criar {nome.group(1) if nome else '?'}: {e}")
         
         # GARANTIR que recebimento existe
         try:
@@ -17032,9 +17040,29 @@ def casar_tabela_recebimento(conn, vigencia=None):
 def comissoes_tabela():
     """Conferência do casamento entre a tabela publicada e o cadastro do sistema."""
     conn = db()
-    tem = conn.execute("SELECT COUNT(*) c FROM tabela_operadora").fetchone()['c']
-    dados = casar_tabela_recebimento(conn) if tem else {'ok': False,
-        'erro': 'A tabela publicada ainda não foi carregada no banco.'}
+    # Tela de configuração de dinheiro não pode cair com 500: se faltar tabela
+    # ou coluna, ela precisa DIZER o que falta em vez de sumir.
+    tem = 0
+    try:
+        tem = conn.execute("SELECT COUNT(*) c FROM tabela_operadora").fetchone()['c']
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        app.logger.error(f"[TABELA] tabela_operadora indisponível: {e}")
+        close_db(conn)
+        return render_template('comissoes_tabela.html', tem_tabela=0, ultimo_lote=None,
+                               vigencia=_TABELA_VIGENCIA,
+                               dados={'ok': False, 'erro': (
+                                   'A estrutura da tabela publicada ainda não existe neste banco. '
+                                   'Clique em "Carregar a tabela publicada" — o próprio botão cria e preenche.')})
+    try:
+        dados = casar_tabela_recebimento(conn) if tem else {'ok': False,
+            'erro': 'A tabela publicada ainda não foi carregada no banco.'}
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        app.logger.error(f"[TABELA] casamento falhou: {e}")
+        dados = {'ok': False, 'erro': f'Não consegui montar a comparação: {e}'}
     ultimo = _tabela_ultimo_lote(conn)
     close_db(conn)
     return render_template('comissoes_tabela.html', dados=dados, tem_tabela=tem,
@@ -17286,6 +17314,30 @@ def tabela_operadora_importar():
         return jsonify({'ok': False, 'erro': 'Arquivo da tabela não encontrado ou vazio'}), 400
     vig = (request.json or {}).get('vigencia') or _TABELA_VIGENCIA
     conn = db()
+    # Cria a estrutura se ela não veio do init_db — assim o botão resolve
+    # sozinho em vez de exigir um deploy só para destravar.
+    ddl_pg = DB_MODE == 'postgres'
+    for ddl in (
+        f"""CREATE TABLE IF NOT EXISTS tabela_operadora (
+                id {'SERIAL PRIMARY KEY' if ddl_pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+                fonte TEXT DEFAULT 'affinity', vigencia TEXT NOT NULL, plano TEXT NOT NULL,
+                empresa TEXT NOT NULL, sub TEXT DEFAULT '', faixa TEXT DEFAULT '',
+                tipo TEXT DEFAULT 'perc', total REAL, regua_json TEXT DEFAULT '',
+                obs TEXT DEFAULT '',
+                UNIQUE(fonte, vigencia, plano, empresa, sub, faixa))""",
+        f"""CREATE TABLE IF NOT EXISTS recebimento_backup (
+                id {'SERIAL PRIMARY KEY' if ddl_pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+                lote TEXT NOT NULL, recebimento_id INTEGER NOT NULL,
+                total REAL, promo_total REAL, promo_parcela INTEGER,
+                regua_json TEXT, fonte_tabela TEXT, criado_por TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""",
+    ):
+        try:
+            conn.execute(ddl); conn.commit()
+        except Exception as e:
+            try: conn.rollback()
+            except Exception: pass
+            app.logger.warning(f"[TABELA] DDL sob demanda falhou: {e}")
     gravados = 0
     for r in dados:
         try:
