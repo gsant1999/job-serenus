@@ -5646,19 +5646,45 @@ def _fin_visao(conn, competencia=''):
                  JOIN propostas p ON p.id = s.proposta_id
                  WHERE COALESCE(p.status,'') <> 'Excluída' AND COALESCE(p.estornada,0)=0"""
         sql += " AND COALESCE(p.regime_aplicado,'') IN ('socio_gestor_regra','socio_gestor_pendente')"
+        # ESCOPO: quando a tela pede um mês, este bloco também tem que respeitar.
+        # Antes ele somava TODAS as vendas de gestor de todos os tempos enquanto
+        # o resto da tela mostrava só o mês — dois números com cara de "o que
+        # vamos receber" e escopos diferentes, um do lado do outro.
+        # A fração `ordem` corresponde a `parcelas.numero`, e a parcela é quem
+        # sabe a competência. Por isso o mapa vem de lá.
+        comp_por_parcela = {}
+        if competencia:
+            try:
+                for pr in conn.execute(
+                        "SELECT proposta_id, numero FROM parcelas WHERE competencia = ?",
+                        (competencia,)).fetchall():
+                    d = dict(pr)
+                    comp_por_parcela.setdefault(d['proposta_id'], set()).add(d['numero'])
+            except Exception:
+                comp_por_parcela = {}
+
         for s in conn.execute(sql).fetchall():
             snap = dict(s)
-            visao['vendas_gestor'] += 1
             if not snap.get('completa'):
+                # Venda sem regra completa conta como pendência do mês inteiro:
+                # não dá pra dizer em que competência ela cairia.
+                visao['vendas_gestor'] += 1
                 visao['sem_regra'] += 1
                 continue
             r = _gestor_calcular(snap, snap['comissao'])
-            visao['bruto_esperado'] += r['total_recebido']
-            visao['bruto_gestor'] += r['total_bruto_gestor']
-            visao['retencao_gestor'] += r['total_retencao_gestor']
-            visao['retencao_serenus'] += r['total_retencao_serenus']
-            visao['liquido_pix_gestor'] += r['total_liquido_gestor']
-            visao['saldo_serenus'] += r['total_saldo_serenus']
+            fracoes = r.get('fracoes') or []
+            if competencia:
+                nums = comp_por_parcela.get(snap.get('proposta_id')) or set()
+                fracoes = [f for f in fracoes if f.get('ordem') in nums]
+                if not fracoes:
+                    continue          # esta venda não tem fração neste mês
+            visao['vendas_gestor'] += 1
+            visao['bruto_esperado'] += sum(f['recebido'] for f in fracoes)
+            visao['bruto_gestor'] += sum(f['bruto_gestor'] for f in fracoes)
+            visao['retencao_gestor'] += sum(f['retencao_gestor'] for f in fracoes)
+            visao['retencao_serenus'] += sum(f['retencao_serenus'] for f in fracoes)
+            visao['liquido_pix_gestor'] += sum(f['liquido_gestor'] for f in fracoes)
+            visao['saldo_serenus'] += sum(f['saldo_serenus'] for f in fracoes)
     except Exception:
         if DB_MODE == 'postgres':
             try: conn.rollback()

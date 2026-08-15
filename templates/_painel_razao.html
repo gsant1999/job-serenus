@@ -11,10 +11,15 @@
 <div class="pr-box">
   <div class="pr-cab">
     <div>
-      <div class="pr-titulo">Comissão da Affinity: do apurado ao pago</div>
+      <div class="pr-titulo">Vendas de gestor: do apurado ao pago</div>
       <div class="pr-sub">
-        Mesma fonte no Financeiro e no Fluxo de Caixa. Cada valor é um estado diferente do
-        dinheiro — não são versões do mesmo número.
+        {# O título dizia só "Comissão da Affinity", e o painel de baixo mostra "A receber
+           (operadoras)" com TODAS as vendas. Dois números com cara de "o que vamos receber"
+           e escopos diferentes, um do lado do outro. Agora o escopo está no título. #}
+        Só as vendas de <b>gestor/admin</b>{% if fin_visao.competencia %}, na competência
+        {{ fin_visao.competencia }}{% endif %}. Vendas de consultor aparecem em
+        "A receber (operadoras)", abaixo. Cada valor é um estado diferente do dinheiro —
+        não são versões do mesmo número.
       </div>
     </div>
     <a href="/comissoes/conciliacao" class="pr-link">Abrir conciliação</a>

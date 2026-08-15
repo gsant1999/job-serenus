@@ -324,7 +324,7 @@
       <div class="pe">{{ 'Sobra depois de tudo que entra e sai.' if saldo>=0 else 'Falta este valor para fechar o mês.' }}</div>
     </div>
     <div class="fin-mini">
-      <div class="m"><span>A receber (operadoras)</span><b class="pos">{{ receber_mes|moeda }}</b></div>
+      <div class="m"><span>A receber (todas as vendas)<i class="ajuda-i" title="Todas as vendas com parcela prevista neste mês — de consultor e de gestor. O painel de cima mostra só as de gestor, por isso o valor é menor.">i</i></span><b class="pos">{{ receber_mes|moeda }}</b></div>
       <div class="m"><span>A pagar (consultores)</span><b class="neg">{{ pagar_consultor|moeda }}</b></div>
       <div class="m"><span>Custos</span><b class="neg">{{ total_custos_puro|moeda }}</b></div>
       <div class="m"><span>Fixos</span><b class="neg">{{ total_fixos|moeda }}</b></div>
