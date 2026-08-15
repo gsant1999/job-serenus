@@ -223,6 +223,11 @@
         <input type="date" name="data_nasc_titular" id="data_nasc_titular" title="Nascimento do titular" onchange="mostrarIdades()">
       </div>
       <div class="hint" id="idade-titular" style="margin-bottom:4px;"></div>
+      {# O cartao SUS do titular aparece aqui, e nao junto do CPF la em cima,
+         porque a busca precisa das DUAS coisas — CPF e nascimento — e o
+         nascimento mora nesta linha. Resultado ao lado de quem o causou. #}
+      <div class="cns-linha" id="cns-titular" hidden></div>
+      <input type="hidden" name="cns_titular" id="cns_titular">
       <div class="erro-campo" id="erro-beneficiarios" style="margin-bottom:8px;"></div>
       <div id="lista-dependentes"></div>
       <button type="button" class="btn-ghost" style="font-size:12px; margin-top:6px;" onclick="addDependente()">+ Adicionar dependente</button>
@@ -691,22 +696,31 @@ document.querySelector('[name=adm_operadora]').addEventListener('change', carreg
 // ─── Dependentes ───
 let DEPS = [];
 function addDependente() {
-  DEPS.push({nome:'', nasc:'', parentesco:''});
+  DEPS.push({nome:'', nasc:'', cpf:'', parentesco:'', cns:''});
   renderDeps();
 }
+// O CPF do dependente entrou por causa do cartao SUS: a consulta e por CPF +
+// nascimento, entao sem CPF o dependente simplesmente nao tem como ser
+// buscado. Continua opcional — quem nao tem em maos salva a proposta igual.
 function renderDeps() {
   const c = document.getElementById('lista-dependentes');
   c.innerHTML = DEPS.map((d,i)=>`
-    <div class="form-row" style="grid-template-columns:1.5fr 1fr 1fr auto; gap:8px; margin-bottom:6px;">
-      <input type="text" placeholder="Nome do dependente" value="${d.nome}" onchange="DEPS[${i}].nome=this.value;syncDeps()">
-      <div>
-        <input type="date" value="${d.nasc}" onchange="DEPS[${i}].nasc=this.value;syncDeps()" title="Nascimento" style="width:100%;">
-        <div class="hint" style="margin-top:2px;">${_rotIdade(d.nasc)}</div>
+    <div style="margin-bottom:10px;">
+      <div class="form-row" style="grid-template-columns:1.4fr .95fr 1.05fr .9fr auto; gap:8px;">
+        <input type="text" placeholder="Nome do dependente" value="${d.nome}" onchange="DEPS[${i}].nome=this.value;syncDeps()">
+        <div>
+          <input type="date" value="${d.nasc}" onchange="DEPS[${i}].nasc=this.value;syncDeps();buscarCNSDep(${i})" title="Nascimento" style="width:100%;">
+          <div class="hint" style="margin-top:2px;">${_rotIdade(d.nasc)}</div>
+        </div>
+        <input type="text" placeholder="CPF" value="${d.cpf||''}" title="CPF do dependente — sem ele não dá pra buscar o cartão SUS"
+               oninput="mascaraCPF(this)" onchange="DEPS[${i}].cpf=this.value;syncDeps();buscarCNSDep(${i})">
+        <input type="text" placeholder="Parentesco" list="lista-parentesco" value="${d.parentesco}" onchange="DEPS[${i}].parentesco=this.value;syncDeps()">
+        <button type="button" class="btn-ghost" style="color:var(--rosa);" onclick="DEPS.splice(${i},1);renderDeps();syncDeps()">×</button>
       </div>
-      <input type="text" placeholder="Parentesco" list="lista-parentesco" value="${d.parentesco}" onchange="DEPS[${i}].parentesco=this.value;syncDeps()">
-      <button type="button" class="btn-ghost" style="color:var(--rosa);" onclick="DEPS.splice(${i},1);renderDeps();syncDeps()">×</button>
+      <div class="cns-linha" id="cns-dep-${i}" hidden></div>
     </div>`).join('');
   syncDeps();
+  DEPS.forEach((_, i) => buscarCNSDep(i));
 }
 
 // ═══ IDADE ════════════════════════════════════════════════════════════════
@@ -1186,7 +1200,8 @@ function preencherFormulario(dados, bannerMsg) {
   setName('razao_social', dados.razao_social);
   setName('total_vidas', dados.total_vidas);
   if (dados.dependentes && dados.dependentes.length) {
-    DEPS = dados.dependentes.map(d => ({nome:d.nome||'', nasc:d.nasc||'', parentesco:d.parentesco||''}));
+    DEPS = dados.dependentes.map(d => ({nome:d.nome||'', nasc:d.nasc||'', cpf:d.cpf||'',
+                                        parentesco:d.parentesco||'', cns:d.cns||''}));
     renderDeps();
   }
   const obs = document.querySelector('[name="observacoes"]');
@@ -1233,6 +1248,132 @@ function buscarDadosCNPJ(dig) {
     const dig = this.value.replace(/\D/g, '');
     if (dig.length === 14) _cnpjBuscaTimer = setTimeout(() => buscarDadosCNPJ(dig), 400);
   });
+})();
+
+// ═══ CARTÃO SUS (CNS) — busca sozinho, sem ninguém pedir ═══════════════════
+// A consulta precisa de CPF + nascimento. Assim que os dois existem numa
+// pessoa, o sistema vai atrás; o consultor não clica em nada. Cada pessoa tem
+// seu próprio estado, porque numa proposta familiar quatro consultas rodam ao
+// mesmo tempo e "não encontrado" sem dono não diz nada.
+const _cnsEstado = {};   // {chave: {timer, req, feito}} — um por pessoa
+
+function _cnsNorm(s) {
+  return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase().replace(/[^A-Z ]/g, '').replace(/\s+/g, ' ').trim();
+}
+// Só acusa divergência quando é OUTRA PESSOA, não quando falta um sobrenome:
+// o cadastro do SUS costuma ter o nome completo e o consultor digita o curto.
+function _cnsNomeDivergente(digitado, doSus) {
+  const a = _cnsNorm(digitado), b = _cnsNorm(doSus);
+  if (!a || !b || a === b) return false;
+  if (b.startsWith(a) || a.startsWith(b)) return false;
+  const pa = a.split(' '), pb = b.split(' ');
+  if (pa[0] !== pb[0]) return true;                       // primeiro nome diferente
+  return !pa.every(p => pb.includes(p)) && !pb.every(p => pa.includes(p));
+}
+
+function _cnsPinta(el, estado, d, ctx) {
+  if (!el) return;
+  el.className = 'cns-linha';
+  el.hidden = false;
+  if (estado === 'buscando') {
+    el.classList.add('buscando');
+    el.innerHTML = '<span class="cns-msg">Buscando o cartão SUS no Ministério da Saúde...</span>';
+    return;
+  }
+  if (estado === 'ok') {
+    // NOME DIVERGENTE NÃO É SUCESSO. Se o SUS devolve outra pessoa, o CPF ou a
+    // data está errado — e verde com "Baixar PDF" ao lado convida a anexar na
+    // proposta o cartão de um terceiro. Então o aviso vem primeiro, o número
+    // perde o verde, e o PDF só aparece depois que a pessoa confere.
+    const pdf = '<a class="cns-btn" href="/cartao-sus.pdf?cpf=' + encodeURIComponent(d.cpf) +
+                '&nascimento=' + encodeURIComponent(d.nascimento) + '">Baixar PDF</a>';
+    if (_cnsNomeDivergente(ctx && ctx.nome, d.nome)) {
+      el.classList.add('erro');
+      el.innerHTML =
+        '<span class="cns-divergente">Este CPF e data são de ' + d.nome + ', não de ' +
+          (ctx.nome || 'quem está no formulário') + '.</span>' +
+        '<span class="cns-rot">Cartão SUS</span>' +
+        '<span class="cns-num neutro">' + d.cns_fmt + '</span>' + pdf;
+      return;
+    }
+    el.innerHTML =
+      '<span class="cns-rot">Cartão SUS</span>' +
+      '<span class="cns-num">' + d.cns_fmt + '</span>' + pdf;
+    return;
+  }
+  if (estado === 'nao_encontrado') {
+    el.classList.add('erro');
+    el.innerHTML = '<span class="cns-msg">Sem cadastro no SUS com esse CPF e essa data de nascimento. '
+      + 'Confira a data — é o que mais erra.</span>';
+    return;
+  }
+  el.classList.add('falhou');
+  el.innerHTML = '<span class="cns-msg">A base do Ministério da Saúde não respondeu.</span>'
+    + '<button type="button" class="cns-btn" data-cns-retry="' + (ctx && ctx.chave || '') + '">Tentar de novo</button>';
+  const b = el.querySelector('[data-cns-retry]');
+  if (b) b.onclick = () => (ctx && ctx.repetir) && ctx.repetir(true);
+}
+
+function _cnsBusca(chave, cpf, nasc, el, nomeDigitado, guardar, forcar) {
+  const dig = (cpf || '').replace(/\D/g, '');
+  const st = _cnsEstado[chave] || (_cnsEstado[chave] = {});
+  clearTimeout(st.timer);
+  if (dig.length !== 11 || !nasc) {          // ainda não dá pra buscar: linha some
+    st.feito = null;
+    if (el) { el.hidden = true; el.innerHTML = ''; }
+    guardar('');
+    return;
+  }
+  const par = dig + '|' + nasc;
+  if (st.feito === par && !forcar) return;   // já resolvido, não repete
+  st.feito = par;
+  const ctx = { nome: nomeDigitado, chave: chave,
+                repetir: (f) => _cnsBusca(chave, cpf, nasc, el, nomeDigitado, guardar, f) };
+  _cnsPinta(el, 'buscando', null, ctx);
+  const meu = (st.req = (st.req || 0) + 1);
+  fetch('/api/cns?cpf=' + encodeURIComponent(dig) + '&nascimento=' + encodeURIComponent(nasc))
+    .then(r => r.json().then(j => ({ ok: r.ok, j })))
+    .then(({ j }) => {
+      if (st.req !== meu) return;            // chegou tarde, outro pedido é o válido
+      if (j.ok) { guardar(j.cns.cns); _cnsPinta(el, 'ok', j.cns, ctx); }
+      else { guardar(''); st.feito = (j.motivo === 'indisponivel' ? null : par);
+             _cnsPinta(el, j.motivo || 'indisponivel', null, ctx); }
+    })
+    .catch(() => {
+      if (st.req !== meu) return;
+      guardar(''); st.feito = null;
+      _cnsPinta(el, 'indisponivel', null, ctx);
+    });
+}
+
+function buscarCNSTitular() {
+  const cpf  = (document.getElementById('cpf_titular') || {}).value || '';
+  const nasc = (document.getElementById('data_nasc_titular') || {}).value || '';
+  const nome = (document.getElementById('nome_titular') || {}).value || '';
+  _cnsBusca('titular', cpf, nasc, document.getElementById('cns-titular'), nome,
+            v => { const h = document.getElementById('cns_titular'); if (h) h.value = v; });
+}
+
+function buscarCNSDep(i) {
+  const d = DEPS[i];
+  if (!d) return;
+  _cnsBusca('dep' + i, d.cpf || '', d.nasc || '', document.getElementById('cns-dep-' + i), d.nome,
+            v => { if (DEPS[i]) { DEPS[i].cns = v; syncDeps(); } });
+}
+
+(function () {
+  ['cpf_titular', 'data_nasc_titular'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    // 'change' e não 'input': a busca sai da máquina do consultor pra um
+    // sistema do governo — não vale disparar a cada tecla digitada.
+    el.addEventListener('change', buscarCNSTitular);
+    el.addEventListener('blur', buscarCNSTitular);
+  });
+  // O pré-preenchimento pela leitura de documento já traz CPF e nascimento:
+  // nesse caso o cartão SUS aparece junto, sem ninguém tocar em nada.
+  setTimeout(buscarCNSTitular, 300);
 })();
 
 // ─── Colar dados extraídos (RG/CNH/comprovantes) — parser local, sem IA/internet ───

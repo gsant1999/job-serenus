@@ -452,6 +452,17 @@
                 {% if p.data_nasc_titular %}Nasc: {{ p.data_nasc_titular|data_br }}{% endif %}
                 {% if p.cpf_titular %} · CPF: {{ p.cpf_titular }}{% endif %}
               </div>
+              {# O cartao SUS so aparece quando existe. Linha vazia escrita
+                 "CNS: —" e ruido em toda proposta antiga. #}
+              {% if p.cns_titular %}
+              <div class="cns-linha">
+                <span class="cns-rot">Cartão SUS</span>
+                <span class="cns-num">{{ p.cns_titular|cns_fmt }}</span>
+                {% if p.cpf_titular and p.data_nasc_titular %}
+                <a class="cns-btn" href="/cartao-sus.pdf?cpf={{ p.cpf_titular|urlencode }}&nascimento={{ p.data_nasc_titular|urlencode }}">Baixar PDF</a>
+                {% endif %}
+              </div>
+              {% endif %}
             </div>
           </div>
           <div id="lista-dependentes"></div>
@@ -1086,6 +1097,21 @@ const DEPS_JSON = {{ (p.dependentes_json or '[]')|tojson }};
 const REP = {{ p.repique_json|tojson if p.repique_json else 'null' }};
 let ETIQUETAS_MARCADAS = [];
 
+// O titular sai por filtro do servidor (data_br) e o dependente é desenhado
+// aqui: sem isto o mesmo cartão mostrava 08/01/1972 numa linha e 2010-05-02 na
+// de baixo.
+function _dataBR(v){
+  const m = String(v||'').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(v||'');
+}
+
+// Blocos de 3-4-4-4, como no cartão físico — 15 dígitos grudados erram na
+// hora de ditar pro balcão da operadora.
+function _cnsFmt(v){
+  const d = String(v||'').replace(/\D/g,'');
+  return d.length === 15 ? `${d.slice(0,3)} ${d.slice(3,7)} ${d.slice(7,11)} ${d.slice(11)}` : d;
+}
+
 const TIPO_LABELS = {conjuge:'Cônjuge',filho:'Filho(a)',filha:'Filho(a)',pai:'Pai',mae:'Mãe',sogro:'Sogro(a)',sogra:'Sogro(a)',irmao:'Irmão/Irmã',irma:'Irmão/Irmã',neto:'Neto(a)',neta:'Neto(a)',titular:'Titular'};
 const TIPO_CORES  = {conjuge:'#8b5cf6',filho:'#3b82f6',filha:'#3b82f6',pai:'#f59e0b',mae:'#f59e0b',sogro:'#f59e0b',sogra:'#f59e0b',irmao:'#10b981',irma:'#10b981',neto:'#06b6d4',neta:'#06b6d4',titular:'#1fd8a4'};
 
@@ -1109,8 +1135,13 @@ document.addEventListener('DOMContentLoaded', () => {
               <div style="font-size:13px;font-weight:600;">${d.nome||'Dependente '+(i+1)}</div>
               <div style="font-size:11.5px;color:var(--cinza);margin-top:2px;">
                 <span style="background:${cor}20;color:${cor};padding:1px 8px;border-radius:4px;font-size:11px;font-weight:600;margin-right:6px;">${label}</span>
-                ${d.nasc?'Nasc: '+d.nasc:''}
+                ${d.nasc?'Nasc: '+_dataBR(d.nasc):''}${d.cpf?' · CPF: '+d.cpf:''}
               </div>
+              ${d.cns ? `<div class="cns-linha">
+                <span class="cns-rot">Cartão SUS</span>
+                <span class="cns-num">${_cnsFmt(d.cns)}</span>
+                ${d.cpf && d.nasc ? `<a class="cns-btn" href="/cartao-sus.pdf?cpf=${encodeURIComponent(d.cpf)}&nascimento=${encodeURIComponent(d.nasc)}">Baixar PDF</a>` : ''}
+              </div>` : ''}
             </div>
           </div>`;
         }).join('');

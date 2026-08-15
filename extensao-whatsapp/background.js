@@ -350,6 +350,52 @@ async function _sessaoMorreu() {
   }
 }
 
+// Baixa um arquivo BINÁRIO do JOB e devolve como data URL.
+//
+// O chamarJob acima faz resp.json() e serve pra tudo que é dado; um PDF morre
+// ali. E o content script não pode buscar sozinho porque a extensão autentica
+// por token, não por cookie (ver o comentário grande em chamarJob) — um <a
+// href> direto só funcionaria pra quem estivesse logado no JOB no mesmo
+// Chrome, que é exatamente o admin, e a falha ficaria invisível justo pra
+// quem testa.
+async function baixarArquivoJob(caminho, timeoutMs) {
+  const { jobUrl, extKey } = await config();
+  const { extToken } = await chrome.storage.local.get(['extToken']);
+  if (!extKey && !extToken) {
+    return { ok: false, erro: 'Entre com seu e-mail e senha no popup da extensão (clique no ícone do JOB).' };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs || 30000);
+  try {
+    const resp = await fetch(jobUrl + caminho, {
+      method: 'GET',
+      credentials: 'omit',
+      headers: extToken ? { 'Authorization': 'Bearer ' + extToken }
+                        : (extKey ? { 'X-Extension-Key': extKey } : {}),
+      signal: controller.signal
+    });
+    if (!resp.ok) {
+      // Quando dá erro, o servidor responde JSON com o motivo — e o motivo
+      // ('sem cadastro' x 'base fora do ar') é o que o consultor precisa ler.
+      let j = null;
+      try { j = await resp.json(); } catch (e) { j = null; }
+      return { ok: false, erro: (j && j.erro) || 'Não consegui baixar o cartão SUS agora.' };
+    }
+    const buf = await resp.arrayBuffer();
+    let bin = '';
+    const bytes = new Uint8Array(buf);
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    const disp = resp.headers.get('Content-Disposition') || '';
+    const m = disp.match(/filename="([^"]+)"/);
+    return { ok: true, dataUrl: 'data:application/pdf;base64,' + btoa(bin),
+             nome: m ? m[1] : 'CARTAO SUS.pdf' };
+  } catch (e) {
+    return { ok: false, erro: e && e.name === 'AbortError'
+      ? 'A base do Ministério da Saúde demorou demais. Tente de novo.'
+      : 'Não consegui baixar o cartão SUS agora.' };
+  } finally { clearTimeout(timer); }
+}
+
 async function chamarJob(caminho, metodo, corpo, timeoutMs, reqId, opts) {
   const _t0 = Date.now();
   const _anota = (ok) => { try { _anotarTempo(caminho.split('?')[0], Date.now() - _t0, ok); } catch (e) {} };
@@ -914,6 +960,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'consultar_cnpj') {
     const dig = String(msg.cnpj || '').replace(/\D/g, '');
     chamarJob('/api/whatsapp/cnpj/' + encodeURIComponent(dig), 'GET', null, 20000).then(sendResponse);
+    return true;
+  }
+  // Cartão SUS (CNS) por CPF + nascimento. 25 s porque quem responde é a base
+  // do Ministério da Saúde, que é mais lenta que a BrasilAPI do CNPJ.
+  if (msg && msg.type === 'consultar_cns') {
+    const qs = 'cpf=' + encodeURIComponent(String(msg.cpf || '').replace(/\D/g, '')) +
+               '&nascimento=' + encodeURIComponent(msg.nascimento || '');
+    chamarJob('/api/whatsapp/cns?' + qs, 'GET', null, 25000).then(sendResponse);
+    return true;
+  }
+  // O PDF do cartão SUS. Não dá pra ser um link na tela: a extensão não manda
+  // cookie, então quem busca o arquivo é o background (que tem o token) e
+  // devolve como data URL pro content script salvar.
+  if (msg && msg.type === 'baixar_cartao_sus') {
+    const qs = 'cpf=' + encodeURIComponent(String(msg.cpf || '').replace(/\D/g, '')) +
+               '&nascimento=' + encodeURIComponent(msg.nascimento || '');
+    baixarArquivoJob('/api/whatsapp/cartao-sus.pdf?' + qs).then(sendResponse);
     return true;
   }
   // Cotações já feitas pra este cliente. A extensão pergunta isso toda vez que

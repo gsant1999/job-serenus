@@ -13,6 +13,7 @@ ERP em **Flask + PostgreSQL (Railway)** da Serenus Corretora de Saúde. Um arqui
 3. **Não fazer mudanças não solicitadas.**
 4. Validar sintaxe após editar `app.py`: `python3 -c "import ast; ast.parse(open('app.py').read())"`
 5. Testar local antes do deploy (SQLite): `JOB_DATA_DIR=/tmp/jobtest python3` + `app.app.test_client()` com sessão `{'user_id':1,'perfil':'admin'}`. Após deploy: testar a feature + uma antiga (anti-regressão) + abrir um anexo.
+6. **Toda mudança de interface passa pela skill `ux-job` antes de ser escrita.** Ela é a régua (regras inegociáveis, valores de acabamento e movimento, checklist) e tem precedência sobre as skills genéricas de design instaladas em `.claude/skills/` — `apple-design` e `emil-design-eng` para consultar, `animate` para construir movimento, `review-animations` para criticar. Nenhum commit de visual sai sem passar pela bancada de telas.
 
 ## Mapa de módulos (rotas por região do app.py — use grep para o exato)
 
