@@ -47,6 +47,12 @@
              border-radius:10px; padding:12px 14px; font-size:12px; color:var(--texto);
              line-height:1.65; margin-bottom:16px; }
   #rgLista a { color:var(--azul); text-decoration:none; font-weight:600; }
+  .rg-res { white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .rg-res div { display:flex; gap:8px; justify-content:space-between; font-size:12px; line-height:1.9; }
+  .rg-res-l { color:var(--cinza-2); }
+  .rg-res-g { color:var(--amarelo); }
+  .rg-res-r { color:var(--erro); }
+  .rg-res-s { color:var(--verde); }
 </style>
 {% endblock %}
 
@@ -185,7 +191,7 @@
     <table class="pnl-tab" id="rgLista">
       <thead>
         <tr><th>Operadora e plano</th><th>Régua de recebimento</th><th>Régua do gestor</th>
-            <th>Retenções</th><th>Situação</th><th>Ações</th></tr>
+            <th>Retenções</th><th>Resultado</th><th>Situação</th><th>Ações</th></tr>
       </thead>
       <tbody>
         {% for r in regras %}
@@ -221,6 +227,24 @@
             {% else %}<span style="font-size:11.5px;color:var(--cinza);">nenhuma</span>{% endfor %}
             <button type="button" class="rg-mini" style="margin-top:6px;"
                     data-ret="{{ r.id }}">Adicionar retenção</button>
+          </td>
+          {# O que a regra DA, nao so como ela reparte. Mesma unidade da regua
+             (% de mensalidade), calculado pelo motor de verdade. #}
+          <td class="rg-res">
+            {% if r.bruto_pct is not none %}
+              <div><span class="rg-res-l">Bruto</span>
+                   <b>{{ ('%g' % r.bruto_pct)|replace('.', ',') }}%</b></div>
+              <div><span class="rg-res-l">Gestor</span>
+                   <b class="rg-res-g">{{ ('%g' % r.gestor_pct)|replace('.', ',') }}%</b></div>
+              {% if r.retencao_pct %}
+              <div><span class="rg-res-l">Retenção</span>
+                   <b class="rg-res-r">{{ ('%g' % r.retencao_pct)|replace('.', ',') }}%</b></div>
+              {% endif %}
+              <div><span class="rg-res-l">Serenus</span>
+                   <b class="rg-res-s">{{ ('%g' % r.serenus_pct)|replace('.', ',') }}%</b></div>
+            {% else %}
+              <span style="font-size:11.5px;color:var(--cinza-2);">só com a regra completa</span>
+            {% endif %}
           </td>
           <td>
             {% if r.falta %}

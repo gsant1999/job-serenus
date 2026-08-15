@@ -3422,6 +3422,15 @@ def init_db():
         # não tinha régua nenhuma. Aqui ela passa a morar em `recebimento`, que já
         # é chaveado por (operadora, obs, plano), e o gestor_regra herda daqui.
         # Esparso e sem teto de 8 parcelas: Qualicorp paga Qualicash na 13ª e 25ª.
+        # ── Data REAL da entrada, separada da previsão ──
+        # O evento de entrada_confirmada nascia com competencia derivada da data
+        # PREVISTA. Se a Affinity previu 28/08 e o dinheiro caiu 03/09, o razão
+        # respondia agosto para uma entrada de setembro. São três coisas
+        # diferentes e agora moram em campos diferentes:
+        #   data_evento     — a data que o extrato informou (previsão/informada)
+        #   data_liquidacao — quando caiu na conta de verdade
+        #   competencia     — o mês contábil, que segue a real quando existe
+        ("fin_evento", "data_liquidacao", "TEXT"),
         ("recebimento", "regua_json", "TEXT"),
         ("recebimento", "tipo_valor", "TEXT DEFAULT 'perc'"),   # perc | reais (Prevent Senior 0-18 paga R$)
         ("recebimento", "promo_total", "REAL"),                 # ex.: 2.80 na Amil quando a tabela é 2.40
@@ -4299,7 +4308,7 @@ def init_db():
                 estado TEXT NOT NULL, papel TEXT DEFAULT 'serenus',
                 proposta_id INTEGER, parcela_id INTEGER, conciliacao_id INTEGER,
                 fracao INTEGER,
-                competencia TEXT, data_evento TEXT,
+                competencia TEXT, data_evento TEXT, data_liquidacao TEXT,
                 valor REAL DEFAULT 0, sinal INTEGER DEFAULT 1,
                 origem TEXT, origem_ref TEXT, descricao TEXT,
                 usuario_id INTEGER, usuario_nome TEXT,
@@ -4334,7 +4343,7 @@ def init_db():
                 estado TEXT NOT NULL, papel TEXT DEFAULT 'serenus',
                 proposta_id INTEGER, parcela_id INTEGER, conciliacao_id INTEGER,
                 fracao INTEGER,
-                competencia TEXT, data_evento TEXT,
+                competencia TEXT, data_evento TEXT, data_liquidacao TEXT,
                 valor REAL DEFAULT 0, sinal INTEGER DEFAULT 1,
                 origem TEXT, origem_ref TEXT, descricao TEXT,
                 usuario_id INTEGER, usuario_nome TEXT,
@@ -4347,6 +4356,18 @@ def init_db():
                     "CREATE INDEX IF NOT EXISTS idx_fin_ev_est ON fin_evento(estado)"):
             conn.execute(idx)
         conn.commit()
+        # fin_evento nasce DEPOIS do loop de migrações de coluna, então uma
+        # entrada lá não alcança esta tabela — o ALTER tem que morar aqui.
+        # Banco que já existia não recria o CREATE, e sem isso a coluna nunca
+        # aparece (foi exatamente o que aconteceu ao adicionar data_liquidacao).
+        try:
+            conn.execute("ALTER TABLE fin_evento ADD COLUMN "
+                         + ("IF NOT EXISTS " if is_pg else "") + "data_liquidacao TEXT")
+            conn.commit()
+        except Exception:
+            if is_pg:
+                try: conn.rollback()
+                except Exception: pass
     except Exception as e:
         if is_pg:
             try: conn.rollback()
@@ -8248,7 +8269,8 @@ def webhook_asaas():
                             "INSERT INTO historico_proposta (proposta_id, usuario_nome, campo, valor_antes, valor_depois) VALUES (?,?,?,?,?)",
                             (parc['proposta_id'], 'Asaas (webhook)', 'Status do pagamento', 'Pendente', 'Pago ao corretor (PIX confirmado)')
                         )
-                        _fin_repasse(conn, parc['id'], 'pago', 'Asaas (webhook)')
+                        _fin_repasse(conn, parc['id'], 'pago', 'Asaas (webhook)',
+                                     data_liquidacao=_data_iso(data_efetiva))
                         app.logger.info(f"[WEBHOOK] 💰 Transferência concluída: parcela {parc['id']} marcada como 'Pago ao corretor'")
 
                     elif evento in ('TRANSFER_FAILED', 'TRANSFER_CANCELLED'):
@@ -29734,6 +29756,19 @@ def _fin_competencia(data_br):
     return f'{m.group(3)}-{m.group(2)}' if m else ''
 
 
+def _data_iso(v):
+    """'03/09/2026' ou '2026-09-03' -> '2026-09-03'. Lixo -> ''.
+
+    Não inventa data: sem entrada válida devolve vazio, e vazio significa
+    'ninguém informou', que é diferente de qualquer data que eu chutasse."""
+    s = (v or '').strip()
+    m = re.match(r'^(\d{2})/(\d{2})/(\d{4})$', s)
+    if m:
+        return f'{m.group(3)}-{m.group(2)}-{m.group(1)}'
+    m = re.match(r'^(\d{4})-(\d{2})-(\d{2})', s)
+    return m.group(0) if m else ''
+
+
 def _fin_registrar(conn, chave_idem, estado, valor, **kw):
     """Grava um fato no razao. IDEMPOTENTE: a chave e UNIQUE, entao rodar duas
     vezes a mesma importacao nao duplica dinheiro — a segunda passada bate na
@@ -29747,19 +29782,20 @@ def _fin_registrar(conn, chave_idem, estado, valor, **kw):
         return False
     conn.execute("""INSERT INTO fin_evento
         (chave_idem, estado, papel, proposta_id, parcela_id, conciliacao_id, fracao,
-         competencia, data_evento, valor, sinal, origem, origem_ref, descricao,
-         usuario_id, usuario_nome, criado_em)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+         competencia, data_evento, data_liquidacao, valor, sinal, origem, origem_ref,
+         descricao, usuario_id, usuario_nome, criado_em)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (chave_idem, estado, kw.get('papel', 'serenus'), kw.get('proposta_id'),
          kw.get('parcela_id'), kw.get('conciliacao_id'), kw.get('fracao'),
-         kw.get('competencia', ''), kw.get('data_evento', ''), round(float(valor or 0), 2),
+         kw.get('competencia', ''), kw.get('data_evento', ''), kw.get('data_liquidacao') or None,
+         round(float(valor or 0), 2),
          int(kw.get('sinal', 1)), kw.get('origem', ''), str(kw.get('origem_ref', ''))[:120],
          str(kw.get('descricao', ''))[:300], kw.get('usuario_id'),
          str(kw.get('usuario_nome', ''))[:80], _agora_sp()))
     return True
 
 
-def _fin_repasse(conn, parcela_id, estado, quem='', sinal=1, sufixo=''):
+def _fin_repasse(conn, parcela_id, estado, quem='', sinal=1, sufixo='', data_liquidacao=''):
     """Registra no razão um passo do repasse ao consultor.
 
     O razão parava em 'entrada_confirmada': o dinheiro entrava e sumia da
@@ -29784,8 +29820,9 @@ def _fin_repasse(conn, parcela_id, estado, quem='', sinal=1, sufixo=''):
         return _fin_registrar(conn, f"repasse:{parcela_id}:{estado}{sufixo}", estado, valor,
                               papel='consultor', proposta_id=d.get('proposta_id'),
                               parcela_id=parcela_id, fracao=d.get('numero'),
-                              competencia=d.get('competencia') or '',
+                              competencia=((data_liquidacao or '')[:7] or d.get('competencia') or ''),
                               data_evento=datetime.now(TZ_SP).strftime('%Y-%m-%d'),
+                              data_liquidacao=data_liquidacao or '',
                               sinal=sinal, origem='repasse', origem_ref=str(parcela_id),
                               descricao=(f"Parcela {d.get('numero')} de "
                                          f"{(d.get('razao_social') or '')[:60]}"),
@@ -30043,6 +30080,29 @@ def regra_gestor():
             d['gestor'] = json.loads(d.get('gestor_json') or '[]')
         except Exception:
             d['fracoes'], d['gestor'] = [], []
+        # ── O RESULTADO da regra, em % de mensalidade ──
+        # As três colunas de percentuais dizem COMO reparte, mas não DÁ NO QUÊ.
+        # Aqui a regra é rodada de verdade pelo mesmo motor do cálculo, na mesma
+        # unidade da régua (% de mensalidade), para a tela responder direto:
+        # a operadora paga X, o gestor leva Y, sobra Z para a Serenus.
+        d['bruto_pct'] = d['gestor_pct'] = d['retencao_pct'] = d['serenus_pct'] = None
+        try:
+            total_pct = sum(float(f.get('percentual') or 0) for f in d['fracoes'])
+            if total_pct > 0 and not d['falta']:
+                # _gestor_calcular recebe SNAPSHOT, que tem `completa`; a regra
+                # tem `confirmada`. Sem traduzir, ele devolve zero em silêncio.
+                base = dict(d)
+                base['completa'] = 1
+                base['retencoes_json'] = json.dumps(ret, ensure_ascii=False, default=str)
+                calc = _gestor_calcular(base, total_pct)
+                if calc.get('completa'):
+                    d['bruto_pct'] = round(total_pct, 2)
+                    d['gestor_pct'] = round(calc.get('total_bruto_gestor') or 0, 2)
+                    d['retencao_pct'] = round((calc.get('total_retencao_gestor') or 0)
+                                              + (calc.get('total_retencao_serenus') or 0), 2)
+                    d['serenus_pct'] = round(calc.get('total_saldo_serenus') or 0, 2)
+        except Exception:
+            pass
         regras.append(d)
     operadoras = _operadoras_lista(conn)
     # Vendas de gestor sem regra completa: o motivo de a tela existir.
@@ -30616,11 +30676,19 @@ def comissao_conciliacao_confirmar_entrada(cid):
                     WHERE id=?""",
                  (ref[:120], 'asaas' if ref else 'humana', session.get('nome'), agora,
                   obs[:400], agora, cid))
+    # Data REAL da entrada. Quando informada, é ela que define a competência:
+    # dinheiro previsto para 28/08 que caiu em 03/09 entrou em SETEMBRO, e o
+    # caixa precisa dizer isso. Sem informar, cai na previsão (comportamento
+    # antigo) e o evento fica marcado como sem data real — em vez de fingir uma.
+    data_real = _data_iso(d.get('data_entrada'))
+    comp = (data_real[:7] if data_real
+            else _fin_competencia(c['data_pagamento_informada'] or c['previsao']))
     _fin_registrar(conn, f"afy:entrada:{cid}", 'entrada_confirmada', c['liquido'],
                    papel='serenus', proposta_id=c['proposta_id'], parcela_id=c['parcela_id'],
                    conciliacao_id=cid,
-                   competencia=_fin_competencia(c['data_pagamento_informada'] or c['previsao']),
+                   competencia=comp,
                    data_evento=c['data_pagamento_informada'] or c['previsao'] or '',
+                   data_liquidacao=data_real,
                    sinal=1, origem='asaas' if ref else 'confirmacao_humana',
                    origem_ref=ref or c['codigo_comissao'],
                    descricao=(f"Entrada confirmada por Asaas {ref}" if ref
