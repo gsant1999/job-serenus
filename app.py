@@ -8131,6 +8131,9 @@ def _pagar_parcela_asaas_core(conn, pid, operador_nome):
                         VALUES (?,?,?,?,?)""",
                      (parc['proposta_id'] if 'proposta_id' in parc.keys() else None, operador_nome,
                       'Pagamento PIX (Asaas)', '', f"R$ {valor:.2f} para {parc['consultor']} — transfer {data['id']}"))
+        # O PIX sair da fila e fato: entra no razao antes da confirmacao, senao
+        # dinheiro em transito nao aparece em lugar nenhum.
+        _fin_repasse(conn, pid, 'pix_iniciado', operador_nome)
         conn.commit()
         return True, data['id']
     erro_msg = data.get('_erro')
@@ -8245,6 +8248,7 @@ def webhook_asaas():
                             "INSERT INTO historico_proposta (proposta_id, usuario_nome, campo, valor_antes, valor_depois) VALUES (?,?,?,?,?)",
                             (parc['proposta_id'], 'Asaas (webhook)', 'Status do pagamento', 'Pendente', 'Pago ao corretor (PIX confirmado)')
                         )
+                        _fin_repasse(conn, parc['id'], 'pago', 'Asaas (webhook)')
                         app.logger.info(f"[WEBHOOK] 💰 Transferência concluída: parcela {parc['id']} marcada como 'Pago ao corretor'")
 
                     elif evento in ('TRANSFER_FAILED', 'TRANSFER_CANCELLED'):
@@ -12986,10 +12990,15 @@ def parcela_acao(pid):
     elif acao == 'liberar':  # confirmação do gestor
         conn.execute("UPDATE parcelas SET status='Liberado para o corretor',confirmado_gestor=1,data_confirmacao_gestor=? WHERE id=?",
                      (agora, pid))
+        _fin_repasse(conn, pid, 'liberado_repasse', session.get('nome', ''))
     elif acao == 'pagar':
         conn.execute("UPDATE parcelas SET status='Pago ao corretor',data_pagamento=? WHERE id=?", (agora, pid))
+        _fin_repasse(conn, pid, 'pago', session.get('nome', ''))
     elif acao == 'voltar':
         conn.execute("UPDATE parcelas SET status='Pendente de receber',confirmado_gestor=0,aceite_corretor=0 WHERE id=?", (pid,))
+        # Desfazer a liberação também é fato: contraevento, não apagar o de cima.
+        _fin_repasse(conn, pid, 'liberado_repasse', session.get('nome', ''),
+                     sinal=-1, sufixo=':anula')
     else:
         close_db(conn); return jsonify({"ok": False, "msg": "Ação inválida"}), 400
     conn.commit()
@@ -16655,6 +16664,26 @@ def _estorno_regra_vigente(conn, operadora, plano='', escopo='', data_venda=None
     return cands[0]
 
 
+def _estorno_curva_sobe(conn, regra_id):
+    """Devolve o degrau onde a curva SOBE, ou None se ela é bem-comportada.
+
+    Curva de estorno só desce: quanto mais o cliente pagou, menos a operadora
+    tira de volta. Uma curva que sobe é erro de tabela — foi assim que a
+    Seguros Unimed apareceu com 7ª=33% e 8ª=50%. Cobrar por uma curva assim é
+    cobrar errado com cara de regra."""
+    try:
+        f = [dict(x) for x in conn.execute(
+            "SELECT ate, percentual FROM estorno_faixa WHERE regra_id=? ORDER BY ate",
+            (regra_id,)).fetchall()]
+    except Exception:
+        return None
+    for a, b in zip(f, f[1:]):
+        if float(b['percentual'] or 0) > float(a['percentual'] or 0) + 0.01:
+            return {'de': a['ate'], 'para': b['ate'],
+                    'perc_de': a['percentual'], 'perc_para': b['percentual']}
+    return None
+
+
 def _estorno_faixa(conn, regra_id, contagem):
     """Degrau da curva para N parcelas/meses/dias pagos.
 
@@ -16708,6 +16737,18 @@ def calcular_estorno(conn, proposta_id, data_cancelamento=None, escopo=''):
                 'total_pago': total_pago, 'valor': 0.0,
                 'memoria': (f"{operadora} usa cálculo proporcional aos dias usados, sem curva fixa. "
                             f"{regra.get('observacao') or ''} Precisa de conferência manual.").strip()}
+
+    # Curva que sobe é erro de tabela, não regra. Não calcula em cima disso.
+    sobe = _estorno_curva_sobe(conn, regra['id'])
+    if sobe:
+        return {'ok': False, 'curva_invalida': True, 'regra': regra,
+                'parcelas_pagas': n_pagas, 'total_pago': total_pago, 'valor': 0.0,
+                'memoria': (f"A curva de estorno de {operadora}"
+                            + (f" ({regra['escopo']})" if regra.get('escopo') else '')
+                            + f" SOBE do degrau {sobe['de']} ({_pct_br(sobe['perc_de'])}%) para o "
+                            + f"{sobe['para']} ({_pct_br(sobe['perc_para'])}%). Estorno só desce: "
+                            + "quanto mais o cliente pagou, menos a operadora tira de volta. "
+                            + "Isto é erro de tabela — confirme com a administradora antes de cobrar.")}
 
     faixa = _estorno_faixa(conn, regra['id'], n_pagas)
     if not faixa:
@@ -17295,6 +17336,28 @@ def estorno_aplicar(pid):
     conn.execute("UPDATE propostas SET estornada=1, estorno_info=? WHERE id=?", (info, pid))
     conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
         VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], quem, 'estorno', info, datetime.now(TZ_SP)))
+
+    # ── O estorno tem que existir no RAZÃO ──
+    # Antes ele cobrava do consultor e o razão não sabia que tinha acontecido:
+    # somar fin_evento dava um resultado, olhar o Financeiro dava outro. Como o
+    # razão é append-only, dinheiro que volta é evento de SINAL -1 ligado à
+    # proposta, nunca edição do que já estava lá.
+    if valor > 0:
+        try:
+            comp = datetime.now(TZ_SP).strftime('%Y-%m')
+            eid = conn.execute("SELECT MAX(id) i FROM estorno_aplicado WHERE proposta_id=?",
+                               (pid,)).fetchone()
+            eid = dict(eid)['i'] if eid else None
+            _fin_registrar(conn, f"estorno:{pid}:{eid or 'x'}", 'estorno', valor,
+                           papel='serenus', proposta_id=pid, competencia=comp,
+                           data_evento=datetime.now(TZ_SP).strftime('%Y-%m-%d'),
+                           sinal=-1, origem='estorno', origem_ref=str(pid),
+                           descricao=(f"Estorno de {p.get('razao_social') or 'proposta'}: "
+                                      f"{memoria[:200]}"),
+                           usuario_id=session.get('user_id'), usuario_nome=quem)
+        except Exception as e:
+            app.logger.error(f"[ESTORNO] nao consegui registrar no razao: {e}")
+
     conn.commit(); close_db(conn)
 
     if p.get('usuario_id') and valor > 0:
@@ -29694,6 +29757,42 @@ def _fin_registrar(conn, chave_idem, estado, valor, **kw):
          str(kw.get('descricao', ''))[:300], kw.get('usuario_id'),
          str(kw.get('usuario_nome', ''))[:80], _agora_sp()))
     return True
+
+
+def _fin_repasse(conn, parcela_id, estado, quem='', sinal=1, sufixo=''):
+    """Registra no razão um passo do repasse ao consultor.
+
+    O razão parava em 'entrada_confirmada': o dinheiro entrava e sumia da
+    história. Liberar, iniciar o PIX e pagar são fatos, e fato mora no razão —
+    senão a pergunta 'quanto já saiu para os consultores?' só tem resposta
+    olhando status de parcela, que é estado atual e não histórico.
+
+    papel='consultor' e valores positivos: somar estado='pago' e papel
+    'consultor' responde direto quanto saiu, sem precisar inverter sinal."""
+    try:
+        r = conn.execute("""SELECT pa.id, pa.valor, pa.numero, pa.competencia, pa.proposta_id,
+                                   pr.razao_social
+                              FROM parcelas pa
+                              JOIN propostas pr ON pr.id = pa.proposta_id
+                             WHERE pa.id = ?""", (parcela_id,)).fetchone()
+        if not r:
+            return False
+        d = dict(r)
+        valor = float(d.get('valor') or 0)
+        if valor <= 0:
+            return False
+        return _fin_registrar(conn, f"repasse:{parcela_id}:{estado}{sufixo}", estado, valor,
+                              papel='consultor', proposta_id=d.get('proposta_id'),
+                              parcela_id=parcela_id, fracao=d.get('numero'),
+                              competencia=d.get('competencia') or '',
+                              data_evento=datetime.now(TZ_SP).strftime('%Y-%m-%d'),
+                              sinal=sinal, origem='repasse', origem_ref=str(parcela_id),
+                              descricao=(f"Parcela {d.get('numero')} de "
+                                         f"{(d.get('razao_social') or '')[:60]}"),
+                              usuario_nome=(quem or '')[:80])
+    except Exception as e:
+        app.logger.error(f"[RAZAO] repasse {estado} da parcela {parcela_id} nao registrado: {e}")
+        return False
 
 
 def _afy_importar_lote(conn, linhas, usuario_id, usuario_nome):

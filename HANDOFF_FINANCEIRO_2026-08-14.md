@@ -71,13 +71,26 @@ Fontes convertidas em `knowledge/affinity-tabela-comissoes.pdf.md` e
 
 Na tabela publicada ele aparece como **"Med Sênior"** (com espaço e acento).
 
-### Divergências entre o cadastro e a tabela (conferir com a Affinity)
+### Divergências — RESOLVIDAS pelo Guilherme em 15/08/2026
 
-- **Bradesco PME**: sistema **330%**, tabela 300%, Guilherme disse 300%.
-- **Med Sênior PME**: sistema **180%**, Guilherme disse 170%; não casa por nome
-  com a tabela de PME.
-- **Alice PME**: sistema 300%, tabela 240%.
-- **Qualicorp PME**: sistema 300%, tabela 320% (sistema MENOR que a tabela).
+- **Bradesco PME: 330% está CERTO.** A tabela publicada traz 300%, mas a
+  condição negociada é 330%. O sistema está correto; a diferença de 30 pontos
+  é promoção. Não mexer.
+- **Med Sênior PME: o certo é 170%.** O cadastro está com **180%** — está
+  errado e precisa ser corrigido na tela de Operadoras (`recebimento.total`
+  = 1.70). Enquanto não for corrigido, toda venda dessa operadora calcula
+  comissão a maior.
+- **Seguros Unimed / Contratos: curva reconstruída.** A publicada tinha 7ª=33,33%
+  e 8ª=50% — degrau que sobe, o que não existe em estorno. A curva de
+  Movimentação da mesma operadora é uma escada limpa de 8,33, e da 4ª em diante
+  as duas coincidem exceto nas posições 7 e 8. Adotado 7ª=50%, 8ª=41,67%,
+  9ª=33,33%. **Ainda assim, confirmar com a Affinity antes de cobrar.**
+- **Alice PME**: sistema 300%, tabela 240% — pendente de confirmação.
+- **Qualicorp PME**: sistema 300%, tabela 320% (sistema MENOR) — pendente.
+
+Proteção instalada: `_estorno_curva_sobe()` recusa calcular estorno sobre
+qualquer curva que suba, dizendo em qual degrau. Erro de tabela não vira
+cobrança silenciosa.
 
 ### O total do sistema não é a tabela
 
