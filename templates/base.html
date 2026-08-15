@@ -59,10 +59,22 @@
        se le sem truque nenhum. O amarelo fica onde ele funciona: no escuro. */
     --amarelo:#c2410c; --am:#c2410c;
   }
+  /* A SIDEBAR É ESCURA NOS DOIS TEMAS — então nada dentro dela pode tirar cor
+     de variável que muda com o tema. Era esse o defeito: o rodapé usava
+     --cinza, que no tema claro é um cinza ESCURO feito pra fundo branco, e
+     "Modo Claro" e "Sair" ficavam quase invisíveis sobre o fundo escuro.
+     Configurações escapava só porque tinha a classe .nav-link, que já estava
+     corrigida aqui — daí a impressão de que dois itens estavam desabilitados.
+     A regra agora cobre o menu, os cabeçalhos de grupo e o rodapé juntos. */
   [data-theme="light"] .sidebar { background:#1a1d2e; }
-  [data-theme="light"] .sidebar .nav-link { color:#c5c9d8; }
+  [data-theme="light"] .sidebar .nav-link,
+  [data-theme="light"] .sidebar-bottom a { color:#c5c9d8; }
+  [data-theme="light"] .sidebar .nav-grupo-cab { color:#9aa2b8; }
+  [data-theme="light"] .sidebar .nav-grupo-cab:hover,
+  [data-theme="light"] .sidebar .nav-grupo[open] > .nav-grupo-cab { color:#fff; }
   [data-theme="light"] .sidebar .nav-link:hover,
-  [data-theme="light"] .sidebar .nav-link.active { background:rgba(255,255,255,.1); color:#fff; }
+  [data-theme="light"] .sidebar .nav-link.active,
+  [data-theme="light"] .sidebar-bottom a:hover { background:rgba(255,255,255,.1); color:#fff; }
   [data-theme="light"] .card, [data-theme="light"] .metrica {
     box-shadow:0 2px 4px rgba(0,0,0,.05);
   }
@@ -113,7 +125,9 @@
   /* ═══ SIDEBAR ═══ */
   .sidebar { width:var(--sidebar-w); background:#0a0a10; min-height:100vh; display:flex; flex-direction:column;
     position:fixed; left:0; top:0; bottom:0; z-index:200; border-right:1px solid var(--borda);
-    transition:transform .25s ease; }
+    /* A mesma curva de gaveta que o resto do menu já usa. Com 'ease' genérico
+       ela saía mais devagar no começo — justo quando o dedo acabou de tocar. */
+    transition:transform .28s cubic-bezier(.32,.72,0,1); }
   .sidebar-logo { padding:18px 20px 14px; border-bottom:1px solid var(--borda); }
   .logo-wrap { display:flex; align-items:center; gap:10px; }
   .logo-mark { position:relative; width:40px; height:40px; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
@@ -134,11 +148,18 @@
      nada em destaque. Aqui o dia a dia fica sempre à vista e o resto desce um
      nível — o grupo onde você está abre sozinho, então nada fica escondido de
      quem precisa. */
+  /* UMA MARGEM ESQUERDA SÓ. Medido antes de mexer: o rótulo do grupo começava
+     em 32px e os ícones dos itens em 20px — 12px de degrau, com o pai à
+     DIREITA dos filhos. É esse desencontro que faz o menu parecer torto, mais
+     do que qualquer cor. Tudo aqui nasce da mesma linha: 10px do .sidebar-nav
+     + 10px de padding. */
   .nav-grupo { border:none; margin:0; }
-  .nav-grupo-cab { display:flex; align-items:center; gap:8px; padding:9px 14px; margin:1px 8px;
-    font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.7px;
+  .nav-grupo-cab { display:flex; align-items:center; gap:8px; padding:9px 10px; margin:1px 0;
+    font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:1.2px;
     color:var(--cinza-2); cursor:pointer; list-style:none; border-radius:8px;
-    user-select:none; transition:background .12s, color .12s; }
+    user-select:none; position:relative;
+    transition:background .14s cubic-bezier(.23,1,.32,1), color .14s cubic-bezier(.23,1,.32,1),
+               transform .1s cubic-bezier(.23,1,.32,1); }
   .nav-grupo-cab::-webkit-details-marker { display:none; }
   .nav-grupo-cab:hover { background:rgba(255,255,255,.04); color:var(--texto); }
   .nav-grupo-cab:active { transform:scale(.98); }
@@ -146,36 +167,58 @@
     transition:transform .22s cubic-bezier(.32,.72,0,1); }
   .nav-grupo[open] > .nav-grupo-cab .nav-chev { transform:rotate(90deg); }
   .nav-grupo[open] > .nav-grupo-cab { color:var(--texto); }
-  /* Marca o grupo fechado que contém a página atual, pra ninguém se perder */
+  /* Marca o grupo fechado que contém a página atual, pra ninguém se perder.
+     O ponto fica ancorado à direita, junto da seta: preso à margem esquerda
+     por margem negativa ele saía da caixa quando o rótulo mudava de tamanho. */
   .nav-grupo:not([open]) > .nav-grupo-cab.tem-ativo { color:var(--azul); }
+  .nav-grupo:not([open]) > .nav-grupo-cab.tem-ativo .nav-chev { opacity:1; }
   .nav-grupo:not([open]) > .nav-grupo-cab.tem-ativo::after {
     content:''; width:5px; height:5px; border-radius:50%; background:var(--azul);
-    position:absolute; margin-left:-14px; }
+    margin-left:6px; flex-shrink:0; }
   .nav-grupo-itens { overflow:hidden; }
   .nav-grupo[open] .nav-grupo-itens { animation:nav-abre .24s cubic-bezier(.32,.72,0,1); }
   @keyframes nav-abre { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
-  @media (prefers-reduced-motion: reduce) {
-    .nav-chev { transition:none; }
-    .nav-grupo[open] .nav-grupo-itens { animation:none; }
-    .nav-grupo-cab:active { transform:none; }
-  }
 
-  .nav-section { font-size:9.5px; color:var(--cinza-2); text-transform:uppercase;
-    letter-spacing:1.6px; padding:14px 10px 5px; font-weight:600; }
   .nav-link { display:flex; align-items:center; gap:10px; padding:8px 10px; position:relative;
     color:var(--cinza); text-decoration:none; border-radius:8px;
-    font-size:13px; font-weight:400; margin-bottom:1px; transition:background .15s, color .15s; }
+    font-size:13px; font-weight:400; margin-bottom:1px;
+    transition:background .14s cubic-bezier(.23,1,.32,1), color .14s cubic-bezier(.23,1,.32,1),
+               transform .1s cubic-bezier(.23,1,.32,1); }
   .nav-link:hover { background:rgba(255,255,255,.05); color:#fff; }
+  .nav-link:active { transform:scale(.98); }
   .nav-link.active { background:rgba(255,255,255,.07); color:#fff; font-weight:500; }
-  .nav-link.active::before { content:''; position:absolute; left:0; top:15%; bottom:15%; width:3px;
-    border-radius:0 3px 3px 0; background:var(--grad-frio); }
+  /* Altura fixa, não porcentagem: em porcentagem o traço mudava de tamanho
+     junto com a linha, e duas linhas ativas nunca tinham a mesma marca. */
+  .nav-link.active::before { content:''; position:absolute; left:0; top:50%; height:18px;
+    margin-top:-9px; width:3px; border-radius:0 3px 3px 0; background:var(--grad-frio); }
   .nav-link svg { width:15px; height:15px; opacity:.7; flex-shrink:0; }
   .nav-link:hover svg, .nav-link.active svg { opacity:1; }
 
+  /* O RODAPÉ É UM BLOCO SÓ. Configurações vinha com .nav-link e os outros dois
+     sem classe nenhuma: o ícone da engrenagem saía a 0.7 de opacidade e os
+     outros a 1.0, e três itens lado a lado tinham dois acabamentos. */
   .sidebar-bottom { padding:10px; border-top:1px solid var(--borda); }
   .sidebar-bottom a { display:flex; align-items:center; gap:10px; padding:8px 10px;
-    color:var(--cinza-2); text-decoration:none; border-radius:8px; font-size:13px; transition:.15s; }
-  .sidebar-bottom a:hover { color:var(--rosa); background:rgba(244,63,124,.07); }
+    color:var(--cinza); text-decoration:none; border-radius:8px; font-size:13px;
+    transition:background .14s cubic-bezier(.23,1,.32,1), color .14s cubic-bezier(.23,1,.32,1),
+               transform .1s cubic-bezier(.23,1,.32,1); }
+  .sidebar-bottom a svg { width:15px; height:15px; opacity:.7; flex-shrink:0; }
+  .sidebar-bottom a:hover { color:#fff; background:rgba(255,255,255,.05); }
+  .sidebar-bottom a:hover svg { opacity:1; }
+  .sidebar-bottom a:active { transform:scale(.98); }
+  /* Rosa é a cor de sair. Ela estava em Configurações e no tema também, e cor
+     de saída em item que não é saída ensina a ignorar o aviso. */
+  .sidebar-bottom a[href="/logout"]:hover { color:var(--rosa); background:rgba(244,63,124,.07); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .nav-chev { transition:none; }
+    .nav-grupo[open] .nav-grupo-itens { animation:none; }
+    .nav-grupo-cab, .nav-link, .sidebar-bottom a { transition:none; }
+    .nav-grupo-cab:active, .nav-link:active, .sidebar-bottom a:active { transform:none; }
+    /* O logo gira 20s em laço infinito, em toda página. Quem pediu menos
+       movimento não deveria conviver com uma oscilação permanente. */
+    .logo-arcs-img { animation:none; }
+  }
 
   /* ═══ CARTÃO SUS (CNS) ═══
      Mora aqui, e não na tela, porque o mesmo componente aparece no formulário
@@ -651,8 +694,13 @@
     {% endif %}
   </div>
 
+  {# SEM RÓTULO NO PRIMEIRO BLOCO. "Principal" era um texto estático com um
+     acabamento (tracking 1.6px, sem seta, não clicável) e os grupos abaixo
+     eram outro (tracking 0.7px, com seta, clicável) — dois tratamentos para o
+     mesmo nível de hierarquia, que é o defeito visual mais caro que existe.
+     O rótulo também não informava nada: o que está sempre aberto no topo é o
+     dia a dia por definição. Tirando ele, sobra um padrão só de cabeçalho. #}
   <div class="sidebar-nav">
-    <div class="nav-section">Principal</div>
     <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1V9.5z"/></svg>
       Dashboard
