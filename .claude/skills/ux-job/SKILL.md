@@ -6,12 +6,18 @@ description: Régua de UX do ecossistema JOB (site Flask/Jinja2 da Serenus e ext
 # UX do JOB
 
 Esta é a régua de design do ecossistema JOB. Ela tem precedência sobre skills
-genéricas de design (`apple-design`, `frontend-design`, `ui-ux-pro-max`): aquelas
-são fonte de consulta, esta é a decisão. Quando uma sugerir algo que contraria
-esta, esta ganha.
+genéricas de design (`apple-design`, `emil-design-eng`, `animate`,
+`review-animations`, `design-critic`, `ux-friction-analyzer`, `frontend-design`,
+`ui-ux-pro-max`): aquelas são fonte de consulta, esta é a decisão. Quando uma
+sugerir algo que contraria esta, esta ganha.
 
 O aprofundamento de cada princípio está em `UX_APRENDIZADOS.md`, na raiz do
 repositório — leia sob demanda, não por padrão.
+
+**Consulte antes de desenhar, não depois:** `apple-design` para hierarquia,
+material, tipografia e gesto; `emil-design-eng` para acabamento de componente e
+decisão de animação; `animate` para construir um movimento novo;
+`review-animations` para criticar um que já existe.
 
 ## Regras inegociáveis
 
@@ -73,7 +79,83 @@ saúde, o usuário tem razão em desconfiar.
 
 **Componente antes de tela.** Botão, chip, badge e folha se constroem uma vez e
 se reusam entre popup, sidebar e overlays. Estilizar cada tela isolada é como o
-app virou remendo.
+app virou remendo. O CSS de componente compartilhado mora em `base.html`, não na
+tela — três cópias divergem na primeira mudança de cor.
+
+## Acabamento e movimento
+
+O que separa "funciona" de "parece produto" não é feature: é o acabamento, e ele
+se decide em valores, não em gosto. Todo número abaixo é escolha defensável — se
+você não sabe justificar um espaçamento, um tempo ou um alinhamento, ele está
+errado.
+
+**Coisa igual se parece igual, se comporta igual e mora no mesmo lugar.** Dois
+tratamentos visuais para o mesmo nível de hierarquia é o defeito mais caro e o
+mais comum — foi exatamente isso que deixou a sidebar do JOB torta. Se dois itens
+são irmãos, eles têm a mesma margem esquerda, o mesmo tamanho de letra e a mesma
+afordância.
+
+**Nada de `transition: all`.** Nomeie a propriedade. `all` anima layout sem
+querer e derruba frame.
+
+**Anime só `transform` e `opacity`.** São as duas que rodam na GPU. Animar
+`height`, `width`, `margin` ou `padding` refaz layout a cada frame.
+
+**Decida se deve animar, pela frequência:**
+
+| Quantas vezes por dia o usuário vê | Decisão |
+|---|---|
+| Centenas (atalho, salvar, abrir menu) | Sem animação nenhuma |
+| Dezenas (hover, trocar de item da lista) | Reduzir ao mínimo |
+| Ocasional (folha, modal, confirmação) | Animação padrão |
+| Raro (primeira vez, comemoração) | Pode ter graça |
+
+Movimento que se repete o dia inteiro vira atraso. Nada disparado por teclado
+anima.
+
+**Curvas e tempos do JOB:**
+
+```css
+--ease-saida:   cubic-bezier(.23, 1, .32, 1);    /* entra/sai: começa rápido */
+--ease-mov:     cubic-bezier(.77, 0, .175, 1);   /* move na tela */
+--ease-folha:   cubic-bezier(.32, .72, 0, 1);    /* folha/gaveta, curva iOS */
+```
+
+| Elemento | Duração |
+|---|---|
+| Resposta de clique | 100–160 ms |
+| Dica, popover pequeno | 125–200 ms |
+| Menu, select | 150–250 ms |
+| Folha, modal, gaveta | 200–400 ms |
+
+Acima de 300 ms em elemento de interface, reduza. **Nunca `ease-in`** em
+interface: ele adia o começo justo no instante em que o usuário está olhando, e
+faz a tela parecer lenta com o mesmo tempo no relógio.
+
+**Botão responde ao dedo.** `transform: scale(.97)` no `:active`, com transição
+de ~140 ms. Vale para qualquer coisa pressionável.
+
+**Nada nasce do nada.** Nunca `scale(0)`. Comece em `scale(.95)` com
+`opacity: 0`.
+
+**Popover cresce de onde foi chamado**, não do centro — `transform-origin` no
+gatilho. Modal é a exceção: ele não tem gatilho no espaço, fica centrado.
+
+**Sai pelo mesmo caminho que entrou.** Painel que entra pela direita sai pela
+direita. Entrar por um lado e sair por outro desorienta.
+
+**Hover só onde existe mouse:** `@media (hover: hover) and (pointer: fine)`. Em
+toque, hover dispara no tap e gruda.
+
+**`prefers-reduced-motion` não é "sem retorno".** Troque deslocamento por
+opacidade, tire elástico e mantenha o que ajuda a entender.
+
+**Sem oscilação eterna.** Nada de laço infinito lento em elemento presente em
+toda tela — é distração permanente e camada de composição queimada à toa.
+
+**Tipografia é escala, não um tamanho.** Título grande pede `letter-spacing`
+negativo (≈ `-0.02em`) e entrelinha curta; texto corrido fica perto de zero com
+entrelinha folgada. Hierarquia se faz com peso + tamanho + entrelinha juntos.
 
 ## Onde o JOB já errou
 
@@ -113,6 +195,7 @@ e não dividem a mesma lista.
 - **Acionável** — está claro onde estou, o que fazer agora, e o que acontece se der erro?
 - **Inteligente** — a ação mais comum está destacada? O sistema previne o erro em vez de avisar depois? Usa o que já sabe sobre o usuário?
 - **Agradável** — contraste e legibilidade suficientes nos dois temas? O tempo do usuário foi respeitado?
+- **Acabado** — irmãos alinhados na mesma margem e no mesmo tamanho? Nenhum `transition: all`? Nenhum `ease-in`? Só `transform`/`opacity` animando? Botão com resposta no `:active`? `prefers-reduced-motion` tratado? Nenhum valor que você não saiba justificar?
 - **Relevante** — isso resolve o que o usuário espera de fato, ou só o que foi pedido literalmente?
 
 ## Medir, não opinar
