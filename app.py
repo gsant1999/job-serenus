@@ -3553,6 +3553,10 @@ def init_db():
         ("propostas", "end_cidade", "TEXT"),
         ("propostas", "end_estado", "TEXT"),
         ("propostas", "end_cep", "TEXT"),
+        # Cartão SUS do titular. O dos dependentes mora no dependentes_json,
+        # junto do CPF de cada um — não vale coluna porque o número de
+        # dependentes varia por proposta.
+        ("propostas", "cns_titular", "TEXT"),
         # Cotação: link público imutável, orientação e vínculo com lead do CRM
         ("cotacao_salva", "token", "TEXT"),
         ("cotacao_salva", "orientacao", "TEXT"),
@@ -10216,9 +10220,14 @@ def salvar_proposta():
             try: rv = float(rv) if rv else 0
             except: rv = 0
             repique = {'nome': d.get('repique_nome',''), 'tipo': d.get('repique_tipo',''), 'valor': rv}
-        cur.execute("""UPDATE propostas SET data_nasc_titular=?, dependentes_json=?, tem_repique=?, repique_json=? WHERE id=?""",
+        # O CNS de cada dependente já vem dentro do dependentes_json; só o do
+        # titular precisa de coluna própria. Guardamos só dígitos.
+        cns_tit = re.sub(r'\D', '', d.get('cns_titular', '') or '')[:15]
+        cur.execute("""UPDATE propostas SET data_nasc_titular=?, dependentes_json=?, tem_repique=?, repique_json=?,
+                       cns_titular=? WHERE id=?""",
             (d.get('data_nasc_titular',''), json.dumps(deps, ensure_ascii=False),
-             1 if d.get('tem_repique') else 0, json.dumps(repique, ensure_ascii=False) if repique else None, proposta_id))
+             1 if d.get('tem_repique') else 0, json.dumps(repique, ensure_ascii=False) if repique else None,
+             cns_tit or None, proposta_id))
         gerador_parcelas = (gerar_parcelas_socio_gestor
                             if c.get('modelo') == 'socio_gestor_regra'
                             else gerar_parcelas)
@@ -21391,6 +21400,119 @@ def api_whatsapp_cns():
         return _wa_cors(jsonify({"ok": True, "cns": dados}))
     codigo = 400 if status == 'invalido' else (404 if status == 'nao_encontrado' else 502)
     return _wa_cors(jsonify({"ok": False, "motivo": status, "erro": _CNS_MSG[status]})), codigo
+
+
+def _pdf_cartao_sus(d):
+    """Monta o PDF do cartão SUS e devolve os bytes.
+
+    NÃO imita o documento do governo de propósito. O que a operadora precisa é
+    o número conferível com a origem escrita; um facsímile do cartão oficial
+    seria um documento que aparenta ser o que não é. Então: papel timbrado da
+    corretora, os quatro dados, e o rodapé dizendo de onde veio e quando."""
+    import io
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas as _canvas
+    buf = io.BytesIO()
+    c = _canvas.Canvas(buf, pagesize=A4)
+    L, T = 20 * mm, A4[1] - 22 * mm
+
+    # Marca de quem assina o documento: a CORRETORA, não o ERP.
+    try:
+        logo = os.path.join(app.root_path, (BRAND.get('logo_cliente_hd') or '').lstrip('/'))
+        if os.path.exists(logo):
+            img = ImageReader(logo)
+            iw, ih = img.getSize()
+            larg = 38 * mm
+            c.drawImage(img, L, T - (larg * ih / iw), width=larg, height=larg * ih / iw,
+                        mask='auto')
+            T -= (larg * ih / iw) + 12 * mm
+    except Exception:
+        pass
+
+    c.setFillColorRGB(.07, .08, .11)
+    c.setFont('Helvetica-Bold', 16)
+    c.drawString(L, T, 'Cartão Nacional de Saúde')
+    c.setFont('Helvetica', 9)
+    c.setFillColorRGB(.42, .45, .5)
+    c.drawString(L, T - 13, 'Consulta na base pública do CNES — Ministério da Saúde')
+    T -= 30
+
+    # O quadro. O número é o que a pessoa veio buscar, então é ele que tem o
+    # maior peso da página — hierarquia por tamanho, não por enfeite.
+    alt = 62 * mm
+    c.setStrokeColorRGB(.85, .86, .89)
+    c.setLineWidth(.8)
+    c.roundRect(L, T - alt, A4[0] - 2 * L, alt, 10, stroke=1, fill=0)
+    y = T - 16 * mm
+
+    def linha(rot, val, tam=12, bold=False):
+        nonlocal y
+        c.setFont('Helvetica', 8)
+        c.setFillColorRGB(.45, .48, .53)
+        c.drawString(L + 10 * mm, y, rot.upper())
+        c.setFont('Helvetica-Bold' if bold else 'Helvetica', tam)
+        c.setFillColorRGB(.07, .08, .11)
+        c.drawString(L + 10 * mm, y - 6.5 * mm, val or '—')
+        y -= 15 * mm
+
+    linha('Nome', d.get('nome', ''), 12, True)
+    linha('CPF', _doc_cpf_br(d.get('cpf', '')), 11)
+
+    c.setFont('Helvetica', 8)
+    c.setFillColorRGB(.45, .48, .53)
+    c.drawString(L + 10 * mm, y, 'DATA DE NASCIMENTO')
+    c.setFont('Helvetica', 11)
+    c.setFillColorRGB(.07, .08, .11)
+    c.drawString(L + 10 * mm, y - 6.5 * mm, d.get('nascimento', '') or '—')
+
+    c.setFont('Helvetica', 8)
+    c.setFillColorRGB(.45, .48, .53)
+    c.drawString(L + 78 * mm, y, 'CNS')
+    c.setFont('Helvetica-Bold', 19)
+    c.setFillColorRGB(.07, .08, .11)
+    c.drawString(L + 78 * mm, y - 7.5 * mm, d.get('cns_fmt') or _cns_formatado(d.get('cns', '')))
+
+    T -= alt + 12 * mm
+    c.setFont('Helvetica', 7.5)
+    c.setFillColorRGB(.5, .53, .58)
+    for i, ln in enumerate([
+        'Consultado em ' + (d.get('consultado_em') or '') + ' em ' + (d.get('fonte') or '') + '.',
+        'Documento gerado pelo sistema da ' + BRAND['nome'] + ' para instrução de proposta.',
+        'Não substitui o Cartão Nacional de Saúde emitido pelo Ministério da Saúde.',
+    ]):
+        c.drawString(L, T - i * 11, ln)
+
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+def _cns_nome_arquivo(d):
+    """Nome do arquivo igual ao que o consultor já usa na pasta do cliente:
+    'CARTAO SUS_NOME COMPLETO.pdf'."""
+    nome = re.sub(r'[^A-Za-z0-9ÀÁÂÃÉÊÍÓÔÕÚÇàáâãéêíóôõúç ]', '', (d.get('nome') or 'BENEFICIARIO')).strip()
+    return f"CARTAO SUS_{nome.upper()}.pdf" if nome else "CARTAO SUS.pdf"
+
+
+@app.route('/cartao-sus.pdf')
+@login_required
+def cartao_sus_pdf():
+    """Baixa o cartão SUS em PDF. Vale pro formulário de proposta ainda NÃO
+    salvo, pro detalhe e pra extensão — por isso a chave é CPF + nascimento, e
+    não o id da proposta: na hora do cadastro a proposta ainda não existe."""
+    status, dados = _consultar_cns(request.args.get('cpf', ''), request.args.get('nascimento', ''))
+    if status != 'ok':
+        return jsonify({"ok": False, "motivo": status, "erro": _CNS_MSG[status]}), \
+               (400 if status == 'invalido' else (404 if status == 'nao_encontrado' else 502))
+    try:
+        pdf = _pdf_cartao_sus(dados)
+    except Exception as e:
+        app.logger.warning(f"[CNS] falha ao gerar PDF: {e}")
+        return jsonify({"ok": False, "erro": "Não consegui gerar o PDF agora."}), 500
+    return Response(pdf, mimetype='application/pdf', headers={
+        'Content-Disposition': 'attachment; filename="' + _cns_nome_arquivo(dados) + '"'})
 
 
 # Notas do lead — anotações que ficam presas ao telefone e aparecem numa barra
