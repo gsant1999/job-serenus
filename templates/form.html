@@ -254,14 +254,59 @@
        — e digitado a mao ele vem abreviado, enquanto a operadora quer o nome
        de registro. Agora a ordem da tela e a ordem do trabalho: identifica,
        o resto se preenche. #}
-    <div class="form-row form-row-3" id="bloco-docs" style="display:none;">
-      <div class="campo" id="campo-cnpj" style="display:none;">
-        <label>CNPJ da empresa</label>
-        <input type="text" name="cnpj" id="cnpj" placeholder="00.000.000/0000-00" oninput="mascaraCNPJ(this)">
-        <div class="hint" id="cnpj-status"></div>
+    {# NO EMPRESARIAL A ORDEM E OUTRA, e foi o Guilherme quem apontou por que:
+       quem SEMPRE existe num plano empresarial e o socio que assina pelo CNPJ.
+       O titular pode ser ele ou um funcionario. Perguntar primeiro pelo socio e
+       depois "o titular e ele mesmo?" e mais simples que cadastrar o titular e
+       o sistema tentar adivinhar se aquilo era um socio — adivinhacao que, alias,
+       depende de um provedor externo trazer o CPF do socio, e a ReceitaWS nao
+       traz. Flag no lugar de palpite. #}
+    <div class="campo" id="campo-cnpj" style="display:none;">
+      <label>CNPJ da empresa</label>
+      <input type="text" name="cnpj" id="cnpj" placeholder="00.000.000/0000-00" oninput="mascaraCNPJ(this)">
+      <div class="hint" id="cnpj-status"></div>
+    </div>
+
+    <div id="bloco-socio" hidden style="margin-top:14px; padding:16px; border:1px solid var(--al-bd-f);
+         background:var(--al-bg-f); border-radius:10px;">
+      <div style="display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:4px;">
+        <b style="font-size:13.5px;">Quem assina pela empresa</b>
+        <span class="obrig">obrigatório</span>
+        <i class="ajuda-i" title="O socio dono da empresa e quem assina o contrato — a operadora exige esse dado em todo plano empresarial. Ele so entra como vida do plano se for tambem o titular, o que voce marca logo abaixo.">i</i>
       </div>
+      <div class="hint" id="socio-sugestao" style="margin-bottom:12px;">Sócio ou representante legal do CNPJ.</div>
+      <div class="form-row form-row-3">
+        <div class="campo">
+          <label>CPF</label>
+          <input type="text" name="socio_cpf" id="socio_cpf" placeholder="000.000.000-00" oninput="mascaraCPF(this)">
+        </div>
+        <div class="campo">
+          <label>Data de nascimento</label>
+          <input type="date" name="socio_nascimento" id="socio_nascimento" max="{{ ano_atual }}-12-31">
+        </div>
+        <div class="campo">
+          <label>Nome</label>
+          <input type="text" name="socio_nome" id="socio_nome" placeholder="Vem do cartão SUS">
+        </div>
+      </div>
+      <div class="cns-linha" id="cns-socio" hidden></div>
+
+      {# O FLAG QUE DECIDE TUDO. Marcado, o titular do plano é o próprio sócio e
+         os campos dele nem aparecem — não se digita duas vezes a mesma pessoa.
+         Desmarcado, o titular é funcionário e ganha seus próprios campos. #}
+      <label style="display:flex; align-items:center; gap:9px; cursor:pointer; margin-top:14px;">
+        <input type="checkbox" id="socio-e-titular" onchange="toggleSocioTitular()"
+               style="width:16px; height:16px; accent-color:var(--azul); cursor:pointer;">
+        <span>O titular do plano é esta mesma pessoa</span>
+      </label>
+      <div class="hint" id="socio-titular-dica" style="margin-top:4px;">
+        Desmarcado, o titular é outra pessoa — um funcionário, por exemplo.
+      </div>
+    </div>
+
+    <div class="form-row form-row-3" id="bloco-docs" style="display:none;">
       <div class="campo">
-        <label>CPF do titular</label>
+        <label id="rot-cpf-titular">CPF do titular</label>
         <input type="text" name="cpf_titular" id="cpf_titular" placeholder="000.000.000-00" oninput="mascaraCPF(this)">
       </div>
       <div class="campo">
@@ -306,31 +351,6 @@
     {# QUEM ASSINA PELO CNPJ. So aparece quando o titular NAO e socio — se ele
        for, os dados ja estao na tela e pedir de novo e pedir o que se ve.
        Este bloco nao e vida do contrato: e quem responde pela empresa. #}
-    <div id="bloco-socio" hidden style="margin-top:14px; padding:16px; border:1px solid var(--al-bd-f);
-         background:var(--al-bg-f); border-radius:10px;">
-      <div style="display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:4px;">
-        <b style="font-size:13.5px;">Sócio responsável pelo CNPJ</b>
-        <span class="obrig">obrigatório</span>
-        <i class="ajuda-i" title="Quando o titular do plano e funcionario, quem assina o contrato e o socio dono da empresa. A operadora exige esse dado. Ele NAO entra como vida do plano — responde pela empresa.">i</i>
-      </div>
-      <div class="hint" style="margin-bottom:12px;">Não é vida do contrato: é quem assina pela empresa.</div>
-      <div class="form-row form-row-3">
-        <div class="campo">
-          <label>CPF</label>
-          <input type="text" name="socio_cpf" id="socio_cpf" placeholder="000.000.000-00" oninput="mascaraCPF(this)">
-        </div>
-        <div class="campo">
-          <label>Data de nascimento</label>
-          <input type="date" name="socio_nascimento" id="socio_nascimento" max="{{ ano_atual }}-12-31">
-        </div>
-        <div class="campo">
-          <label>Nome</label>
-          <input type="text" name="socio_nome" id="socio_nome" placeholder="Vem do cartão SUS">
-        </div>
-      </div>
-      <div class="cns-linha" id="cns-socio" hidden></div>
-    </div>
-
     <div class="campo" style="margin-top:14px;">
       {# A PERGUNTA VEM ANTES DOS CAMPOS.
          O botão "+ Adicionar dependente" era uma afordância silenciosa: quem
@@ -1030,33 +1050,83 @@ function marcarSeSocio() {
   const tp = (document.getElementById('tipo_pessoa') || {}).value || '';
   const bloco = document.getElementById('bloco-socio');
   const aviso = document.getElementById('socio-aviso');
-  if (!bloco || !aviso) return;
-  if (tp !== 'PME' && tp !== 'PJ') { bloco.hidden = true; aviso.hidden = true; return; }
-
-  const achado = socioQueBate();
-  const eSocio = (SOCIO_CONFIRMADO === null) ? !!achado : SOCIO_CONFIRMADO;
-  aviso.hidden = false;
-  aviso.className = 'hint' + (eSocio ? ' socio-ok' : '');
-  const _esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
-    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  aviso.innerHTML = eSocio
-    ? 'Este titular <b>é sócio da empresa</b>'
-      + (achado && achado.qualificacao ? ' (' + _esc(achado.qualificacao) + ')' : '')
-      + '. Não precisa informar quem assina pelo CNPJ. '
-      + '<a href="#" onclick="corrigirSocio(false);return false;">não é sócio</a>'
-    : 'Este titular <b>não consta no quadro societário</b> — então é funcionário, e a proposta '
-      + 'precisa de quem assina pelo CNPJ. '
-      + '<a href="#" onclick="corrigirSocio(true);return false;">é sócio, sim</a>';
-  bloco.hidden = eSocio;
+  if (!bloco) return;
+  const emp = (tp === 'PME' || tp === 'PJ');
+  // O bloco de quem assina é SEMPRE obrigatório no empresarial. Antes ele
+  // aparecia só quando o sistema achava que o titular não era sócio — ou seja,
+  // o dado mais importante do contrato dependia de um palpite dar certo.
+  bloco.hidden = !emp;
+  if (aviso) aviso.hidden = true;
   ['socio_nome', 'socio_cpf'].forEach(id => {
-    const e = document.getElementById(id); if (e) e.required = !eSocio;
+    const e = document.getElementById(id); if (e) e.required = emp;
   });
-  try { atualizarBarra(); } catch (e) {}
+  if (!emp) {
+    const cx = document.getElementById('socio-e-titular');
+    if (cx && cx.checked) { cx.checked = false; }
+  }
+  conferirSocioNoQuadro();
+  toggleSocioTitular();
 }
-// A máquina erra nos dois sentidos: homônimo e nome de casada. Quem está com o
-// contrato na mão desempata — e a escolha dele manda.
-function corrigirSocio(v) { SOCIO_CONFIRMADO = v; marcarSeSocio(); }
 
+// A DETECÇÃO VIROU CONFERÊNCIA, não decisão. Ela não esconde nem abre nada:
+// só diz se o CPF digitado bate com o quadro societário. Quando a BrasilAPI
+// falha e cai na ReceitaWS, o CPF do sócio nem vem — por isso o silêncio é a
+// resposta certa nesse caso, e não "não consta".
+function conferirSocioNoQuadro() {
+  const dica = document.getElementById('socio-sugestao');
+  if (!dica) return;
+  const base = 'Sócio ou representante legal do CNPJ.';
+  const cpf = (document.getElementById('socio_cpf') || {}).value || '';
+  const dig = cpf.replace(/\D/g, '');
+  if (!SOCIOS_CNPJ.length) { dica.textContent = base; dica.style.color = ''; return; }
+  const nomes = SOCIOS_CNPJ.map(x => x.nome).filter(Boolean);
+  if (dig.length !== 11) {
+    dica.textContent = 'No quadro societário: ' + nomes.join('; ');
+    dica.style.color = ''; return;
+  }
+  const temCpf = SOCIOS_CNPJ.some(x => String(x.cpf_mascarado || '').replace(/\D/g, ''));
+  const bate = SOCIOS_CNPJ.find(x => _cpfMioloBate(cpf, x.cpf_mascarado));
+  if (bate) {
+    dica.textContent = 'Confere: este CPF é ' + (bate.qualificacao || 'sócio') + ' da empresa.';
+    dica.style.color = 'var(--ok-fg)';
+  } else if (temCpf) {
+    dica.textContent = 'Atenção: este CPF não consta no quadro societário. No CNPJ constam: '
+      + nomes.join('; ');
+    dica.style.color = 'var(--al-fg)';
+  } else {
+    // Sem CPF na base do CNPJ não dá pra afirmar nada — só listar quem consta.
+    dica.textContent = 'No quadro societário: ' + nomes.join('; ');
+    dica.style.color = '';
+  }
+}
+
+// O FLAG MANDA. Marcado, o titular é o próprio sócio: os campos do titular
+// somem, porque digitar a mesma pessoa duas vezes é onde os dados divergem.
+function toggleSocioTitular() {
+  const cx = document.getElementById('socio-e-titular');
+  const tp = (document.getElementById('tipo_pessoa') || {}).value || '';
+  const emp = (tp === 'PME' || tp === 'PJ');
+  const eMesma = !!(cx && cx.checked) && emp;
+  const docs = document.getElementById('bloco-docs');
+  const cnt = document.getElementById('campo-nome-titular');
+  const linha = document.getElementById('cns-titular');
+  if (docs) docs.style.display = (emp && eMesma) ? 'none' : (tp ? 'grid' : 'none');
+  if (cnt) cnt.style.display = (emp && !eMesma) ? 'block' : 'none';
+  if (linha && eMesma) { linha.hidden = true; }
+  const dica = document.getElementById('socio-titular-dica');
+  if (dica) dica.textContent = eMesma
+    ? 'O titular do plano é esta pessoa — não precisa cadastrar de novo abaixo.'
+    : 'Desmarcado, o titular é outra pessoa — um funcionário, por exemplo.';
+  // Espelha nos campos do titular pra proposta salvar com quem é a vida.
+  if (eMesma) {
+    const cp = (id) => (document.getElementById(id) || {}).value || '';
+    const set = (id, v) => { const e = document.getElementById(id); if (e) e.value = v; };
+    set('cpf_titular', cp('socio_cpf'));
+    set('data_nasc_titular', cp('socio_nascimento'));
+    set('nome_titular', cp('socio_nome'));
+  }
+  try { syncDeps(); mostrarIdades(); atualizarBarra(); } catch (e) {}
+}
 function buscarCNSSocio() {
   const cpf  = (document.getElementById('socio_cpf') || {}).value || '';
   const nasc = (document.getElementById('socio_nascimento') || {}).value || '';
