@@ -9150,7 +9150,11 @@ def nova_proposta():
             prefill['nome_titular'] = tit.get('nome') or ''
             prefill['cpf_titular'] = tit.get('cpf') or ''
             prefill['data_nasc_titular'] = _iso(tit.get('nascimento'))
+            # O CPF do dependente vem junto porque e ele que destrava a busca do
+            # cartao SUS: com CPF + nascimento no prefill, o CNS da familia
+            # inteira aparece sozinho quando o formulario abre.
             prefill['dependentes'] = [{'nome': p.get('nome') or '', 'nasc': _iso(p.get('nascimento')),
+                                       'cpf': p.get('cpf') or '',
                                        'parentesco': p.get('_parentesco') or ''}
                                       for p in pessoas[1:] if p.get('nome')]
             prefill['total_vidas'] = len(pessoas)
