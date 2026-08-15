@@ -66,7 +66,12 @@ def criar_gestor(conn, email='teste.regra.gestor@x.com', perfil='admin'):
     return A._last_insert_id(cur)
 
 
-def criar_venda(conn, usuario_id, operadora='Amil', razao='TESTE REGRA VENDA LTDA'):
+def criar_venda(conn, usuario_id, operadora='Amil', razao='TESTE REGRA VENDA LTDA',
+                regime='socio_gestor_pendente'):
+    """`regime` precisa ser parâmetro: quem decide se a venda entra no motor do
+    gestor é o regime GRAVADO nela, não o perfil de quem vendeu. Sem isso, o
+    teste do consultor criava a venda como gestor e depois exigia comportamento
+    de consultor — cobrando do código o oposto do que ele mesmo montou."""
     cur = conn.execute("""INSERT INTO propostas (usuario_id, consultor, numero_proposta,
                     razao_social, status, comissao_total_corretora, vigencia, modalidade,
                     tipo_contrato, acomodacao, fator_moderador, total_vidas, valor,
@@ -74,7 +79,7 @@ def criar_venda(conn, usuario_id, operadora='Amil', razao='TESTE REGRA VENDA LTD
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                  (usuario_id, 'Gestor Teste', None, razao, 'Implantada', 1000.0, '2026-07-01',
                   'PME', 'Novo', 'Enfermaria', 'Sem', 1, 1000.0, operadora,
-                  'socio_gestor_pendente', A._agora_sp()))
+                  regime, A._agora_sp()))
     return A._last_insert_id(cur)
 
 
@@ -306,7 +311,8 @@ def teste_consultor_nao_e_bloqueado():
                         'sem_lead_sem_fixo'))
     uid = A._last_insert_id(cur)
     pid = criar_venda(conn, uid, operadora='OperadoraSemRegra',
-                      razao='TESTE REGRA CONSULTOR LTDA')
+                      razao='TESTE REGRA CONSULTOR LTDA',
+                      regime='sem_lead_sem_fixo')
     conn.commit()
     b = A._gestor_bloqueio(conn, pid)
     A.close_db(conn)
@@ -376,10 +382,15 @@ def teste_venda_de_consultor_nao_entra_na_regra_de_gestor():
     limpar()
     conn = A.db()
     uid = criar_gestor(conn)
+    # propostas tem 10 colunas NOT NULL sem default (vigencia, tipo_contrato,
+    # acomodacao, fator_moderador, total_vidas...). O fixture omitia varias e o
+    # INSERT estourava antes do teste comecar.
     cur = conn.execute("""INSERT INTO propostas
         (usuario_id,consultor,razao_social,status,comissao_total_corretora,valor,
-         adm_operadora,modalidade,regime_aplicado)
-        VALUES (?,?,?,'Ativo',1000,1000,'Amil','PME','sem_lead_sem_fixo')""",
+         adm_operadora,modalidade,regime_aplicado,vigencia,
+         tipo_contrato,acomodacao,fator_moderador,total_vidas)
+        VALUES (?,?,?,'Ativo',1000,1000,'Amil','PME','sem_lead_sem_fixo','2026-01-01',
+                'Novo','Enfermaria','Sem',1)""",
         (uid, 'Gestor Teste', 'TESTE REGRA CONSULTOR LEGADO'))
     pid = A._last_insert_id(cur)
     A._gestor_congelar_snapshot(conn, pid, 'Amil', 'PME', uid, 'Gestor Teste')
@@ -400,8 +411,10 @@ def teste_migracao_unitaria_de_venda_legada_de_gestor():
     conn.execute("INSERT OR REPLACE INTO recebimento (operadora,obs,plano,total) VALUES ('Amil','', 'PME', 1.0)")
     cur = conn.execute("""INSERT INTO propostas
         (usuario_id,consultor,razao_social,status,comissao_total_corretora,comissao_consultor,
-         comissao_corretora_liquida,valor,adm_operadora,modalidade,regime_aplicado,vigencia)
-        VALUES (?,?,?,'Ativo',1000,900,100,1000,'Amil','PME','sem_lead_sem_fixo','2026-01-01')""",
+         comissao_corretora_liquida,valor,adm_operadora,modalidade,regime_aplicado,vigencia,
+         tipo_contrato,acomodacao,fator_moderador,total_vidas)
+        VALUES (?,?,?,'Ativo',1000,900,100,1000,'Amil','PME','sem_lead_sem_fixo','2026-01-01',
+                'Novo','Enfermaria','Sem',1)""",
         (uid, 'Gestor Teste', 'TESTE REGRA MIGRACAO GESTOR'))
     pid = A._last_insert_id(cur)
     ok, msg = A._migrar_venda_legada_para_gestor(conn, pid, 'Administrador Teste')

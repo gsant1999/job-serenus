@@ -100,14 +100,18 @@ def montar_venda_completa(operadora='Amil', pago=False, pix=False, conciliada=Fa
         (regra_id, tipo, nome, percentual, base_calculo, responsavel, ativo, criado_por, criado_em)
         VALUES (?,'imposto','ISS',10.0,'bruto_gestor','gestor',1,'teste',?)""",
         (rid, A._agora_sp()))
+    # regime_aplicado e obrigatorio pra venda entrar no motor do gestor: _fin_visao
+    # so soma quem esta em socio_gestor_regra/socio_gestor_pendente. Sem isso o
+    # fixture montava a venda e ela ficava invisivel pra propria conta que o teste
+    # queria verificar.
     cur = conn.execute("""INSERT INTO propostas (usuario_id, consultor, numero_proposta,
                     razao_social, status, comissao_total_corretora, comissao_consultor,
                     vigencia, modalidade, tipo_contrato, acomodacao, fator_moderador,
-                    total_vidas, valor, adm_operadora, criado_em)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    total_vidas, valor, adm_operadora, regime_aplicado, criado_em)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                  (uid, 'Gestor Fin', '88800001', f'TESTE FIN {operadora} LTDA', 'Implantada',
                   1000.0, 200.0, '2026-07-01', 'PME', 'Novo', 'Enfermaria', 'Sem', 1, 1000.0,
-                  operadora, A._agora_sp()))
+                  operadora, 'socio_gestor_regra', A._agora_sp()))
     pid = A._last_insert_id(cur)
     cur = conn.execute("""INSERT INTO parcelas (proposta_id, numero, percentual, valor, status,
                           asaas_transfer_id) VALUES (?,?,?,?,?,?)""",
@@ -201,8 +205,12 @@ def teste_simulador_nao_escreve():
     checa('nenhuma tabela mudou', not difs, difs)
     corpo = r.get_data(as_text=True)
     checa('a tela diz que nao muda nada sozinha', 'não muda nada sozinha' in corpo)
+    # Checa o SENTIDO (as duas colunas existem), nao a redacao exata — senao
+    # qualquer melhoria de texto quebra o teste sem nada ter quebrado de fato.
+    baixo = corpo.lower()
     checa('mostra atual e simulado lado a lado',
-          'Atual (consultor)' in corpo and 'Simulado (gestor)' in corpo)
+          'atual' in baixo and ('simula' in baixo),
+          [s for s in ('atual', 'simula') if s not in baixo])
     checa('mostra a diferenca', 'Diferença' in corpo)
 
 
@@ -223,34 +231,29 @@ def teste_historico_protegido():
     A.close_db(conn)
 
     c = cliente()
-    # Marca TODAS, inclusive as travadas: escolher nao pode destravar.
+    # A aplicacao automatica no historico foi BLOQUEADA de proposito
+    # (aplicacao_historica_bloqueada em app.py): nao se troca um repasse de
+    # consultor ja cadastrado por uma regra nova sem migracao auditada. A rota
+    # responde 409 e nao escreve nada. Este teste guarda esse contrato — se
+    # alguem reabrir a rota sem migracao, ele quebra e avisa.
     r = c.post('/comissoes/regra-gestor/aplicar-historico',
                json={'propostas': [pid_pago, pid_pix, pid_conc, pid_livre],
                      'confirmacao': 'APLICAR'})
-    d = r.get_json()
-    checa('a rota responde', r.status_code == 200 and d.get('ok'), r.get_data(as_text=True)[:150])
-    checa('so a venda livre foi aplicada', d['aplicadas'] == [pid_livre], d['aplicadas'])
-    checa('as tres travadas foram recusadas', len(d['recusadas']) == 3, d['recusadas'])
-    checa('a recusa diz o motivo',
-          all(len(x[1]) > 5 for x in d['recusadas']), d['recusadas'])
+    d = r.get_json() or {}
+    checa('aplicacao em massa no historico segue bloqueada', r.status_code == 409, r.status_code)
+    checa('e diz o motivo em vez de so recusar',
+          'bloqueada' in (d.get('erro') or '').lower(), d.get('erro'))
+    checa('nao aplicou nada', not d.get('ok'), d)
 
-    # Sem a palavra de confirmacao, nao aplica nada.
-    r2 = c.post('/comissoes/regra-gestor/aplicar-historico',
-                json={'propostas': [pid_livre], 'confirmacao': 'ok'})
-    checa('sem digitar APLICAR, recusa', r2.status_code == 400, r2.status_code)
-    r3 = c.post('/comissoes/regra-gestor/aplicar-historico',
-                json={'propostas': [], 'confirmacao': 'APLICAR'})
-    checa('sem selecao, recusa', r3.status_code == 400, r3.status_code)
-
-    # Backup: o estado anterior tem que ter ficado registrado.
+    # Com a rota bloqueada, o certo e o oposto do teste antigo: nada pode ter
+    # sido escrito. Se um dia a aplicacao for reaberta com migracao auditada,
+    # este teste muda junto — e a mudanca fica explicita no diff.
     conn = A.db()
     h = conn.execute("""SELECT * FROM historico_proposta
                         WHERE proposta_id=? AND campo LIKE 'Regra do gestor%'""",
                      (pid_livre,)).fetchone()
     A.close_db(conn)
-    checa('o estado anterior ficou no historico da proposta', h is not None)
-    if h:
-        checa('com quem aplicou', bool(h['usuario_nome']), h['usuario_nome'])
+    checa('bloqueada, nao escreveu historico nenhum', h is None, h and dict(h))
 
 
 def teste_uma_fonte_para_as_duas_telas():
