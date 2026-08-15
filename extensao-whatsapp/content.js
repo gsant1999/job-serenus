@@ -1323,12 +1323,13 @@
         '<span class="job-trilho-item-label">Leads</span>' +
         '<span class="job-trilho-item-badge" id="job-inbox-badge" hidden>0</span>' +
       '</button>' +
-      // CNPJ e cartão SUS são a MESMA tarefa: conferir dado oficial de quem
-      // está do outro lado da conversa. Duas entradas no trilho seriam duas
-      // portas pro mesmo cômodo, e o trilho já tem dez.
-      '<button class="job-trilho-item" data-secao="cnpj" title="Consultar CNPJ na Receita ou o cartão SUS no Ministério da Saúde">' +
+      // O rótulo é CNPJ, não "Consultas": o consultor procura pelo nome da
+      // coisa que ele quer. "Consultas" era um guarda-chuva que não dizia o
+      // que tem dentro — e nome vago obriga a abrir pra descobrir.
+      // O cartão SUS mora numa aba aqui dentro, e a dica do botão anuncia isso.
+      '<button class="job-trilho-item" data-secao="cnpj" title="Consultar CNPJ na Receita — e o cartão SUS do cliente, na aba ao lado">' +
         '<span class="job-trilho-item-icone">' + _ICO_CNPJ + '</span>' +
-        '<span class="job-trilho-item-label">Consultas</span>' +
+        '<span class="job-trilho-item-label">CNPJ</span>' +
       '</button>' +
       '<button class="job-trilho-item" data-secao="cotacao" title="Cotações deste cliente: ver, copiar o link e mandar na conversa">' +
         '<span class="job-trilho-item-icone">' + _ICO_COTACAO + '</span>' +
@@ -8977,7 +8978,7 @@
 
   function abrirSecaoCnpj() {
     setCorpoSecao(
-      _secHead('Consultas', 'Dado oficial de quem está do outro lado: empresa na Receita, pessoa no Ministério da Saúde.') +
+      _secHead('Consultas', 'Dado oficial de quem está do outro lado: empresa na Receita, pessoa no Ministério da Saúde. O cartão SUS traz o nome completo junto.') +
       '<div class="job-consulta-abas">' +
         '<button class="job-consulta-aba" data-aba="cnpj">CNPJ</button>' +
         '<button class="job-consulta-aba" data-aba="cns">Cartão SUS</button>' +
