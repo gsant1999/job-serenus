@@ -917,6 +917,11 @@
     </a>
     {% endif %}
     {% if pode_modulo('campos') %}
+    <a href="/anexos-email" class="nav-link {% if '/anexos-email' in request.path %}active{% endif %}" onclick="closeSidebar()"
+       title="O que segue anexado em cada e-mail que sai do JOB">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+      Anexos por E-mail
+    </a>
     <a href="/campos" class="nav-link {% if '/campo' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="14" y2="15"/><circle cx="18" cy="15" r="2"/></svg>
       Campos Personalizados
@@ -1223,6 +1228,51 @@ document.addEventListener('DOMContentLoaded', () => {
     if (lbl) lbl.textContent = 'Modo Escuro';
   }
 });
+
+/* ═══ COLAR DATA EM QUALQUER CAMPO DE DATA ═══════════════════════════════
+   O <input type="date"> do navegador IGNORA texto colado: o consultor copia
+   "24/11/1999" do WhatsApp ou do documento, dá Ctrl+V no campo e não acontece
+   nada — sem erro, sem aviso, o campo continua "dd/mm/aaaa". Ele então digita
+   à mão, que é onde a data sai trocada.
+
+   Aqui o JOB intercepta a colagem, entende os formatos que aparecem na vida
+   real e preenche. Vale pra TODA tela, porque mora no base.html: campo de data
+   novo já nasce aceitando colar, sem ninguém lembrar de ligar.
+
+   Dispara 'input' e 'change' depois de preencher — é deles que dependem o
+   cálculo de idade, a busca do cartão SUS e o total de vidas. */
+function _dataColadaParaISO(txt) {
+  const s = String(txt || '').trim();
+  if (!s) return '';
+  const arruma = (d, m, a) => {
+    d = parseInt(d, 10); m = parseInt(m, 10); a = parseInt(a, 10);
+    // Ano de dois dígitos: acima de 30 é 19xx. Serve pra data de nascimento,
+    // que é o caso que mais aparece — 24/11/99 é 1999, não 2099.
+    if (a < 100) a = a > 30 ? 1900 + a : 2000 + a;
+    if (!(m >= 1 && m <= 12) || !(d >= 1 && d <= 31) || !(a >= 1900 && a <= 2200)) return '';
+    const iso = `${a}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const t = new Date(iso + 'T00:00:00');
+    // Rejeita 31/02 e afins: o Date corrige sozinho e viraria outra data.
+    return (t.getDate() === d && t.getMonth() + 1 === m) ? iso : '';
+  };
+  let m;
+  if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return arruma(m[3], m[2], m[1]);
+  if ((m = s.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/))) return arruma(m[1], m[2], m[3]);
+  if ((m = s.match(/^(\d{2})(\d{2})(\d{4})$/))) return arruma(m[1], m[2], m[3]);
+  return '';
+}
+document.addEventListener('paste', function (e) {
+  const el = e.target;
+  if (!el || el.tagName !== 'INPUT' || el.type !== 'date') return;
+  const txt = ((e.clipboardData || window.clipboardData) || {}).getData
+    ? (e.clipboardData || window.clipboardData).getData('text') : '';
+  const iso = _dataColadaParaISO(txt);
+  if (!iso) return;   // não entendeu: deixa o navegador fazer o que faria
+  e.preventDefault();
+  el.value = iso;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+}, true);
 
 function toggleTema() {
   const html = document.documentElement;

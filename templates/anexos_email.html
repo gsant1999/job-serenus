@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Anexos por e-mail{% endblock %}
+
+{% block head %}
+<style>
+  /* Uma coluna por modelo de e-mail, uma linha por tipo de documento. A grade
+     existe pra responder de relance a pergunta que importa: "o comprovante de
+     pagamento vai em quais e-mails?" — que numa lista por modelo exigiria
+     abrir os três e comparar de cabeça. */
+  .ae-grade { background:var(--panel); border:1px solid var(--borda); border-radius:14px;
+    overflow:hidden; }
+  .ae-linha { display:grid; grid-template-columns:1fr repeat({{ modelos|length }}, 150px);
+    align-items:center; border-bottom:1px solid var(--borda); }
+  .ae-linha:last-child { border-bottom:none; }
+  .ae-cab { background:var(--panel-2); position:sticky; top:0; z-index:2; }
+  .ae-cab .ae-cel { padding:14px 12px; }
+  .ae-cel { padding:11px 12px; text-align:center; }
+  .ae-cel:first-child { text-align:left; }
+  .ae-doc { font-size:13px; color:var(--texto); }
+  .ae-modelo { font-size:11px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.6px; color:var(--cinza-2); line-height:1.4; }
+  .ae-modelo small { display:block; font-size:10px; font-weight:400; text-transform:none;
+    letter-spacing:0; color:var(--cinza-2); margin-top:4px; }
+  .ae-linha:hover:not(.ae-cab) { background:var(--panel-2); }
+  .ae-cel input[type=checkbox] { width:17px; height:17px; accent-color:var(--azul); cursor:pointer; }
+  .ae-acoes { display:flex; gap:10px; align-items:center; margin-top:18px; flex-wrap:wrap; }
+  .ae-salvar { padding:11px 20px; border:none; border-radius:9px; background:var(--azul);
+    color:#fff; font-size:13.5px; font-weight:600; font-family:inherit; cursor:pointer;
+    transition:filter .14s cubic-bezier(.23,1,.32,1), transform .1s cubic-bezier(.23,1,.32,1); }
+  .ae-salvar:hover { filter:brightness(1.07); }
+  .ae-salvar:active { transform:scale(.97); }
+  @media (max-width:820px) {
+    .ae-linha { grid-template-columns:1fr repeat({{ modelos|length }}, 88px); }
+    .ae-modelo small { display:none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ae-salvar { transition:none; } .ae-salvar:active { transform:none; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Anexos por e-mail</h1>
+    <div class="sub">O que segue em cada e-mail que sai do JOB</div>
+  </div>
+</div>
+
+{% if salvo %}
+<div class="aviso" style="margin-bottom:14px; border-color:var(--verde); color:var(--verde);">
+  Regras salvas. Valem no próximo e-mail enviado.
+</div>
+{% endif %}
+
+<div class="hint" style="margin-bottom:14px; max-width:760px; line-height:1.6;">
+  Marque o que cada e-mail deve levar. O tipo de cada documento é definido na hora
+  de anexar, no cadastro da proposta — documento que entrou antes disso conta como
+  <b>Outro</b>, por isso "Outro" vem marcado no protocolo: sem ele, proposta antiga
+  sairia sem anexo nenhum.
+</div>
+
+<form method="POST" action="/anexos-email">
+  <div class="ae-grade">
+    <div class="ae-linha ae-cab">
+      <div class="ae-cel ae-modelo">Tipo de documento</div>
+      {% for chave, nome, desc in modelos %}
+      <div class="ae-cel ae-modelo">{{ nome }}<small>{{ desc }}</small></div>
+      {% endfor %}
+    </div>
+    {% for tipo, rotulo in doc_tipos %}
+    <div class="ae-linha">
+      <div class="ae-cel ae-doc">{{ rotulo }}</div>
+      {% for chave, nome, desc in modelos %}
+      <div class="ae-cel">
+        <input type="checkbox" name="{{ chave }}" value="{{ tipo }}"
+               title="{{ rotulo }} em {{ nome }}"
+               {% if tipo in regras[chave] %}checked{% endif %}>
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="ae-acoes">
+    <button type="submit" class="ae-salvar">Salvar regras</button>
+    <span class="hint">Vale para os próximos envios. E-mail já enviado não muda.</span>
+  </div>
+</form>
+{% endblock %}
