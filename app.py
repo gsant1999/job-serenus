@@ -5559,6 +5559,58 @@ def _migrar_venda_legada_para_gestor(conn, proposta_id, usuario_executor):
     return True, 'Venda atualizada para a regra de sócio/gestor.'
 
 
+def _gestor_retencao_empresa(conn, meses=6):
+    """De cada R$100 que a administradora paga em venda de sócio, quanto FICA
+    na empresa — e quanto de aporte foi preciso no mesmo período.
+
+    Este é o número que explica o aporte. Ele existe hoje espalhado em vinte
+    réguas separadas, e ninguém consegue somar de cabeça: cada regra diz sua
+    fatia, nenhuma diz o efeito no caixa. Sem ele, "a empresa fica sem dinheiro"
+    é sensação; com ele, é conta — e a régua do gestor vira uma decisão em vez
+    de um hábito."""
+    out = {'tem_dados': False, 'meses': meses}
+    try:
+        corte = (datetime.now(TZ_SP) - relativedelta(months=meses)).strftime('%Y-%m-%d')
+        bruto = gestor = serenus = 0.0
+        vendas = 0
+        for s in conn.execute("""SELECT s.*, COALESCE(p.comissao_total_corretora,0) comissao
+                                   FROM proposta_regra_snapshot s
+                                   JOIN propostas p ON p.id = s.proposta_id
+                                  WHERE COALESCE(p.status,'') <> 'Excluída'
+                                    AND COALESCE(p.estornada,0) = 0
+                                    AND COALESCE(p.regime_aplicado,'') IN
+                                        ('socio_gestor_regra','socio_gestor_pendente')
+                                    AND COALESCE(p.vigencia,'') >= ?""", (corte,)).fetchall():
+            snap = dict(s)
+            if not snap.get('completa'):
+                continue
+            r = _gestor_calcular(snap, snap['comissao'])
+            if not r.get('completa'):
+                continue
+            vendas += 1
+            bruto += float(r.get('total_recebido') or 0)
+            gestor += float(r.get('total_bruto_gestor') or 0)
+            serenus += float(r.get('total_saldo_serenus') or 0)
+        if not vendas:
+            return out
+        out.update({'tem_dados': True, 'vendas': vendas,
+                    'bruto': round(bruto, 2), 'gestor': round(gestor, 2),
+                    'serenus': round(serenus, 2),
+                    'por_cem': round((serenus / bruto * 100), 1) if bruto else 0.0})
+        # Aporte no mesmo período: o contraponto. Se a empresa retém pouco e
+        # precisa de aporte alto, os dois números contam a mesma história.
+        try:
+            ap = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM lancamentos
+                                  WHERE tipo='aporte' AND COALESCE(data_competencia,'') >= ?""",
+                              (corte[:7],)).fetchone()['v']
+            out['aporte'] = round(float(ap or 0), 2)
+        except Exception:
+            out['aporte'] = None
+    except Exception as e:
+        app.logger.warning(f"[GESTOR] retencao da empresa nao calculada: {e}")
+    return out
+
+
 def _gestor_snapshot(conn, proposta_id):
     try:
         r = conn.execute("SELECT * FROM proposta_regra_snapshot WHERE proposta_id=?",
@@ -30104,6 +30156,7 @@ def regra_gestor():
         except Exception:
             pass
         regras.append(d)
+    retencao_empresa = _gestor_retencao_empresa(conn)
     operadoras = _operadoras_lista(conn)
     # Vendas de gestor sem regra completa: o motivo de a tela existir.
     pendentes = []
@@ -30119,6 +30172,7 @@ def regra_gestor():
                               'consultor': p['consultor'], 'falta': b['falta'][:2]})
     close_db(conn)
     return render_template('regra_gestor.html', regras=regras, operadoras=operadoras,
+                           retencao_empresa=retencao_empresa,
                            op_sel=op_sel, obs_sel=obs_sel, plano_sel=plano_sel,
                            pendentes=pendentes[:40], bases=_RETENCAO_BASES,
                            responsaveis=_RETENCAO_RESPONSAVEIS)

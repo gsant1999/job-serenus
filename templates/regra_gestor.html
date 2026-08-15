@@ -47,6 +47,20 @@
              border-radius:10px; padding:12px 14px; font-size:12px; color:var(--texto);
              line-height:1.65; margin-bottom:16px; }
   #rgLista a { color:var(--azul); text-decoration:none; font-weight:600; }
+  .rg-caixa { background:var(--panel); border:1px solid var(--borda); border-left:3px solid var(--azul);
+              border-radius:12px; padding:16px 18px; margin-bottom:16px; }
+  .rg-caixa-top { display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; }
+  .rg-caixa-lbl { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2); font-weight:700; }
+  .rg-caixa-n { font-family:'Sora',sans-serif; font-size:30px; font-weight:800; color:var(--verde);
+                line-height:1.15; margin-top:5px; font-variant-numeric:tabular-nums; }
+  .rg-caixa-n span { font-family:'Inter',sans-serif; font-size:13px; font-weight:600; color:var(--cinza); }
+  .rg-caixa-det { display:flex; gap:20px; flex-wrap:wrap; }
+  .rg-caixa-det div { font-size:11.5px; color:var(--cinza-2); }
+  .rg-caixa-det b { display:block; font-size:15px; color:var(--texto); font-variant-numeric:tabular-nums; margin-top:2px; }
+  .rg-caixa-det b.pos { color:var(--verde); } .rg-caixa-det b.neg { color:var(--erro); }
+  .rg-caixa-pe { font-size:12px; color:var(--cinza); line-height:1.7; margin-top:12px;
+                 border-top:1px solid var(--borda); padding-top:10px; }
+  .rg-caixa-pe b { color:var(--texto); } .rg-caixa-pe b.neg { color:var(--erro); }
   .rg-res { white-space:nowrap; font-variant-numeric:tabular-nums; }
   .rg-res div { display:flex; gap:8px; justify-content:space-between; font-size:12px; line-height:1.9; }
   .rg-res-l { color:var(--cinza-2); }
@@ -87,6 +101,38 @@
     O que sobra é o <b>saldo Serenus</b>.
     <i class="ajuda-i" title="Juntar as três num percentual só foi o que produziu o modelo antigo, que entrega 100% da comissão numa parcela: ele não sabe dizer o que é fração da operadora, o que é do gestor e o que é imposto — então também não sabe dizer o que sobra para a empresa.">i</i>
   </div>
+
+  {% if retencao_empresa and retencao_empresa.tem_dados %}
+  {# O NUMERO QUE EXPLICA O APORTE.
+     Cada regra diz a fatia dela; nenhuma diz o efeito no caixa. Somado, vira
+     a conta que faltava: de tudo que a administradora paga em venda de socio,
+     isto e o que sobra pra empresa pagar fixo e custo. #}
+  <div class="rg-caixa">
+    <div class="rg-caixa-top">
+      <div>
+        <div class="rg-caixa-lbl">De cada R$ 100 que a Affinity paga em venda de sócio</div>
+        <div class="rg-caixa-n">R$ {{ ('%g' % retencao_empresa.por_cem)|replace('.', ',') }}
+          <span>ficam na Serenus</span></div>
+      </div>
+      <div class="rg-caixa-det">
+        <div><span>Entrou</span><b>{{ retencao_empresa.bruto|moeda }}</b></div>
+        <div><span>Foi para os sócios</span><b class="neg">{{ retencao_empresa.gestor|moeda }}</b></div>
+        <div><span>Ficou na empresa</span><b class="pos">{{ retencao_empresa.serenus|moeda }}</b></div>
+      </div>
+    </div>
+    <div class="rg-caixa-pe">
+      {{ retencao_empresa.vendas }} venda(s) de sócio nos últimos {{ retencao_empresa.meses }} meses.
+      {% if retencao_empresa.aporte %}
+      No mesmo período entraram <b>{{ retencao_empresa.aporte|moeda }}</b> em aportes de sócio.
+      {% if retencao_empresa.aporte > retencao_empresa.serenus %}
+      <b class="neg">O aporte foi maior do que a empresa reteve</b> — o dinheiro sai de vocês
+      e volta como aporte.
+      {% endif %}
+      {% endif %}
+      A régua do gestor é o que decide esse número. Mexer nela abaixo muda o caixa da empresa.
+    </div>
+  </div>
+  {% endif %}
 
   {% if pendentes %}
   <div class="rg-alerta">
