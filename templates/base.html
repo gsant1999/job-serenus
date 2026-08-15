@@ -791,6 +791,14 @@
       Rede de Atendimento
     </a>
     {% endif %}
+    {# Cartão SUS mora em "Conteúdo e apoio", junto de Rede de Atendimento e
+       Material de Apoio: é ferramenta de consulta do consultor, não cadastro.
+       Não vira item de primeiro nível — o menu já tem itens demais. #}
+    <a href="/cartao-sus" class="nav-link {% if request.path == '/cartao-sus' %}active{% endif %}" onclick="closeSidebar()"
+       title="Consultar o cartão SUS de uma pessoa pelo CPF e baixar o PDF">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M12 14h4"/></svg>
+      Cartão SUS
+    </a>
     {% if pode_modulo('manual') and eh_serenus %}
     <a href="/manual" class="nav-link {% if request.path == '/manual' %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 6.5C10.5 5 8.5 4 6 4a1 1 0 0 0-1 1v13a1 1 0 0 0 1 1c2.5 0 4.5 1 6 2.5 1.5-1.5 3.5-2.5 6-2.5a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1c-2.5 0-4.5 1-6 2.5z"/><path d="M12 6.5V21"/></svg>

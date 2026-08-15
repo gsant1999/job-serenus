@@ -21922,6 +21922,17 @@ def api_whatsapp_cartao_sus_pdf():
         'Content-Disposition': 'attachment; filename="' + _cns_nome_arquivo(dados) + '"'}))
 
 
+@app.route('/cartao-sus')
+@login_required
+def cartao_sus():
+    """Consulta avulsa do cartão SUS, fora do fluxo da proposta.
+
+    Dentro da proposta a busca acontece sozinha, porque ali o CPF e a data já
+    estão na tela. Esta existe pro caso oposto: o cliente mandou o CPF no
+    WhatsApp e o consultor só quer o PDF, sem abrir proposta nenhuma."""
+    return render_template('cartao_sus.html')
+
+
 @app.route('/cartao-sus.pdf')
 @login_required
 def cartao_sus_pdf():
