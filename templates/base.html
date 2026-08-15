@@ -1229,6 +1229,51 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+/* ═══ COLAR DATA EM QUALQUER CAMPO DE DATA ═══════════════════════════════
+   O <input type="date"> do navegador IGNORA texto colado: o consultor copia
+   "24/11/1999" do WhatsApp ou do documento, dá Ctrl+V no campo e não acontece
+   nada — sem erro, sem aviso, o campo continua "dd/mm/aaaa". Ele então digita
+   à mão, que é onde a data sai trocada.
+
+   Aqui o JOB intercepta a colagem, entende os formatos que aparecem na vida
+   real e preenche. Vale pra TODA tela, porque mora no base.html: campo de data
+   novo já nasce aceitando colar, sem ninguém lembrar de ligar.
+
+   Dispara 'input' e 'change' depois de preencher — é deles que dependem o
+   cálculo de idade, a busca do cartão SUS e o total de vidas. */
+function _dataColadaParaISO(txt) {
+  const s = String(txt || '').trim();
+  if (!s) return '';
+  const arruma = (d, m, a) => {
+    d = parseInt(d, 10); m = parseInt(m, 10); a = parseInt(a, 10);
+    // Ano de dois dígitos: acima de 30 é 19xx. Serve pra data de nascimento,
+    // que é o caso que mais aparece — 24/11/99 é 1999, não 2099.
+    if (a < 100) a = a > 30 ? 1900 + a : 2000 + a;
+    if (!(m >= 1 && m <= 12) || !(d >= 1 && d <= 31) || !(a >= 1900 && a <= 2200)) return '';
+    const iso = `${a}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const t = new Date(iso + 'T00:00:00');
+    // Rejeita 31/02 e afins: o Date corrige sozinho e viraria outra data.
+    return (t.getDate() === d && t.getMonth() + 1 === m) ? iso : '';
+  };
+  let m;
+  if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return arruma(m[3], m[2], m[1]);
+  if ((m = s.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/))) return arruma(m[1], m[2], m[3]);
+  if ((m = s.match(/^(\d{2})(\d{2})(\d{4})$/))) return arruma(m[1], m[2], m[3]);
+  return '';
+}
+document.addEventListener('paste', function (e) {
+  const el = e.target;
+  if (!el || el.tagName !== 'INPUT' || el.type !== 'date') return;
+  const txt = ((e.clipboardData || window.clipboardData) || {}).getData
+    ? (e.clipboardData || window.clipboardData).getData('text') : '';
+  const iso = _dataColadaParaISO(txt);
+  if (!iso) return;   // não entendeu: deixa o navegador fazer o que faria
+  e.preventDefault();
+  el.value = iso;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+}, true);
+
 function toggleTema() {
   const html = document.documentElement;
   const atual = html.getAttribute('data-theme');

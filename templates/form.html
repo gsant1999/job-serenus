@@ -959,15 +959,44 @@ function mostrarIdades(){
   bloco.hidden = !menores;
   const mot = document.getElementById('resp-fin-motivo');
   if (menores && mot){
+    // A frase antiga terminava em "o responsável pode entrar no plano ou apenas
+    // responder pelo pagamento" — e ensinava o oposto da regra. Se ele entra no
+    // plano, ele É o titular e a criança vira dependente; aí não existe
+    // responsável financeiro. Duas frases contrárias na mesma caixa é pior que
+    // nenhuma: a de cima dizia uma coisa e a de baixo, outra.
     mot.textContent = 'Aparece porque ' + menores[0] + ' é o titular e tem menos de 18 anos num plano '
       + ((document.getElementById('tipo_pessoa')||{}).value)
-      + '. O responsável pode entrar no plano ou apenas responder pelo pagamento.';
+      + '. Quem responde pelo pagamento precisa ser um adulto.';
   }
   // Obrigatorio so quando o bloco esta em cena.
   ['resp_fin_nome','resp_fin_cpf','resp_fin_parentesco'].forEach(id => {
     const e = document.getElementById(id); if (e) e.required = !!menores;
   });
+  travarDependentesDeMenor();
   try { atualizarBarra(); } catch(e){}
+}
+
+// TITULAR MENOR NÃO CARREGA DEPENDENTE — e a tela não pode nem oferecer.
+// Dois irmãos menores são DUAS propostas, cada uma com uma criança titular e o
+// mesmo responsável financeiro. Deixar a pergunta marcável convida a um
+// cadastro que a operadora recusa, e o erro só apareceria lá na frente.
+function travarDependentesDeMenor() {
+  const cx = document.getElementById('tem-dependentes');
+  const dica = document.getElementById('hint-dependentes');
+  if (!cx) return;
+  const tp = (document.getElementById('tipo_pessoa') || {}).value || '';
+  const at = idadeDe((document.getElementById('data_nasc_titular') || {}).value);
+  const menorPf = (tp === 'PF' || tp === 'Adesão') && at !== null && at < 18;
+  const rot = cx.closest('label');
+  cx.disabled = menorPf;
+  if (rot) { rot.style.opacity = menorPf ? '.5' : ''; rot.style.cursor = menorPf ? 'default' : 'pointer'; }
+  if (menorPf) {
+    if (cx.checked) { cx.checked = false; toggleDependentes(); }   // limpa o que já estava marcado
+    if (dica) dica.textContent = 'Titular com menos de 18 anos não carrega dependente. Se há outra '
+      + 'criança no contrato, ela entra numa proposta separada, com o mesmo responsável.';
+  } else if (dica && !cx.checked) {
+    dica.textContent = 'Só o titular. Marque se houver mais alguém no contrato.';
+  }
 }
 
 // ═══ SÓCIO OU FUNCIONÁRIO ═══════════════════════════════════════════════
