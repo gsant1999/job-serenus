@@ -21978,7 +21978,13 @@ def _consultar_cnpj(dig):
             if r.status_code == 200:
                 d = r.json()
                 if (d.get('status') or '').upper() != 'ERROR':
-                    socios = [{"nome": (s.get('nome') or '').strip(), "qualificacao": (s.get('qual') or '').strip()}
+                    # A ReceitaWS não devolve o CPF do sócio (a BrasilAPI
+                    # devolve, mascarado). Sem ele o casamento por CPF não
+                    # acontece e sobra só o nome — que é justamente o caso que
+                    # apareceu em produção quando a BrasilAPI falhou.
+                    socios = [{"nome": (s.get('nome') or '').strip(),
+                               "qualificacao": (s.get('qual') or '').strip(),
+                               "cpf_mascarado": ''}
                               for s in (d.get('qsa') or []) if (s.get('nome') or '').strip()]
                     sit = (d.get('situacao') or '').strip()
                     dados = {
