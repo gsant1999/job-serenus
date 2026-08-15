@@ -785,6 +785,24 @@ def init_db():
                 ate_mensalidade INTEGER DEFAULT 3,
                 observacao TEXT
             )""",
+            # ── Tabela de comissão PUBLICADA pela administradora (Affinity) ──
+            # Fonte da verdade do que a administradora paga à corretora, versionada
+            # por vigência. NÃO é o que a corretora usa no cálculo (isso é
+            # `recebimento`) — a comparação entre as duas é o que revela divergência.
+            """CREATE TABLE IF NOT EXISTS tabela_operadora (
+                id SERIAL PRIMARY KEY,
+                fonte TEXT DEFAULT 'affinity',
+                vigencia TEXT NOT NULL,
+                plano TEXT NOT NULL,
+                empresa TEXT NOT NULL,
+                sub TEXT DEFAULT '',
+                faixa TEXT DEFAULT '',
+                tipo TEXT DEFAULT 'perc',
+                total REAL,
+                regua_json TEXT DEFAULT '',
+                obs TEXT DEFAULT '',
+                UNIQUE(fonte, vigencia, plano, empresa, sub, faixa)
+            )""",
             """CREATE TABLE IF NOT EXISTS config (
                 chave TEXT PRIMARY KEY,
                 valor TEXT
@@ -2019,6 +2037,20 @@ def init_db():
             ate_mensalidade INTEGER DEFAULT 3,
             observacao TEXT
         );
+        CREATE TABLE IF NOT EXISTS tabela_operadora (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fonte TEXT DEFAULT 'affinity',
+            vigencia TEXT NOT NULL,
+            plano TEXT NOT NULL,
+            empresa TEXT NOT NULL,
+            sub TEXT DEFAULT '',
+            faixa TEXT DEFAULT '',
+            tipo TEXT DEFAULT 'perc',
+            total REAL,
+            regua_json TEXT DEFAULT '',
+            obs TEXT DEFAULT '',
+            UNIQUE(fonte, vigencia, plano, empresa, sub, faixa)
+        );
         CREATE TABLE IF NOT EXISTS config (
             chave TEXT PRIMARY KEY,
             valor TEXT
@@ -3247,6 +3279,24 @@ def init_db():
         ("propostas", "estado", "TEXT"),
         ("propostas", "estornada", "INTEGER DEFAULT 0"),
         ("propostas", "estorno_info", "TEXT"),
+        # ── Régua REAL de recebimento da corretora (quando a operadora paga) ──
+        # Antes existia só `total` (ex.: 2.40 = 240%), sem QUANDO. O fluxo de caixa
+        # fatiava o recebível pela régua do CONSULTOR, o que está errado sempre que
+        # as duas réguas têm formatos diferentes (quase sempre).
+        #
+        # MESMO FORMATO de gestor_regra.fracoes_json, de propósito:
+        #   [{"ordem":1,"percentual":100,"mes":1}, {"ordem":2,"percentual":100,"mes":2}]
+        # A régua de recebimento é UM fato da operadora, não muda conforme quem
+        # vendeu. Antes ela só existia dentro de gestor_regra — venda de consultor
+        # não tinha régua nenhuma. Aqui ela passa a morar em `recebimento`, que já
+        # é chaveado por (operadora, obs, plano), e o gestor_regra herda daqui.
+        # Esparso e sem teto de 8 parcelas: Qualicorp paga Qualicash na 13ª e 25ª.
+        ("recebimento", "regua_json", "TEXT"),
+        ("recebimento", "tipo_valor", "TEXT DEFAULT 'perc'"),   # perc | reais (Prevent Senior 0-18 paga R$)
+        ("recebimento", "promo_total", "REAL"),                 # ex.: 2.80 na Amil quando a tabela é 2.40
+        ("recebimento", "promo_parcela", "INTEGER"),            # em que parcela cai a diferença da promo
+        ("recebimento", "nota", "TEXT"),
+        ("recebimento", "fonte_tabela", "TEXT"),                # 'affinity 08.2026'
         ("propostas", "cpf_titular", "TEXT"),
         ("propostas", "cnpj", "TEXT"),
         ("propostas", "contrato_arquivo", "TEXT"),
@@ -4841,6 +4891,48 @@ def _producao_mes(conn, usuario_id, mes_meta, excluir_pid=None):
         return 0
 
 
+def _regua_recebimento(receb_row):
+    """Régua da operadora a partir da linha de `recebimento`.
+
+    Devolve [{'ordem':1,'percentual':100,'mes':1}, ...] — mesmo formato de
+    gestor_regra.fracoes_json. Sem régua cadastrada devolve [], e aí o cálculo
+    cai no comportamento antigo (proporcional) em vez de quebrar."""
+    try:
+        fr = json.loads((receb_row or {}).get('regua_json') or '[]')
+        return fr if isinstance(fr, list) and fr else []
+    except Exception:
+        return []
+
+
+def _aplicar_promocao(regua, receb_row):
+    """Acrescenta a diferença da promoção como uma fração extra.
+
+    A tabela da Affinity paga X (ex.: Amil 240% em 100/100/40). A condição
+    promocional negociada paga Y (280%). A diferença (40%) chega no mês
+    seguinte ao último da tabela — é uma fração a mais, não um aumento
+    diluído nas existentes. Por isso entra como fração nova."""
+    try:
+        total_tab = float((receb_row or {}).get('total') or 0)
+        total_promo = float((receb_row or {}).get('promo_total') or 0)
+    except (TypeError, ValueError):
+        return regua
+    if not regua or total_promo <= total_tab:
+        return regua
+    # Converte a diferença em pontos da mesma escala da régua (% da mensalidade)
+    soma = sum(float(f.get('percentual') or 0) for f in regua) or 1.0
+    delta_pontos = soma * ((total_promo - total_tab) / total_tab) if total_tab else 0.0
+    if delta_pontos <= 0:
+        return regua
+    ultimo_mes = max(int(f.get('mes') or f.get('ordem') or 0) for f in regua)
+    try:
+        mes_promo = int((receb_row or {}).get('promo_parcela') or 0) or (ultimo_mes + 1)
+    except (TypeError, ValueError):
+        mes_promo = ultimo_mes + 1
+    nova = list(regua) + [{'ordem': len(regua) + 1, 'percentual': round(delta_pontos, 4),
+                           'mes': mes_promo, 'promocional': True}]
+    return nova
+
+
 def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidade='', tipo_pessoa=''):
     """Motor de comissão isolando a regra da Taxa de Adesão."""
     conn = db()
@@ -4854,13 +4946,24 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
 
     # 1) Recebimento da corretora (mensalidades / resíduo)
     receb = conn.execute(
-        "SELECT total FROM recebimento WHERE operadora=? AND obs=? AND plano=?",
+        "SELECT * FROM recebimento WHERE operadora=? AND obs=? AND plano=?",
         (op_nome, op_obs, plano)).fetchone()
     if not receb:
         receb = conn.execute(
-            "SELECT total FROM recebimento WHERE operadora=? AND plano=? ORDER BY (obs='') DESC LIMIT 1",
+            "SELECT * FROM recebimento WHERE operadora=? AND plano=? ORDER BY (obs='') DESC LIMIT 1",
             (op_nome, plano)).fetchone()
-    receb_mens = float(receb['total']) if receb else 0.0
+    rd = dict(receb) if receb else {}
+    # Promoção vigente substitui o total da tabela (ex.: Amil 240% -> 280%).
+    # A diferença cai numa parcela combinada, depois do fim da régua da tabela.
+    receb_mens = float(rd.get('total') or 0.0)
+    promo_total = rd.get('promo_total')
+    regua_receb = _regua_recebimento(rd)
+    if promo_total:
+        try:
+            receb_mens = float(promo_total)
+            regua_receb = _aplicar_promocao(regua_receb, rd)
+        except (TypeError, ValueError):
+            pass
     total_corretora = round(valor * receb_mens, 2)
 
     # GESTOR VENDEDOR: leva 100% da corretora
@@ -4873,6 +4976,7 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
             'regua_mens': regua, 'receb_mens': receb_mens, 'rep_mens': receb_mens, 'taxa': 0,
             'valor': valor, 'total_corretora': total_corretora,
             'consultor': total_corretora, 'liquido': 0.0,
+            'regua_receb': regua_receb,
             'aviso': ''
         }
 
@@ -4915,6 +5019,7 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
             'regua_mens': [rep_mens] if rep_mens else [0.0], 'receb_mens': receb_mens, 'rep_mens': rep_mens, 'taxa': 1,
             'valor': valor, 'total_corretora': total_corretora,
             'consultor': consultor, 'liquido': liquido,
+            'regua_receb': regua_receb,
             'aviso': ' · '.join(avisos),
         }
 
@@ -4941,6 +5046,7 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
         'regua_mens': regua, 'receb_mens': receb_mens, 'rep_mens': rep_mens, 'taxa': taxa,
         'valor': valor, 'total_corretora': total_corretora,
         'consultor': consultor, 'liquido': liquido,
+        'regua_receb': regua_receb,
         'aviso': ' · '.join(avisos),
     }
 
@@ -5480,15 +5586,42 @@ def gerar_parcelas(proposta_id, vigencia, c, dia_vencimento=None, status_overrid
     total_cor = float(c.get('total_corretora', 0))
     soma_regua = sum(regua) or 1.0
 
+    # ── Recebível da corretora: usa a régua REAL da operadora quando existe ──
+    # Antes o recebível era fatiado pela régua do CONSULTOR (mens/soma_regua).
+    # Isso só acerta por acaso: a Amil paga 100/100/40 em 3 meses, e a régua do
+    # consultor tem outro formato quase sempre. O resultado era um fluxo de caixa
+    # errado por construção — e o /financeiro e o /bi herdavam o erro.
+    # `regua_receb` = [{'ordem':1,'percentual':100,'mes':1}, ...] de recebimento.
+    regua_receb = c.get('regua_receb') or []
+    mapa_receb = {}
+    if regua_receb:
+        soma_receb = sum(float(f.get('percentual') or 0) for f in regua_receb) or 1.0
+        for f in regua_receb:
+            mes = int(f.get('mes') or f.get('ordem') or 0)
+            if mes >= 1:
+                mapa_receb[mes] = mapa_receb.get(mes, 0.0) + (
+                    total_cor * (float(f.get('percentual') or 0) / soma_receb))
+
+    # A operadora pode pagar em MAIS meses do que a régua do consultor tem
+    # parcelas (é o caso da promoção: a diferença cai no mês seguinte ao último
+    # da tabela). Sem isso esse dinheiro simplesmente não apareceria em lugar
+    # nenhum. Nesses meses extras o consultor recebe 0 e a corretora recebe a
+    # fração — a linha existe pro caixa enxergar a entrada.
+    n_parcelas = max(len(regua), max(mapa_receb) if mapa_receb else 0)
+
     parcelas = []
-    for i, mens in enumerate(regua):
+    for i in range(n_parcelas):
+        mens = regua[i] if i < len(regua) else 0.0
         mes_ref = base + relativedelta(months=i)
         try:
             data = mes_ref.replace(day=min(dia, 28)).strftime('%Y-%m-%d')
         except Exception:
             data = mes_ref.strftime('%Y-%m-01')
         val_c = round(valor * mens, 2)
-        val_cor = round(total_cor * (mens / soma_regua), 2)
+        if mapa_receb:
+            val_cor = round(mapa_receb.get(i + 1, 0.0), 2)
+        else:
+            val_cor = round(total_cor * (mens / soma_regua), 2)
         perc = round((mens / soma_regua) * 100, 2)
         parcelas.append({
             'proposta_id': proposta_id, 'numero': i + 1, 'percentual': perc,
@@ -16127,6 +16260,76 @@ def regra_estorno_salvar():
         (d.get('operadora'), float(d.get('perc_estorno') or 100), int(d.get('ate_mensalidade') or 3), d.get('observacao','')))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
+
+# ═══════════ TABELA PUBLICADA DA ADMINISTRADORA (Affinity) ═══════════
+# A corrente do dinheiro tem quatro elos, e cada um responde uma pergunta:
+#   tabela_operadora    — o que a Affinity PROMETE pagar (tabela publicada)
+#   recebimento         — o que a corretora ESPERA receber (pode ter promoção)
+#   comissao_extrato    — o que a Affinity REALMENTE pagou (PDF do extrato)
+#   affinity_conciliacao— o casamento entre esperado e recebido
+# Faltava o primeiro elo: sem ele não dá pra dizer se o extrato veio certo,
+# porque não havia contra o que conferir.
+
+_TABELA_ARQ = os.path.join(BASE_DIR, 'dados', 'tabela_affinity_2026-08.json')
+_TABELA_VIGENCIA = '2026-08'
+
+
+def _carregar_tabela_publicada(arquivo=None):
+    """Lê o JSON versionado da tabela da administradora. Nunca levanta erro."""
+    try:
+        with open(arquivo or _TABELA_ARQ, encoding='utf-8') as fh:
+            return json.load(fh)
+    except Exception as e:
+        app.logger.warning(f"[TABELA] nao consegui ler {arquivo or _TABELA_ARQ}: {e}")
+        return []
+
+
+def _regua_para_fracoes(regua_dict):
+    """{'1':100,'2':100,'3':40} -> [{'ordem':1,'percentual':100,'mes':1}, ...]
+
+    Mesmo formato de gestor_regra.fracoes_json de propósito: a régua de
+    recebimento é uma coisa só no sistema, não uma por tela."""
+    fracoes = []
+    for i, chave in enumerate(sorted(regua_dict or {}, key=lambda k: int(k)), start=1):
+        mes = int(chave)
+        fracoes.append({'ordem': i, 'percentual': float(regua_dict[chave]), 'mes': mes})
+    return fracoes
+
+
+@app.route('/admin/tabela-operadora/importar', methods=['POST'])
+@login_required
+@admin_required
+def tabela_operadora_importar():
+    """Carrega a tabela publicada para dentro do banco. Idempotente (UPSERT).
+
+    NÃO toca em `recebimento`: importar a tabela da administradora não pode
+    mudar sozinho o que a corretora cobra. A aplicação é um passo humano,
+    feito na tela de conciliação, linha a linha."""
+    dados = _carregar_tabela_publicada()
+    if not dados:
+        return jsonify({'ok': False, 'erro': 'Arquivo da tabela não encontrado ou vazio'}), 400
+    vig = (request.json or {}).get('vigencia') or _TABELA_VIGENCIA
+    conn = db()
+    gravados = 0
+    for r in dados:
+        try:
+            conn.execute("""INSERT INTO tabela_operadora
+                    (fonte,vigencia,plano,empresa,sub,faixa,tipo,total,regua_json,obs)
+                    VALUES ('affinity',?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(fonte,vigencia,plano,empresa,sub,faixa) DO UPDATE SET
+                    tipo=excluded.tipo, total=excluded.total,
+                    regua_json=excluded.regua_json, obs=excluded.obs""",
+                (vig, r.get('plano'), r.get('empresa'), r.get('sub') or '', r.get('faixa') or '',
+                 r.get('tipo') or 'perc', r.get('total'),
+                 json.dumps(_regua_para_fracoes(r.get('regua')), ensure_ascii=False),
+                 r.get('obs') or ''))
+            gravados += 1
+        except Exception as e:
+            app.logger.warning(f"[TABELA] linha ignorada {r.get('empresa')}/{r.get('plano')}: {e}")
+    conn.commit(); close_db(conn)
+    app.logger.info(f"[TABELA] vigencia {vig}: {gravados} linhas gravadas")
+    return jsonify({'ok': True, 'gravados': gravados, 'vigencia': vig})
+
 
 @app.route('/proposta/<int:pid>/excluir', methods=['POST'])
 @login_required

@@ -1,0 +1,3038 @@
+[
+ {
+  "plano": "PME",
+  "empresa": "Affix",
+  "sub": "Hapvida",
+  "faixa": "01 a 99",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "3": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Alice",
+  "sub": "",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Allcare",
+  "sub": "Unimed Fluminense – RJ",
+  "faixa": "03 a 29",
+  "tipo": "perc",
+  "total": 130.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Allcare",
+  "sub": "Humana",
+  "faixa": "01 a 99",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Allcare",
+  "sub": "Pessoal Saúde",
+  "faixa": "03 a 29",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 35.0,
+   "3": 35.0,
+   "4": 35.0,
+   "5": 35.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Amhe Med",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 270.0,
+  "regua": {
+   "1": 100.0,
+   "2": 85.0,
+   "3": 85.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Amep",
+  "sub": "",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 25.0,
+   "3": 25.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Ameplan",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 270.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0,
+   "3": 50.0,
+   "4": 40.0,
+   "5": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Amil",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Aurora",
+  "sub": "",
+  "faixa": "01 a 29",
+  "tipo": "perc",
+  "total": 230.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0,
+   "3": 40.0,
+   "4": 25.0,
+   "5": 25.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Aurora",
+  "sub": "",
+  "faixa": "30 a 99",
+  "tipo": "perc",
+  "total": 210.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0,
+   "3": 40.0,
+   "4": 15.0,
+   "5": 15.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Ana Costa",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 70.0,
+   "3": 40.0,
+   "4": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Assim Saúde",
+  "sub": "0 a 18 anos",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0,
+   "3": 20.0,
+   "4": 20.0,
+   "5": 20.0,
+   "6": 20.0,
+   "7": 20.0,
+   "8": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Assim Saúde",
+  "sub": "+19 anos",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "3": 30.0,
+   "4": 20.0,
+   "5": 20.0,
+   "6": 20.0,
+   "7": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Assim Saúde",
+  "sub": "Memorial",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "3": 30.0,
+   "4": 25.0,
+   "5": 25.0,
+   "6": 15.0,
+   "7": 15.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Assim Saúde",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Ativia Saúde",
+  "sub": "",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 200.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Ativia Saúde",
+  "sub": "",
+  "faixa": "30 a 99",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Biovida",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 280.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0,
+   "3": 50.0,
+   "4": 40.0,
+   "5": 20.0,
+   "6": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Bluemed",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 180.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Bradesco",
+  "sub": "",
+  "faixa": "03 a 199",
+  "tipo": "perc",
+  "total": 300.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 100.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Care Plus",
+  "sub": "",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 200.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Corpe",
+  "sub": "São Camilo",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 250.0,
+  "regua": {
+   "1": 100.0,
+   "2": 80.0,
+   "3": 40.0,
+   "4": 20.0,
+   "5": 10.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Corpe",
+  "sub": "Funeral",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 35.0,
+   "2": 35.0,
+   "3": 35.0,
+   "4": 35.0,
+   "5": 25.0,
+   "6": 25.0,
+   "7": 25.0,
+   "8": 25.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Cruz Azul",
+  "sub": "",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 180.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0,
+   "3": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Cruz Azul",
+  "sub": "",
+  "faixa": "30 a 99",
+  "tipo": "perc",
+  "total": 200.0,
+  "regua": {
+   "1": 100.0,
+   "2": 60.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Easyplan Adm",
+  "sub": "Ceam Brasil – Bronze e Bronze Plus",
+  "faixa": "01 a 99",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Easyplan Adm",
+  "sub": "Ceam Brasil – Prata e Platinum",
+  "faixa": "01 a 99",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Easyplan Adm",
+  "sub": "Ideal Saúde – Distrito Federal",
+  "faixa": "01 a 99",
+  "tipo": "perc",
+  "total": 100.0,
+  "regua": {
+   "1": 100.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Ever",
+  "sub": "",
+  "faixa": "01 a 99",
+  "tipo": "perc",
+  "total": 110.0,
+  "regua": {
+   "1": 25.0,
+   "2": 10.0,
+   "3": 5.0,
+   "4": 10.0,
+   "5": 5.0,
+   "7": 5.0,
+   "9": 5.0,
+   "11": 5.0
+  },
+  "obs": "◆ 5% nas parcelas 5/7/9/11 e 10% nas 6/8/10/12"
+ },
+ {
+  "plano": "PME",
+  "empresa": "GS Garantia",
+  "sub": "",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 270.0,
+  "regua": {
+   "1": 100.0,
+   "2": 35.0,
+   "3": 35.0,
+   "4": 35.0,
+   "5": 35.0,
+   "6": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Hapvida",
+  "sub": "SJC",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 200.0,
+  "regua": {
+   "1": 100.0,
+   "2": 15.0,
+   "3": 15.0,
+   "4": 25.0,
+   "5": 25.0,
+   "6": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Hapvida",
+  "sub": "Minas Gerais",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 280.0,
+  "regua": {
+   "1": 100.0,
+   "2": 80.0,
+   "3": 80.0,
+   "4": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Hapvida",
+  "sub": "",
+  "faixa": "01 a 99",
+  "tipo": "perc",
+  "total": 280.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 80.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Hapvida",
+  "sub": "SJC",
+  "faixa": "30 a 99",
+  "tipo": "perc",
+  "total": 200.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0,
+   "3": 20.0,
+   "4": 20.0,
+   "5": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "HBC",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 200.0,
+  "regua": {
+   "1": 100.0,
+   "2": 25.0,
+   "3": 25.0,
+   "4": 25.0,
+   "5": 25.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "HSMED Saúde",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0,
+   "3": 45.0,
+   "4": 45.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Hub Health",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 35.0,
+   "3": 35.0,
+   "4": 35.0,
+   "5": 35.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Interclinicas",
+  "sub": "",
+  "faixa": "0 a 29",
+  "tipo": "perc",
+  "total": 200.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0,
+   "3": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Integral Saúde",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Klini Saúde",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Leve Saúde",
+  "sub": "RJ",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Leve Saúde RJ",
+  "sub": "",
+  "faixa": "Acima 30",
+  "tipo": "perc",
+  "total": 20.0,
+  "regua": {
+   "1": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Med Sênior",
+  "sub": "SP / RJ",
+  "faixa": "01 a 29",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Medtour",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 330.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0,
+   "3": 40.0,
+   "4": 50.0,
+   "5": 50.0,
+   "6": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Nova Saúde",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Omint",
+  "sub": "",
+  "faixa": "01 a 29",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Plena Saúde",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 60.0,
+   "3": 60.0,
+   "4": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Plural",
+  "sub": "Cemeru",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 20.0,
+  "regua": {
+   "3": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Porto Seguro",
+  "sub": "",
+  "faixa": "03 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "São Camilo",
+  "sub": "São Paulo",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0,
+   "3": 40.0,
+   "4": 30.0,
+   "5": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "São Camilo",
+  "sub": "Fortaleza",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 230.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0,
+   "3": 45.0,
+   "4": 45.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Qualicorp BH",
+  "sub": "Unimed",
+  "faixa": "Adesão",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Qualicorp",
+  "sub": "Onmed",
+  "faixa": "01 a 29",
+  "tipo": "perc",
+  "total": 320.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0,
+   "3": 200.0
+  },
+  "obs": "◆ 3ª = Qualicash"
+ },
+ {
+  "plano": "PME",
+  "empresa": "Sagrada Família",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 25.0,
+   "3": 25.0,
+   "4": 25.0,
+   "5": 25.0,
+   "6": 20.0,
+   "7": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Sami",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Samoc",
+  "sub": "",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Samoc",
+  "sub": "",
+  "faixa": "30 a 99",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Santa Casa de Mauá",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 35.0,
+   "3": 35.0,
+   "4": 35.0,
+   "5": 20.0,
+   "6": 15.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Santa Helena",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Santa Tereza",
+  "sub": "",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "3": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Santa Tereza",
+  "sub": "",
+  "faixa": "30 a 99",
+  "tipo": "perc",
+  "total": 100.0,
+  "regua": {
+   "1": 50.0,
+   "2": 25.0,
+   "3": 25.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "São Cristóvão",
+  "sub": "",
+  "faixa": "03 a 99",
+  "tipo": "perc",
+  "total": 230.0,
+  "regua": {
+   "1": 100.0,
+   "2": 60.0,
+   "3": 35.0,
+   "4": 35.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "São Cristóvão",
+  "sub": "0 a 11 anos",
+  "faixa": "01 a 02",
+  "tipo": "perc",
+  "total": 0.0,
+  "regua": {
+   "1": 0.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "São Francisco",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 140.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0,
+   "3": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "São Miguel",
+  "sub": "",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 290.0,
+  "regua": {
+   "1": 100.0,
+   "2": 45.0,
+   "3": 45.0,
+   "4": 50.0,
+   "5": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "São Miguel",
+  "sub": "",
+  "faixa": "30 a 99",
+  "tipo": "perc",
+  "total": 50.0,
+  "regua": {
+   "1": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "São Miguel Segplan",
+  "sub": "",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 100.0,
+  "regua": {
+   "1": 100.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "SB Saúde",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 210.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0,
+   "3": 40.0,
+   "4": 20.0,
+   "5": 10.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Seguros Unimed",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Select",
+  "sub": "",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 160.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "3": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Sobam",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "SulAmérica",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Tec Group",
+  "sub": "Brasília, Salvador e SP",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0,
+   "3": 50.0,
+   "4": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Tec Group",
+  "sub": "Belém, Campo Grande e Manaus",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 140.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Tec Saúde",
+  "sub": "Proasa",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0,
+   "3": 50.0,
+   "4": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Trasmontano",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 270.0,
+  "regua": {
+   "1": 100.0,
+   "2": 70.0,
+   "3": 70.0,
+   "4": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Unihosp",
+  "sub": "",
+  "faixa": "01 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Unimed FERJ",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Unimed Leste Fluminense",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 200.0,
+  "regua": {
+   "1": 100.0,
+   "2": 25.0,
+   "3": 25.0,
+   "4": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Unimed GRU",
+  "sub": "Sem coparticipação",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 190.0,
+  "regua": {
+   "1": 100.0,
+   "2": 60.0,
+   "3": 20.0,
+   "4": 10.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Unimed GRU",
+  "sub": "Com coparticipação",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 80.0,
+   "3": 40.0,
+   "4": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Unimed Jundiaí",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0,
+   "3": 50.0,
+   "4": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Unimed Os Bandeirantes",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0,
+   "3": 40.0,
+   "4": 30.0,
+   "5": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Unimed SJC",
+  "sub": "",
+  "faixa": "02 a 99",
+  "tipo": "perc",
+  "total": 110.0,
+  "regua": {
+   "1": 100.0,
+   "2": 5.0,
+   "3": 5.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Unimed Sorocaba",
+  "sub": "",
+  "faixa": "01 a 29",
+  "tipo": "perc",
+  "total": 90.0,
+  "regua": {
+   "1": 90.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PME",
+  "empresa": "Vera Cruz",
+  "sub": "",
+  "faixa": "02 a 29",
+  "tipo": "perc",
+  "total": 160.0,
+  "regua": {
+   "1": 100.0,
+   "2": 60.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "ADCPLASP",
+  "sub": "Única Saúde",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "3": 25.0,
+   "4": 25.0,
+   "5": 15.0,
+   "6": 15.0,
+   "7": 10.0,
+   "8": 10.0,
+   "9": 10.0
+  },
+  "obs": "9ª: 10%"
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "ADCPLASP",
+  "sub": "Elite Saúde",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 250.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0,
+   "3": 40.0,
+   "4": 40.0,
+   "5": 10.0,
+   "6": 10.0,
+   "7": 10.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "ADCPLASP",
+  "sub": "Unimed Guarulhos",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "3": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "ADCPLASP",
+  "sub": "Dental Par",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 25.0,
+   "3": 25.0,
+   "4": 45.0,
+   "5": 45.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Abplus",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 100.0,
+  "regua": {
+   "1": 100.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Amep",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 25.0,
+   "3": 25.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Affix",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 130.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Affix",
+  "sub": "Ativia / Unimed Jundiaí",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "3": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Affix",
+  "sub": "Hapvida",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "3": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Allcare",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Allcare",
+  "sub": "Unimed Guarulhos",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Alter Ben.",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Capital ADM",
+  "sub": "Interclinicas / Univida",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 130.0,
+  "regua": {
+   "1": 100.0,
+   "2": 10.0,
+   "3": 10.0,
+   "4": 10.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Capital ADM",
+  "sub": "Health Med",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 115.0,
+  "regua": {
+   "1": 100.0,
+   "2": 15.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Capital ADM",
+  "sub": "Quallity Ambulatorial",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 10.0,
+   "3": 10.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Capital ADM",
+  "sub": "Quallity Completo",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 110.0,
+  "regua": {
+   "1": 100.0,
+   "2": 10.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Capital ADM",
+  "sub": "Top Life",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 160.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0,
+   "3": 10.0,
+   "4": 10.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Corpe",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 130.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Corpe",
+  "sub": "Ameplan Saude",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Corpe",
+  "sub": "NDI",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 140.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Corpe",
+  "sub": "São Camilo",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 250.0,
+  "regua": {
+   "1": 100.0,
+   "2": 80.0,
+   "3": 40.0,
+   "4": 20.0,
+   "5": 10.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Dix Med",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 100.0,
+  "regua": {
+   "1": 100.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Dix Med",
+  "sub": "Assim / Klini",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Easyplan ADM",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 130.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Grupo Contém",
+  "sub": "Klini e Ônix",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 130.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Grupo Contém",
+  "sub": "Odonto Empresa",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 155.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "3": 25.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Grupo Contém",
+  "sub": "Unimed Odonto",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 15.0,
+   "3": 15.0,
+   "4": 10.0,
+   "5": 10.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Grupo Contém",
+  "sub": "Oplan",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 140.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "3": 10.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "G2C ADM",
+  "sub": "Klini Saúde",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 140.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "G2C ADM",
+  "sub": "Demais",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Hebrom",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 25.0,
+   "3": 25.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Hub Health",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 220.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "3": 30.0,
+   "4": 30.0,
+   "5": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Interclinicas",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 220.0,
+  "regua": {
+   "1": 100.0,
+   "2": 60.0,
+   "3": 60.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Medtour",
+  "sub": "Funcionário Público",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 130.0,
+  "regua": {
+   "1": 100.0,
+   "2": 15.0,
+   "3": 15.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Mount Hermon",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Nacional Saúde",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Plural",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 130.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Plural",
+  "sub": "NDI/TotalMedcare/SBC",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Plural RJ",
+  "sub": "CEMERU",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "3": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Plural RJ",
+  "sub": "NDI e Health Med",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Qualicorp SP",
+  "sub": "Premium",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "3": 50.0
+  },
+  "obs": "◆ 3ª = Qualicash 30% na 13ª e 30% na 25ª parcela"
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Qualicorp SP",
+  "sub": "Prime",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 210.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "3": 40.0
+  },
+  "obs": "◆ 3ª = Qualicash 20% na 13ª e 20% na 25ª parcela"
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Qualicorp SP",
+  "sub": "Plus",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 190.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0,
+   "3": 30.0
+  },
+  "obs": "◆ 3ª = Qualicash 20% na 13ª e 20% na 25ª parcela"
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Qualicorp SP",
+  "sub": "Onmed",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 310.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "3": 100.0
+  },
+  "obs": "◆ 3ª = Qualicash 40% na 13ª e 40% na 25ª parcela"
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Qualicorp RJ",
+  "sub": "Premium",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 250.0,
+  "regua": {
+   "1": 100.0,
+   "3": 100.0
+  },
+  "obs": "◆ 3ª = Qualicash 25% na 13ª e 25% na 25ª parcela"
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Qualicorp BH",
+  "sub": "Prime",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 160.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "13": 15.0,
+   "25": 15.0
+  },
+  "obs": "◆ 13ª = 15% 25ª = 15%"
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Qualicorp BH",
+  "sub": "Premium",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 170.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "13": 15.0,
+   "25": 25.0
+  },
+  "obs": "◆ 13ª = 15% 25ª = 25%"
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Qualicorp BH",
+  "sub": "Plus",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "13": 10.0,
+   "25": 10.0
+  },
+  "obs": "◆ 13ª = 10% 25ª = 10%"
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Qualicorp",
+  "sub": "Demais praças",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 110.0,
+  "regua": {
+   "1": 100.0,
+   "2": 10.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "QV RJ e SP",
+  "sub": "NDI",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 140.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "QV",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Safe",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Select",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 110.0,
+  "regua": {
+   "1": 100.0,
+   "2": 5.0,
+   "3": 5.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Supermed",
+  "sub": "SP/RJ",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Tec Saúde",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Uniconsult",
+  "sub": "Qualicorp",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Valor Saúde",
+  "sub": "Golden Cross",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 110.0,
+  "regua": {
+   "1": 100.0,
+   "2": 10.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ADESAO",
+  "empresa": "Você Clube",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Assim Saúde",
+  "sub": "Memorial",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "3": 30.0,
+   "4": 25.0,
+   "5": 25.0,
+   "6": 15.0,
+   "7": 15.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Amhe Med",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 270.0,
+  "regua": {
+   "1": 100.0,
+   "2": 70.0,
+   "3": 25.0,
+   "4": 25.0,
+   "5": 25.0,
+   "6": 25.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Ativia",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Biovida",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 280.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0,
+   "3": 50.0,
+   "4": 40.0,
+   "5": 20.0,
+   "6": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Bluemed",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 170.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0,
+   "3": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Corpe",
+  "sub": "Funeral",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 35.0,
+   "2": 35.0,
+   "3": 35.0,
+   "4": 35.0,
+   "5": 25.0,
+   "6": 25.0,
+   "7": 25.0,
+   "8": 25.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Ever",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 110.0,
+  "regua": {
+   "1": 25.0,
+   "2": 10.0,
+   "3": 5.0,
+   "4": 10.0,
+   "5": 5.0,
+   "7": 5.0,
+   "9": 5.0,
+   "11": 5.0
+  },
+  "obs": "◆ 5% nas parc. 5/7/9/11 e 10% nas 6/8/10/12"
+ },
+ {
+  "plano": "PF",
+  "empresa": "GS Garantia de Saúde",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 270.0,
+  "regua": {
+   "1": 100.0,
+   "2": 35.0,
+   "3": 35.0,
+   "4": 35.0,
+   "5": 35.0,
+   "6": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Hapvida",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Hapvida",
+  "sub": "SJC",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 230.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0,
+   "3": 30.0,
+   "4": 30.0,
+   "5": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Hapvida",
+  "sub": "Minas Gerais",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 200.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0,
+   "3": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Hapvida",
+  "sub": "NotreLife",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "HSMED Saúde",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0,
+   "3": 45.0,
+   "4": 45.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "HBC",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 200.0,
+  "regua": {
+   "1": 100.0,
+   "2": 25.0,
+   "3": 25.0,
+   "4": 25.0,
+   "5": 25.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Klini Saúde",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 25.0,
+   "3": 25.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Leve Saúde RJ",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Med Sênior",
+  "sub": "SP/RJ",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Medtour",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "3": 30.0,
+   "4": 40.0,
+   "5": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Medtour",
+  "sub": "12 de Outubro",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 180.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "3": 25.0,
+   "4": 25.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Plena Saúde",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 220.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0,
+   "3": 80.0,
+   "4": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Prevent Senior",
+  "sub": "0 a 18 anos",
+  "faixa": "",
+  "tipo": "reais",
+  "total": 50.0,
+  "regua": {
+   "1": 10.0,
+   "2": 10.0,
+   "3": 10.0,
+   "4": 10.0,
+   "5": 10.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Prevent Senior",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 170.0,
+  "regua": {
+   "1": 100.0,
+   "2": 35.0,
+   "3": 35.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Sagrada Família",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 25.0,
+   "3": 25.0,
+   "4": 25.0,
+   "5": 25.0,
+   "6": 20.0,
+   "7": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Samoc",
+  "sub": "0 a 8 anos",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 70.0,
+  "regua": {
+   "1": 70.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Samoc",
+  "sub": "09 a 58 anos",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 220.0,
+  "regua": {
+   "1": 100.0,
+   "2": 70.0,
+   "3": 30.0,
+   "4": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Samoc",
+  "sub": "59+",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 130.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Santa Casa de Mauá",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 35.0,
+   "3": 35.0,
+   "4": 35.0,
+   "5": 20.0,
+   "6": 15.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "São Cristóvão",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 200.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0,
+   "3": 25.0,
+   "4": 25.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "São Francisco",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 140.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0,
+   "3": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "São Miguel",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 260.0,
+  "regua": {
+   "1": 100.0,
+   "2": 35.0,
+   "3": 35.0,
+   "4": 45.0,
+   "5": 45.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Select",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 160.0,
+  "regua": {
+   "1": 100.0,
+   "2": 12.0,
+   "3": 12.0,
+   "4": 12.0,
+   "5": 12.0,
+   "6": 12.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Trasmontano",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 200.0,
+  "regua": {
+   "1": 100.0,
+   "2": 80.0,
+   "3": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "PF",
+  "empresa": "Unihosp",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 300.0,
+  "regua": {
+   "1": 100.0,
+   "2": 60.0,
+   "3": 60.0,
+   "4": 40.0,
+   "5": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PME",
+  "empresa": "Amil Dental",
+  "sub": "Win",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PME",
+  "empresa": "Assim Saúde",
+  "sub": "RJ",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PME",
+  "empresa": "Bradesco",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PME",
+  "empresa": "Care Plus",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PME",
+  "empresa": "Dental Par",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 200.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0,
+   "3": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PME",
+  "empresa": "Hapvida",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PME",
+  "empresa": "Odontoprev",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PME",
+  "empresa": "Mais Dental",
+  "sub": "I, II, III e IV",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 80.0,
+   "3": 40.0,
+   "4": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PME",
+  "empresa": "Mais Dental",
+  "sub": "Invisa mais",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 15.0,
+   "3": 15.0,
+   "4": 10.0,
+   "5": 10.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PME",
+  "empresa": "Omint",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PME",
+  "empresa": "Plena Odonto",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 70.0,
+   "3": 70.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PME",
+  "empresa": "Porto Seguro",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PME",
+  "empresa": "São Cristóvão",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 250.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PME",
+  "empresa": "SulAmérica",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PME",
+  "empresa": "Unimed Odonto",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PME",
+  "empresa": "Uniodonto",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 100.0,
+   "3": 40.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PF",
+  "empresa": "Amil Dental",
+  "sub": "Win/Kids",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 200.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0,
+   "3": 15.0,
+   "4": 15.0,
+   "5": 5.0,
+   "7": 5.0,
+   "9": 5.0,
+   "11": 5.0,
+   "13": 5.0,
+   "15": 5.0,
+   "17": 5.0,
+   "19": 5.0
+  },
+  "obs": "◆ 5% nas parc. 5/7/9/11/13/15/17/19"
+ },
+ {
+  "plano": "ODONTO_PF",
+  "empresa": "Assim Saúde",
+  "sub": "RJ",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PF",
+  "empresa": "Bradesco",
+  "sub": "Mensal",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 130.0,
+  "regua": {
+   "1": 100.0,
+   "2": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PF",
+  "empresa": "Bradesco",
+  "sub": "Anual",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 10.0,
+  "regua": {
+   "1": 10.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PF",
+  "empresa": "Dental Par",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 200.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0,
+   "3": 20.0,
+   "4": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PF",
+  "empresa": "Odontoplan",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 125.0,
+  "regua": {
+   "1": 100.0,
+   "2": 25.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PF",
+  "empresa": "Odontoprev",
+  "sub": "Mensal",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 100.0,
+  "regua": {
+   "1": 100.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PF",
+  "empresa": "Odontoprev",
+  "sub": "Anual",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 10.0,
+  "regua": {
+   "1": 10.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PF",
+  "empresa": "Odontoprev",
+  "sub": "Mensal (Mogidonto)",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 25.0,
+   "3": 25.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PF",
+  "empresa": "Hapvida",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PF",
+  "empresa": "Mais Dental",
+  "sub": "I, II, III e IV",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 210.0,
+  "regua": {
+   "1": 100.0,
+   "2": 40.0,
+   "3": 40.0,
+   "4": 15.0,
+   "5": 15.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PF",
+  "empresa": "Mais Dental",
+  "sub": "Ortho mais, Invisa mais e Dental Implante",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 150.0,
+  "regua": {
+   "1": 100.0,
+   "2": 15.0,
+   "3": 15.0,
+   "4": 10.0,
+   "5": 10.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PF",
+  "empresa": "Plena Odonto",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 240.0,
+  "regua": {
+   "1": 100.0,
+   "2": 60.0,
+   "3": 50.0,
+   "4": 30.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PF",
+  "empresa": "São Cristóvão",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 250.0,
+  "regua": {
+   "1": 100.0,
+   "2": 50.0,
+   "3": 50.0,
+   "4": 50.0
+  },
+  "obs": ""
+ },
+ {
+  "plano": "ODONTO_PF",
+  "empresa": "SulAmérica",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 140.0,
+  "regua": {
+   "1": 100.0,
+   "2": 5.0,
+   "3": 5.0,
+   "4": 5.0,
+   "5": 5.0,
+   "6": 5.0,
+   "7": 5.0,
+   "8": 5.0
+  },
+  "obs": "◆ 8ª: 5%"
+ },
+ {
+  "plano": "ODONTO_PF",
+  "empresa": "Uniodonto",
+  "sub": "",
+  "faixa": "",
+  "tipo": "perc",
+  "total": 120.0,
+  "regua": {
+   "1": 100.0,
+   "2": 20.0
+  },
+  "obs": ""
+ }
+]
