@@ -14404,12 +14404,97 @@ def bi():
     # Comissão por campanha/criativo é leitura de investimento em mídia — visão de
     # corretora, mesma régua do bruto/líquido nesta página.
     por_midia = _comissao_por_midia(conn, f_mes) if ea else []
+    # Antes de fechar a conexão — senão a consulta falha calada e a seção
+    # simplesmente não aparece, que foi exatamente o que aconteceu aqui.
+    saude = _bi_saude_dinheiro(conn, f_mes) if ea else None
     close_db(conn)
     return render_template('bi.html', por_mes=por_mes, por_operadora=por_operadora,
                            por_modalidade=por_modalidade, por_consultor=por_consultor,
                            media_comissao=media_comissao, pct_geral=pct_geral,
                            avisos_comissao=avisos_comissao, por_midia=por_midia,
+                           saude=saude,
                            f_mes=f_mes, meses_disponiveis=meses_disponiveis)
+
+
+def _bi_saude_dinheiro(conn, mes=None):
+    """Saúde do dinheiro: o que era esperado, o que entrou, o que escapou.
+
+    O BI respondia 'quanto vendemos'. Isso responde 'quanto realmente entra e
+    quanto escapa' — que é outra pergunta, e é a que dói. Três blocos:
+    recebimento (esperado x recebido), escape (estornos) e projeção (pela régua
+    real da operadora, não pela do consultor)."""
+    out = {'tem_dados': False}
+    try:
+        # ── 1. Recebimento: esperado x recebido, no líquido ──
+        conf = conferir_comissao(conn, competencia=mes or None, limite=5000)
+        r = conf['resumo']
+        out['esperado'] = r['total_esperado']
+        out['recebido'] = r['total_recebido']
+        out['retencoes'] = r['total_retencoes']
+        out['diferenca'] = r['total_diferenca']
+        out['linhas_ok'] = r['ok']
+        out['linhas_dif'] = r['divergentes']
+        out['linhas_sem'] = r['sem_extrato']
+        out['aderencia'] = round((r['total_recebido'] / r['total_esperado'] * 100), 1) \
+            if r['total_esperado'] else 0.0
+
+        # Onde o dinheiro escapa: operadoras com maior divergência acumulada
+        porop = {}
+        for l in conf['linhas']:
+            if l['situacao'] in ('ok', 'sem_extrato'):
+                continue
+            k = l['operadora'] or '—'
+            d = porop.setdefault(k, {'operadora': k, 'diferenca': 0.0, 'linhas': 0})
+            d['diferenca'] += l['diferenca']; d['linhas'] += 1
+        out['divergencia_operadora'] = sorted(
+            porop.values(), key=lambda x: x['diferenca'])[:8]
+
+        # ── 2. Escape: estornos aplicados ──
+        w, p = [], []
+        if mes:
+            w.append("substr(CAST(ea.criado_em AS TEXT),1,7) = ?"); p.append(mes)
+        onde = ('WHERE ' + ' AND '.join(w)) if w else ''
+        est = dict(conn.execute(f"""
+            SELECT COALESCE(SUM(ea.valor_estornado),0) total, COUNT(*) qtd
+              FROM estorno_aplicado ea {onde}""", tuple(p)).fetchone())
+        out['estorno_total'] = round(float(est['total'] or 0), 2)
+        out['estorno_qtd'] = int(est['qtd'] or 0)
+        out['estorno_operadora'] = [dict(x) for x in conn.execute(f"""
+            SELECT p.adm_operadora operadora, COALESCE(SUM(ea.valor_estornado),0) total,
+                   COUNT(*) qtd
+              FROM estorno_aplicado ea JOIN propostas p ON p.id = ea.proposta_id
+              {onde}
+             GROUP BY p.adm_operadora ORDER BY total DESC LIMIT 6""", tuple(p)).fetchall()]
+        # Taxa de escape: quanto do que entrou voltou pela porta dos fundos
+        out['taxa_estorno'] = round((out['estorno_total'] / out['recebido'] * 100), 1) \
+            if out['recebido'] else 0.0
+
+        # ── 3. Projeção: o que ainda vai entrar, mês a mês, pela régua real ──
+        hoje = datetime.now(TZ_SP).strftime('%Y-%m')
+        out['projecao'] = [dict(x) for x in conn.execute("""
+            SELECT pa.competencia mes,
+                   COALESCE(SUM(pa.valor_corretora),0) corretora,
+                   COALESCE(SUM(pa.valor),0) consultor,
+                   COUNT(*) qtd
+              FROM parcelas pa JOIN propostas p ON p.id = pa.proposta_id
+             WHERE pa.competencia >= ?
+               AND pa.status NOT IN ('Pago ao corretor','Cancelada / Estornada')
+               AND p.status <> 'Excluída' AND COALESCE(p.estornada,0) = 0
+             GROUP BY pa.competencia ORDER BY pa.competencia LIMIT 8""", (hoje,)).fetchall()]
+        out['projecao_total'] = round(sum(float(x['corretora'] or 0) for x in out['projecao']), 2)
+
+        # ── 4. Régua cadastrada? Sem isso a projeção é chute ──
+        tot_op = conn.execute("SELECT COUNT(*) c FROM recebimento").fetchone()['c']
+        com_regua = conn.execute("""SELECT COUNT(*) c FROM recebimento
+            WHERE regua_json IS NOT NULL AND regua_json <> '' AND regua_json <> '[]'""").fetchone()['c']
+        out['op_total'] = tot_op
+        out['op_com_regua'] = com_regua
+        out['cobertura_regua'] = round((com_regua / tot_op * 100), 0) if tot_op else 0
+
+        out['tem_dados'] = True
+    except Exception as e:
+        app.logger.warning(f"[BI] saude do dinheiro falhou: {e}")
+    return out
 
 # ─── USUÁRIOS ────────────────────────────────────────────────────────────────────
 @app.route('/usuarios')
@@ -15810,6 +15895,10 @@ def financeiro():
     conferencia = _conferencia_mes(conn, mes)
     previsao = _previsao_meses(conn, mes)
     regras_faltando = _gestor_regras_faltando(conn)
+    # Pergunta DIFERENTE da conferência acima: aquela compara o previsto com o
+    # status interno ("marcamos como recebido?"); esta compara com o extrato da
+    # Affinity, no líquido ("a administradora pagou o que devia?").
+    saude = _bi_saude_dinheiro(conn, mes)
     # MESMA função que o Fluxo de Caixa chama, de propósito: enquanto cada tela
     # somava da sua própria consulta, as duas mostravam números diferentes pro
     # mesmo dinheiro e não havia como saber qual estava certa.
@@ -15844,7 +15933,7 @@ def financeiro():
         saldo=saldo, dre=dre, saldo_socios=saldo_socios_lista, lancamento_focus=lancamento_focus,
         centros_custo=CENTROS_CUSTO, tipos_lancamento=TIPOS_LANCAMENTO,
         canais_midia=CANAIS_MIDIA, status_lancamento=STATUS_LANCAMENTO,
-        conferencia=conferencia, previsao=previsao, regras_faltando=regras_faltando,
+        conferencia=conferencia, previsao=previsao, regras_faltando=regras_faltando, saude=saude,
         fin_visao=fin_visao,
         calendario=calendario, cal_total=cal_total, cal_rotulo=_cal_rotulo,
         cal_livre=_cal_livre,

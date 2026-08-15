@@ -20,6 +20,159 @@
 
 <div class="page">
 
+  {% if saude and saude.tem_dados %}
+  {# ═══ SAÚDE DO DINHEIRO ═══
+     O resto desta tela responde "quanto vendemos". Isto responde "quanto
+     realmente entra e quanto escapa" — que é outra pergunta, e é a que dói.
+     Vem primeiro de propósito: produção alta com recebimento furado é um
+     problema que só aparece quando alguém olha o segundo número. #}
+  <style>
+    .sd-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(178px,1fr)); gap:12px; padding:0 16px 16px; }
+    .sd-t { background:var(--panel-2); border:1px solid var(--borda); border-left:3px solid var(--borda-2);
+            border-radius:11px; padding:13px 15px; }
+    .sd-t .l { font-size:9.5px; font-weight:700; letter-spacing:.5px; text-transform:uppercase;
+               color:var(--cinza-2); margin-bottom:5px; }
+    .sd-t .v { font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; color:var(--texto);
+               line-height:1.15; }
+    .sd-t .n { display:block; font-size:10.5px; color:var(--cinza); margin-top:4px; line-height:1.45; }
+    /* Cor por ESTADO, não por série: entra=bom, escapa=ruim, atenção=amarelo. */
+    .sd-t.bom   { border-left-color:var(--verde); }  .sd-t.bom .v   { color:var(--verde); }
+    .sd-t.ruim  { border-left-color:var(--erro); }   .sd-t.ruim .v  { color:var(--erro); }
+    .sd-t.aten  { border-left-color:var(--amarelo); }.sd-t.aten .v  { color:var(--amarelo); }
+    .sd-t.neutro{ border-left-color:var(--azul); }
+    .sd-barra { height:6px; background:var(--panel); border-radius:3px; overflow:hidden; margin-top:8px; }
+    .sd-barra i { display:block; height:100%; background:var(--verde); border-radius:3px; }
+    .sd-nota { padding:0 16px 16px; font-size:12px; color:var(--cinza); line-height:1.6; }
+    .sd-nota b { color:var(--texto); }
+    .sd-alerta { margin:0 16px 16px; background:rgba(250,204,21,.08); border:1px solid rgba(250,204,21,.28);
+                 border-radius:10px; padding:11px 14px; font-size:12.5px; color:var(--texto); line-height:1.6; }
+    .sd-alerta a { color:var(--amarelo); font-weight:600; }
+  </style>
+
+  <div class="card">
+    <div class="card-header"><h3>Saúde do dinheiro</h3></div>
+    <div class="sd-nota">
+      Produção diz quanto foi vendido. Isto diz <b>quanto entrou de verdade</b> e
+      <b>quanto voltou pela porta dos fundos</b>. Confere no líquido — o valor que cai na conta.
+    </div>
+
+    <div class="sd-grid">
+      <div class="sd-t neutro">
+        <div class="l">Esperado</div>
+        <span class="v">{{ saude.esperado|moeda }}</span>
+        <span class="n">pela régua das operadoras</span>
+      </div>
+      {# Sem esperado não há o que julgar: ausência de dado não é resultado ruim. #}
+      <div class="sd-t {% if not saude.esperado %}neutro{% elif saude.aderencia >= 99 %}bom{% elif saude.aderencia >= 90 %}aten{% else %}ruim{% endif %}">
+        <div class="l">Recebido</div>
+        <span class="v">{{ saude.recebido|moeda }}</span>
+        <span class="n">{% if saude.esperado %}{{ saude.aderencia }}% do esperado{% else %}nada esperado no período{% endif %}</span>
+        {% if saude.esperado %}<div class="sd-barra"><i style="width:{{ [saude.aderencia, 100]|min }}%"></i></div>{% endif %}
+      </div>
+      <div class="sd-t neutro">
+        <div class="l">Retenções</div>
+        <span class="v">{{ saude.retencoes|moeda }}</span>
+        <span class="n">taxa, desp. adm. e ISS — não é erro</span>
+      </div>
+      <div class="sd-t {% if saude.diferenca < -0.05 %}ruim{% elif saude.diferenca > 0.05 %}aten{% else %}bom{% endif %}">
+        <div class="l">Divergência</div>
+        <span class="v">{{ saude.diferenca|moeda }}</span>
+        <span class="n">{{ saude.linhas_dif }} linha(s) fora; {{ saude.linhas_ok }} conferem</span>
+      </div>
+      {# A cor segue o VALOR que escapou, não a taxa: com recebido zerado a taxa
+         dá 0% e o cartão ficava verde em cima de dinheiro perdido. #}
+      <div class="sd-t {% if not saude.estorno_total %}bom{% elif saude.taxa_estorno >= 5 or not saude.recebido %}ruim{% else %}aten{% endif %}">
+        <div class="l">Escapou por estorno</div>
+        <span class="v">{{ saude.estorno_total|moeda }}</span>
+        <span class="n">{% if saude.recebido %}{{ saude.taxa_estorno }}% do recebido · {% endif %}{{ saude.estorno_qtd }} caso(s)</span>
+      </div>
+      <div class="sd-t neutro">
+        <div class="l">Ainda vai entrar</div>
+        <span class="v">{{ saude.projecao_total|moeda }}</span>
+        <span class="n">próximos meses, parcelas em aberto</span>
+      </div>
+    </div>
+
+    {% if saude.cobertura_regua < 100 %}
+    <div class="sd-alerta">
+      <b>{{ saude.op_com_regua }} de {{ saude.op_total }}</b> configurações de operadora têm a régua de
+      recebimento preenchida ({{ saude.cobertura_regua }}%). Sem régua, o sistema não sabe
+      <b>em que mês</b> a operadora paga — e a projeção acima vira chute para essas.
+      Preencher em <a href="/operadoras">Operadoras</a>.
+    </div>
+    {% endif %}
+
+    {% if saude.divergencia_operadora %}
+    <div style="padding:0 16px 6px;font-size:12.5px;color:var(--cinza);line-height:1.55;">
+      <b style="color:var(--texto);">Onde o dinheiro escapa.</b> Operadoras com maior diferença
+      acumulada entre o esperado e o que a Affinity pagou, no período.
+    </div>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Operadora</th><th>Linhas fora</th><th>Diferença</th></tr></thead>
+        <tbody>
+          {% for o in saude.divergencia_operadora %}
+          <tr>
+            <td><strong>{{ o.operadora }}</strong></td>
+            <td class="td-mono">{{ o.linhas }}</td>
+            <td class="td-mono" style="color:{% if o.diferenca < 0 %}var(--erro){% else %}var(--amarelo){% endif %};font-weight:600;">{{ o.diferenca|moeda }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if saude.estorno_operadora %}
+    <div style="padding:14px 16px 6px;font-size:12.5px;color:var(--cinza);line-height:1.55;">
+      <b style="color:var(--texto);">Estornos por operadora.</b> Quanto foi cobrado de volta dos consultores.
+    </div>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Operadora</th><th>Casos</th><th>Valor estornado</th></tr></thead>
+        <tbody>
+          {% for o in saude.estorno_operadora %}
+          <tr>
+            <td><strong>{{ o.operadora or '—' }}</strong></td>
+            <td class="td-mono">{{ o.qtd }}</td>
+            <td class="td-mono" style="color:var(--erro);font-weight:600;">{{ o.total|moeda }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if saude.projecao %}
+    <div style="padding:14px 16px 6px;font-size:12.5px;color:var(--cinza);line-height:1.55;">
+      <b style="color:var(--texto);">O que ainda entra, mês a mês.</b> Parcelas em aberto pela régua real
+      da operadora — não pela do consultor.
+    </div>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Competência</th><th>Parcelas</th><th>Entra (corretora)</th><th>Sai (consultor)</th></tr></thead>
+        <tbody>
+          {% for m in saude.projecao %}
+          <tr>
+            <td><strong>{{ m.mes }}</strong></td>
+            <td class="td-mono">{{ m.qtd }}</td>
+            <td class="td-mono" style="color:var(--verde);font-weight:600;">{{ m.corretora|moeda }}</td>
+            <td class="td-mono" style="color:var(--erro);">{{ m.consultor|moeda }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <div class="sd-nota" style="padding-top:12px;">
+      {% if saude.linhas_sem %}<b>{{ saude.linhas_sem }}</b> parcela(s) ainda não apareceram em nenhum extrato —
+      não contam como divergência até chegarem. {% endif %}
+      Detalhe linha a linha em <a href="/comissoes/conferencia" style="color:var(--azul);">Conferência</a>.
+    </div>
+  </div>
+  {% endif %}
+
   {% if por_midia %}
   <div class="card">
     <div class="card-header"><h3>Comissão por campanha e criativo</h3></div>

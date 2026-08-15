@@ -368,11 +368,40 @@
        descobrir de quem era. Foi o que aconteceu com a comissão inflada: a
        resposta só veio por auditoria fora do sistema.
        Quem não recebeu vem primeiro: a tela existe pra achar o que falta. #}
+    {# ── Contra o EXTRATO da Affinity ──
+       Pergunta diferente do painel abaixo. Aquele compara o previsto com o
+       nosso status interno ("marcamos como recebido?"); este compara com o que
+       a administradora efetivamente pagou, no líquido. Marcar como recebido
+       não é o mesmo que ter recebido — a diferença entre as duas perguntas é
+       onde o dinheiro some. #}
+    {% if saude and saude.tem_dados and (saude.diferenca or saude.estorno_total or saude.linhas_dif) %}
+    <div class="card conf" style="margin-bottom:14px;">
+      <div class="conf-topo">
+        <div>
+          <b>O que não fechou</b>
+          <div class="conf-sub">Divergência contra o extrato da Affinity, no líquido, e o que voltou por estorno.</div>
+        </div>
+        <div class="conf-nums">
+          <div class="cn destaque"><span>Divergência</span>
+            <b class="{{ 'neg' if saude.diferenca < -0.005 else 'pos' }}">{{ saude.diferenca|moeda }}</b></div>
+          {% if saude.estorno_total %}
+          <div class="cn"><span>Escapou por estorno</span><b class="neg">{{ saude.estorno_total|moeda }}</b></div>
+          {% endif %}
+        </div>
+      </div>
+      <div style="padding:0 16px 14px;font-size:12px;color:var(--cinza);line-height:1.6;">
+        {{ saude.linhas_dif }} linha(s) fora, {{ saude.linhas_ok }} conferem{% if saude.linhas_sem %},
+        {{ saude.linhas_sem }} ainda sem extrato{% endif %}. Retenções não contam como erro.
+        Detalhe em <a href="/comissoes/conferencia?competencia={{ mes }}" style="color:var(--azul);font-weight:600;">Conferência</a>.
+      </div>
+    </div>
+    {% endif %}
+
     <div class="card conf" style="margin-bottom:14px;">
       <div class="conf-topo">
         <div>
           <b>Conferência de {{ mes }}</b>
-          <div class="conf-sub">O que era pra entrar, e o que entrou de fato.</div>
+          <div class="conf-sub">O que era pra entrar, e o que entrou de fato, pelo nosso status interno.</div>
         </div>
         <div class="conf-nums">
           <div class="cn"><span>Previsto</span><b>{{ conferencia.prev|moeda }}</b></div>
