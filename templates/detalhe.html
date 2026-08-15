@@ -899,11 +899,42 @@
 </div>
 
 <div class="modal-overlay" id="modal-estorno">
-  <div class="modal" style="max-width:420px;">
-    <h3>Confirmar estorno</h3>
-    <p style="font-size:13px;color:var(--cinza);margin-bottom:20px;line-height:1.6;">As parcelas pendentes serão canceladas. Não pode ser desfeito.</p>
+  <div class="modal" style="max-width:540px;">
+    <h3>Estornar proposta</h3>
+    <p style="font-size:13px;color:var(--cinza);margin:0 0 14px;line-height:1.6;">
+      As parcelas pendentes serão canceladas e o valor devido pelo consultor será
+      lançado como débito, abatido nas próximas comissões. Não pode ser desfeito.
+    </p>
+
+    <div id="est-carregando" style="font-size:13px;color:var(--cinza-2);padding:16px 0;">Calculando o estorno...</div>
+
+    <div id="est-conta" hidden style="background:var(--panel-2);border:1px solid var(--borda);
+         border-radius:10px;padding:14px 16px;margin-bottom:14px;">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);
+                  font-weight:700;margin-bottom:6px;">A cobrar do consultor</div>
+      <div id="est-valor" style="font-size:26px;font-weight:700;color:var(--rosa);
+           font-variant-numeric:tabular-nums;line-height:1.1;">—</div>
+      <div id="est-memoria" style="font-size:12px;color:var(--cinza);line-height:1.65;margin-top:10px;"></div>
+    </div>
+
+    <div id="est-aviso" hidden style="background:rgba(250,204,21,.08);border:1px solid rgba(250,204,21,.3);
+         border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:12.5px;
+         color:var(--texto);line-height:1.6;"></div>
+
+    <details id="est-ajuste" hidden style="margin-bottom:14px;">
+      <summary style="font-size:12px;color:var(--cinza);cursor:pointer;">Cobrar valor diferente do calculado</summary>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+        <input id="est-valor-manual" type="text" placeholder="Valor a cobrar"
+               style="flex:0 0 140px;background:var(--panel-2);border:1px solid var(--borda);
+                      border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;">
+        <input id="est-justificativa" type="text" placeholder="Justificativa (obrigatória)"
+               style="flex:1;min-width:180px;background:var(--panel-2);border:1px solid var(--borda);
+                      border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;">
+      </div>
+    </details>
+
     <div style="display:flex;gap:10px;">
-      <button class="btn" style="flex:1;background:var(--rosa);" onclick="confirmarEstorno()">Confirmar estorno</button>
+      <button class="btn" id="est-btn" style="flex:1;background:var(--rosa);" onclick="confirmarEstorno()" disabled>Confirmar estorno</button>
       <button class="btn-outline" onclick="document.getElementById('modal-estorno').classList.remove('open')">Cancelar</button>
     </div>
   </div>
@@ -1047,7 +1078,11 @@ if(btMigrarRegra){btMigrarRegra.addEventListener('click',async()=>{
   }catch(e){msg.textContent='Não foi possível migrar a venda. Nenhum valor foi alterado.';btMigrarRegra.disabled=false;btMigrarRegra.textContent='Migrar esta venda para a regra de sócio/gestor';}
 });}
 const PROP_ID = {{ p.id }};
-const DEPS_JSON = {{ p.dependentes_json|tojson if p.dependentes_json else '"[]"' }};
+{# O `else` antigo devolvia a string literal '"[]"', que o autoescape do Jinja
+   virava &#34;[]&#34; — e isso quebrava TODO este bloco de script em qualquer
+   proposta sem dependentes. `|tojson` já emite JS válido e seguro nos dois
+   casos, então o ramo tem que passar por ele também. #}
+const DEPS_JSON = {{ (p.dependentes_json or '[]')|tojson }};
 const REP = {{ p.repique_json|tojson if p.repique_json else 'null' }};
 let ETIQUETAS_MARCADAS = [];
 
@@ -1232,11 +1267,66 @@ async function excluirAnexo(tipo,nome){
 }
 
 // ── ESTORNO / EXCLUSÃO ──
-function abrirEstorno(){document.getElementById('modal-estorno').classList.add('open');}
+// Estorno: mostra a CONTA antes de cobrar. Ninguém confirma cobrança de
+// comissão às cegas — e a memória de cálculo é o que se mostra ao consultor
+// quando ele contestar.
+function abrirEstorno(){
+  const m = document.getElementById('modal-estorno');
+  m.classList.add('open');
+  document.getElementById('est-carregando').hidden = false;
+  document.getElementById('est-conta').hidden = true;
+  document.getElementById('est-aviso').hidden = true;
+  document.getElementById('est-ajuste').hidden = true;
+  document.getElementById('est-btn').disabled = true;
+
+  fetch(`/proposta/${PROP_ID}/estorno/previa`).then(r=>r.json()).then(d=>{
+    document.getElementById('est-carregando').hidden = true;
+    const btn = document.getElementById('est-btn');
+    if (d.ok) {
+      document.getElementById('est-conta').hidden = false;
+      document.getElementById('est-ajuste').hidden = false;
+      document.getElementById('est-valor').textContent = (d.valor||0)
+        .toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+      document.getElementById('est-memoria').textContent = d.memoria || '';
+      btn.disabled = false;
+      btn.textContent = (d.valor > 0) ? 'Confirmar e cobrar' : 'Confirmar estorno (sem cobrança)';
+    } else {
+      const av = document.getElementById('est-aviso');
+      av.hidden = false;
+      av.textContent = d.memoria || d.erro || 'Não foi possível calcular o estorno.';
+      // Sem regra ou caso manual: dá pra estornar, mas só informando o valor à mão.
+      document.getElementById('est-ajuste').hidden = false;
+      document.getElementById('est-ajuste').open = true;
+      btn.disabled = false;
+      btn.textContent = 'Estornar informando o valor';
+    }
+  }).catch(()=>{
+    document.getElementById('est-carregando').hidden = true;
+    const av = document.getElementById('est-aviso');
+    av.hidden = false; av.textContent = 'Erro ao calcular. Tente de novo.';
+  });
+}
+
 async function confirmarEstorno(){
-  try{const res=await fetch(`/proposta/${PROP_ID}/estornar`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});const data=await res.json();
-  if(data.ok){document.getElementById('modal-estorno').classList.remove('open');toast(data.msg||'Estorno aplicado','ok');setTimeout(()=>location.reload(),1400);}
-  else toast(data.msg||'Erro','err');}catch(e){toast('Erro de conexão','err');}
+  const btn = document.getElementById('est-btn');
+  const vm = (document.getElementById('est-valor-manual').value||'').trim();
+  const just = (document.getElementById('est-justificativa').value||'').trim();
+  const corpo = {};
+  if (vm) { corpo.valor = vm; corpo.justificativa = just; }
+  btn.disabled = true; const rot = btn.textContent; btn.textContent = 'Aplicando...';
+  try{
+    const res = await fetch(`/proposta/${PROP_ID}/estorno/aplicar`,
+      {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(corpo)});
+    const data = await res.json();
+    if(data.ok){
+      document.getElementById('modal-estorno').classList.remove('open');
+      toast('Estorno aplicado. Débito de ' + (data.valor||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}) + ' lançado.','ok');
+      setTimeout(()=>location.reload(),1600);
+    } else {
+      btn.disabled = false; btn.textContent = rot;
+      toast(data.erro || data.msg || 'Erro', 'err');
+    }
+  }catch(e){ btn.disabled=false; btn.textContent=rot; toast('Erro de conexão','err'); }
 }
 function abrirExclusao(){document.getElementById('modal-exclusao').classList.add('open');}
 async function confirmarExclusao(){

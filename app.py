@@ -12999,7 +12999,12 @@ def fluxo_caixa():
     # nenhum: os dois paineis contavam historias diferentes, e este e o que
     # decide o dinheiro que sai. Mesmo predicado usado em todo o resto do
     # arquivo (`_conferencia_mes`, `financeiro()`, etc).
-    _AVIVA = "p.status <> 'Excluída' AND COALESCE(p.estornada,0)=0"
+    # Proposta estornada some do fluxo — MENOS a linha do estorno em si. Se ela
+    # também sumisse, o débito que o consultor precisa devolver ficaria
+    # invisível justamente na tela onde o dinheiro dele é somado, e o abatimento
+    # nunca aconteceria. Todas as consultas abaixo já usam o alias `pa`.
+    _AVIVA = ("p.status <> 'Excluída' AND (COALESCE(p.estornada,0)=0"
+              " OR COALESCE(pa.tipo_origem,'')='estorno')")
 
     if eh_admin:
         # Totais por status
@@ -16771,6 +16776,102 @@ def api_comissao_conferencia():
                           limite=limite)
     close_db(conn)
     return jsonify(r)
+
+
+@app.route('/proposta/<int:pid>/estorno/aplicar', methods=['POST'])
+@login_required
+@admin_required
+def estorno_aplicar(pid):
+    """Confirma a cobrança do estorno: gera o débito e estorna a proposta.
+
+    O débito é uma parcela NEGATIVA com tipo_origem='estorno'. Assim ele entra
+    no mesmo lugar onde a comissão do consultor é somada e abate sozinho as
+    próximas — em vez de virar um controle paralelo que alguém precisa lembrar
+    de conferir."""
+    d = request.json or {}
+    conn = db()
+
+    ja = conn.execute("SELECT id FROM estorno_aplicado WHERE proposta_id=? AND status<>'cancelado'",
+                      (pid,)).fetchone()
+    if ja:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Esta proposta já tem estorno aplicado.'}), 409
+
+    calc = calcular_estorno(conn, pid, escopo=(d.get('escopo') or ''))
+    try:
+        v_manual = float(str(d.get('valor')).replace('.', '').replace(',', '.')) \
+            if d.get('valor') not in (None, '') else None
+    except (TypeError, ValueError):
+        v_manual = None
+    just = (d.get('justificativa') or '').strip()
+
+    if not calc.get('ok'):
+        # Sem regra cadastrada ou caso proporcional (Prevent Senior): dá pra
+        # estornar, mas só com valor informado à mão E justificativa. O sistema
+        # não inventa percentual, e ninguém cobra sem dizer por quê.
+        if v_manual is None:
+            close_db(conn)
+            return jsonify({'ok': False, 'erro': calc.get('memoria') or 'Não foi possível calcular.',
+                            'sem_regra': calc.get('sem_regra'), 'manual': calc.get('manual')}), 400
+        if not just:
+            close_db(conn)
+            return jsonify({'ok': False,
+                            'erro': 'Sem regra cadastrada, o valor informado precisa de justificativa.'}), 400
+        valor = v_manual
+        memoria = (f"VALOR INFORMADO MANUALMENTE: {_moeda(v_manual)}. Motivo: {just}. "
+                   f"Contexto: {calc.get('memoria') or ''}").strip()
+    else:
+        # Valor pode vir ajustado pelo admin (caso negociado), mas nunca sem
+        # justificativa: o calculado e o cobrado ficam os dois no registro.
+        valor = calc.get('valor') or 0.0
+        memoria = calc.get('memoria') or ''
+        if v_manual is not None and abs(v_manual - valor) > 0.01:
+            if not just:
+                close_db(conn)
+                return jsonify({'ok': False, 'erro': 'Para cobrar valor diferente do calculado, informe a justificativa.'}), 400
+            memoria += f" AJUSTE MANUAL: cobrado {_moeda(v_manual)} em vez de {_moeda(valor)}. Motivo: {just}"
+            valor = v_manual
+
+    p = dict(conn.execute("SELECT usuario_id, razao_social FROM propostas WHERE id=?", (pid,)).fetchone() or {})
+    quem = session.get('nome', 'admin')
+
+    if valor > 0:
+        comp = datetime.now(TZ_SP).strftime('%Y-%m')
+        prox = (conn.execute("SELECT COALESCE(MAX(numero),0)+1 n FROM parcelas WHERE proposta_id=?",
+                             (pid,)).fetchone()['n'])
+        conn.execute("""INSERT INTO parcelas
+                (proposta_id,numero,percentual,valor,valor_corretora,perc_cliente,
+                 data_prevista,status,competencia,mensalidade_ref,tipo_origem)
+                VALUES (?,?,0,?,0,0,?, 'Liberado para o corretor', ?, 0, 'estorno')""",
+            (pid, prox, -abs(valor), datetime.now(TZ_SP).strftime('%Y-%m-%d'), comp))
+
+    conn.execute("""INSERT INTO estorno_aplicado
+            (proposta_id,regra_id,usuario_id,parcelas_pagas,percentual,base_valor,
+             valor_estornado,memoria,status,criado_por)
+            VALUES (?,?,?,?,?,?,?,?, 'aplicado', ?)""",
+        (pid, (calc.get('regra') or {}).get('id'), p.get('usuario_id'),
+         calc.get('parcelas_pagas'), calc.get('percentual'), calc.get('base_valor'),
+         valor, memoria, quem))
+
+    canceladas = conn.execute("""UPDATE parcelas SET status='Cancelada / Estornada'
+        WHERE proposta_id=? AND status IN ('Pendente de receber','Bloqueado - Falta Comprovante')""",
+        (pid,)).rowcount
+    info = (f"Estorno confirmado por {quem} em {datetime.now(TZ_SP).strftime('%d/%m/%Y %H:%M')}. "
+            f"{canceladas} parcela(s) cancelada(s). Débito de {_moeda(valor)} lançado ao consultor. {memoria}")
+    conn.execute("UPDATE propostas SET estornada=1, estorno_info=? WHERE id=?", (info, pid))
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+        VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], quem, 'estorno', info, datetime.now(TZ_SP)))
+    conn.commit(); close_db(conn)
+
+    if p.get('usuario_id') and valor > 0:
+        try:
+            _notificar(p['usuario_id'], 'comissao', 'Estorno lançado',
+                       f"{p.get('razao_social') or 'Proposta'} foi estornada. "
+                       f"Débito de {_moeda(valor)} será abatido das próximas comissões.",
+                       f"/proposta/{pid}")
+        except Exception:
+            pass
+    return jsonify({'ok': True, 'valor': valor, 'canceladas': canceladas, 'memoria': memoria})
 
 
 @app.route('/proposta/<int:pid>/estorno/previa')
