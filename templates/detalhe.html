@@ -409,6 +409,11 @@
         <div class="card-header">
           <h3>Dados da proposta</h3>
         </div>
+        {# O cartao SUS entra na lista abaixo como campo, junto de CPF e CNPJ:
+           e um numero de documento do titular, e quem procura documento procura
+           nesta relacao, nao no bloco de beneficiarios.
+           O comentario mora AQUI FORA de proposito — dentro da expressao do
+           {% for %} o Jinja nao aceita {# #} e a tela inteira da 500. #}
         <div class="card-body dados-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
           {% for label, valor in [
             ('Consultor', p.consultor), ('Quem subiu', p.quem_subiu),
@@ -418,6 +423,7 @@
             ('Operadora', p.adm_operadora), ('Produto', p.produto),
             ('Vencimento 1ª', p.vencimento_1), ('Previsão 1ª', p.previsao_1),
             ('Status da venda', p.venda_status), ('Nasc. Titular', p.data_nasc_titular),
+            ('Cartão SUS', p.cns_titular|cns_fmt if p.cns_titular else ''),
           ] %}{% if valor %}
           <div>
             <div style="font-size:10px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">{{ label }}</div>
@@ -460,6 +466,8 @@
                 <span class="cns-num">{{ p.cns_titular|cns_fmt }}</span>
                 {% if p.cpf_titular and p.data_nasc_titular %}
                 <a class="cns-btn" href="/cartao-sus.pdf?cpf={{ p.cpf_titular|urlencode }}&nascimento={{ p.data_nasc_titular|urlencode }}">Baixar PDF</a>
+                <button type="button" class="cns-btn" onclick="anexarCartaoSus(this)"
+                        data-cpf="{{ p.cpf_titular }}" data-nasc="{{ p.data_nasc_titular }}">Anexar na proposta</button>
                 {% endif %}
               </div>
               {% endif %}
@@ -1097,6 +1105,32 @@ const DEPS_JSON = {{ (p.dependentes_json or '[]')|tojson }};
 const REP = {{ p.repique_json|tojson if p.repique_json else 'null' }};
 let ETIQUETAS_MARCADAS = [];
 
+// Anexa o cartão SUS da pessoa na lista de documentos da proposta.
+// O servidor é idempotente: clicar duas vezes não gera dois arquivos, ele
+// responde que já existia. Por isso o botão pode dizer a verdade nos dois casos.
+async function anexarCartaoSus(btn) {
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Anexando...';
+  let j = null;
+  try {
+    const r = await fetch(location.pathname.replace(/\/$/, '') + '/cartao-sus/anexar', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({cpf: btn.dataset.cpf, nascimento: btn.dataset.nasc})
+    });
+    j = await r.json();
+  } catch (e) { j = null; }
+  if (j && j.ok) {
+    btn.textContent = j.ja_existia ? 'Já estava anexado' : 'Anexado';
+    // Recarrega pra lista de documentos mostrar o arquivo novo — sem isso o
+    // consultor anexa e não vê nada aparecer, e anexa de novo.
+    if (!j.ja_existia) setTimeout(() => location.reload(), 900);
+    else setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 2500);
+    return;
+  }
+  btn.disabled = false; btn.textContent = orig;
+  toast((j && j.erro) || 'Não consegui anexar agora. Tente de novo em instantes.', 'err');
+}
+
 // O titular sai por filtro do servidor (data_br) e o dependente é desenhado
 // aqui: sem isto o mesmo cartão mostrava 08/01/1972 numa linha e 2010-05-02 na
 // de baixo.
@@ -1140,7 +1174,8 @@ document.addEventListener('DOMContentLoaded', () => {
               ${d.cns ? `<div class="cns-linha">
                 <span class="cns-rot">Cartão SUS</span>
                 <span class="cns-num">${_cnsFmt(d.cns)}</span>
-                ${d.cpf && d.nasc ? `<a class="cns-btn" href="/cartao-sus.pdf?cpf=${encodeURIComponent(d.cpf)}&nascimento=${encodeURIComponent(d.nasc)}">Baixar PDF</a>` : ''}
+                ${d.cpf && d.nasc ? `<a class="cns-btn" href="/cartao-sus.pdf?cpf=${encodeURIComponent(d.cpf)}&nascimento=${encodeURIComponent(d.nasc)}">Baixar PDF</a>
+                <button type="button" class="cns-btn" onclick="anexarCartaoSus(this)" data-cpf="${d.cpf}" data-nasc="${d.nasc}">Anexar na proposta</button>` : ''}
               </div>` : ''}
             </div>
           </div>`;

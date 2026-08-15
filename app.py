@@ -21922,6 +21922,85 @@ def api_whatsapp_cartao_sus_pdf():
         'Content-Disposition': 'attachment; filename="' + _cns_nome_arquivo(dados) + '"'}))
 
 
+@app.route('/proposta/<int:pid>/cartao-sus/anexar', methods=['POST'])
+@login_required
+def anexar_cartao_sus(pid):
+    """Gera o PDF do cartão SUS e guarda na lista de documentos da proposta.
+
+    É um clique, e não algo automático ao salvar, por dois motivos medidos: a
+    consulta sai pra um sistema do governo e a gravação vai pro R2 — pendurar
+    isso no /salvar-proposta faria o consultor esperar por N beneficiários toda
+    vez que corrige uma vírgula. E é idempotente: se o cartão daquela pessoa já
+    está anexado, não cria um segundo."""
+    conn = db()
+    p = conn.execute("SELECT usuario_id, anexos FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Proposta não encontrada."}), 404
+    if session['perfil'] != 'admin' and p['usuario_id'] != session['user_id']:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Sem permissão nesta proposta."}), 403
+
+    d = request.get_json(silent=True) or {}
+    status, dados = _consultar_cns(d.get('cpf', ''), d.get('nascimento', ''))
+    if status != 'ok':
+        close_db(conn)
+        return jsonify({"ok": False, "motivo": status, "erro": _CNS_MSG[status]}), \
+               (400 if status == 'invalido' else (404 if status == 'nao_encontrado' else 502))
+
+    try:
+        anexos = json.loads(p['anexos'] or '[]')
+    except Exception:
+        anexos = []
+    # O CNS no nome do arquivo é o que torna a checagem confiável: dois
+    # beneficiários podem ter nomes parecidos, o número não se repete.
+    marca = f"CARTAO-SUS_{dados['cns']}"
+    ja = next((a for a in anexos if marca in str(a)), None)
+    if ja:
+        close_db(conn)
+        return jsonify({"ok": True, "ja_existia": True, "nome": ja,
+                        "msg": "O cartão SUS desta pessoa já está nos anexos."})
+
+    try:
+        pdf = _pdf_cartao_sus(dados)
+    except Exception as e:
+        close_db(conn)
+        app.logger.warning(f"[CNS] falha ao gerar PDF pra anexar (proposta {pid}): {e}")
+        return jsonify({"ok": False, "erro": "Não consegui gerar o PDF agora."}), 500
+
+    import io as _io
+    nome = f"{marca}_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_" \
+           f"{_sanitizar_filename((dados.get('nome') or 'beneficiario') + '.pdf')}"
+    resultado = upload_arquivo_r2(_io.BytesIO(pdf), f"propostas/{pid}/documentos/{nome}")
+    if not resultado.get('ok'):
+        close_db(conn)
+        app.logger.error(f"[CNS] falha ao gravar anexo da proposta {pid}: {resultado.get('erro')}")
+        return jsonify({"ok": False, "erro": "Não consegui salvar o arquivo agora."}), 500
+
+    storage_tipo = resultado.get('storage', 'local')
+    anexos.append(nome)
+    conn.execute("UPDATE propostas SET anexos=? WHERE id=?", (json.dumps(anexos), pid))
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+        VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome', 'admin'),
+        'documento', f"Cartão SUS anexado ({dados.get('nome','')} — CNS {dados['cns']}): "
+                     f"{nome} ({storage_tipo})", datetime.now(TZ_SP)))
+    conn.commit()
+    close_db(conn)
+    return jsonify({"ok": True, "nome": nome, "storage": storage_tipo,
+                    "msg": "Cartão SUS anexado na proposta."})
+
+
+@app.route('/cartao-sus')
+@login_required
+def cartao_sus():
+    """Consulta avulsa do cartão SUS, fora do fluxo da proposta.
+
+    Dentro da proposta a busca acontece sozinha, porque ali o CPF e a data já
+    estão na tela. Esta existe pro caso oposto: o cliente mandou o CPF no
+    WhatsApp e o consultor só quer o PDF, sem abrir proposta nenhuma."""
+    return render_template('cartao_sus.html')
+
+
 @app.route('/cartao-sus.pdf')
 @login_required
 def cartao_sus_pdf():
