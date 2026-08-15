@@ -11,13 +11,27 @@
   .cc-alert { border-left-color:var(--amarelo); }
   .cc-alert .cc-num { color:var(--amarelo); }
   .cc-foot { margin-top:20px; color:var(--cinza); font-size:12px; line-height:1.65; }
+  .cc-conf { border-left:4px solid var(--verde); }
+  .cc-conf .cc-num { color:var(--verde); }
+  .cc-sec { font-size:11.5px; color:var(--azul); text-decoration:none; margin-top:-4px; }
+  .cc-sec:hover { text-decoration:underline; }
+  .cc-cadeia { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:16px;
+               background:var(--panel); border:1px solid var(--borda); border-radius:12px;
+               padding:14px 18px; }
+  .cc-cadeia div { min-width:120px; }
+  .cc-cadeia span { display:block; font-size:10px; text-transform:uppercase; letter-spacing:.5px;
+                    color:var(--cinza-2); font-weight:700; }
+  .cc-cadeia b { font-size:16px; color:var(--texto); font-variant-numeric:tabular-nums; }
+  .cc-cadeia b.pos { color:var(--verde); } .cc-cadeia b.neg { color:var(--erro); }
+  .cc-cadeia i { color:var(--cinza-2); font-style:normal; font-size:17px; }
+  @media (max-width:760px){ .cc-cadeia i { display:none; } }
 </style>
 {% endblock %}
 {% block content %}
 <div class="topbar">
   <div>
     <h1>Central de comissões</h1>
-    <div class="sub">Uma cadeia, quatro perguntas. Cada número tem uma fonte definida.</div>
+    <div class="sub">Uma cadeia, cinco perguntas. Cada número tem uma fonte definida.</div>
   </div>
   <div><a class="btn-outline" href="/financeiro">Abrir Financeiro</a></div>
 </div>
@@ -26,11 +40,39 @@
     <b style="color:var(--texto);">Caminho da venda:</b> Operadora define <b>quanto a corretora recebe</b>; o regime do vendedor define <b>quem recebe quanto</b>; a proposta congela o acordo; extrato e conciliação registram o que a Affinity apurou e o que entrou. <i class="ajuda-i" title="A tabela histórica de comissões não participa mais do cálculo. Ela foi preservada para consulta, mas não deve ser usada para cadastrar ou alterar valores.">i</i>
   </div>
   <div class="cc-grid">
-    <section class="cc-card"><h2>1. Recebimento da corretora</h2><div class="cc-num">{{ resumo.recebimentos }}</div><p>Quanto a operadora paga à Serenus, por operadora, variação e plano. É a base comum para consultor e gestor.</p><a class="btn-outline" href="/operadoras">Configurar recebimento</a></section>
+    <section class="cc-card"><h2>1. Recebimento da corretora</h2><div class="cc-num">{{ resumo.recebimentos }}</div><p>Quanto a operadora paga à Serenus, por operadora, variação e plano. É a base comum para consultor e gestor.</p><a class="btn-outline" href="/operadoras">Configurar recebimento</a><a class="cc-sec" href="/comissoes/tabela">Comparar com a tabela da Affinity</a></section>
     <section class="cc-card"><h2>2. Repasse de consultores</h2><div class="cc-num">{{ resumo.repasses }}</div><p>Somente para consultores: Sem Lead/Sem Fixo, Com Lead N1/N2/N3 e Com Fixo + Lead. Não usar para gestor/admin vendedor.</p><a class="btn-outline" href="/repasses">Configurar repasses</a></section>
     <section class="cc-card"><h2>3. Regra de sócio/gestor</h2><div class="cc-num">{{ resumo.regras_gestor }}</div><p>Distribui cada fração recebida entre gestor, retenções e saldo Serenus. É exclusiva de vendas feitas por gestor/admin.</p><a class="btn" href="/comissoes/regra-gestor">Configurar regra de gestor</a></section>
     <section class="cc-card cc-alert"><h2>4. Pendências para revisar</h2><div class="cc-num">{{ resumo.regras_pendentes + resumo.gestor_legado + resumo.extratos_sem_vinculo }}</div><p>{{ resumo.regras_pendentes }} regra(s) incompleta(s), {{ resumo.gestor_legado }} venda(s) antiga(s) de gestor e {{ resumo.extratos_sem_vinculo }} linha(s) de extrato sem vínculo.</p><a class="btn-outline" href="/comissoes/conciliacao">Abrir conciliação</a></section>
+    <section class="cc-card cc-conf"><h2>5. Conferência do mês</h2>
+      {% if resumo.conf %}
+      <div class="cc-num">{{ resumo.conf.divergentes }}</div>
+      <p>{{ resumo.conf.divergentes }} venda(s) divergente(s) em {{ resumo.conf_mes }},
+         {{ resumo.conf.ok }} conferem e {{ resumo.conf.sem_extrato }} ainda sem extrato.</p>
+      {% else %}
+      <div class="cc-num">—</div>
+      <p>Compara o previsto com o que a Affinity apurou e o que entrou na conta.</p>
+      {% endif %}
+      <a class="btn-outline" href="/comissoes/conferencia?competencia={{ resumo.conf_mes }}">Abrir conferência</a></section>
   </div>
+
+  {% if resumo.conf and (resumo.conf.total_previsto or resumo.conf.total_apurado) %}
+  {# A cadeia inteira em uma linha. Os quatro numeros saem do MESMO razao que o
+     Financeiro le — se um dia divergirem, e bug, nao interpretacao. #}
+  <div class="cc-cadeia">
+    <div><span>Previsto</span><b>{{ resumo.conf.total_previsto|moeda }}</b></div>
+    <i>→</i>
+    <div><span>Apurado pela Affinity</span><b>{{ resumo.conf.total_apurado|moeda }}</b></div>
+    <i>→</i>
+    <div><span>Entrou na conta</span><b class="pos">{{ resumo.conf.total_entrou|moeda }}</b></div>
+    <i>→</i>
+    <div><span>Repassado</span><b>{{ resumo.conf.total_repassado|moeda }}</b></div>
+    {% if resumo.conf.total_estorno %}
+    <i>·</i><div><span>Estornado</span><b class="neg">{{ resumo.conf.total_estorno|moeda }}</b></div>
+    {% endif %}
+  </div>
+  {% endif %}
+
   <div class="cc-foot">Vendas antigas não são recalculadas em massa. Quando uma venda antiga de gestor ainda estiver no regime de consultor, abra a proposta e use a migração individual somente se não houver pagamento, PIX, conciliação ou parcela liberada.</div>
 </div>
 {% endblock %}

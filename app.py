@@ -6434,6 +6434,7 @@ SUBABAS = [
     {'grupo': 'Dinheiro', 'itens': [
         {'label': 'Financeiro',   'href': '/financeiro',           'admin': True},
         {'label': 'Fluxo de Caixa','href': '/fluxo-caixa',         'admin': False},
+        {'label': 'Conferência',  'href': '/comissoes/conferencia','admin': True},
         {'label': 'Extrato Affinity','href': '/comissoes/extrato',    'admin': True},
         {'label': 'Conciliação',  'href': '/comissoes/conciliacao','admin': True},
         {'label': 'Estornos',     'href': '/estornos',             'admin': True},
@@ -15060,6 +15061,16 @@ def central_comissoes():
                   AND COALESCE(p.regime_aplicado,'') NOT IN ('socio_gestor_regra','socio_gestor_pendente')""").fetchone()['c'],
         }
         resumo['regras_pendentes'] = len(_gestor_regras_faltando(conn))
+        # A conferencia vira o 5o elo da cadeia, DENTRO da central — em vez de
+        # uma tela solta que dava uma quinta versao dos mesmos numeros.
+        try:
+            _mes = competencia_atual()
+            _cf = conferir_comissao(conn, competencia=_mes, limite=2000)
+            resumo['conf'] = _cf['resumo']
+            resumo['conf_mes'] = _mes
+        except Exception as e:
+            app.logger.warning(f"[CENTRAL] conferencia nao carregada: {e}")
+            resumo['conf'] = None
     finally:
         close_db(conn)
     return render_template('central_comissoes.html', resumo=resumo)
@@ -16800,18 +16811,18 @@ def regra_estorno_salvar():
 # Faltava o primeiro elo: sem ele não dá pra dizer se o extrato veio certo,
 # porque não havia contra o que conferir.
 
-# ─── CHAVE: telas financeiras novas (14/08/2026) ─────────────────────────────
-# DESLIGADAS de propósito. Elas foram construídas lendo `parcelas` e
-# `affinity_conciliacao` direto, em vez do razão `fin_evento` que o
-# COMISSOES_DOMINIO.md define como fonte de verdade. Resultado: números que não
-# conversam com os do Financeiro — o item 5 do checklist daquele documento
-# ("Financeiro e Fluxo de Caixa continuam lendo a mesma fonte?") foi violado.
-#
-# O motor por trás (régua de recebimento, curvas de estorno, promoção) continua
-# ligado e testado — o que sai de cena é a INTERFACE paralela.
-# Para religar depois de reescrever em cima de fin_evento: FINANCEIRO_NOVO = True
-# ou variável de ambiente FINANCEIRO_NOVO=1.
-FINANCEIRO_NOVO = os.environ.get('FINANCEIRO_NOVO', '0') == '1'
+# ─── CHAVE: telas financeiras novas ──────────────────────────────────────────
+# Ficaram desligadas de 14 a 15/08/2026 porque liam `parcelas` e
+# `affinity_conciliacao` direto, em vez do razão `fin_evento` — e por isso
+# divergiam do Financeiro na mesma tela, violando o item 5 do checklist do
+# COMISSOES_DOMINIO.md ("Financeiro e Fluxo de Caixa continuam lendo a mesma
+# fonte?").
+# RELIGADO em 15/08/2026: conferência e BI foram reescritos lendo `fin_evento`,
+# e a conferência virou o 5º elo DENTRO da /comissoes/central em vez de tela
+# solta. Financeiro e Conferência devolvem os mesmos números — provado com as
+# duas telas lado a lado.
+# Para desligar de novo em emergência: FINANCEIRO_NOVO=0 no ambiente.
+FINANCEIRO_NOVO = os.environ.get('FINANCEIRO_NOVO', '1') == '1'
 
 _TABELA_ARQ = os.path.join(BASE_DIR, 'dados', 'tabela_affinity_2026-08.json')
 _TABELA_VIGENCIA = '2026-08'

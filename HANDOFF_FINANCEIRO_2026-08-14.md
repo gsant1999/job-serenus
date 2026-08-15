@@ -6,7 +6,7 @@ o que está desligado, por que, e o que fazer para religar direito.
 
 ## Estado atual
 
-`FINANCEIRO_NOVO = False` em `app.py` (ou env `FINANCEIRO_NOVO=1` para ligar).
+**RELIGADO em 15/08/2026.** `FINANCEIRO_NOVO` liga por padrão; para desligar em emergência, `FINANCEIRO_NOVO=0` no ambiente.
 
 | Peça | Estado | Onde |
 |---|---|---|
@@ -14,10 +14,10 @@ o que está desligado, por que, e o que fazer para religar direito.
 | Promoção como fração extra | **ligado** | `_aplicar_promocao`, `recebimento.promo_total/promo_parcela` |
 | Curvas de estorno (34 regras, 194 faixas) | **ligado** | `estorno_regra`, `estorno_faixa`, `calcular_estorno` |
 | Cobrança do estorno (débito ao consultor) | **ligado** | `/proposta/<id>/estorno/aplicar`, modal em `detalhe.html` |
-| Tela de conferência | **DESLIGADA** → redireciona | `/comissoes/conferencia` |
-| Import assistido da tabela | **DESLIGADA** → redireciona | `/comissoes/tabela` |
-| "Saúde do dinheiro" no BI | **DESLIGADA** | `_bi_saude_dinheiro` |
-| "O que não fechou" no Financeiro | **DESLIGADA** | `financeiro.html` |
+| Tela de conferência | **ligada**, lê `fin_evento`, 5º elo da central | `/comissoes/conferencia` |
+| Import assistido da tabela | **ligado**, entra pela central (cartão 1) | `/comissoes/tabela` |
+| "Saúde do dinheiro" no BI | **ligada**, lê `fin_evento` | `_bi_saude_dinheiro` |
+| "O que não fechou" no Financeiro | **ligado** | `financeiro.html` |
 
 ## Por que foi desligado
 
@@ -44,13 +44,20 @@ Também na mesma tela: **"Bruto do gestor" e "Líquido para PIX" mostram o mesmo
 valor** com uma "Retenção" entre eles, porque a retenção é da Serenus e não do
 gestor. Lido de cima para baixo, parece conta errada.
 
-## Para religar, na ordem
+## Religado — o que foi feito (15/08/2026)
 
-1. Unificar o escopo dos dois números acima e rotular cada um com o que ele
-   realmente conta.
-2. Reescrever `conferir_comissao` e `_bi_saude_dinheiro` lendo `fin_evento`.
-3. Levar a conferência para dentro de `/comissoes/central` — não criar tela nova.
-4. Só então religar a chave.
+1. ~~Unificar o escopo dos dois números~~ — feito: o bloco do gestor em
+   `_fin_visao` passou a respeitar a competência, e os rótulos dizem o escopo.
+2. ~~Reescrever lendo `fin_evento`~~ — feito: previsto vem de `parcelas`;
+   apurado, entrou, repassado e estorno vêm do razão. Financeiro e Conferência
+   devolvem os mesmos números.
+3. ~~Levar para dentro da central~~ — feito: a conferência é o 5º cartão e a
+   cadeia inteira aparece numa linha na própria central.
+4. ~~Religar a chave~~ — feito.
+
+Ainda aberto no razão: `previsto` não tem gravador ativo (só rotina histórica
+bloqueada), e a duplicidade de vínculo manual tem reparo em
+`/admin/razao/duplicidade` que precisa ser rodado uma vez em produção.
 
 ## Fatos comerciais apurados (valem independente do código)
 
