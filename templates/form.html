@@ -198,13 +198,16 @@
         </select>
         <div class="hint">Define o resto do formulário: empresa pede CNPJ, pessoa física não.</div>
       </div>
-      <div class="campo">
-        <label id="rot-razao">Razão social / beneficiário <span class="obrig">obrigatório</span></label>
-        <input type="text" name="razao_social" required>
-      </div>
     </div>
 
-    <div class="form-row form-row-2" id="bloco-docs" style="display:none;">
+    {# IDENTIFICACAO ANTES DO NOME.
+       CPF e nascimento subiram pra ca, na frente dos campos de nome, porque
+       com os dois o Ministerio da Saude devolve o cartao SUS E o nome completo
+       do titular. Digitar o nome primeiro era digitar o que o sistema ja sabe
+       — e digitado a mao ele vem abreviado, enquanto a operadora quer o nome
+       de registro. Agora a ordem da tela e a ordem do trabalho: identifica,
+       o resto se preenche. #}
+    <div class="form-row form-row-3" id="bloco-docs" style="display:none;">
       <div class="campo" id="campo-cnpj" style="display:none;">
         <label>CNPJ da empresa</label>
         <input type="text" name="cnpj" id="cnpj" placeholder="00.000.000/0000-00" oninput="mascaraCNPJ(this)">
@@ -214,20 +217,28 @@
         <label>CPF do titular</label>
         <input type="text" name="cpf_titular" id="cpf_titular" placeholder="000.000.000-00" oninput="mascaraCPF(this)">
       </div>
+      <div class="campo">
+        <label>Data de nascimento</label>
+        <input type="date" name="data_nasc_titular" id="data_nasc_titular"
+               title="Nascimento do titular" max="{{ ano_atual }}-12-31" onchange="mostrarIdades()">
+        <div class="hint" id="idade-titular"></div>
+      </div>
+    </div>
+    {# O resultado fica colado nos campos que o causaram. #}
+    <div class="cns-linha" id="cns-titular" hidden style="margin-bottom:10px;"></div>
+    <input type="hidden" name="cns_titular" id="cns_titular">
+
+    <div class="campo">
+      <label id="rot-razao">Razão social / beneficiário <span class="obrig">obrigatório</span></label>
+      <input type="text" name="razao_social" id="razao_social" required>
+      <div class="hint" id="hint-razao"></div>
     </div>
 
     <div class="campo" style="margin-top:14px;">
       <label>Titular e dependentes</label>
-      <div class="form-row form-row-2" style="margin-bottom:4px;">
+      <div class="form-row" style="margin-bottom:4px;">
         <input type="text" name="nome_titular" id="nome_titular" placeholder="Nome do titular">
-        <input type="date" name="data_nasc_titular" id="data_nasc_titular" title="Nascimento do titular" onchange="mostrarIdades()">
       </div>
-      <div class="hint" id="idade-titular" style="margin-bottom:4px;"></div>
-      {# O cartao SUS do titular aparece aqui, e nao junto do CPF la em cima,
-         porque a busca precisa das DUAS coisas — CPF e nascimento — e o
-         nascimento mora nesta linha. Resultado ao lado de quem o causou. #}
-      <div class="cns-linha" id="cns-titular" hidden></div>
-      <input type="hidden" name="cns_titular" id="cns_titular">
       <div class="erro-campo" id="erro-beneficiarios" style="margin-bottom:8px;"></div>
       <div id="lista-dependentes"></div>
       <button type="button" class="btn-ghost" style="font-size:12px; margin-top:6px;" onclick="addDependente()">+ Adicionar dependente</button>
@@ -706,14 +717,14 @@ function renderDeps() {
   const c = document.getElementById('lista-dependentes');
   c.innerHTML = DEPS.map((d,i)=>`
     <div style="margin-bottom:10px;">
-      <div class="form-row" style="grid-template-columns:1.4fr .95fr 1.05fr .9fr auto; gap:8px;">
-        <input type="text" placeholder="Nome do dependente" value="${d.nome}" onchange="DEPS[${i}].nome=this.value;syncDeps()">
+      <div class="form-row" style="grid-template-columns:1.15fr .9fr 1.45fr .85fr auto; gap:8px;">
+        <input type="text" placeholder="CPF" value="${d.cpf||''}" title="Com CPF e nascimento o nome e o cartão SUS vêm sozinhos"
+               oninput="mascaraCPF(this)" onchange="DEPS[${i}].cpf=this.value;syncDeps();buscarCNSDep(${i})">
         <div>
           <input type="date" value="${d.nasc}" onchange="DEPS[${i}].nasc=this.value;syncDeps();buscarCNSDep(${i})" title="Nascimento" style="width:100%;">
           <div class="hint" style="margin-top:2px;">${_rotIdade(d.nasc)}</div>
         </div>
-        <input type="text" placeholder="CPF" value="${d.cpf||''}" title="CPF do dependente — sem ele não dá pra buscar o cartão SUS"
-               oninput="mascaraCPF(this)" onchange="DEPS[${i}].cpf=this.value;syncDeps();buscarCNSDep(${i})">
+        <input type="text" id="dep-nome-${i}" placeholder="Nome do dependente" value="${d.nome}" onchange="DEPS[${i}].nome=this.value;syncDeps()">
         <input type="text" placeholder="Parentesco" list="lista-parentesco" value="${d.parentesco}" onchange="DEPS[${i}].parentesco=this.value;syncDeps()">
         <button type="button" class="btn-ghost" style="color:var(--rosa);" onclick="DEPS.splice(${i},1);renderDeps();syncDeps()">×</button>
       </div>
@@ -916,6 +927,10 @@ function toggleDocs() {
   if (!tipo) { bloco.style.display = 'none'; return; }
   bloco.style.display = 'grid';
   const empresarial = (tipo === 'PME' || tipo === 'PJ');
+  // Três colunas só quando o CNPJ está em cena. Sem isso, pessoa física ficava
+  // com CPF e nascimento espremidos à esquerda e uma coluna vazia à direita.
+  bloco.classList.toggle('form-row-3', empresarial);
+  bloco.classList.toggle('form-row-2', !empresarial);
   campoCnpj.style.display = empresarial ? 'block' : 'none';
   document.getElementById('cnpj').required = empresarial;
   document.getElementById('cpf_titular').required = true;
@@ -1336,15 +1351,29 @@ function _cnsBusca(chave, cpf, nasc, el, nomeDigitado, guardar, forcar) {
     .then(r => r.json().then(j => ({ ok: r.ok, j })))
     .then(({ j }) => {
       if (st.req !== meu) return;            // chegou tarde, outro pedido é o válido
-      if (j.ok) { guardar(j.cns.cns); _cnsPinta(el, 'ok', j.cns, ctx); }
-      else { guardar(''); st.feito = (j.motivo === 'indisponivel' ? null : par);
+      if (j.ok) { guardar(j.cns.cns, j.cns); _cnsPinta(el, 'ok', j.cns, ctx); }
+      else { guardar('', null); st.feito = (j.motivo === 'indisponivel' ? null : par);
              _cnsPinta(el, j.motivo || 'indisponivel', null, ctx); }
     })
     .catch(() => {
       if (st.req !== meu) return;
-      guardar(''); st.feito = null;
+      guardar('', null); st.feito = null;
       _cnsPinta(el, 'indisponivel', null, ctx);
     });
+}
+
+// O NOME VEM DE GRAÇA JUNTO COM O CNS.
+// A base do Ministério da Saúde devolve o nome de registro — que é o que a
+// operadora quer, e é justamente o que o consultor digita errado ou abreviado
+// às pressas. Preenchemos campo VAZIO; nunca sobrescrevemos o que a pessoa
+// escreveu, porque aí seria o sistema discordando de quem está olhando o
+// documento. Quando o que ela escreveu diverge de verdade, o aviso da linha do
+// cartão SUS já aparece.
+function _cnsPreencheSeVazio(el, valor) {
+  if (!el || !valor || (el.value || '').trim()) return false;
+  el.value = valor;
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  return true;
 }
 
 function buscarCNSTitular() {
@@ -1352,14 +1381,41 @@ function buscarCNSTitular() {
   const nasc = (document.getElementById('data_nasc_titular') || {}).value || '';
   const nome = (document.getElementById('nome_titular') || {}).value || '';
   _cnsBusca('titular', cpf, nasc, document.getElementById('cns-titular'), nome,
-            v => { const h = document.getElementById('cns_titular'); if (h) h.value = v; });
+    (v, d) => {
+      const h = document.getElementById('cns_titular'); if (h) h.value = v;
+      if (!d || !d.nome) return;
+      const pin = [];
+      if (_cnsPreencheSeVazio(document.getElementById('nome_titular'), d.nome)) pin.push('nome do titular');
+      // Razão social só entra em pessoa física: em PME e PJ esse campo é o
+      // nome da EMPRESA, e preencher com o nome do titular estragaria a
+      // proposta em silêncio.
+      const tp = (document.getElementById('tipo_pessoa') || {}).value || '';
+      if (tp === 'PF' || tp === 'Adesão') {
+        if (_cnsPreencheSeVazio(document.getElementById('razao_social'), d.nome)) pin.push('beneficiário');
+      }
+      // O óbvio dito: campo que se preenche sozinho sem avisar parece defeito.
+      const hr = document.getElementById('hint-razao');
+      if (hr) hr.textContent = pin.length
+        ? 'Preenchido pelo cadastro do SUS (' + pin.join(' e ') + '). Pode corrigir se precisar.'
+        : '';
+      try { syncDeps(); atualizarBarra(); } catch (e) {}
+    });
 }
 
 function buscarCNSDep(i) {
   const d = DEPS[i];
   if (!d) return;
   _cnsBusca('dep' + i, d.cpf || '', d.nasc || '', document.getElementById('cns-dep-' + i), d.nome,
-            v => { if (DEPS[i]) { DEPS[i].cns = v; syncDeps(); } });
+    (v, dados) => {
+      if (!DEPS[i]) return;
+      DEPS[i].cns = v;
+      if (dados && dados.nome && !(DEPS[i].nome || '').trim()) {
+        DEPS[i].nome = dados.nome;
+        const campo = document.getElementById('dep-nome-' + i);
+        if (campo) campo.value = dados.nome;   // sem re-render: não perde o foco de quem digita
+      }
+      syncDeps();
+    });
 }
 
 (function () {
