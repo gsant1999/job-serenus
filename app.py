@@ -785,6 +785,62 @@ def init_db():
                 ate_mensalidade INTEGER DEFAULT 3,
                 observacao TEXT
             )""",
+            # ── ESTORNO: curva em degraus, com vigência e base de cálculo ──
+            # A tabela antiga `regras_estorno` guarda "X% até o mês N" e nunca foi
+            # lida por cálculo nenhum. A realidade tem até 16 degraus (Porto),
+            # regras diferentes por escopo na MESMA operadora (Amil Dental x
+            # Médico), vigência por data (Amil Médico só ≥01/08/2026) e cinco
+            # bases distintas — por isso duas tabelas, e não mais colunas.
+            #
+            # base:
+            #   acumulado          — % sobre a comissão da 1ª à Nª parcela
+            #   parcela_especifica — % sobre a comissão de UMA parcela (Unimed
+            #                        Guarulhos: com 4 pagas, estorna a 3ª)
+            #   total_repassado    — % sobre tudo que foi repassado
+            #   prorata            — proporcional aos dias usados (Prevent Senior)
+            # unidade: parcela | mes | dia — o que a faixa conta.
+            """CREATE TABLE IF NOT EXISTS estorno_regra (
+                id SERIAL PRIMARY KEY,
+                operadora TEXT NOT NULL,
+                escopo TEXT DEFAULT '',
+                plano TEXT DEFAULT '',
+                base TEXT DEFAULT 'acumulado',
+                unidade TEXT DEFAULT 'parcela',
+                alvo_fixo INTEGER,
+                janela_dias INTEGER,
+                vigencia_inicio TEXT,
+                vigencia_fim TEXT,
+                observacao TEXT DEFAULT '',
+                fonte TEXT DEFAULT '',
+                ativo INTEGER DEFAULT 1,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(operadora, escopo, plano, vigencia_inicio)
+            )""",
+            """CREATE TABLE IF NOT EXISTS estorno_faixa (
+                id SERIAL PRIMARY KEY,
+                regra_id INTEGER NOT NULL,
+                ate INTEGER NOT NULL,
+                percentual REAL NOT NULL,
+                alvo TEXT DEFAULT '',
+                UNIQUE(regra_id, ate)
+            )""",
+            # Cada estorno aplicado vira registro: quanto, por qual regra, sobre
+            # que base e com que memória de cálculo. Sem isso ninguém consegue
+            # contestar uma cobrança — e cobrança de comissão sempre é contestada.
+            """CREATE TABLE IF NOT EXISTS estorno_aplicado (
+                id SERIAL PRIMARY KEY,
+                proposta_id INTEGER NOT NULL,
+                regra_id INTEGER,
+                usuario_id INTEGER,
+                parcelas_pagas INTEGER,
+                percentual REAL,
+                base_valor REAL,
+                valor_estornado REAL,
+                memoria TEXT,
+                status TEXT DEFAULT 'calculado',
+                criado_por TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             # ── Tabela de comissão PUBLICADA pela administradora (Affinity) ──
             # Fonte da verdade do que a administradora paga à corretora, versionada
             # por vigência. NÃO é o que a corretora usa no cálculo (isso é
@@ -2036,6 +2092,45 @@ def init_db():
             perc_estorno REAL DEFAULT 100,
             ate_mensalidade INTEGER DEFAULT 3,
             observacao TEXT
+        );
+        CREATE TABLE IF NOT EXISTS estorno_regra (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operadora TEXT NOT NULL,
+            escopo TEXT DEFAULT '',
+            plano TEXT DEFAULT '',
+            base TEXT DEFAULT 'acumulado',
+            unidade TEXT DEFAULT 'parcela',
+            alvo_fixo INTEGER,
+            janela_dias INTEGER,
+            vigencia_inicio TEXT,
+            vigencia_fim TEXT,
+            observacao TEXT DEFAULT '',
+            fonte TEXT DEFAULT '',
+            ativo INTEGER DEFAULT 1,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(operadora, escopo, plano, vigencia_inicio)
+        );
+        CREATE TABLE IF NOT EXISTS estorno_faixa (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            regra_id INTEGER NOT NULL,
+            ate INTEGER NOT NULL,
+            percentual REAL NOT NULL,
+            alvo TEXT DEFAULT '',
+            UNIQUE(regra_id, ate)
+        );
+        CREATE TABLE IF NOT EXISTS estorno_aplicado (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proposta_id INTEGER NOT NULL,
+            regra_id INTEGER,
+            usuario_id INTEGER,
+            parcelas_pagas INTEGER,
+            percentual REAL,
+            base_valor REAL,
+            valor_estornado REAL,
+            memoria TEXT,
+            status TEXT DEFAULT 'calculado',
+            criado_por TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS tabela_operadora (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -16272,6 +16367,228 @@ def regra_estorno_salvar():
 
 _TABELA_ARQ = os.path.join(BASE_DIR, 'dados', 'tabela_affinity_2026-08.json')
 _TABELA_VIGENCIA = '2026-08'
+_ESTORNO_ARQ = os.path.join(BASE_DIR, 'dados', 'estorno_affinity_2026-08.json')
+
+
+# ═══════════ MOTOR DE ESTORNO ═══════════
+# Quando o cliente cancela, a operadora tira de volta parte do agenciamento que
+# já pagou. Até aqui o JOB só cancelava as parcelas ainda não pagas e marcava a
+# proposta — a comissão JÁ PAGA ao consultor nunca voltava, e o rombo ficava
+# invisível. Este motor calcula quanto volta, por qual regra, e deixa a memória
+# de cálculo escrita: cobrança de comissão sempre é contestada, e quem cobra
+# precisa conseguir mostrar a conta.
+
+def _pct_br(v):
+    """83.0 -> '83' ; 83.33 -> '83,33'. Percentual redondo não mostra decimal."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return '0'
+    return (f'{f:.0f}' if abs(f - round(f)) < 0.005 else f'{f:.2f}'.replace('.', ','))
+
+
+def _estorno_regra_vigente(conn, operadora, plano='', escopo='', data_venda=None):
+    """Regra de estorno aplicável a ESTA venda.
+
+    A vigência é do CONTRATO, não de hoje: mudar a regra amanhã não pode mudar
+    o que valia numa venda de ontem. Entre várias candidatas vence a de vigência
+    mais recente que já valia na data da venda."""
+    op = (operadora or '').strip()
+    if not op:
+        return None
+    linhas = conn.execute(
+        "SELECT * FROM estorno_regra WHERE LOWER(operadora)=LOWER(?) AND COALESCE(ativo,1)=1",
+        (op,)).fetchall()
+    cands = []
+    for r in linhas:
+        d = dict(r)
+        if d.get('plano') and plano and d['plano'].upper() != (plano or '').upper():
+            continue
+        if escopo and d.get('escopo') and escopo.lower() not in d['escopo'].lower():
+            continue
+        ini = d.get('vigencia_inicio')
+        if ini and data_venda and str(data_venda)[:10] < str(ini)[:10]:
+            continue      # a venda é anterior à regra: essa regra não a alcança
+        fim = d.get('vigencia_fim')
+        if fim and data_venda and str(data_venda)[:10] > str(fim)[:10]:
+            continue
+        cands.append(d)
+    if not cands:
+        return None
+    # Mais específica primeiro (plano/escopo preenchidos), depois vigência mais recente
+    cands.sort(key=lambda d: (bool(d.get('plano')), bool(d.get('escopo')),
+                              (d.get('vigencia_inicio') or '')), reverse=True)
+    return cands[0]
+
+
+def _estorno_faixa(conn, regra_id, contagem):
+    """Degrau da curva para N parcelas/meses/dias pagos.
+
+    Pega o MENOR degrau cujo teto ainda cobre a contagem — é assim que a tabela
+    da Affinity se lê ('4 parcelas pagas -> 83%'). Acima do último degrau,
+    devolve None: sem estorno."""
+    faixas = conn.execute(
+        "SELECT ate, percentual, alvo FROM estorno_faixa WHERE regra_id=? ORDER BY ate",
+        (regra_id,)).fetchall()
+    for f in faixas:
+        d = dict(f)
+        if contagem <= int(d['ate']):
+            return d
+    return None
+
+
+def calcular_estorno(conn, proposta_id, data_cancelamento=None, escopo=''):
+    """Quanto precisa voltar do consultor nesta proposta.
+
+    Devolve sempre um dicionário com `memoria` explicando a conta em português —
+    inclusive quando o resultado é zero. 'Sem estorno' também é uma resposta que
+    precisa de justificativa."""
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (proposta_id,)).fetchone()
+    if not p:
+        return {'ok': False, 'erro': 'Proposta não encontrada'}
+    pd = dict(p)
+    # A coluna da operadora na proposta é `adm_operadora` (não `operadora`).
+    operadora = _split_operadora(pd.get('adm_operadora') or '')[0]
+    plano = _plano_from_modalidade(pd.get('tipo_contrato') or '', pd.get('titular_dependentes') or '')
+
+    # Parcelas de comissão efetivamente pagas ao consultor
+    pagas = conn.execute("""SELECT numero, valor, valor_corretora FROM parcelas
+        WHERE proposta_id=? AND status IN ('Pago ao corretor','Liberado para o corretor')
+        ORDER BY numero""", (proposta_id,)).fetchall()
+    pagas = [dict(x) for x in pagas]
+    n_pagas = len(pagas)
+    total_pago = round(sum(float(x.get('valor') or 0) for x in pagas), 2)
+
+    # Vigência do contrato manda; se faltar, cai na data de cadastro.
+    data_venda = str(pd.get('vigencia') or pd.get('criado_em') or '')[:10]
+    regra = _estorno_regra_vigente(conn, operadora, plano, escopo, data_venda)
+    if not regra:
+        return {'ok': False, 'sem_regra': True, 'operadora': operadora, 'plano': plano,
+                'parcelas_pagas': n_pagas, 'total_pago': total_pago, 'valor': 0.0,
+                'memoria': (f'Não há regra de estorno cadastrada para {operadora}'
+                            + (f' / {plano}' if plano else '')
+                            + '. O JOB não inventa percentual: cadastre a regra para poder cobrar.')}
+
+    if regra.get('base') == 'prorata':
+        return {'ok': False, 'manual': True, 'regra': regra, 'parcelas_pagas': n_pagas,
+                'total_pago': total_pago, 'valor': 0.0,
+                'memoria': (f"{operadora} usa cálculo proporcional aos dias usados, sem curva fixa. "
+                            f"{regra.get('observacao') or ''} Precisa de conferência manual.").strip()}
+
+    faixa = _estorno_faixa(conn, regra['id'], n_pagas)
+    if not faixa:
+        return {'ok': True, 'regra': regra, 'parcelas_pagas': n_pagas, 'total_pago': total_pago,
+                'percentual': 0.0, 'base_valor': 0.0, 'valor': 0.0,
+                'memoria': (f'{n_pagas} parcela(s) paga(s) em {operadora}: já passou do último degrau '
+                            f'da curva de estorno. Sem estorno.')}
+
+    perc = float(faixa['percentual'] or 0)
+    base_tipo = regra.get('base') or 'acumulado'
+
+    if base_tipo == 'acumulado':
+        base_valor = total_pago
+        desc_base = f'comissão paga da 1ª à {n_pagas}ª parcela'
+    elif base_tipo == 'total_repassado':
+        base_valor = total_pago
+        desc_base = 'total repassado ao consultor'
+    elif base_tipo == 'parcela_especifica':
+        alvo = (faixa.get('alvo') or '').strip() or str(regra.get('alvo_fixo') or '')
+        nums = [int(x) for x in re.split(r'[,;]', alvo) if x.strip().isdigit()] or [1]
+        base_valor = round(sum(float(x['valor'] or 0) for x in pagas if int(x['numero']) in nums), 2)
+        rot = 'ª, '.join(str(n) for n in nums) + 'ª'
+        desc_base = f'comissão da {rot} parcela'
+    else:
+        base_valor = total_pago
+        desc_base = 'comissão paga'
+
+    valor = round(base_valor * perc / 100.0, 2)
+    memoria = (f"{operadora}"
+               + (f" ({regra['escopo']})" if regra.get('escopo') else '')
+               + f": {n_pagas} parcela(s) paga(s) → degrau de até {faixa['ate']} = {_pct_br(perc)}%. "
+               + f"Base: {desc_base} = {_moeda(base_valor)}. "
+               + f"Estorno = {_pct_br(perc)}% de {_moeda(base_valor)} = {_moeda(valor)}.")
+    if regra.get('vigencia_inicio'):
+        memoria += f" Regra vigente para contratos a partir de {_fmt_data_br(regra['vigencia_inicio'])}."
+    if regra.get('observacao'):
+        memoria += f" Obs.: {regra['observacao']}"
+
+    return {'ok': True, 'regra': regra, 'faixa': faixa, 'parcelas_pagas': n_pagas,
+            'total_pago': total_pago, 'percentual': perc, 'base_valor': base_valor,
+            'valor': valor, 'memoria': memoria}
+
+
+def _importar_regras_estorno(conn, arquivo=None):
+    """Carrega as curvas do JSON versionado. Idempotente."""
+    try:
+        with open(arquivo or _ESTORNO_ARQ, encoding='utf-8') as fh:
+            pacote = json.load(fh)
+    except Exception as e:
+        app.logger.warning(f"[ESTORNO] nao consegui ler o arquivo: {e}")
+        return 0, 0
+    fonte = pacote.get('fonte') or ''
+    nr = nf = 0
+    for r in pacote.get('regras', []):
+        try:
+            conn.execute("""INSERT INTO estorno_regra
+                    (operadora,escopo,plano,base,unidade,alvo_fixo,janela_dias,
+                     vigencia_inicio,observacao,fonte)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(operadora,escopo,plano,vigencia_inicio) DO UPDATE SET
+                    base=excluded.base, unidade=excluded.unidade,
+                    alvo_fixo=excluded.alvo_fixo, janela_dias=excluded.janela_dias,
+                    observacao=excluded.observacao, fonte=excluded.fonte""",
+                (r.get('operadora'), r.get('escopo') or '', r.get('plano') or '',
+                 r.get('base') or 'acumulado', r.get('unidade') or 'parcela',
+                 r.get('alvo_fixo'), r.get('janela_dias'),
+                 r.get('vigencia_inicio'), r.get('observacao') or '', fonte))
+            row = conn.execute("""SELECT id FROM estorno_regra
+                WHERE operadora=? AND escopo=? AND plano=?
+                  AND COALESCE(vigencia_inicio,'')=COALESCE(?,'')""",
+                (r.get('operadora'), r.get('escopo') or '', r.get('plano') or '',
+                 r.get('vigencia_inicio'))).fetchone()
+            if not row:
+                continue
+            rid = dict(row)['id']
+            nr += 1
+            alvos = r.get('alvos') or {}
+            for ate, perc in (r.get('faixas') or []):
+                alvo = str(alvos.get(str(ate), '') or '')
+                conn.execute("""INSERT INTO estorno_faixa (regra_id,ate,percentual,alvo)
+                        VALUES (?,?,?,?)
+                    ON CONFLICT(regra_id,ate) DO UPDATE SET
+                        percentual=excluded.percentual, alvo=excluded.alvo""",
+                    (rid, int(ate), float(perc), alvo))
+                nf += 1
+        except Exception as e:
+            app.logger.warning(f"[ESTORNO] regra ignorada {r.get('operadora')}: {e}")
+    conn.commit()
+    app.logger.info(f"[ESTORNO] {nr} regra(s) e {nf} faixa(s) carregadas")
+    return nr, nf
+
+
+@app.route('/admin/estorno/importar-regras', methods=['POST'])
+@login_required
+@admin_required
+def estorno_importar_regras():
+    conn = db()
+    nr, nf = _importar_regras_estorno(conn)
+    close_db(conn)
+    return jsonify({'ok': bool(nr), 'regras': nr, 'faixas': nf})
+
+
+@app.route('/proposta/<int:pid>/estorno/previa')
+@login_required
+@admin_required
+def estorno_previa(pid):
+    """Quanto seria estornado — SEM gravar nada. Prévia antes de cobrar."""
+    conn = db()
+    r = calcular_estorno(conn, pid, escopo=(request.args.get('escopo') or ''))
+    close_db(conn)
+    if r.get('regra'):
+        r['regra'] = {k: r['regra'].get(k) for k in
+                      ('id', 'operadora', 'escopo', 'plano', 'base', 'unidade',
+                       'vigencia_inicio', 'observacao')}
+    return jsonify(r)
 
 
 def _carregar_tabela_publicada(arquivo=None):
@@ -39836,6 +40153,18 @@ try:
     init_db()
     _db_initialized = True
     print(f"[STARTUP] ✅ Schema pronto ({DB_MODE.upper()})")
+    # Curvas de estorno: carrega SÓ se ainda não houver nenhuma. Assim a regra
+    # chega pronta na primeira subida e, a partir daí, edição manual na tela
+    # nunca é sobrescrita por um deploy.
+    try:
+        _c = db()
+        _tem = _c.execute("SELECT COUNT(*) c FROM estorno_regra").fetchone()['c']
+        if not _tem:
+            _nr, _nf = _importar_regras_estorno(_c)
+            print(f"[STARTUP] ✅ Estorno: {_nr} regra(s), {_nf} faixa(s) carregadas da Affinity 08.2026")
+        close_db(_c)
+    except Exception as _ee:
+        print(f"[STARTUP] ⚠️ carga das regras de estorno adiada ({_ee})")
 except Exception as _e:
     print(f"[STARTUP] ⚠️ init_db falhou no import ({_e}); será tentado por requisição")
 

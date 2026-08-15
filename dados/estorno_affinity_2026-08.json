@@ -1,0 +1,184 @@
+{
+  "fonte": "Affinity Corretora — Regras de Estorno, versão 08.2026",
+  "observacao": "As regras são aplicadas pelas operadoras. Em algumas situações só tomamos conhecimento quando refletem no relatório. Podem mudar sem aviso.",
+  "regras": [
+    {
+      "operadora": "Alice", "escopo": "", "plano": "", "base": "acumulado", "unidade": "parcela",
+      "faixas": [[1,80],[2,70],[3,60],[4,50],[5,40],[6,30],[7,20],[8,10],[9,0]]
+    },
+    {
+      "operadora": "Allcare", "escopo": "", "plano": "", "base": "parcela_especifica", "unidade": "parcela",
+      "alvo_fixo": 1,
+      "faixas": [[3,100],[4,0]],
+      "observacao": "100% do AG da 1ª parcela recebida em relatório, até a 3ª parcela."
+    },
+    {
+      "operadora": "Amil", "escopo": "Dental", "plano": "", "base": "acumulado", "unidade": "parcela",
+      "faixas": [[1,80],[2,70],[3,60],[4,50],[5,40],[6,30],[7,0]],
+      "observacao": "Regra vigente para todos os contratos Dental."
+    },
+    {
+      "operadora": "Amil", "escopo": "Médico", "plano": "PME", "base": "acumulado", "unidade": "parcela",
+      "vigencia_inicio": "2026-08-01",
+      "faixas": [[1,100],[2,100],[3,100],[4,83],[5,79],[6,75],[7,60],[8,50],[9,45],[10,40],[11,35],[12,30]],
+      "observacao": "PME (2–99 vidas) e PJ (100+ vidas), contratos a partir de 01/08/2026."
+    },
+    {
+      "operadora": "Bluemed", "escopo": "", "plano": "", "base": "acumulado", "unidade": "mes",
+      "faixas": [[7,100],[8,0]],
+      "observacao": "100% da comissão paga até o 7º mês; a partir do 8º, sem estorno."
+    },
+    {
+      "operadora": "Bradesco Saúde", "escopo": "", "plano": "", "base": "acumulado", "unidade": "parcela",
+      "faixas": [[1,100],[2,100],[3,100],[4,80],[5,75],[6,70],[7,60],[8,50],[9,45],[10,40],[11,35],[12,30]]
+    },
+    {
+      "operadora": "Corpe", "escopo": "Hapvida e HNDI", "plano": "", "base": "total_repassado", "unidade": "dia",
+      "faixas": [[180,100]],
+      "observacao": "Proposta nos últimos 180 dias: 100% do agenciamento pago em relatório."
+    },
+    {
+      "operadora": "Corpe", "escopo": "Humana Saúde Sul", "plano": "", "base": "total_repassado", "unidade": "parcela",
+      "faixas": [[1,100],[2,83.33]],
+      "observacao": "1 boleto pago: 100% do agenciamento. 2 boletos: 83,33% sobre o total repassado."
+    },
+    {
+      "operadora": "Cruz Azul", "escopo": "PME", "plano": "PME", "base": "acumulado", "unidade": "parcela",
+      "faixas": [[1,80],[2,70],[3,60],[4,50],[5,40],[6,30]]
+    },
+    {
+      "operadora": "Hapvida Notredame Intermédica", "escopo": "", "plano": "PF", "base": "parcela_especifica", "unidade": "parcela",
+      "faixas": [[2,100],[3,100],[4,50],[5,50],[6,50],[7,0]],
+      "alvos": {"2":1,"3":2,"4":1,"5":1,"6":1},
+      "observacao": "Pessoa Física / Individual. Até a 2ª: 100% do AG da 1ª; até a 3ª: 100% do AG da 2ª; até 4ª/5ª/6ª: 50% do AG da 1ª."
+    },
+    {
+      "operadora": "Hapvida Notredame Intermédica", "escopo": "Super Simples e PME", "plano": "PME", "base": "parcela_especifica", "unidade": "parcela",
+      "vigencia_inicio": "2024-12-01",
+      "faixas": [[2,100],[3,100],[4,100],[5,100],[6,100],[7,0]],
+      "alvos": {"2":1,"3":2,"4":3,"5":"3,4","6":"3,4"},
+      "observacao": "Coletivo empresarial. Válido para propostas transmitidas a partir de 01/12/2024."
+    },
+    {
+      "operadora": "Interclinicas", "escopo": "", "plano": "", "base": "acumulado", "unidade": "mes",
+      "faixas": [[6,100]],
+      "observacao": "100% da comissão paga em cancelamento até 6 meses."
+    },
+    {
+      "operadora": "Klini Saúde", "escopo": "PME1, PME2 e PJ", "plano": "PME", "base": "parcela_especifica", "unidade": "parcela",
+      "vigencia_inicio": "2026-08-01",
+      "faixas": [[1,100],[2,100],[3,100],[4,80],[5,75],[6,70],[7,40],[8,30],[9,20],[10,15],[11,10],[12,5]],
+      "alvos": {"1":"1","2":"1,2","3":"1,2,3","4":"1,2,3","5":"1,2,3","6":"1,2,3","7":"1,2,3","8":"1,2,3","9":"1,2,3","10":"1,2,3","11":"1,2,3","12":"1,2,3"},
+      "observacao": "Contratos coletivos implantados a partir de 01/08/2026. Da 4ª em diante o percentual incide sempre sobre a comissão da 1ª à 3ª parcela."
+    },
+    {
+      "operadora": "MedSênior", "escopo": "", "plano": "", "base": "parcela_especifica", "unidade": "parcela",
+      "faixas": [[2,100],[3,70],[4,30],[5,0]],
+      "alvos": {"2":1,"3":2,"4":3},
+      "observacao": "Cancelou na 2ª: 100% da 1ª paga. Na 3ª: 70% da 2ª. Na 4ª: 30% da 3ª. Da 5ª em diante, sem estorno."
+    },
+    {
+      "operadora": "Odontoprev", "escopo": "Mensal", "plano": "", "base": "acumulado", "unidade": "parcela",
+      "faixas": [[1,85],[2,80],[3,70],[4,60],[5,50],[6,40],[7,0]],
+      "observacao": "Pagamento mensal. 1 parcela paga: 85% dos agenciamentos da 1ª parcela."
+    },
+    {
+      "operadora": "Odontoprev", "escopo": "Anual", "plano": "", "base": "parcela_especifica", "unidade": "parcela",
+      "faixas": [[1,100],[2,100],[3,100],[4,100],[5,100],[6,100],[7,100],[8,100],[9,100],[10,100],[11,100],[12,100]],
+      "observacao": "Pagamento anual: cada 1/12 devolvida estorna 100% do AG da parcela correspondente."
+    },
+    {
+      "operadora": "Omint", "escopo": "", "plano": "", "base": "total_repassado", "unidade": "parcela",
+      "faixas": [[24,100]],
+      "observacao": "Contrato de 12 ou 24 meses: 100% de tudo que foi pago."
+    },
+    {
+      "operadora": "Plural", "escopo": "NDI", "plano": "", "base": "parcela_especifica", "unidade": "parcela",
+      "alvo_fixo": 1,
+      "faixas": [[3,100],[4,0]],
+      "observacao": "100% do AG da 1ª parcela recebida em relatório, até a 3ª."
+    },
+    {
+      "operadora": "Plural", "escopo": "RJ", "plano": "", "base": "parcela_especifica", "unidade": "mes",
+      "alvo_fixo": 1,
+      "faixas": [[3,100]],
+      "observacao": "Até 3 meses de existência do plano: 100% do AG da 1ª parcela + bonificação ao corretor."
+    },
+    {
+      "operadora": "Porto Seguro", "escopo": "", "plano": "", "base": "acumulado", "unidade": "parcela",
+      "faixas": [[1,100],[2,100],[3,100],[4,100],[5,100],[6,100],[7,75],[8,65],[9,55],[10,45],[11,35],[12,30],[13,25],[14,20],[15,15],[16,0]]
+    },
+    {
+      "operadora": "Prevent Senior", "escopo": "", "plano": "", "base": "prorata", "unidade": "dia",
+      "faixas": [],
+      "observacao": "Sem curva fixa. 1) Cancelou em 7 dias da adesão: estorna tudo. 2) Cliente em atraso dentro da competência: estorna. 3) Cancelamento dentro da competência: estorna. 4) Após o período pago: comissionamento proporcional aos dias usados (Provento − Estorno). Exige conferência manual."
+    },
+    {
+      "operadora": "Qualicorp", "escopo": "", "plano": "ADESAO", "base": "parcela_especifica", "unidade": "parcela",
+      "faixas": [[1,100],[13,100],[25,100]],
+      "alvos": {"1":1,"13":13,"25":25},
+      "janela_dias": 90,
+      "observacao": "1ª/13ª/25ª parcela + 90 dias: 100% do AG daquela parcela. A partir de 91 dias, sem estorno."
+    },
+    {
+      "operadora": "Safelife", "escopo": "NDI", "plano": "", "base": "total_repassado", "unidade": "parcela",
+      "faixas": [[3,100]],
+      "observacao": "Até a 3ª parcela (90 dias da implantação): 100% do agenciamento recebido."
+    },
+    {
+      "operadora": "Safelife", "escopo": "Demais operadoras", "plano": "", "base": "total_repassado", "unidade": "parcela",
+      "faixas": [[1,100]],
+      "observacao": "1ª parcela (30 dias da implantação): 100% do agenciamento recebido."
+    },
+    {
+      "operadora": "Sami", "escopo": "2–99 vidas", "plano": "PME", "base": "parcela_especifica", "unidade": "parcela",
+      "faixas": [[2,100],[3,100],[4,100],[5,100],[6,100],[7,100],[8,100]],
+      "alvos": {"2":1,"3":2,"4":3,"5":3,"6":3,"7":3,"8":3},
+      "observacao": "Cancelou na 2ª: 100% da 1ª. Na 3ª: 100% da 2ª. Da 4ª à 8ª: 100% da 3ª."
+    },
+    {
+      "operadora": "Santa Tereza", "escopo": "", "plano": "", "base": "acumulado", "unidade": "mes",
+      "faixas": [[6,100]]
+    },
+    {
+      "operadora": "Seguros Unimed", "escopo": "Contratos", "plano": "", "base": "acumulado", "unidade": "parcela",
+      "faixas": [[1,100],[2,100],[3,100],[4,75],[5,66.67],[6,58.33],[7,33.33],[8,50],[9,33],[10,25],[11,16.66]],
+      "observacao": "ATENÇÃO: a curva da 7ª (33,33%) é MENOR que a da 8ª (50%) na tabela publicada. Confirmar com a Affinity antes de cobrar."
+    },
+    {
+      "operadora": "Seguros Unimed", "escopo": "Movimentação", "plano": "", "base": "acumulado", "unidade": "dia",
+      "faixas": [[95,100],[125,75],[155,66.67],[185,58.33],[215,50],[245,41.67],[275,33.33],[305,25],[335,16.66]]
+    },
+    {
+      "operadora": "SulAmérica", "escopo": "12 meses", "plano": "", "base": "acumulado", "unidade": "parcela",
+      "faixas": [[1,100],[2,100],[3,100],[4,100],[5,100],[6,100],[7,75],[8,67],[9,58],[10,50],[11,42],[12,33],[13,0]]
+    },
+    {
+      "operadora": "SulAmérica", "escopo": "24 meses", "plano": "", "base": "acumulado", "unidade": "parcela",
+      "vigencia_inicio": "2026-03-03",
+      "faixas": [[1,100],[2,100],[3,100],[4,100],[5,100],[6,100],[7,96],[8,92],[9,80],[10,70],[11,60],[12,50],[13,40],[14,30],[15,20],[16,0]],
+      "observacao": "Válido para propostas transmitidas a partir de 03/03/2026."
+    },
+    {
+      "operadora": "Supermed", "escopo": "", "plano": "", "base": "acumulado", "unidade": "dia",
+      "faixas": [[90,100],[180,50]],
+      "observacao": "Até 90 dias da vigência: 100% da comissão da 2ª mensalidade (1º boleto). De 91 a 180 dias: 50% dos pagamentos."
+    },
+    {
+      "operadora": "Trasmontano", "escopo": "", "plano": "", "base": "parcela_especifica", "unidade": "dia",
+      "alvo_fixo": 1,
+      "faixas": [[7,100]],
+      "observacao": "Dentro de 7 dias da implantação: 100% da 1ª parcela paga."
+    },
+    {
+      "operadora": "Unimed Guarulhos", "escopo": "", "plano": "", "base": "parcela_especifica", "unidade": "parcela",
+      "faixas": [[1,100],[2,100],[3,100],[4,100],[5,100],[6,100],[7,0]],
+      "alvos": {"1":1,"2":2,"3":3,"4":3,"5":4,"6":4},
+      "observacao": "Estorna a comissão de UMA parcela específica, não o acumulado. Com 4 pagas estorna a 3ª; com 5 e 6 pagas, a 4ª."
+    },
+    {
+      "operadora": "Unimed Sorocaba", "escopo": "", "plano": "", "base": "acumulado", "unidade": "mes",
+      "faixas": [[6,100]]
+    }
+  ]
+}
