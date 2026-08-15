@@ -9448,6 +9448,84 @@ def _plataforma_corpo(d, tipo, docs=None):
     return "\n".join(corpo)
 
 
+# ═══════════ QUE ANEXO VAI EM QUE E-MAIL ═══════════════════════════════════
+# Cada e-mail que sai daqui leva um pacote diferente, e isso estava escrito
+# dentro de cada função de envio — a antecipação mandava comprovante E contrato
+# porque alguém digitou os dois numa lista, e mudar exigia deploy.
+#
+# Agora a regra é dado, não código: mora na tabela `config` e o Guilherme muda
+# na tela. O default abaixo é só o ponto de partida de quem nunca configurou.
+_EMAIL_MODELOS = [
+    ('protocolo',   'Protocolo da proposta',
+     'Vai para a administradora com a documentação do cliente.'),
+    ('antecipacao', 'Antecipação de comissão',
+     'Pede o adiantamento. Não precisa da papelada do cliente de novo.'),
+    ('ciencia',     'Ciência / aviso',
+     'Comunicado sem documentação.'),
+]
+_EMAIL_ANEXOS_PADRAO = {
+    # Tudo do cliente, MENOS o que é da antecipação.
+    'protocolo': ['identidade', 'cpf', 'comprovante_endereco', 'cartao_cnpj',
+                  'contrato_social', 'certidao_casamento', 'declaracao_uniao_estavel',
+                  'certidao_nascimento', 'carteira_trabalho', 'holerite',
+                  'cartao_plano', 'cartao_sus', 'declaracao_saude', 'outro'],
+    # O Guilherme foi explícito: só o comprovante, mais nada.
+    'antecipacao': ['comprovante_pagamento'],
+    'ciencia': [],
+}
+
+
+def _email_regra_anexos(conn, modelo):
+    """Tipos de documento que seguem naquele modelo de e-mail."""
+    try:
+        salvo = _cfg_valor(conn, 'email_anexos_' + modelo, '')
+        if salvo:
+            return [t for t in json.loads(salvo) if t in _DOC_TIPO_NOME]
+    except Exception:
+        pass
+    return list(_EMAIL_ANEXOS_PADRAO.get(modelo, []))
+
+
+def _email_regra_salvar(conn, modelo, tipos):
+    tipos = [t for t in (tipos or []) if t in _DOC_TIPO_NOME]
+    valor = json.dumps(tipos, ensure_ascii=False)
+    if HAS_POSTGRES:
+        conn.execute("""INSERT INTO config (chave,valor) VALUES (?,?)
+                        ON CONFLICT (chave) DO UPDATE SET valor=EXCLUDED.valor""",
+                     ('email_anexos_' + modelo, valor))
+    else:
+        conn.execute("INSERT OR REPLACE INTO config (chave,valor) VALUES (?,?)",
+                     ('email_anexos_' + modelo, valor))
+    return tipos
+
+
+def _anexos_por_regra(conn, proposta, modelo):
+    """Filtra os anexos da proposta pelos tipos que aquele modelo leva.
+
+    O tipo mora no NOME do arquivo (ver _doc_tipo_do_nome). Documento antigo,
+    gravado antes de existir tipo, cai em 'outro' — por isso 'outro' está no
+    pacote do protocolo: sem ele, proposta antiga sairia sem anexo nenhum."""
+    permitidos = set(_email_regra_anexos(conn, modelo))
+    try:
+        lista = json.loads((proposta.get('anexos') if isinstance(proposta, dict)
+                            else proposta['anexos']) or '[]') or []
+    except Exception:
+        lista = []
+    saida = []
+    for item in lista:
+        nome = item.get('nome') if isinstance(item, dict) else item
+        if nome and _doc_tipo_do_nome(os.path.basename(nome)) in permitidos:
+            saida.append(nome)
+    # Os dois campos dedicados não estão no array de anexos, mas têm tipo fixo.
+    def _pega(campo, tipo):
+        v = (proposta.get(campo) if isinstance(proposta, dict) else proposta[campo])
+        if v and tipo in permitidos:
+            saida.append(v)
+    _pega('comprovante_boleto', 'comprovante_pagamento')
+    _pega('contrato_arquivo', 'proposta_operadora')
+    return saida
+
+
 def _plataforma_anexos(conn, d):
     """Os arquivos do PROTOCOLO, com o nome que o outro lado consegue ler.
 
@@ -12463,10 +12541,11 @@ def antecipacao_enviar(pid):
     assunto = "Solicitação de Antecipação de Comissão - Contratos"
     corpo_html = _montar_email_antecipacao_html([linha_cliente], eh_teste=eh_teste, pid=pid)
 
-    # Anexos da ANTECIPAÇÃO: SOMENTE comprovante de pagamento + contrato/proposta assinada
-    # (documentos finais). Os documentos iniciais/extras NÃO entram aqui.
-    lista_anexos = [p['comprovante_boleto'], p['contrato_arquivo']]
-    lista_anexos = [a for a in lista_anexos if a]
+    # Anexos da ANTECIPAÇÃO: quem manda é a regra configurada, não uma lista
+    # escrita aqui dentro. O padrão passou a ser SÓ o comprovante de pagamento
+    # — antes ia comprovante e contrato assinado, e o Guilherme foi explícito
+    # de que o contrato não precisa seguir de novo neste e-mail.
+    lista_anexos = [a for a in _anexos_por_regra(conn, dict(p), 'antecipacao') if a]
 
     destino = CC_SERENUS if eh_teste else DEST_AFFINITY
     assunto_final = f"[TESTE] {assunto}" if eh_teste else assunto
@@ -22361,6 +22440,28 @@ def anexar_cartao_sus(pid):
     close_db(conn)
     return jsonify({"ok": True, "nome": nome, "storage": storage_tipo,
                     "msg": "Cartão SUS anexado na proposta."})
+
+
+@app.route('/anexos-email', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def anexos_email():
+    """Quais tipos de documento seguem em cada modelo de e-mail.
+
+    Isto era código: a antecipação mandava comprovante E contrato porque havia
+    uma lista escrita dentro da função de envio, e mudar exigia deploy. Vira
+    dado, e o admin muda sozinho."""
+    conn = db()
+    salvo = False
+    if request.method == 'POST':
+        for chave, _nome, _desc in _EMAIL_MODELOS:
+            _email_regra_salvar(conn, chave, request.form.getlist(chave))
+        conn.commit()
+        salvo = True
+    regras = {chave: _email_regra_anexos(conn, chave) for chave, _n, _d in _EMAIL_MODELOS}
+    close_db(conn)
+    return render_template('anexos_email.html', modelos=_EMAIL_MODELOS,
+                           regras=regras, salvo=salvo)
 
 
 @app.route('/cartao-sus')
