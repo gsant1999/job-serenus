@@ -66,7 +66,7 @@ Fontes convertidas em `knowledge/affinity-tabela-comissoes.pdf.md` e
 | Amil PME 02–99 | 240% (100/100/40) | 280% | +40% | 4ª |
 | SulAmérica PME 02–99 | 240% (100/100/40) | 280% | +40% | 4ª |
 | Porto Seguro 03–99 | 240% (100/100/40) | 280% | +40% | 4ª |
-| Bradesco 03–199 | 300% (100/100/100) | 300% | — | — |
+| Bradesco 03–199 | 300% (100/100/100) | **330%** | +30% | 4ª |
 | Med Sênior SP/RJ 01–29 | 150% (100/50) | 170% | +20% | 3ª |
 
 Na tabela publicada ele aparece como **"Med Sênior"** (com espaço e acento).
@@ -76,10 +76,9 @@ Na tabela publicada ele aparece como **"Med Sênior"** (com espaço e acento).
 - **Bradesco PME: 330% está CERTO.** A tabela publicada traz 300%, mas a
   condição negociada é 330%. O sistema está correto; a diferença de 30 pontos
   é promoção. Não mexer.
-- **Med Sênior PME: o certo é 170%.** O cadastro está com **180%** — está
-  errado e precisa ser corrigido na tela de Operadoras (`recebimento.total`
-  = 1.70). Enquanto não for corrigido, toda venda dessa operadora calcula
-  comissão a maior.
+- **Med Sênior PME: 170%, e o cadastro JÁ ESTÁ correto** (1.7 em PME e PF,
+  conferido em produção em 15/08/2026). O 180% que eu havia anotado era leitura
+  de dado velho do meu ambiente de teste — não existe divergência aqui.
 - **Seguros Unimed / Contratos: curva reconstruída.** A publicada tinha 7ª=33,33%
   e 8ª=50% — degrau que sobe, o que não existe em estorno. A curva de
   Movimentação da mesma operadora é uma escada limpa de 8,33, e da 4ª em diante
@@ -123,8 +122,9 @@ data (Amil Médico ≥ 01/08/2026, Hapvida ≥ 01/12/2024, SulAmérica 24m ≥
 Decisão do Guilherme: o sistema **calcula e cobra do consultor**, via lançamento
 a débito abatido nas próximas comissões, com prévia e confirmação de admin.
 
-Atenção em `Seguros Unimed / Contratos`: a curva publicada tem a 7ª parcela em
-33,33% e a 8ª em 50% — degrau que sobe. Confirmar com a Affinity antes de cobrar.
+`Seguros Unimed / Contratos` está com a curva **reconstruída** (ver Divergências
+acima). O motor recusa calcular sobre curva que sobe, então esse tipo de erro de
+tabela não vira cobrança silenciosa.
 
 ## Bugs corrigidos no caminho (esses ficam)
 

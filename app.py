@@ -30128,6 +30128,51 @@ def regra_gestor_salvar():
     return jsonify({"ok": True, "id": rid, "falta": falta})
 
 
+@app.route('/comissoes/regra-gestor/<int:rid>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def regra_gestor_excluir(rid):
+    """Apaga uma regra de gestor — e diz antes o que isso trava.
+
+    Venda já vendida NÃO é afetada: o acordo dela está congelado em
+    proposta_regra_snapshot, que é cópia, não referência. O que a exclusão
+    atinge é o FUTURO: venda nova dessa operadora/plano volta a ficar sem regra
+    e com o financeiro bloqueado. Por isso a rota conta quantas vendas ficam
+    sem cobertura e exige confirmação quando há alguma."""
+    conn = db()
+    r = conn.execute("SELECT * FROM gestor_regra WHERE id=?", (rid,)).fetchone()
+    if not r:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Regra não encontrada.'}), 404
+    d = dict(r)
+
+    # Vendas de gestor dessa operadora/plano que AINDA não congelaram snapshot
+    try:
+        desprotegidas = conn.execute("""
+            SELECT COUNT(*) c FROM propostas p
+             WHERE COALESCE(p.regime_aplicado,'') IN ('socio_gestor_regra','socio_gestor_pendente')
+               AND COALESCE(p.status,'') <> 'Excluída' AND COALESCE(p.estornada,0)=0
+               AND LOWER(COALESCE(p.adm_operadora,'')) LIKE LOWER(?)
+               AND NOT EXISTS (SELECT 1 FROM proposta_regra_snapshot s WHERE s.proposta_id = p.id)
+        """, (f"%{d.get('operadora') or ''}%",)).fetchone()['c']
+    except Exception:
+        desprotegidas = 0
+
+    if desprotegidas and not (request.json or {}).get('confirmar'):
+        close_db(conn)
+        return jsonify({'ok': False, 'precisa_confirmar': True, 'vendas_afetadas': desprotegidas,
+                        'erro': (f'{desprotegidas} venda(s) de gestor desta operadora ainda não '
+                                 f'congelaram a regra. Apagar agora deixa essas vendas sem cobertura '
+                                 f'e com o financeiro bloqueado. Vendas já congeladas não mudam.')}), 409
+
+    conn.execute("DELETE FROM gestor_retencao WHERE regra_id=?", (rid,))
+    conn.execute("DELETE FROM gestor_regra WHERE id=?", (rid,))
+    conn.commit(); close_db(conn)
+    app.logger.info(f"[REGRA_GESTOR] {session.get('nome','admin')} excluiu a regra {rid} "
+                    f"({d.get('operadora')}/{d.get('obs')}/{d.get('plano')})")
+    return jsonify({'ok': True, 'excluida': _op_display(d.get('operadora'), d.get('obs'))})
+
+
 @app.route('/comissoes/regra-gestor/simular')
 @login_required
 @admin_required

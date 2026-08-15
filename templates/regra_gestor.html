@@ -33,6 +33,9 @@
   .rg-mini { padding:6px 12px; font-size:12px; border-radius:8px; border:1px solid var(--borda);
              background:var(--panel-2); color:var(--texto); cursor:pointer; font-family:inherit; font-weight:600; }
   .rg-mini:hover { border-color:var(--azul); }
+  .rg-mini:disabled { opacity:.5; cursor:progress; }
+  .rg-mini-del { color:var(--erro); border-color:rgba(244,63,94,.3); }
+  .rg-mini-del:hover { border-color:var(--erro); background:rgba(244,63,94,.08); }
   .rg-confirma { display:flex; gap:8px; align-items:flex-start; font-size:12px; color:var(--texto);
                  background:var(--panel-2); border:1px solid var(--borda); border-radius:10px;
                  padding:10px 12px; margin:10px 0; line-height:1.55; }
@@ -182,7 +185,7 @@
     <table class="pnl-tab" id="rgLista">
       <thead>
         <tr><th>Operadora e plano</th><th>Régua de recebimento</th><th>Régua do gestor</th>
-            <th>Retenções</th><th>Situação</th></tr>
+            <th>Retenções</th><th>Situação</th><th>Ações</th></tr>
       </thead>
       <tbody>
         {% for r in regras %}
@@ -224,6 +227,19 @@
               <span class="pill pill-amarelo">incompleta</span>
               <div class="rg-falta">{% for f in r.falta %}<div>{{ f }}</div>{% endfor %}</div>
             {% else %}<span class="pill pill-verde">completa</span>{% endif %}
+          </td>
+          {# Editar leva a regra pro formulario de cima: e o MESMO formulario de
+             cadastrar, entao nao existe uma segunda tela pra manter em sincronia. #}
+          <td style="white-space:nowrap;">
+            <button type="button" class="rg-mini" data-edit="{{ r.id }}"
+                    data-regra="{{ {'operadora': r.operadora, 'obs': r.obs or '', 'plano': r.plano,
+                                    'vigencia_inicio': r.vigencia_inicio or '',
+                                    'observacao': r.observacao or '',
+                                    'confirmada': (r.confirmada or 0)|int,
+                                    'display': r.display,
+                                    'fracoes': r.fracoes, 'gestor': r.gestor}|tojson|forceescape }}">Editar</button>
+            <button type="button" class="rg-mini rg-mini-del" data-del-regra="{{ r.id }}"
+                    data-nome="{{ r.display }} · {{ r.plano }}">Excluir</button>
           </td>
         </tr>
         {% endfor %}
@@ -303,6 +319,67 @@ document.getElementById('rgSalvar').addEventListener('click', function(){
     setTimeout(function(){ location.reload(); }, 1400);
   });
 });
+// EDITAR: leva a regra para o formulário de cima. É o mesmo formulário de
+// cadastrar — salvar sobrescreve a regra da mesma operadora/variação/plano.
+// Não existe uma segunda tela de edição pra manter em sincronia.
+document.querySelectorAll('[data-edit]').forEach(function(b){
+  b.addEventListener('click', function(){
+    var r;
+    try { r = JSON.parse(b.dataset.regra); } catch(e) { return; }
+    document.getElementById('rgOp').value = r.operadora || '';
+    document.getElementById('rgObs').value = r.obs || '';
+    document.getElementById('rgPlano').value = r.plano || 'PME';
+    document.getElementById('rgVigIni').value = (r.vigencia_inicio || '').slice(0, 10);
+    document.getElementById('rgObsTxt').value = r.observacao || '';
+    document.getElementById('rgConf').checked = !!r.confirmada;
+    corpo.innerHTML = '';
+    var ges = r.gestor || [];
+    (r.fracoes || []).forEach(function(f, i){
+      var g = ges[i] || {};
+      corpo.appendChild(linhaFracao(i + 1, f.evento || '',
+        (f.percentual === null || f.percentual === undefined) ? '' : f.percentual,
+        (g.percentual_gestor === null || g.percentual_gestor === undefined) ? '' : g.percentual_gestor));
+    });
+    var msg = document.getElementById('rgMsg');
+    msg.className = 'rg-msg';
+    msg.textContent = 'Editando "' + (r.display || '') + ' · ' + (r.plano || '') +
+                      '". Ajuste e clique em Salvar esta regra — vai sobrescrever a atual.';
+    document.getElementById('rgOp').scrollIntoView({block: 'center', behavior: 'smooth'});
+    document.getElementById('rgOp').focus();
+  });
+});
+
+// EXCLUIR: o servidor conta quantas vendas ficam sem cobertura e devolve 409
+// pedindo confirmação. Venda já congelada não muda — o acordo dela é cópia.
+document.querySelectorAll('[data-del-regra]').forEach(function(b){
+  b.addEventListener('click', function(){
+    var nome = b.dataset.nome || 'esta regra';
+    if (!confirm('Excluir a regra de ' + nome + '?\n\nVendas já congeladas não mudam. ' +
+                 'Vendas novas dessa operadora ficam sem regra até você cadastrar outra.')) return;
+    function enviar(confirmar){
+      return fetch('/comissoes/regra-gestor/' + b.dataset.delRegra + '/excluir', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({confirmar: !!confirmar})
+      }).then(function(r){ return r.json().then(function(d){ return {st:r.status, d:d}; }); });
+    }
+    b.disabled = true;
+    enviar(false).then(function(res){
+      if (res.d.ok) { location.reload(); return; }
+      if (res.st === 409 && res.d.precisa_confirmar) {
+        b.disabled = false;
+        if (!confirm(res.d.erro + '\n\nExcluir mesmo assim?')) return;
+        b.disabled = true;
+        return enviar(true).then(function(r2){
+          if (r2.d.ok) location.reload();
+          else { b.disabled = false; alert(r2.d.erro || 'Não consegui excluir.'); }
+        });
+      }
+      b.disabled = false;
+      alert(res.d.erro || 'Não consegui excluir.');
+    }).catch(function(){ b.disabled = false; alert('Erro de conexão.'); });
+  });
+});
+
 document.querySelectorAll('[data-ret]').forEach(function(b){
   b.addEventListener('click', function(){
     var tipo = prompt('Tipo da retenção (imposto, taxa, outro):');
