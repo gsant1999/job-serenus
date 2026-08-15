@@ -3607,6 +3607,12 @@ def init_db():
         # junto do CPF de cada um — não vale coluna porque o número de
         # dependentes varia por proposta.
         ("propostas", "cns_titular", "TEXT"),
+        # Sócio que assina pelo CNPJ quando o titular do plano é FUNCIONÁRIO.
+        # Não é vida do contrato: responde pela empresa. Quando o titular é o
+        # próprio sócio, estes ficam vazios — o dado já está no titular.
+        ("propostas", "socio_nome", "TEXT"),
+        ("propostas", "socio_cpf", "TEXT"),
+        ("propostas", "socio_nascimento", "TEXT"),
         # Cotação: link público imutável, orientação e vínculo com lead do CRM
         ("cotacao_salva", "token", "TEXT"),
         ("cotacao_salva", "orientacao", "TEXT"),
@@ -10214,12 +10220,22 @@ def salvar_proposta():
                 return n
             return None
 
-        # Anexos genéricos (múltiplos)
+        # ANEXOS: SOBE TUDO DE UMA VEZ, COM O TIPO DE CADA UM.
+        #
+        # Antes todo anexo do cadastro virava '{ts}_doc_{arquivo}' — com 'doc'
+        # fixo. O tipo simplesmente não era gravado, e é por isso que não dava
+        # pra montar pacote de e-mail nem saber o que já foi entregue: na
+        # proposta salva os tipos existiam, mas os arquivos tinham entrado sem
+        # nenhum. A lista de tipos vem paralela à de arquivos, na mesma ordem
+        # em que o navegador os manda.
         nomes = []
-        for f in request.files.getlist('anexos'):
+        tipos_enviados = request.form.getlist('anexo_tipos')
+        for i, f in enumerate(request.files.getlist('anexos')):
             if f and f.filename:
+                tipo = tipos_enviados[i] if i < len(tipos_enviados) else 'outro'
                 nome_limpo = _sanitizar_filename(f.filename)
-                n = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_doc_{nome_limpo}"
+                n = (f"{_doc_prefixo_arquivo(tipo)}_"
+                     f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{nome_limpo}")
                 caminho = os.path.join(UPLOAD_FOLDER, n)
                 f.save(caminho)
                 nomes.append(n)
@@ -10304,8 +10320,9 @@ def salvar_proposta():
             consultor_usuario_id,subido_por_usuario_id,vigencia_confirmada,
             plataforma_venda,plataforma_papel,
             resp_fin_nome,resp_fin_cpf,resp_fin_nascimento,resp_fin_parentesco,
-            resp_fin_telefone,resp_fin_email,resp_fin_no_plano
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            resp_fin_telefone,resp_fin_email,resp_fin_no_plano,
+            socio_nome,socio_cpf,socio_nascimento
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
             dono_uid,dono_nome,d.get('supervisora_id') or None,
             d.get('proposta_tem_numero'),d.get('numero_proposta'),
             d.get('vigencia'),d.get('modalidade'),d.get('tipo_pessoa'),
@@ -10341,7 +10358,13 @@ def salvar_proposta():
             (d.get('resp_fin_parentesco') or '').strip() or None,
             (d.get('resp_fin_telefone') or '').strip() or None,
             (d.get('resp_fin_email') or '').strip() or None,
-            1 if d.get('resp_fin_no_plano') == '1' else 0
+            0,
+            # Socio que assina pelo CNPJ. So vem preenchido quando o titular do
+            # plano e FUNCIONARIO; quando o titular e o proprio socio, o dado ja
+            # esta nos campos do titular e estes ficam vazios de proposito.
+            (d.get('socio_nome') or '').strip() or None,
+            re.sub(r'\D', '', d.get('socio_cpf') or '') or None,
+            (d.get('socio_nascimento') or '').strip() or None
         ))
         proposta_id = _last_insert_id(cur)
         # Amarra ao lead na hora: é aqui que o telefone/CNPJ estão frescos e certos.
@@ -21072,7 +21095,69 @@ _DOC_ROTULO = {
     'declaracao_uniao_estavel': 'UNIAO-ESTAVEL', 'declaracao_saude': 'DECLARACAO-SAUDE',
     'carteira_trabalho': 'CTPS', 'holerite': 'HOLERITE', 'cartao_plano': 'CARTAO-PLANO',
     'proposta_operadora': 'PROPOSTA-OPERADORA', 'outro': 'OUTRO',
+    # Prefixo escrito à mão, e não derivado do rótulo: derivando, "Cartão SUS"
+    # virava "CART-O-SUS" porque o acento não sobrevive ao nome de arquivo.
+    'cartao_sus': 'CARTAO-SUS', 'comprovante_pagamento': 'COMPROVANTE-PAGAMENTO',
 }
+
+
+# Rótulo humano de cada tipo. O _DOC_ROTULO acima é o prefixo do ARQUIVO
+# (maiúsculo, sem acento, porque vira nome de arquivo); este é o que o
+# consultor lê na tela e o que vai aparecer na regra de anexo do e-mail.
+_DOC_TIPO_NOME = {
+    'identidade': 'RG ou CNH',
+    'cpf': 'CPF',
+    'comprovante_endereco': 'Comprovante de endereço',
+    'cartao_cnpj': 'Cartão CNPJ',
+    'contrato_social': 'Contrato social',
+    'certidao_casamento': 'Certidão de casamento',
+    'declaracao_uniao_estavel': 'Declaração de união estável',
+    'certidao_nascimento': 'Certidão de nascimento',
+    'carteira_trabalho': 'Carteira de trabalho',
+    'holerite': 'Holerite',
+    'cartao_plano': 'Cartão do plano atual',
+    'proposta_operadora': 'Proposta da operadora',
+    'declaracao_saude': 'Declaração de saúde',
+    'cartao_sus': 'Cartão SUS',
+    'comprovante_pagamento': 'Comprovante de pagamento',
+    'outro': 'Outro',
+}
+
+
+@app.context_processor
+def _inject_doc_tipos():
+    """`doc_tipos` em qualquer template: a lista única de tipos de documento.
+    Antes cada tela tinha a sua, e o que era 'RG' numa era 'identidade' na
+    outra — daí o anexo não ter tipo confiável em lugar nenhum."""
+    return {'doc_tipos': [(k, _DOC_TIPO_NOME[k]) for k in _DOC_TIPO_NOME]}
+
+
+def _doc_prefixo_arquivo(tipo):
+    """Prefixo que vai no nome do arquivo. É ele que carrega o TIPO: o anexo
+    não tem tabela própria, o tipo mora no nome."""
+    t = (tipo or 'outro').strip().lower()
+    if t in _DOC_ROTULO:
+        return _DOC_ROTULO[t]
+    return re.sub(r'[^A-Z0-9]+', '-', _DOC_TIPO_NOME.get(t, 'Outro').upper()).strip('-') or 'OUTRO'
+
+
+def _doc_tipo_do_nome(nome):
+    """Lê o tipo de volta do nome do arquivo. Aceita as duas formas que já
+    existem no banco — 'PREFIXO_pid_ts_arquivo' (upload do detalhe) e
+    'PREFIXO_ts_arquivo' (upload do cadastro) — e devolve 'outro' pro que foi
+    gravado antes de existir tipo, que é a maior parte do histórico."""
+    prefixo = (str(nome or '').split('_') or [''])[0].upper()
+    for chave, rot in _DOC_ROTULO.items():
+        if rot == prefixo:
+            return chave
+    for chave, rot in _DOC_TIPO_NOME.items():
+        if re.sub(r'[^A-Z0-9]+', '-', rot.upper()).strip('-') == prefixo:
+            return chave
+    if prefixo in ('CONTRATO',):
+        return 'proposta_operadora'
+    if prefixo in ('BOLETO1', 'BOLETO'):
+        return 'comprovante_pagamento'
+    return 'outro'
 
 
 def _doc_extensao(nome, mime):
@@ -21736,7 +21821,14 @@ def _consultar_cnpj(dig):
             for s in (d.get('qsa') or []):
                 nome = (s.get('nome_socio') or '').strip()
                 if nome:
-                    socios.append({"nome": nome, "qualificacao": (s.get('qualificacao_socio') or '').strip()})
+                    # O CPF do sócio vem parcialmente mascarado ('***547078**'):
+                    # seis dígitos em posição fixa, do 4º ao 9º. Isso basta pra
+                    # dizer se o titular que está sendo cadastrado É o sócio, e
+                    # é MUITO mais seguro que casar por nome — homônimo passava,
+                    # e sócia com nome de casada não batia.
+                    socios.append({"nome": nome,
+                                   "qualificacao": (s.get('qualificacao_socio') or '').strip(),
+                                   "cpf_mascarado": (s.get('cnpj_cpf_do_socio') or '').strip()})
             sit = (d.get('descricao_situacao_cadastral') or '').strip()
             mun = (d.get('municipio') or '').strip()
             uf = (d.get('uf') or '').strip()
@@ -21822,6 +21914,40 @@ _CNS_CACHE = {}                     # {(cpf, nasc): (ts, status, dados)}
 _CNS_CACHE_TTL = 30 * 24 * 3600     # 30 dias — o CNS de uma pessoa não muda
 _CNS_URL = 'https://cnesadm.datasus.gov.br/cnesadm/publico/usuarios/cadastro'
 
+# CONEXÃO REAPROVEITADA. Medido: os três passos no CNES somam 357-718 ms — a
+# base do governo NÃO é lenta. O que doía era abrir conexão TLS nova a cada
+# consulta: saindo do Railway até um servidor no Brasil, o apertar de mão custa
+# mais que a consulta inteira, e a gente pagava isso toda vez.
+#
+# Aqui a conexão fica de pé e é reusada. Mas com TRAVA, e a trava não é
+# preciosismo: o resultado da busca mora no flash da SESSÃO do Spring, então
+# duas consultas ao mesmo tempo na mesma sessão trocariam de resposta entre si
+# — o consultor A receberia o cartão do cliente do consultor B. Uma de cada vez
+# por sessão; quem chegar junto abre a sua.
+_CNS_SESSOES = []
+_CNS_SESSOES_LOCK = threading.Lock()
+_CNS_SESSOES_MAX = 4
+
+
+class _CnsSessao:
+    """Empresta uma sessão HTTP do pool e devolve no fim, sempre."""
+
+    def __enter__(self):
+        with _CNS_SESSOES_LOCK:
+            self.ses = _CNS_SESSOES.pop() if _CNS_SESSOES else _requests.Session()
+        return self.ses
+
+    def __exit__(self, *e):
+        # Cookie sujo de uma busca não pode contaminar a próxima: o JSESSIONID
+        # continua (é ele que segura a conexão), mas o flash do resultado, não.
+        with _CNS_SESSOES_LOCK:
+            if len(_CNS_SESSOES) < _CNS_SESSOES_MAX:
+                _CNS_SESSOES.append(self.ses)
+            else:
+                try: self.ses.close()
+                except Exception: pass
+        return False
+
 
 def _cns_valido(cns):
     """Valida o dígito verificador do CNS (algoritmo do DATASUS). Serve pra
@@ -21882,8 +22008,9 @@ def _consultar_cns(cpf, nascimento):
     cache = _CNS_CACHE.get(chave)
     if cache and (time.time() - cache[0]) < _CNS_CACHE_TTL:
         return cache[1], cache[2]
+    t0 = time.time()
     try:
-        ses = _requests.Session()
+      with _CnsSessao() as ses:
         # Timeout curto: isto roda com o consultor olhando a tela.
         r1 = ses.get(_CNS_URL, timeout=(5, 12))
         if r1.status_code != 200:
@@ -21923,9 +22050,13 @@ def _consultar_cns(cpf, nascimento):
             'consultado_em': datetime.now().strftime('%d/%m/%Y %H:%M'),
         }
         _CNS_CACHE[chave] = (time.time(), 'ok', dados)
+        # Log do tempo real da consulta. Sem isto, "está demorando" continua
+        # sendo opinião — e a demora pode estar no CNES, na rede do Railway ou
+        # na tela, que são três consertos diferentes.
+        app.logger.info(f"[CNS] consulta ok em {int((time.time() - t0) * 1000)} ms")
         return 'ok', dados
     except Exception as e:
-        app.logger.info(f"[CNS] falha na consulta: {e}")
+        app.logger.info(f"[CNS] falha na consulta em {int((time.time() - t0) * 1000)} ms: {e}")
         return 'indisponivel', {}
 
 
