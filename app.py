@@ -21186,6 +21186,154 @@ def _consultar_cnpj(dig):
     return dados
 
 
+# ═══════════════ Cartão SUS (CNS) — CNES ADM do Ministério da Saúde ═══════════
+# Não existe API de CNS: nem a BrasilAPI tem (testado /cns, /sus, /cnes, todos
+# 404), nem o DATASUS publica uma. O que existe é a tela PÚBLICA de cadastro de
+# usuário do CNES ADM — sem gov.br, sem login — que recebe CPF + nascimento e
+# devolve CNS + nome. É o mesmo caminho que o consultor já fazia na mão; aqui
+# só tiramos o copiar-e-colar do meio.
+#
+# O fluxo é de sistema Spring antigo, em três passos, e a sessão importa:
+#   1. GET  na tela  -> pega o token _csrf e o JSESSIONID
+#   2. POST cpf+data -> 302 quando ACHOU, 200 quando NÃO achou (o resultado
+#                       fica no flash da sessão, não no corpo da resposta)
+#   3. GET  na tela  -> volta o formulário readonly com cns e nome preenchidos
+#
+# Duas armadilhas que já custaram tempo:
+#   • O Location do 302 vem em http:// (sem TLS) e o WAF da saúde derruba quem
+#     seguir. Por isso allow_redirects=False e o GET do passo 3 é nosso, https.
+#   • A tela do passo 3 é o formulário de CADASTRO do cidadão (tem e-mail,
+#     telefone e um campo de recaptcha). NUNCA fazer POST nela: gravaria dado
+#     no registro da pessoa dentro do sistema do governo. Aqui só se lê.
+_CNS_CACHE = {}                     # {(cpf, nasc): (ts, status, dados)}
+_CNS_CACHE_TTL = 30 * 24 * 3600     # 30 dias — o CNS de uma pessoa não muda
+_CNS_URL = 'https://cnesadm.datasus.gov.br/cnesadm/publico/usuarios/cadastro'
+
+
+def _cns_valido(cns):
+    """Valida o dígito verificador do CNS (algoritmo do DATASUS). Serve pra
+    barrar dígito trocado ANTES de mandar pra operadora — e sem consultar
+    ninguém, é conta local. Duas famílias:
+      1 e 2 -> CNS definitivo, DV calculado sobre os 11 primeiros dígitos
+      7,8,9 -> CNS provisório, a soma ponderada dos 15 dígitos fecha em 11"""
+    d = re.sub(r'\D', '', str(cns or ''))
+    if len(d) != 15:
+        return False
+    if d[0] in '789':
+        soma = sum(int(d[i]) * (15 - i) for i in range(15))
+        return soma % 11 == 0
+    if d[0] not in '12':
+        return False
+    pis = d[:11]
+    soma = sum(int(pis[i]) * (15 - i) for i in range(11))
+    dv = 11 - (soma % 11)
+    if dv == 11:
+        dv = 0
+    if dv == 10:
+        soma += 2
+        dv = 11 - (soma % 11)
+        return d == pis + '001' + str(dv)
+    return d == pis + '000' + str(dv)
+
+
+def _cns_data_br(valor):
+    """Aceita a data como o JOB guarda (ISO, do input type=date) ou como o
+    consultor digita (BR) e devolve DD/MM/AAAA, que é o que a tela espera."""
+    s = str(valor or '').strip()
+    m = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})$', s)
+    if m:
+        return f"{int(m.group(3)):02d}/{int(m.group(2)):02d}/{m.group(1)}"
+    m = re.match(r'^(\d{1,2})/(\d{1,2})/(\d{4})$', s)
+    if m:
+        return f"{int(m.group(1)):02d}/{int(m.group(2)):02d}/{m.group(3)}"
+    return ''
+
+
+def _consultar_cns(cpf, nascimento):
+    """Busca o CNS (cartão SUS) por CPF + data de nascimento.
+
+    Devolve (status, dados):
+      ('ok', {...})          achou — cns, nome, cpf, nascimento, fonte
+      ('nao_encontrado', {}) a base respondeu e não tem ninguém com esse par
+      ('invalido', {})       CPF ou data fora de formato (nem chega a consultar)
+      ('indisponivel', {})   fora do ar, lento ou mudou a tela
+
+    'nao_encontrado' e 'indisponivel' são coisas MUITO diferentes pro consultor
+    (um é 'o cliente não tem cadastro', outro é 'tenta de novo daqui a pouco'),
+    por isso não colapsam num None só."""
+    dig = re.sub(r'\D', '', str(cpf or ''))
+    nasc = _cns_data_br(nascimento)
+    if len(dig) != 11 or not nasc:
+        return 'invalido', {}
+    chave = (dig, nasc)
+    cache = _CNS_CACHE.get(chave)
+    if cache and (time.time() - cache[0]) < _CNS_CACHE_TTL:
+        return cache[1], cache[2]
+    try:
+        ses = _requests.Session()
+        # Timeout curto: isto roda com o consultor olhando a tela.
+        r1 = ses.get(_CNS_URL, timeout=(5, 12))
+        if r1.status_code != 200:
+            return 'indisponivel', {}
+        m = re.search(r'name="_csrf"\s+value="([^"]+)"', r1.text)
+        if not m:
+            return 'indisponivel', {}
+        r2 = ses.post(_CNS_URL,
+                      data={'cpf': dig, 'dataNascimento': nasc, '_csrf': m.group(1)},
+                      headers={'Referer': _CNS_URL},
+                      allow_redirects=False, timeout=(5, 12))
+        # 200 = ficou na tela de pesquisa, ou seja, o par CPF+data não bateu.
+        if r2.status_code == 200:
+            _CNS_CACHE[chave] = (time.time(), 'nao_encontrado', {})
+            return 'nao_encontrado', {}
+        if r2.status_code != 302:
+            return 'indisponivel', {}
+        r3 = ses.get(_CNS_URL, headers={'Referer': _CNS_URL}, timeout=(5, 12))
+        if r3.status_code != 200:
+            return 'indisponivel', {}
+        def _campo(nome):
+            mm = re.search(r'id="' + nome + r'"[^>]*\bvalue="([^"]*)"', r3.text)
+            return (mm.group(1).strip() if mm else '')
+        cns = re.sub(r'\D', '', _campo('cns'))
+        nome = _campo('nome')
+        if not cns:
+            _CNS_CACHE[chave] = (time.time(), 'nao_encontrado', {})
+            return 'nao_encontrado', {}
+        dados = {
+            'cns': cns,
+            'cns_fmt': _cns_formatado(cns),
+            'nome': nome,
+            'cpf': dig,
+            'nascimento': nasc,
+            'dv_ok': _cns_valido(cns),
+            'fonte': 'CNES ADM / Ministério da Saúde',
+            'consultado_em': datetime.now().strftime('%d/%m/%Y %H:%M'),
+        }
+        _CNS_CACHE[chave] = (time.time(), 'ok', dados)
+        return 'ok', dados
+    except Exception as e:
+        app.logger.info(f"[CNS] falha na consulta: {e}")
+        return 'indisponivel', {}
+
+
+def _cns_formatado(cns):
+    """CNS é lido em voz alta em balcão de operadora — vai em blocos de 3-4-4-4,
+    que é como sai no cartão físico."""
+    d = re.sub(r'\D', '', str(cns or ''))
+    if len(d) != 15:
+        return d
+    return f"{d[0:3]} {d[3:7]} {d[7:11]} {d[11:15]}"
+
+
+# Mensagem única pro consultor, pra tela e extensão falarem igual.
+_CNS_MSG = {
+    'nao_encontrado': 'Não achei cadastro no SUS com esse CPF e essa data de nascimento. '
+                      'Confira a data — é o que mais erra.',
+    'invalido': 'Preciso do CPF (11 dígitos) e da data de nascimento pra buscar.',
+    'indisponivel': 'A base do Ministério da Saúde não respondeu agora. Tente de novo em instantes.',
+}
+
+
 @app.route('/api/whatsapp/cnpj/<cnpj>', methods=['GET', 'OPTIONS'])
 @requer('crm:ler')
 def api_whatsapp_cnpj(cnpj):
@@ -21215,6 +21363,34 @@ def api_cnpj(cnpj):
     if not dados:
         return jsonify({"ok": False, "erro": "Não consegui consultar esse CNPJ agora. Tente de novo em instantes."}), 502
     return jsonify({"ok": True, "cnpj": dados})
+
+
+@app.route('/api/cns')
+@login_required
+def api_cns():
+    """Busca o cartão SUS por CPF + nascimento, pro formulário de proposta e pra
+    ficha do lead no CRM. Uma pessoa por vez, sob clique — nunca em lote: é
+    consulta de dado de saúde de terceiro, e o motivo tem que ser a proposta que
+    está aberta na tela."""
+    status, dados = _consultar_cns(request.args.get('cpf', ''), request.args.get('nascimento', ''))
+    if status == 'ok':
+        return jsonify({"ok": True, "cns": dados})
+    codigo = 400 if status == 'invalido' else (404 if status == 'nao_encontrado' else 502)
+    return jsonify({"ok": False, "motivo": status, "erro": _CNS_MSG[status]}), codigo
+
+
+@app.route('/api/whatsapp/cns', methods=['GET', 'OPTIONS'])
+@requer('crm:ler')
+def api_whatsapp_cns():
+    """Mesma consulta, pela extensão — o consultor está na conversa, o cliente
+    acabou de mandar CPF e data, e o CNS entra na proposta sem trocar de aba."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    status, dados = _consultar_cns(request.args.get('cpf', ''), request.args.get('nascimento', ''))
+    if status == 'ok':
+        return _wa_cors(jsonify({"ok": True, "cns": dados}))
+    codigo = 400 if status == 'invalido' else (404 if status == 'nao_encontrado' else 502)
+    return _wa_cors(jsonify({"ok": False, "motivo": status, "erro": _CNS_MSG[status]})), codigo
 
 
 # Notas do lead — anotações que ficam presas ao telefone e aparecem numa barra
