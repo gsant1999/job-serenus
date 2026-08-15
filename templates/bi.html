@@ -53,26 +53,31 @@
     <div class="card-header"><h3>Saúde do dinheiro</h3></div>
     <div class="sd-nota">
       Produção diz quanto foi vendido. Isto diz <b>quanto entrou de verdade</b> e
-      <b>quanto voltou pela porta dos fundos</b>. Confere no líquido — o valor que cai na conta.
+      <b>quanto voltou pela porta dos fundos</b>. Cada número vem do razão de eventos — a mesma fonte do Financeiro.
     </div>
 
     <div class="sd-grid">
       <div class="sd-t neutro">
-        <div class="l">Esperado</div>
+        <div class="l">Previsto</div>
         <span class="v">{{ saude.esperado|moeda }}</span>
         <span class="n">pela régua das operadoras</span>
       </div>
-      {# Sem esperado não há o que julgar: ausência de dado não é resultado ruim. #}
-      <div class="sd-t {% if not saude.esperado %}neutro{% elif saude.aderencia >= 99 %}bom{% elif saude.aderencia >= 90 %}aten{% else %}ruim{% endif %}">
-        <div class="l">Recebido</div>
-        <span class="v">{{ saude.recebido|moeda }}</span>
-        <span class="n">{% if saude.esperado %}{{ saude.aderencia }}% do esperado{% else %}nada esperado no período{% endif %}</span>
-        {% if saude.esperado %}<div class="sd-barra"><i style="width:{{ [saude.aderencia, 100]|min }}%"></i></div>{% endif %}
-      </div>
       <div class="sd-t neutro">
-        <div class="l">Retenções</div>
-        <span class="v">{{ saude.retencoes|moeda }}</span>
-        <span class="n">taxa, desp. adm. e ISS — não é erro</span>
+        <div class="l">Apurado</div>
+        <span class="v">{{ saude.apurado|moeda }}</span>
+        <span class="n">a Affinity emitiu extrato</span>
+      </div>
+      {# Sem esperado não há o que julgar: ausência de dado não é resultado ruim. #}
+      <div class="sd-t {% if not saude.apurado %}neutro{% elif saude.entrou_do_apurado >= 99 %}bom{% elif saude.entrou_do_apurado >= 90 %}aten{% else %}ruim{% endif %}">
+        <div class="l">Entrou na conta</div>
+        <span class="v">{{ saude.recebido|moeda }}</span>
+        <span class="n">{% if saude.apurado %}{{ saude.entrou_do_apurado }}% do apurado{% else %}nada apurado no período{% endif %}</span>
+        {% if saude.apurado %}<div class="sd-barra"><i style="width:{{ [saude.entrou_do_apurado, 100]|min }}%"></i></div>{% endif %}
+      </div>
+      <div class="sd-t {% if saude.aguardando > 0.05 %}aten{% else %}bom{% endif %}">
+        <div class="l">Aguardando entrada</div>
+        <span class="v">{{ saude.aguardando|moeda }}</span>
+        <span class="n">apurado que ainda não caiu na conta</span>
       </div>
       <div class="sd-t {% if saude.diferenca < -0.05 %}ruim{% elif saude.diferenca > 0.05 %}aten{% else %}bom{% endif %}">
         <div class="l">Divergência</div>

@@ -60,13 +60,13 @@
 </div>
 
 <div class="cf-info">
-  A conferência fecha no <b>líquido</b> — o valor que cai na conta e que o Fluxo de Caixa enxerga.
-  As retenções da Affinity (taxa, despesa administrativa e ISS) aparecem em coluna própria e
-  <b>não contam como divergência</b>: imposto não é erro.
+  Cada coluna tem <b>uma fonte só</b>, a mesma que o Financeiro usa: <b>Previsto</b> vem da régua,
+  e <b>Apurado</b>, <b>Entrou</b> e <b>Repassado</b> vêm do razão de eventos. A diferença compara
+  o apurado com o previsto — enquanto nada foi apurado <b>não há divergência, há espera</b>.
   {% if not competencia %}<br>Sem mês escolhido, a lista mostra <b>todo o histórico</b> — é aqui que os erros anteriores aparecem.{% endif %}
 </div>
 
-<form class="cf-filtro" method="GET" action="/comissao/conferencia">
+<form class="cf-filtro" method="GET" action="/comissoes/conferencia">
   <select name="competencia" onchange="this.form.submit()">
     <option value="">Todo o histórico</option>
     {% for m in meses %}
@@ -78,24 +78,29 @@
 
 <div class="cf-cards">
   <div class="cf-card esp">
-    <div class="l">Esperado (líquido)</div>
-    <span class="v">{{ resumo.total_esperado|moeda }}</span>
-    <span class="n">{{ resumo.linhas }} parcela(s) conferida(s)</span>
+    <div class="l">Previsto</div>
+    <span class="v">{{ resumo.total_previsto|moeda }}</span>
+    <span class="n">{{ resumo.linhas }} venda(s) · pela régua</span>
   </div>
   <div class="cf-card">
-    <div class="l">Recebido (líquido)</div>
-    <span class="v">{{ resumo.total_recebido|moeda }}</span>
-    <span class="n">conforme extrato da Affinity</span>
+    <div class="l">Apurado pela Affinity</div>
+    <span class="v">{{ resumo.total_apurado|moeda }}</span>
+    <span class="n">ela emitiu extrato dizendo que paga</span>
+  </div>
+  <div class="cf-card ok">
+    <div class="l">Entrou na conta</div>
+    <span class="v">{{ resumo.total_entrou|moeda }}</span>
+    <span class="n">provado, não prometido</span>
   </div>
   <div class="cf-card">
-    <div class="l">Retenções</div>
-    <span class="v">{{ resumo.total_retencoes|moeda }}</span>
-    <span class="n">taxa, desp. adm. e ISS</span>
+    <div class="l">Repassado</div>
+    <span class="v">{{ resumo.total_repassado|moeda }}</span>
+    <span class="n">já pago aos consultores</span>
   </div>
   <div class="cf-card {% if resumo.total_diferenca < 0 %}dif{% else %}ok{% endif %}">
     <div class="l">Diferença</div>
     <span class="v">{{ resumo.total_diferenca|moeda }}</span>
-    <span class="n">{{ resumo.divergentes }} linha(s) divergente(s)</span>
+    <span class="n">{{ resumo.divergentes }} venda(s) divergente(s)</span>
   </div>
   <div class="cf-card ok">
     <div class="l">Conferem</div>
@@ -114,10 +119,11 @@
 <table class="cf">
   <thead>
     <tr>
-      <th>Cliente</th><th>Parcela</th><th>Consultor</th>
-      <th style="text-align:right;">Esperado</th>
-      <th style="text-align:right;">Recebido</th>
-      <th style="text-align:right;">Retenções</th>
+      <th>Cliente</th><th>Consultor</th>
+      <th style="text-align:right;">Previsto</th>
+      <th style="text-align:right;">Apurado</th>
+      <th style="text-align:right;">Entrou</th>
+      <th style="text-align:right;">Repassado</th>
       <th style="text-align:right;">Diferença</th>
       <th>Situação</th>
     </tr>
@@ -127,13 +133,13 @@
     <tr>
       <td>
         <div class="cli">{{ l.cliente or 'Sem nome' }}</div>
-        <div class="cli-sub">{{ l.operadora or '—' }}{% if l.competencia %} · {{ l.competencia }}{% endif %}</div>
+        <div class="cli-sub">{{ l.operadora or '—' }}{% if l.competencia %} · {{ l.competencia }}{% endif %}{% if l.parcelas %} · {{ l.parcelas }} parcela(s){% endif %}</div>
       </td>
-      <td>{{ l.numero }}ª</td>
       <td>{{ l.consultor or '—' }}</td>
-      <td class="num">{{ l.esperado|moeda }}</td>
-      <td class="num">{{ l.recebido|moeda }}</td>
-      <td class="num">{{ l.retencoes|moeda }}</td>
+      <td class="num">{{ l.previsto|moeda }}</td>
+      <td class="num">{{ l.apurado|moeda }}</td>
+      <td class="num" style="color:var(--verde);">{{ l.entrou|moeda }}</td>
+      <td class="num">{{ l.repassado|moeda }}</td>
       <td class="num {% if l.diferenca < 0 %}dif-neg{% elif l.diferenca > 0 %}dif-pos{% else %}dif-zero{% endif %}">
         {{ l.diferenca|moeda }}
       </td>
@@ -152,7 +158,7 @@
 {% else %}
 <div class="vazio">
   Nenhuma parcela para conferir{% if competencia %} em {{ competencia }}{% endif %}.<br>
-  A conferência compara as parcelas geradas pelo JOB com o extrato importado da Affinity.
+  A conferência compara a régua com o razão de eventos. Sem venda no período, não há o que conferir.
 </div>
 {% endif %}
 {% endblock %}

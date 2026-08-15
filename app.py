@@ -14626,15 +14626,25 @@ def _bi_saude_dinheiro(conn, mes=None):
         # ── 1. Recebimento: esperado x recebido, no líquido ──
         conf = conferir_comissao(conn, competencia=mes or None, limite=5000)
         r = conf['resumo']
-        out['esperado'] = r['total_esperado']
-        out['recebido'] = r['total_recebido']
-        out['retencoes'] = r['total_retencoes']
+        # Nomes vindos do razão. 'recebido' passa a ser o que ENTROU na conta
+        # (entrada_confirmada), não o que a Affinity apurou — são coisas
+        # diferentes e a tela agora mostra as duas.
+        out['esperado'] = r['total_previsto']
+        out['apurado'] = r['total_apurado']
+        out['recebido'] = r['total_entrou']
+        out['repassado'] = r['total_repassado']
+        out['estorno_parcelas'] = r['total_estorno']
         out['diferenca'] = r['total_diferenca']
         out['linhas_ok'] = r['ok']
         out['linhas_dif'] = r['divergentes']
         out['linhas_sem'] = r['sem_extrato']
-        out['aderencia'] = round((r['total_recebido'] / r['total_esperado'] * 100), 1) \
-            if r['total_esperado'] else 0.0
+        # Aderência = o que a Affinity apurou contra o que era previsto.
+        out['aderencia'] = round((r['total_apurado'] / r['total_previsto'] * 100), 1) \
+            if r['total_previsto'] else 0.0
+        # Do que ela apurou, quanto se provou que entrou na conta.
+        out['entrou_do_apurado'] = round((r['total_entrou'] / r['total_apurado'] * 100), 1) \
+            if r['total_apurado'] else 0.0
+        out['aguardando'] = round(r['total_apurado'] - r['total_entrou'], 2)
 
         # Onde o dinheiro escapa: operadoras com maior divergência acumulada
         porop = {}
@@ -14666,6 +14676,7 @@ def _bi_saude_dinheiro(conn, mes=None):
         # Taxa de escape: quanto do que entrou voltou pela porta dos fundos
         out['taxa_estorno'] = round((out['estorno_total'] / out['recebido'] * 100), 1) \
             if out['recebido'] else 0.0
+        out['retencoes'] = 0.0   # retenção vive no painel do razão, não aqui
 
         # ── 3. Projeção: o que ainda vai entrar, mês a mês, pela régua real ──
         hoje = datetime.now(TZ_SP).strftime('%Y-%m')
@@ -16979,96 +16990,127 @@ _TOLERANCIA_CENTAVOS = 0.05   # abaixo disso é arredondamento, não divergênci
 
 
 def conferir_comissao(conn, competencia=None, proposta_id=None, limite=500):
-    """Linha a linha: esperado × recebido × repassado, com o motivo da diferença.
+    """A cadeia do dinheiro, lida do RAZÃO — não de somas paralelas.
 
-    Funciona sobre o passado também — é assim que os erros anteriores aparecem
-    sem precisar recalcular nada (o passado fica como está; só fica visível)."""
+    Cada coluna tem UMA fonte, e é a mesma que o Financeiro usa:
+      previsto  — `parcelas`, porque previsão é o que parcela é;
+      apurado   — fin_evento 'apurado_affinity' (a Affinity emitiu extrato);
+      entrou    — fin_evento 'entrada_confirmada' (provou-se que caiu);
+      repassado — fin_evento 'pago', papel consultor (saiu para quem vendeu);
+      estorno   — fin_evento 'estorno' (voltou).
+
+    A versão anterior somava `parcelas` e `affinity_conciliacao` direto e por
+    isso divergia do Financeiro na mesma tela. Somar parcela para dizer o que
+    entrou é o erro: parcela é promessa, evento é fato.
+
+    Agrupa por PROPOSTA e não por parcela porque nem todo evento carrega
+    parcela_id — linha de extrato sem vínculo nasce só com a proposta, e
+    quebrar por parcela perderia justamente essas."""
     where, params = ["COALESCE(pr.status,'') <> 'Excluída'"], []
     if competencia:
         where.append("p.competencia = ?"); params.append(competencia)
     if proposta_id:
         where.append("p.proposta_id = ?"); params.append(proposta_id)
 
+    def _ev(estado, papel=None):
+        """Soma do razão para esta proposta, respeitando sinal (estorno é -1)."""
+        cond = "e.proposta_id = pr.id AND e.estado = ?"
+        p = [estado]
+        if papel:
+            cond += " AND e.papel = ?"; p.append(papel)
+        if competencia:
+            cond += " AND e.competencia = ?"; p.append(competencia)
+        return (f"(SELECT COALESCE(SUM(e.valor * COALESCE(e.sinal,1)),0) "
+                f"FROM fin_evento e WHERE {cond})"), p
+
+    sql_ap, p_ap = _ev('apurado_affinity', 'affinity')
+    sql_en, p_en = _ev('entrada_confirmada')
+    sql_pg, p_pg = _ev('pago', 'consultor')
+    sql_es, p_es = _ev('estorno')
+
     linhas = conn.execute(f"""
-        SELECT p.id parcela_id, p.proposta_id, p.numero, p.competencia,
-               p.valor repasse_previsto, p.valor_corretora esperado, p.status,
-               pr.razao_social, pr.adm_operadora, pr.usuario_id,
+        SELECT pr.id proposta_id, pr.razao_social, pr.adm_operadora,
                COALESCE(pr.estornada,0) estornada,
-               u.nome consultor_nome, u.regime_base,
-               (SELECT COALESCE(SUM(ac.bruto),0) FROM affinity_conciliacao ac
-                 WHERE ac.parcela_id = p.id) recebido_bruto,
-               (SELECT COALESCE(SUM(ac.liquido),0) FROM affinity_conciliacao ac
-                 WHERE ac.parcela_id = p.id) recebido_liquido,
-               (SELECT COUNT(*) FROM affinity_conciliacao ac
-                 WHERE ac.parcela_id = p.id) n_extrato
+               u.nome consultor_nome,
+               MIN(p.competencia) competencia,
+               COUNT(*) parcelas,
+               COALESCE(SUM(p.valor_corretora),0) previsto,
+               COALESCE(SUM(p.valor),0) repasse_previsto,
+               {sql_ap} apurado,
+               {sql_en} entrou,
+               {sql_pg} repassado,
+               {sql_es} estorno
           FROM parcelas p
           JOIN propostas pr ON pr.id = p.proposta_id
           LEFT JOIN usuarios u ON u.id = pr.usuario_id
          WHERE {' AND '.join(where)}
-         ORDER BY p.competencia DESC, p.proposta_id DESC, p.numero
-         LIMIT ?""", tuple(params) + (limite,)).fetchall()
+         GROUP BY pr.id, pr.razao_social, pr.adm_operadora, pr.estornada, u.nome
+         ORDER BY MIN(p.competencia) DESC, pr.id DESC
+         LIMIT ?""",
+        tuple(p_ap + p_en + p_pg + p_es + params) + (limite,)).fetchall()
 
-    saida, resumo = [], {'linhas': 0, 'ok': 0, 'divergentes': 0,
-                         'sem_extrato': 0, 'total_esperado': 0.0,
-                         'total_recebido': 0.0, 'total_retencoes': 0.0,
-                         'total_diferenca': 0.0}
+    saida = []
+    resumo = {'linhas': 0, 'ok': 0, 'divergentes': 0, 'sem_extrato': 0,
+              'total_previsto': 0.0, 'total_apurado': 0.0, 'total_entrou': 0.0,
+              'total_repassado': 0.0, 'total_estorno': 0.0, 'total_diferenca': 0.0}
     for r in linhas:
         d = dict(r)
-        # A conferência fecha no LÍQUIDO: é o valor que cai na conta e o que o
-        # fluxo de caixa enxerga. As retenções da Affinity (taxa, desp. adm.,
-        # ISS) saem numa coluna própria — se entrassem na diferença, todo mês
-        # apareceria "divergência" que na verdade é só imposto.
-        esperado_bruto = float(d.get('esperado') or 0)
-        rec_bruto = float(d.get('recebido_bruto') or 0)
-        rec_liq = float(d.get('recebido_liquido') or 0)
-        tem_extrato = int(d.get('n_extrato') or 0) > 0
-        retencoes = round(rec_bruto - rec_liq, 2) if tem_extrato else 0.0
-        # Esperado líquido = o que esperávamos receber, menos as retenções que o
-        # próprio extrato declarou. Assim a diferença isola erro de verdade.
-        esperado_liq = round(esperado_bruto - retencoes, 2)
-        dif = round(rec_liq - esperado_liq, 2)
+        previsto = round(float(d.get('previsto') or 0), 2)
+        apurado = round(float(d.get('apurado') or 0), 2)
+        entrou = round(float(d.get('entrou') or 0), 2)
+        repassado = round(float(d.get('repassado') or 0), 2)
+        estorno = round(abs(float(d.get('estorno') or 0)), 2)
+        # A diferença que interessa é contra o que a Affinity APUROU: é o único
+        # ponto em que dá pra dizer que ela pagou menos do que devia. Enquanto
+        # nada foi apurado, não há divergência — só espera.
+        dif = round(apurado - previsto, 2) if apurado else 0.0
 
-        if not tem_extrato:
-            situacao, motivo = 'sem_extrato', 'Ainda não apareceu em nenhum extrato da Affinity.'
+        if not apurado:
+            situacao = 'sem_extrato'
+            motivo = 'Ainda não apareceu em extrato da Affinity. Não é divergência, é espera.'
             resumo['sem_extrato'] += 1
         elif abs(dif) <= _TOLERANCIA_CENTAVOS:
             situacao = 'ok'
-            motivo = (f'Líquido bate com o esperado.'
-                      + (f' Retenções da Affinity no período: {_moeda(retencoes)}.' if retencoes else ''))
+            motivo = 'A Affinity apurou o que era previsto.'
+            if apurado and not entrou:
+                motivo += ' Falta confirmar a entrada na conta.'
             resumo['ok'] += 1
         elif dif < 0:
             situacao = 'a_menor'
-            motivo = (f'Caiu {_moeda(abs(dif))} A MENOS que o esperado, já descontadas as retenções. '
-                      + ('A proposta está estornada — confira se o estorno explica a diferença.'
+            motivo = (f'A Affinity apurou {_moeda(abs(dif))} A MENOS que o previsto. '
+                      + ('A proposta está estornada — confira se o estorno explica.'
                          if d.get('estornada') else
                          'Verifique tabela da operadora, número de parcelas ou estorno não registrado.'))
             resumo['divergentes'] += 1
         else:
             situacao = 'a_maior'
-            motivo = (f'Caiu {_moeda(dif)} A MAIS que o esperado, já descontadas as retenções. '
-                      'Verifique se há bônus/campanha ou se a régua cadastrada está desatualizada.')
+            motivo = (f'A Affinity apurou {_moeda(dif)} A MAIS que o previsto. '
+                      'Verifique bônus, campanha ou régua desatualizada.')
             resumo['divergentes'] += 1
 
+        if entrou and repassado > entrou + _TOLERANCIA_CENTAVOS:
+            motivo += (f' ATENÇÃO: repassado ({_moeda(repassado)}) é maior que o '
+                       f'confirmado em conta ({_moeda(entrou)}).')
+
         resumo['linhas'] += 1
-        resumo['total_esperado'] += esperado_liq
-        resumo['total_recebido'] += rec_liq
-        resumo['total_retencoes'] += retencoes
-        resumo['total_diferenca'] += dif if tem_extrato else 0.0
+        for k, v in (('total_previsto', previsto), ('total_apurado', apurado),
+                     ('total_entrou', entrou), ('total_repassado', repassado),
+                     ('total_estorno', estorno), ('total_diferenca', dif)):
+            resumo[k] += v
         saida.append({
-            'parcela_id': d['parcela_id'], 'proposta_id': d['proposta_id'],
-            'numero': d['numero'], 'competencia': d.get('competencia'),
+            'proposta_id': d['proposta_id'], 'competencia': d.get('competencia'),
             'cliente': d.get('razao_social'), 'operadora': d.get('adm_operadora'),
-            'consultor': d.get('consultor_nome'), 'regime': d.get('regime_base'),
-            'esperado_bruto': round(esperado_bruto, 2), 'esperado': esperado_liq,
-            'recebido_bruto': round(rec_bruto, 2), 'recebido': round(rec_liq, 2),
-            'retencoes': retencoes, 'diferenca': dif if tem_extrato else 0.0,
-            'repasse_previsto': round(float(d.get('repasse_previsto') or 0), 2),
-            'status_parcela': d.get('status'), 'estornada': bool(d.get('estornada')),
+            'consultor': d.get('consultor_nome'), 'parcelas': d.get('parcelas'),
+            'previsto': previsto, 'apurado': apurado, 'entrou': entrou,
+            'repassado': repassado, 'estorno': estorno, 'diferenca': dif,
+            'estornada': bool(d.get('estornada')),
             'situacao': situacao, 'motivo': motivo,
         })
-    for k in ('total_esperado', 'total_recebido', 'total_retencoes', 'total_diferenca'):
-        resumo[k] = round(resumo[k], 2)
+    for k in list(resumo):
+        if k.startswith('total_'):
+            resumo[k] = round(resumo[k], 2)
     return {'resumo': resumo, 'linhas': saida}
+
 
 
 @app.route('/comissoes/conferencia')
