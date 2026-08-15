@@ -286,6 +286,13 @@ def _moeda_doc(v):
     except:
         return '0,00'
 
+@app.template_filter('cns_fmt')
+def _cns_fmt_filtro(v):
+    """709 2002 5465 8438 — o CNS em blocos, como sai no cartão físico. Ele é
+    lido em voz alta em balcão de operadora; 15 dígitos grudados erram."""
+    return _cns_formatado(v)
+
+
 @app.template_filter('numero')
 def _numero(v):
     """10.104"""
