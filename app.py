@@ -12766,7 +12766,11 @@ CAMPOS_EDIT_SECOES = [
         {'k': 'adm_operadora',  'label': 'Operadora',        'tipo': 'text'},
         {'k': 'produto',        'label': 'Produto / Plano',  'tipo': 'text'},
         {'k': 'modalidade',     'label': 'Modalidade',       'tipo': 'text'},
-        {'k': 'tipo_pessoa',    'label': 'Tipo de pessoa',   'tipo': 'select', 'opcoes': ['PF','PJ']},
+        # AS QUATRO OPCOES, e nao duas. Faltavam PME e Adesao: numa proposta PME
+        # o select abria em branco, e salvar assim gravava tipo_pessoa vazio —
+        # perdia o dado calado, justo no campo que decide o resto da proposta.
+        {'k': 'tipo_pessoa',    'label': 'Tipo de pessoa',   'tipo': 'select',
+         'opcoes': ['PF', 'PME', 'PJ', 'Adesão']},
         {'k': 'tipo_contrato',  'label': 'Tipo de contrato', 'tipo': 'text'},
         {'k': 'acomodacao',     'label': 'Acomodação',       'tipo': 'text'},
         {'k': 'fator_moderador','label': 'Coparticipação',   'tipo': 'text'},
