@@ -1323,9 +1323,12 @@
         '<span class="job-trilho-item-label">Leads</span>' +
         '<span class="job-trilho-item-badge" id="job-inbox-badge" hidden>0</span>' +
       '</button>' +
-      '<button class="job-trilho-item" data-secao="cnpj" title="Consultar CNPJ">' +
+      // CNPJ e cartão SUS são a MESMA tarefa: conferir dado oficial de quem
+      // está do outro lado da conversa. Duas entradas no trilho seriam duas
+      // portas pro mesmo cômodo, e o trilho já tem dez.
+      '<button class="job-trilho-item" data-secao="cnpj" title="Consultar CNPJ na Receita ou o cartão SUS no Ministério da Saúde">' +
         '<span class="job-trilho-item-icone">' + _ICO_CNPJ + '</span>' +
-        '<span class="job-trilho-item-label">CNPJ</span>' +
+        '<span class="job-trilho-item-label">Consultas</span>' +
       '</button>' +
       '<button class="job-trilho-item" data-secao="cotacao" title="Cotações deste cliente: ver, copiar o link e mandar na conversa">' +
         '<span class="job-trilho-item-icone">' + _ICO_COTACAO + '</span>' +
@@ -8968,15 +8971,41 @@
     _cotMandar(btn);
   }
 
+  // Qual das duas consultas está aberta. Fica fora da função pra que voltar da
+  // conversa não jogue o consultor de volta no CNPJ quando ele estava no SUS.
+  let _consultaAba = 'cnpj';
+
   function abrirSecaoCnpj() {
-    const pre = _cnpjNaConversa();
     setCorpoSecao(
-      _secHead('CNPJ', 'Dados da Receita: razão social, abertura, situação, sócios e se é MEI. Sem CAPTCHA, sem gov.br.') +
+      _secHead('Consultas', 'Dado oficial de quem está do outro lado: empresa na Receita, pessoa no Ministério da Saúde.') +
+      '<div class="job-consulta-abas">' +
+        '<button class="job-consulta-aba" data-aba="cnpj">CNPJ</button>' +
+        '<button class="job-consulta-aba" data-aba="cns">Cartão SUS</button>' +
+      '</div>' +
+      '<div id="job-consulta-corpo"></div>');
+    document.querySelectorAll('.job-consulta-aba').forEach((b) => {
+      b.addEventListener('click', () => { _consultaAba = b.dataset.aba; _pintarConsulta(); });
+    });
+    _pintarConsulta();
+  }
+
+  function _pintarConsulta() {
+    document.querySelectorAll('.job-consulta-aba').forEach((b) =>
+      b.classList.toggle('ativa', b.dataset.aba === _consultaAba));
+    const corpo = document.getElementById('job-consulta-corpo');
+    if (!corpo) return;
+    if (_consultaAba === 'cns') { _montarConsultaCns(corpo); return; }
+    _montarConsultaCnpj(corpo);
+  }
+
+  function _montarConsultaCnpj(corpo) {
+    const pre = _cnpjNaConversa();
+    corpo.innerHTML =
       '<div class="job-cnpj-wrap">' +
         '<input id="job-cnpj-input" class="job-cnpj-input" inputmode="numeric" placeholder="00.000.000/0000-00" value="' + esc(_fmtCnpj(pre)) + '" />' +
         '<button class="job-cnpj-btn" id="job-cnpj-btn">Consultar</button>' +
         '<div id="job-cnpj-resultado"></div>' +
-      '</div>');
+      '</div>';
     const input = document.getElementById('job-cnpj-input');
     const btn = document.getElementById('job-cnpj-btn');
     const disparar = () => _consultarCnpjUI((input.value || '').replace(/\D/g, ''));
@@ -8987,6 +9016,132 @@
       input.focus();
     }
     if (pre) disparar();
+  }
+
+  // ═══════════════ Cartão SUS (CNS) ═══════════════
+  // Não existe API de cartão SUS. O que existe é a tela pública de cadastro de
+  // usuário do CNES ADM, sem gov.br e sem login — o mesmo caminho que o
+  // consultor já fazia na mão, agora sem sair da conversa. O servidor só LÊ
+  // aquela tela; nunca grava nada no registro do cidadão.
+  function _fmtCpf(v) {
+    const d = String(v || '').replace(/\D/g, '').slice(0, 11);
+    if (d.length <= 3) return d;
+    if (d.length <= 6) return d.replace(/^(\d{3})(\d+)/, '$1.$2');
+    if (d.length <= 9) return d.replace(/^(\d{3})(\d{3})(\d+)/, '$1.$2.$3');
+    return d.replace(/^(\d{3})(\d{3})(\d{3})(\d+)/, '$1.$2.$3-$4');
+  }
+  function _fmtCns(v) {
+    const d = String(v || '').replace(/\D/g, '');
+    return d.length === 15 ? d.slice(0, 3) + ' ' + d.slice(3, 7) + ' ' + d.slice(7, 11) + ' ' + d.slice(11) : d;
+  }
+  // O CPF costuma estar na conversa: o cliente manda pra cotação. Pré-preencher
+  // tira uma digitação e um erro de digitação.
+  function _cpfNaConversa() {
+    try {
+      const main = document.querySelector('#main');
+      const txt = main ? (main.innerText || '') : '';
+      const m = txt.match(/\d{3}[.\s]?\d{3}[.\s]?\d{3}[-\s]?\d{2}/);
+      if (m) { const d = m[0].replace(/\D/g, ''); if (d.length === 11) return d; }
+    } catch (e) { /* sem conversa aberta, tudo bem */ }
+    return '';
+  }
+
+  function _montarConsultaCns(corpo) {
+    const pre = _cpfNaConversa();
+    corpo.innerHTML =
+      '<div class="job-cnpj-wrap">' +
+        '<input id="job-cns-cpf" class="job-cnpj-input" inputmode="numeric" placeholder="CPF" value="' + esc(_fmtCpf(pre)) + '" />' +
+        '<input id="job-cns-nasc" class="job-cnpj-input" type="date" title="Data de nascimento" />' +
+        '<button class="job-cnpj-btn" id="job-cns-btn">Consultar</button>' +
+        '<div class="job-cns-dica">Precisa dos dois: o CPF sozinho não acha. A data é o que mais erra.</div>' +
+        '<div id="job-cns-resultado"></div>' +
+      '</div>';
+    const cpf = document.getElementById('job-cns-cpf');
+    const nasc = document.getElementById('job-cns-nasc');
+    const btn = document.getElementById('job-cns-btn');
+    const disparar = () => _consultarCnsUI((cpf.value || '').replace(/\D/g, ''), nasc.value || '');
+    if (btn) btn.addEventListener('click', disparar);
+    if (cpf) {
+      cpf.addEventListener('input', () => { cpf.value = _fmtCpf(cpf.value); });
+      cpf.addEventListener('keydown', (e) => { if (e.key === 'Enter') disparar(); });
+      cpf.focus();
+    }
+    // Preencher a data é a última coisa que falta: assim que ela existe e o
+    // CPF já está completo, não faz sentido pedir mais um clique.
+    if (nasc) nasc.addEventListener('change', () => {
+      if ((cpf.value || '').replace(/\D/g, '').length === 11 && nasc.value) disparar();
+    });
+  }
+
+  async function _consultarCnsUI(dig, nascimento) {
+    const box = document.getElementById('job-cns-resultado');
+    if (!box) return;
+    if (String(dig || '').length !== 11 || !nascimento) {
+      box.innerHTML = '<div class="job-ia-alerta">Preciso do CPF (11 números) e da data de nascimento.</div>';
+      return;
+    }
+    box.innerHTML = _telaCarregando('Consultando no Ministério da Saúde…');
+    let resp;
+    try { resp = await _safeSendMessage({ type: 'consultar_cns', cpf: dig, nascimento: nascimento }); }
+    catch (e) { resp = null; }
+    if (!resp || !resp.ok || !resp.cns) {
+      box.innerHTML = '<div class="job-ia-alerta">' +
+        esc((resp && resp.erro) || 'Não consegui consultar o cartão SUS agora.') + '</div>';
+      return;
+    }
+    const c = resp.cns;
+    const txtCopia = ['Nome: ' + (c.nome || ''), 'CPF: ' + _fmtCpf(c.cpf),
+                      'Nascimento: ' + (c.nascimento || ''), 'Cartão SUS: ' + _fmtCns(c.cns)].join('\n');
+    box.innerHTML =
+      '<div class="job-cns-card">' +
+        '<div class="job-cns-nome">' + esc(c.nome || '') + '</div>' +
+        '<div class="job-cns-linha"><span class="job-cnpj-rot">Cartão SUS</span>' +
+          '<span class="job-cns-num">' + esc(_fmtCns(c.cns)) + '</span>' +
+          '<button class="job-cnpj-copy-item" id="job-cns-copiar-num" data-valor="' + esc(c.cns) + '" title="Copiar o número">' + _ICO_COPIAR + '</button>' +
+        '</div>' +
+        '<div class="job-cns-meta">' + esc(_fmtCpf(c.cpf)) + ' · ' + esc(c.nascimento || '') + '</div>' +
+        '<div class="job-cns-acoes">' +
+          '<button class="job-cnpj-btn" id="job-cns-pdf" data-cpf="' + esc(c.cpf) + '" data-nasc="' + esc(c.nascimento) + '">Baixar PDF</button>' +
+          '<button class="job-cnpj-btn secundario" id="job-cns-salvar" data-texto="' + esc(txtCopia) + '">Salvar no lead (nota)</button>' +
+        '</div>' +
+        '<div class="job-cns-fonte">' + esc(c.fonte || '') + ' · consultado em ' + esc(c.consultado_em || '') + '</div>' +
+      '</div>';
+    const bn = document.getElementById('job-cns-copiar-num');
+    if (bn) bn.addEventListener('click', () => {
+      navigator.clipboard.writeText(bn.dataset.valor || '').then(() => {
+        bn.classList.add('copiado');
+        setTimeout(() => bn.classList.remove('copiado'), 1200);
+      });
+    });
+    const bp = document.getElementById('job-cns-pdf');
+    if (bp) bp.addEventListener('click', async () => {
+      bp.disabled = true; bp.textContent = 'Gerando…';
+      let r = null;
+      try { r = await _safeSendMessage({ type: 'baixar_cartao_sus', cpf: bp.dataset.cpf, nascimento: bp.dataset.nasc }); }
+      catch (e) { r = null; }
+      if (!r || !r.ok || !r.dataUrl) {
+        bp.disabled = false; bp.textContent = 'Baixar PDF';
+        box.insertAdjacentHTML('beforeend',
+          '<div class="job-ia-alerta">' + esc((r && r.erro) || 'Não consegui gerar o PDF.') + '</div>');
+        return;
+      }
+      const a = document.createElement('a');
+      a.href = r.dataUrl; a.download = r.nome || 'CARTAO SUS.pdf';
+      document.body.appendChild(a); a.click(); a.remove();
+      bp.textContent = 'Baixado'; setTimeout(() => { bp.disabled = false; bp.textContent = 'Baixar PDF'; }, 2000);
+    });
+    // A nota vai no telefone da CONVERSA ABERTA, não no do CPF pesquisado —
+    // podem ser pessoas diferentes (consultor confere o CPF do dependente).
+    const bs = document.getElementById('job-cns-salvar');
+    if (bs) bs.addEventListener('click', async () => {
+      bs.disabled = true; bs.textContent = 'Salvando…';
+      let tel = '';
+      try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
+      const ok = await _salvarNotaLead(tel, bs.dataset.texto || '');
+      bs.textContent = ok ? 'Salvo no lead!' : 'Falha — tentar de novo';
+      if (ok) setTimeout(() => { bs.disabled = false; bs.textContent = 'Salvar no lead (nota)'; }, 2000);
+      else bs.disabled = false;
+    });
   }
   async function _consultarCnpjUI(dig) {
     const box = document.getElementById('job-cnpj-resultado');

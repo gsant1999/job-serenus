@@ -1342,7 +1342,48 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
     mask-image: none; -webkit-mask-image: none; border-bottom: 1px solid var(--job-bg3); }
 }
 
-/* ── Consulta de CNPJ ─────────────────────────────────────────────── */
+/* ── Consultas: CNPJ e cartão SUS ─────────────────────────────────── */
+/* Duas consultas, um lugar. São a mesma tarefa — conferir dado oficial de
+   quem está do outro lado da conversa — e duas entradas no trilho seriam
+   duas portas pro mesmo cômodo. */
+.job-consulta-abas { display: flex; gap: 4px; padding: 4px; margin: 0 0 12px;
+  background: var(--job-bg2); border-radius: 10px; }
+.job-consulta-aba { flex: 1 1 0; padding: 8px 6px; border: none; border-radius: 7px;
+  background: transparent; color: var(--job-txt-fraco); font-size: 12.5px; font-weight: 600;
+  font-family: inherit; cursor: pointer;
+  transition: background .14s cubic-bezier(.23,1,.32,1), color .14s cubic-bezier(.23,1,.32,1),
+              transform .1s cubic-bezier(.23,1,.32,1); }
+.job-consulta-aba:hover { color: var(--job-txt); }
+.job-consulta-aba:active { transform: scale(.98); }
+.job-consulta-aba.ativa { background: var(--job-bg3); color: var(--job-txt); }
+
+/* CPF e nascimento são dois campos empilhados: sem isto eles se encostam. */
+.job-cnpj-wrap .job-cnpj-input + .job-cnpj-input { margin-top: 8px; }
+.job-cns-dica { margin-top: 8px; font-size: 11.5px; color: var(--job-txt-fraco); line-height: 1.45; }
+.job-cns-card { margin-top: 14px; padding: 14px; border: 1px solid var(--job-borda);
+  border-radius: 12px; background: var(--job-bg2); }
+.job-cns-nome { font-size: 14px; font-weight: 700; color: var(--job-txt); line-height: 1.3; }
+.job-cns-linha { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; }
+/* O rótulo herdava .job-cnpj-rot e saía do mesmo tamanho do número, disputando
+   a atenção com ele. Quem veio aqui veio pelo número. */
+.job-cns-linha .job-cnpj-rot { font-size: 9.5px; font-weight: 700; letter-spacing: .6px;
+  text-transform: uppercase; color: var(--job-txt-fraco); }
+/* O número é o que a pessoa veio buscar: é ele que tem o maior peso do bloco.
+   Monoespaçado porque ele é ditado em voz alta no balcão da operadora. */
+.job-cns-num { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 15px;
+  font-weight: 700; color: var(--job-ok, #4ade80); letter-spacing: .4px; }
+.job-cns-meta { margin-top: 6px; font-size: 12px; color: var(--job-txt-fraco); }
+.job-cns-acoes { display: flex; gap: 8px; margin-top: 12px; }
+.job-cns-acoes .job-cnpj-btn { margin-top: 0; }
+.job-cnpj-btn.secundario { background: transparent; color: var(--job-txt);
+  border: 1px solid var(--job-borda); font-weight: 500; }
+.job-cnpj-btn.secundario:hover { border-color: var(--job-acento); filter: none; }
+.job-cns-fonte { margin-top: 10px; font-size: 10.5px; color: var(--job-txt-fraco); }
+@media (prefers-reduced-motion: reduce) {
+  .job-consulta-aba { transition: none; }
+  .job-consulta-aba:active { transform: none; }
+}
+
 .job-cnpj-input { width: 100%; box-sizing: border-box; padding: 11px 13px; border-radius: 10px;
   border: 1px solid var(--job-borda); background: var(--job-bg2); color: var(--job-txt);
   font-size: 15px; font-family: inherit; letter-spacing: .3px; outline: none; transition: border-color .12s; }

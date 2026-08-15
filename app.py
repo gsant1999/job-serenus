@@ -21507,6 +21507,28 @@ def _cns_nome_arquivo(d):
     return f"CARTAO SUS_{nome.upper()}.pdf" if nome else "CARTAO SUS.pdf"
 
 
+@app.route('/api/whatsapp/cartao-sus.pdf', methods=['GET', 'OPTIONS'])
+@requer('crm:ler')
+def api_whatsapp_cartao_sus_pdf():
+    """O PDF pela extensão. Precisa de rota própria porque a extensão NÃO manda
+    cookie — ela se identifica por token do aparelho. Um link direto pro
+    /cartao-sus.pdf só funcionaria quando o consultor tivesse o JOB aberto e
+    logado no mesmo navegador, o que esconde a falha justo de quem testa."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    status, dados = _consultar_cns(request.args.get('cpf', ''), request.args.get('nascimento', ''))
+    if status != 'ok':
+        return _wa_cors(jsonify({"ok": False, "motivo": status, "erro": _CNS_MSG[status]})), \
+               (400 if status == 'invalido' else (404 if status == 'nao_encontrado' else 502))
+    try:
+        pdf = _pdf_cartao_sus(dados)
+    except Exception as e:
+        app.logger.warning(f"[CNS] falha ao gerar PDF (extensão): {e}")
+        return _wa_cors(jsonify({"ok": False, "erro": "Não consegui gerar o PDF agora."})), 500
+    return _wa_cors(Response(pdf, mimetype='application/pdf', headers={
+        'Content-Disposition': 'attachment; filename="' + _cns_nome_arquivo(dados) + '"'}))
+
+
 @app.route('/cartao-sus.pdf')
 @login_required
 def cartao_sus_pdf():
