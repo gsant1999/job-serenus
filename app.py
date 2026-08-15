@@ -3431,6 +3431,11 @@ def init_db():
         #   data_liquidacao — quando caiu na conta de verdade
         #   competencia     — o mês contábil, que segue a real quando existe
         ("fin_evento", "data_liquidacao", "TEXT"),
+        # Quando a antecipacao foi pedida por e-mail, e quando o dinheiro
+        # deve cair (72h uteis a partir dali). Sem isso ninguem sabia o que
+        # cobrar da Affinity nem o que prometer ao consultor.
+        ("propostas", "antecipacao_pedida_em", "TEXT"),
+        ("propostas", "antecipacao_prevista_para", "TEXT"),
         ("recebimento", "regua_json", "TEXT"),
         ("recebimento", "tipo_valor", "TEXT DEFAULT 'perc'"),   # perc | reais (Prevent Senior 0-18 paga R$)
         ("recebimento", "promo_total", "REAL"),                 # ex.: 2.80 na Amil quando a tabela é 2.40
@@ -12447,13 +12452,26 @@ def antecipacao_enviar(pid):
 
     if enviado:
         if not eh_teste:
+            agora_env = datetime.now(TZ_SP)
+            prev = previsao_antecipacao(agora_env)
+            conn.execute("""UPDATE propostas SET antecipacao_pedida_em=?, antecipacao_prevista_para=?
+                            WHERE id=?""", (agora_env.strftime('%Y-%m-%d %H:%M'), prev['data'], pid))
             conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
                 VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
-                'antecipacao', f"Solicitação de antecipação de comissão enviada à Affinity. Contrato Nº {numero_contrato} · {op_nome}/{plano}.", datetime.now(TZ_SP)))
+                'antecipacao', (f"Solicitação de antecipação enviada à Affinity. Contrato Nº {numero_contrato} · "
+                                f"{op_nome}/{plano}. Previsão de crédito: {prev['data_br']} "
+                                f"({prev['dias_uteis']} dias úteis"
+                                + (", contados do próximo dia útil porque o pedido saiu após as 17h" if prev['adiado_por_horario'] else "")
+                                + ")."), agora_env))
             conn.commit()
         close_db(conn)
         destino_msg = "para você (teste)" if eh_teste else "à Affinity"
-        return jsonify({"ok": True, "msg": f"Solicitação de antecipação enviada {destino_msg} com {len(lista_anexos)} anexo(s)."})
+        prev_msg = ""
+        if not eh_teste:
+            _p = previsao_antecipacao()
+            prev_msg = f" Previsão de crédito: {_p['data_br']} ({_p['dias_uteis']} dias úteis)."
+        return jsonify({"ok": True, "previsao": (None if eh_teste else _p),
+                        "msg": f"Solicitação de antecipação enviada {destino_msg} com {len(lista_anexos)} anexo(s).{prev_msg}"})
     else:
         close_db(conn)
         erro = getattr(_enviar_email, 'ultimo_erro', None) or "BREVO_API_KEY não configurada no Railway."
@@ -29808,6 +29826,70 @@ def _fin_competencia(data_br):
     return f'{m.group(3)}-{m.group(2)}' if m else ''
 
 
+# ═══════════ PRAZO DA ANTECIPAÇÃO E CORTE DAS 17h ═══════════
+# Pedida a antecipação por e-mail, o dinheiro cai em 72h ÚTEIS. Antes disso não
+# existia previsão nenhuma: ninguém sabia o que cobrar da Affinity nem o que
+# prometer ao consultor. E o corte das 17h decide se ainda dá tempo de repassar
+# no mesmo dia.
+ANTECIPACAO_HORAS_UTEIS = 72          # 3 dias úteis
+CORTE_REPASSE_HORA = 17               # caiu até as 17h, sai no mesmo dia
+
+# Feriados nacionais fixos. Os móveis (Carnaval, Sexta-Feira Santa, Corpus
+# Christi) NÃO estão aqui de propósito: chutá-los erraria a previsão em anos
+# seguintes, e previsão errada é pior que previsão redonda. Quando alguém
+# precisar da precisão, isto vira tabela no banco.
+_FERIADOS_FIXOS = {(1, 1), (4, 21), (5, 1), (9, 7), (10, 12), (11, 2), (11, 15), (12, 25)}
+
+
+def _eh_dia_util(d):
+    """Sábado, domingo e feriado nacional fixo não contam."""
+    return d.weekday() < 5 and (d.month, d.day) not in _FERIADOS_FIXOS
+
+
+def _somar_dias_uteis(inicio, dias):
+    """Avança N dias úteis a partir de uma data (a data de início não conta)."""
+    d = inicio
+    faltam = int(dias)
+    while faltam > 0:
+        d = d + timedelta(days=1)
+        if _eh_dia_util(d):
+            faltam -= 1
+    return d
+
+
+def previsao_antecipacao(quando_pediu=None, horas=None):
+    """Quando o dinheiro da antecipação deve cair, contando do PEDIDO POR E-MAIL.
+
+    Devolve dict com a data prevista e o texto pronto pra tela. Se o pedido saiu
+    depois das 17h, o relógio começa no próximo dia útil — mandar e-mail às 19h
+    não faz a Affinity trabalhar naquela noite."""
+    base = quando_pediu or datetime.now(TZ_SP)
+    if isinstance(base, str):
+        iso = _data_iso(base)
+        try:
+            base = datetime.strptime(iso, '%Y-%m-%d') if iso else datetime.now(TZ_SP)
+        except ValueError:
+            base = datetime.now(TZ_SP)
+    dias = int((horas if horas is not None else ANTECIPACAO_HORAS_UTEIS) / 24)
+    inicio = base.date() if hasattr(base, 'date') else base
+    # Pedido fora do horário comercial só começa a contar no próximo dia útil
+    fora_do_horario = getattr(base, 'hour', 0) >= CORTE_REPASSE_HORA
+    if fora_do_horario or not _eh_dia_util(inicio):
+        inicio = _somar_dias_uteis(inicio, 1)
+    prevista = _somar_dias_uteis(inicio, dias)
+    return {'data': prevista.isoformat(), 'data_br': prevista.strftime('%d/%m/%Y'),
+            'dias_uteis': dias, 'começou_em': inicio.isoformat(),
+            'adiado_por_horario': fora_do_horario}
+
+
+def repasse_mesmo_dia(quando_caiu=None):
+    """Caiu até as 17h de dia útil? Então dá pra processar e repassar hoje."""
+    q = quando_caiu or datetime.now(TZ_SP)
+    if not _eh_dia_util(q.date() if hasattr(q, 'date') else q):
+        return False
+    return getattr(q, 'hour', 24) < CORTE_REPASSE_HORA
+
+
 def _data_iso(v):
     """'03/09/2026' ou '2026-09-03' -> '2026-09-03'. Lixo -> ''.
 
@@ -30737,6 +30819,12 @@ def comissao_conciliacao_confirmar_entrada(cid):
     data_real = _data_iso(d.get('data_entrada'))
     comp = (data_real[:7] if data_real
             else _fin_competencia(c['data_pagamento_informada'] or c['previsao']))
+    # Corte das 17h: caiu ate as 17h de dia util, ainda da pra repassar hoje.
+    # Depois disso, o repasse fica pro proximo dia util — e a tela diz, em vez
+    # de deixar o consultor esperando sem saber por que.
+    hoje_ainda = repasse_mesmo_dia()
+    repasse_em = (datetime.now(TZ_SP).date() if hoje_ainda
+                  else _somar_dias_uteis(datetime.now(TZ_SP).date(), 1))
     _fin_registrar(conn, f"afy:entrada:{cid}", 'entrada_confirmada', c['liquido'],
                    papel='serenus', proposta_id=c['proposta_id'], parcela_id=c['parcela_id'],
                    conciliacao_id=cid,
@@ -30749,7 +30837,12 @@ def comissao_conciliacao_confirmar_entrada(cid):
                               else f"Entrada confirmada manualmente: {obs[:150]}"),
                    usuario_id=session.get('user_id'), usuario_nome=session.get('nome'))
     conn.commit(); close_db(conn)
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "repasse_mesmo_dia": hoje_ainda,
+                    "repasse_em": repasse_em.strftime('%d/%m/%Y'),
+                    "aviso": ("Entrada confirmada. Ainda dá tempo de repassar hoje."
+                              if hoje_ainda else
+                              f"Entrada confirmada após as {CORTE_REPASSE_HORA}h — "
+                              f"o repasse entra em {repasse_em.strftime('%d/%m/%Y')}.")})
 
 
 @app.route('/lead/<int:lid>')

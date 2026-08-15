@@ -215,6 +215,20 @@
       </button>
       {% endif %}
 
+      {# Previsão de crédito: 72h úteis contadas do e-mail. Antes o pedido saía
+         e ninguém sabia quando cobrar da Affinity nem o que dizer ao consultor. #}
+      {% if p.antecipacao_pedida_em %}
+      <div style="flex-basis:100%;background:rgba(31,216,164,.07);border:1px solid rgba(31,216,164,.25);
+                  border-radius:9px;padding:9px 13px;font-size:12.5px;color:var(--texto);
+                  line-height:1.6;margin-top:4px;">
+        Antecipação pedida em <b>{{ p.antecipacao_pedida_em }}</b>.
+        {% if p.antecipacao_prevista_para %}
+        Previsão de crédito: <b style="color:var(--teal);">{{ p.antecipacao_prevista_para|data_br }}</b>
+        <span style="color:var(--cinza);">(72h úteis a partir do e-mail)</span>
+        {% endif %}
+      </div>
+      {% endif %}
+
       <button onclick="abrirConsultor()" style="padding:9px 18px;border-radius:8px;background:var(--panel-2);color:var(--texto);border:1px solid var(--borda);cursor:pointer;font-size:13px;font-weight:600;">
         Trocar consultor
       </button>
