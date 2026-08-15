@@ -10215,12 +10215,22 @@ def salvar_proposta():
                 return n
             return None
 
-        # Anexos genéricos (múltiplos)
+        # ANEXOS: SOBE TUDO DE UMA VEZ, COM O TIPO DE CADA UM.
+        #
+        # Antes todo anexo do cadastro virava '{ts}_doc_{arquivo}' — com 'doc'
+        # fixo. O tipo simplesmente não era gravado, e é por isso que não dava
+        # pra montar pacote de e-mail nem saber o que já foi entregue: na
+        # proposta salva os tipos existiam, mas os arquivos tinham entrado sem
+        # nenhum. A lista de tipos vem paralela à de arquivos, na mesma ordem
+        # em que o navegador os manda.
         nomes = []
-        for f in request.files.getlist('anexos'):
+        tipos_enviados = request.form.getlist('anexo_tipos')
+        for i, f in enumerate(request.files.getlist('anexos')):
             if f and f.filename:
+                tipo = tipos_enviados[i] if i < len(tipos_enviados) else 'outro'
                 nome_limpo = _sanitizar_filename(f.filename)
-                n = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_doc_{nome_limpo}"
+                n = (f"{_doc_prefixo_arquivo(tipo)}_"
+                     f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{nome_limpo}")
                 caminho = os.path.join(UPLOAD_FOLDER, n)
                 f.save(caminho)
                 nomes.append(n)
@@ -21067,7 +21077,69 @@ _DOC_ROTULO = {
     'declaracao_uniao_estavel': 'UNIAO-ESTAVEL', 'declaracao_saude': 'DECLARACAO-SAUDE',
     'carteira_trabalho': 'CTPS', 'holerite': 'HOLERITE', 'cartao_plano': 'CARTAO-PLANO',
     'proposta_operadora': 'PROPOSTA-OPERADORA', 'outro': 'OUTRO',
+    # Prefixo escrito à mão, e não derivado do rótulo: derivando, "Cartão SUS"
+    # virava "CART-O-SUS" porque o acento não sobrevive ao nome de arquivo.
+    'cartao_sus': 'CARTAO-SUS', 'comprovante_pagamento': 'COMPROVANTE-PAGAMENTO',
 }
+
+
+# Rótulo humano de cada tipo. O _DOC_ROTULO acima é o prefixo do ARQUIVO
+# (maiúsculo, sem acento, porque vira nome de arquivo); este é o que o
+# consultor lê na tela e o que vai aparecer na regra de anexo do e-mail.
+_DOC_TIPO_NOME = {
+    'identidade': 'RG ou CNH',
+    'cpf': 'CPF',
+    'comprovante_endereco': 'Comprovante de endereço',
+    'cartao_cnpj': 'Cartão CNPJ',
+    'contrato_social': 'Contrato social',
+    'certidao_casamento': 'Certidão de casamento',
+    'declaracao_uniao_estavel': 'Declaração de união estável',
+    'certidao_nascimento': 'Certidão de nascimento',
+    'carteira_trabalho': 'Carteira de trabalho',
+    'holerite': 'Holerite',
+    'cartao_plano': 'Cartão do plano atual',
+    'proposta_operadora': 'Proposta da operadora',
+    'declaracao_saude': 'Declaração de saúde',
+    'cartao_sus': 'Cartão SUS',
+    'comprovante_pagamento': 'Comprovante de pagamento',
+    'outro': 'Outro',
+}
+
+
+@app.context_processor
+def _inject_doc_tipos():
+    """`doc_tipos` em qualquer template: a lista única de tipos de documento.
+    Antes cada tela tinha a sua, e o que era 'RG' numa era 'identidade' na
+    outra — daí o anexo não ter tipo confiável em lugar nenhum."""
+    return {'doc_tipos': [(k, _DOC_TIPO_NOME[k]) for k in _DOC_TIPO_NOME]}
+
+
+def _doc_prefixo_arquivo(tipo):
+    """Prefixo que vai no nome do arquivo. É ele que carrega o TIPO: o anexo
+    não tem tabela própria, o tipo mora no nome."""
+    t = (tipo or 'outro').strip().lower()
+    if t in _DOC_ROTULO:
+        return _DOC_ROTULO[t]
+    return re.sub(r'[^A-Z0-9]+', '-', _DOC_TIPO_NOME.get(t, 'Outro').upper()).strip('-') or 'OUTRO'
+
+
+def _doc_tipo_do_nome(nome):
+    """Lê o tipo de volta do nome do arquivo. Aceita as duas formas que já
+    existem no banco — 'PREFIXO_pid_ts_arquivo' (upload do detalhe) e
+    'PREFIXO_ts_arquivo' (upload do cadastro) — e devolve 'outro' pro que foi
+    gravado antes de existir tipo, que é a maior parte do histórico."""
+    prefixo = (str(nome or '').split('_') or [''])[0].upper()
+    for chave, rot in _DOC_ROTULO.items():
+        if rot == prefixo:
+            return chave
+    for chave, rot in _DOC_TIPO_NOME.items():
+        if re.sub(r'[^A-Z0-9]+', '-', rot.upper()).strip('-') == prefixo:
+            return chave
+    if prefixo in ('CONTRATO',):
+        return 'proposta_operadora'
+    if prefixo in ('BOLETO1', 'BOLETO'):
+        return 'comprovante_pagamento'
+    return 'outro'
 
 
 def _doc_extensao(nome, mime):
