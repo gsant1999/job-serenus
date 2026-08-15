@@ -88,6 +88,22 @@
   .invalido { border-color:var(--err-bd) !important; }
   .invalido:focus { outline-color:var(--err-bd); }
 
+  /* ═══ LINHAS DE DEPENDENTE ═══
+     Uma medida só para o cabeçalho e para as linhas. Estava sem rótulo
+     nenhum — só placeholder em caixa alta, que some no instante em que a
+     pessoa digita e deixa a linha sem dizer o que é cada coluna. */
+  :root { --dep-grid: 1.15fr .9fr 1.45fr .85fr 28px; }
+  .dep-cab, .dep-linha { display:grid; grid-template-columns:var(--dep-grid); gap:8px; align-items:start; }
+  .dep-cab { margin-bottom:5px; }
+  .dep-cab span { font-size:9.5px; text-transform:uppercase; letter-spacing:.6px;
+    font-weight:700; color:var(--cinza-2); }
+  .dep-linha { margin-bottom:2px; }
+  .dep-item { margin-bottom:12px; }
+  @media (max-width:760px) {
+    .dep-cab { display:none; }
+    .dep-linha { grid-template-columns:1fr 1fr; }
+  }
+
   /* Interno recolhido: ja vem preenchido, nao e trabalho do consultor. */
   .form-interno > summary { cursor:pointer; list-style:none; font-size:15px; font-weight:600;
                             display:flex; align-items:center; gap:8px; }
@@ -234,17 +250,71 @@
       <div class="hint" id="hint-razao"></div>
     </div>
 
-    <div class="campo" style="margin-top:14px;">
-      <label>Titular e dependentes</label>
-      <div class="form-row" style="margin-bottom:4px;">
-        <input type="text" name="nome_titular" id="nome_titular" placeholder="Nome do titular">
+    {# NOME DO TITULAR — SÓ NO EMPRESARIAL.
+       Em PF e Adesão o campo de cima JÁ É o beneficiário titular: eram dois
+       campos com a mesma pessoa e o mesmo texto, e o preenchimento automático
+       deixou a duplicação escancarada. Em PME e PJ os dois continuam, porque
+       ali o de cima é a EMPRESA e este é a pessoa titular do plano. #}
+    <div class="campo" id="campo-nome-titular" style="margin-top:14px; display:none;">
+      <label>Nome do titular do plano <span class="obrig">obrigatório</span></label>
+      <input type="text" name="nome_titular" id="nome_titular" placeholder="Quem é a vida titular do contrato">
+      <div class="hint" id="hint-titular"></div>
+      <div class="hint" id="socio-aviso" hidden style="margin-top:6px;"></div>
+    </div>
+    <input type="hidden" name="nome_titular_pf" id="nome_titular_pf">
+
+    {# QUEM ASSINA PELO CNPJ. So aparece quando o titular NAO e socio — se ele
+       for, os dados ja estao na tela e pedir de novo e pedir o que se ve.
+       Este bloco nao e vida do contrato: e quem responde pela empresa. #}
+    <div id="bloco-socio" hidden style="margin-top:14px; padding:16px; border:1px solid var(--al-bd-f);
+         background:var(--al-bg-f); border-radius:10px;">
+      <div style="display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:4px;">
+        <b style="font-size:13.5px;">Sócio responsável pelo CNPJ</b>
+        <span class="obrig">obrigatório</span>
+        <i class="ajuda-i" title="Quando o titular do plano e funcionario, quem assina o contrato e o socio dono da empresa. A operadora exige esse dado. Ele NAO entra como vida do plano — responde pela empresa.">i</i>
       </div>
-      <div class="erro-campo" id="erro-beneficiarios" style="margin-bottom:8px;"></div>
-      <div id="lista-dependentes"></div>
-      <button type="button" class="btn-ghost" style="font-size:12px; margin-top:6px;" onclick="addDependente()">+ Adicionar dependente</button>
+      <div class="hint" style="margin-bottom:12px;">Não é vida do contrato: é quem assina pela empresa.</div>
+      <div class="form-row form-row-3">
+        <div class="campo">
+          <label>CPF</label>
+          <input type="text" name="socio_cpf" id="socio_cpf" placeholder="000.000.000-00" oninput="mascaraCPF(this)">
+        </div>
+        <div class="campo">
+          <label>Data de nascimento</label>
+          <input type="date" name="socio_nascimento" id="socio_nascimento" max="{{ ano_atual }}-12-31">
+        </div>
+        <div class="campo">
+          <label>Nome</label>
+          <input type="text" name="socio_nome" id="socio_nome" placeholder="Vem do cartão SUS">
+        </div>
+      </div>
+      <div class="cns-linha" id="cns-socio" hidden></div>
+    </div>
+
+    <div class="campo" style="margin-top:14px;">
+      {# A PERGUNTA VEM ANTES DOS CAMPOS.
+         O botão "+ Adicionar dependente" era uma afordância silenciosa: quem
+         não soubesse que podia clicar, não clicava. Agora a tela pergunta, e a
+         resposta é consciente — é dela que sai o total de vidas. #}
+      <label style="display:flex; align-items:center; gap:9px; cursor:pointer;">
+        <input type="checkbox" id="tem-dependentes" onchange="toggleDependentes()"
+               style="width:16px; height:16px; accent-color:var(--azul); cursor:pointer;">
+        <span>Este plano tem dependentes?</span>
+        <i class="ajuda-i" title="Dependente é quem entra no plano por causa do titular: cônjuge, filho, enteado. Ele não existe sozinho — depende de um titular. Se o plano é só do titular, deixe desmarcado.">i</i>
+      </label>
+      <div class="hint" id="hint-dependentes" style="margin-top:4px;">Só o titular. Marque se houver mais alguém no contrato.</div>
+
+      <div id="bloco-dependentes" hidden style="margin-top:12px;">
+        <div class="erro-campo" id="erro-beneficiarios" style="margin-bottom:8px;"></div>
+        <div class="dep-cab" id="dep-cabecalho" hidden>
+          <span>CPF</span><span>Nascimento</span><span>Nome</span><span>Parentesco</span><span></span>
+        </div>
+        <div id="lista-dependentes"></div>
+        <button type="button" class="btn-ghost" style="font-size:12px; margin-top:6px;" onclick="addDependente()">+ Adicionar dependente</button>
+      </div>
       <textarea name="titular_dependentes" id="titular_dependentes" style="display:none;"></textarea>
       <input type="hidden" name="dependentes_json" id="dependentes_json" value="[]">
-      <div class="hint">O total de vidas é calculado a partir daqui — titular mais dependentes.</div>
+      <div class="hint" id="hint-vidas" style="margin-top:8px;">O total de vidas sai daqui — titular mais dependentes.</div>
     </div>
 
     {# RESPONSAVEL FINANCEIRO. Plano de menor de 18 em PF ou Adesao SEMPRE tem
@@ -259,15 +329,18 @@
         <i class="ajuda-i" title="Plano para menor de 18 anos em PF ou Adesao sempre tem um responsavel financeiro. Ele pode ou nao entrar no plano como vida: as vezes e so quem paga. A operadora precisa saber quem e e qual o parentesco com o titular — sem isso a proposta volta.">i</i>
       </div>
       <div class="hint" id="resp-fin-motivo" style="margin-bottom:12px;"></div>
+      {# Mesma ordem do resto do formulario: identifica primeiro, o nome vem
+         sozinho. Era o unico bloco que ainda pedia o nome antes do CPF. #}
       <div class="form-row form-row-3">
-        <div class="campo"><label>Nome completo</label><input type="text" name="resp_fin_nome" id="resp_fin_nome"></div>
         <div class="campo"><label>CPF</label><input type="text" name="resp_fin_cpf" id="resp_fin_cpf" placeholder="000.000.000-00" oninput="mascaraCPF(this)"></div>
         <div class="campo">
           <label>Nascimento</label>
-          <input type="date" name="resp_fin_nascimento" id="resp_fin_nascimento" onchange="mostrarIdades()">
+          <input type="date" name="resp_fin_nascimento" id="resp_fin_nascimento" max="{{ ano_atual }}-12-31" onchange="mostrarIdades()">
           <div class="hint" id="idade-resp-fin"></div>
         </div>
+        <div class="campo"><label>Nome completo</label><input type="text" name="resp_fin_nome" id="resp_fin_nome" placeholder="Vem do cartão SUS"></div>
       </div>
+      <div class="cns-linha" id="cns-resp-fin" hidden></div>
       <div class="form-row form-row-3" style="margin-top:12px;">
         <div class="campo">
           <label>Parentesco com o titular</label>
@@ -289,10 +362,18 @@
         <div class="campo"><label>Telefone</label><input type="tel" name="resp_fin_telefone" id="resp_fin_telefone"></div>
         <div class="campo"><label>E-mail</label><input type="email" name="resp_fin_email" id="resp_fin_email"></div>
       </div>
-      <label class="radio" style="display:inline-flex; margin-top:12px;">
-        <input type="checkbox" name="resp_fin_no_plano" id="resp_fin_no_plano" value="1" onchange="somarVidas()">
-        <span>O responsável financeiro também entra no plano como vida</span>
-      </label>
+      {# A CAIXA "o responsavel tambem entra no plano" FOI EMBORA, e nao por
+         gosto: responsavel financeiro NUNCA e vida do contrato. Se o adulto
+         entra no plano, ele passa a ser o TITULAR e a crianca vira dependente
+         dele — deixa de existir responsavel financeiro. O campo permitia
+         cadastrar um estado que nao existe, e ainda somava uma vida a mais.
+         Fica escondido so pra nao quebrar proposta antiga que ja gravou 1. #}
+      <input type="hidden" name="resp_fin_no_plano" id="resp_fin_no_plano" value="0">
+      <div class="hint" style="margin-top:12px;">
+        O responsável financeiro <b>não é vida</b> do contrato — ele responde pelo
+        pagamento. Se ele também for entrar no plano, o titular passa a ser ele,
+        e a criança entra como dependente.
+      </div>
     </div>
   </div>
 
@@ -716,22 +797,44 @@ function addDependente() {
 function renderDeps() {
   const c = document.getElementById('lista-dependentes');
   c.innerHTML = DEPS.map((d,i)=>`
-    <div style="margin-bottom:10px;">
-      <div class="form-row" style="grid-template-columns:1.15fr .9fr 1.45fr .85fr auto; gap:8px;">
-        <input type="text" placeholder="CPF" value="${d.cpf||''}" title="Com CPF e nascimento o nome e o cartão SUS vêm sozinhos"
+    <div class="dep-item">
+      <div class="dep-linha">
+        <input type="text" placeholder="000.000.000-00" value="${d.cpf||''}" title="Com CPF e nascimento o nome e o cartão SUS vêm sozinhos"
                oninput="mascaraCPF(this)" onchange="DEPS[${i}].cpf=this.value;syncDeps();buscarCNSDep(${i})">
         <div>
           <input type="date" value="${d.nasc}" onchange="DEPS[${i}].nasc=this.value;syncDeps();buscarCNSDep(${i})" title="Nascimento" style="width:100%;">
           <div class="hint" style="margin-top:2px;">${_rotIdade(d.nasc)}</div>
         </div>
-        <input type="text" id="dep-nome-${i}" placeholder="Nome do dependente" value="${d.nome}" onchange="DEPS[${i}].nome=this.value;syncDeps()">
-        <input type="text" placeholder="Parentesco" list="lista-parentesco" value="${d.parentesco}" onchange="DEPS[${i}].parentesco=this.value;syncDeps()">
-        <button type="button" class="btn-ghost" style="color:var(--rosa);" onclick="DEPS.splice(${i},1);renderDeps();syncDeps()">×</button>
+        <input type="text" id="dep-nome-${i}" placeholder="Vem do cartão SUS" value="${d.nome}" onchange="DEPS[${i}].nome=this.value;syncDeps()">
+        <input type="text" placeholder="Filho(a), cônjuge..." list="lista-parentesco" value="${d.parentesco}" onchange="DEPS[${i}].parentesco=this.value;syncDeps()">
+        <button type="button" class="btn-ghost" title="Remover este dependente"
+                style="color:var(--rosa); padding:8px 0;" onclick="DEPS.splice(${i},1);renderDeps();syncDeps()">×</button>
       </div>
       <div class="cns-linha" id="cns-dep-${i}" hidden></div>
     </div>`).join('');
+  const cab = document.getElementById('dep-cabecalho');
+  if (cab) cab.hidden = !DEPS.length;
   syncDeps();
   DEPS.forEach((_, i) => buscarCNSDep(i));
+}
+
+// A pergunta manda no bloco. Desmarcar joga os dependentes fora de propósito:
+// deixar linha preenchida escondida faria o total de vidas mentir.
+function toggleDependentes() {
+  const cx = document.getElementById('tem-dependentes');
+  const bloco = document.getElementById('bloco-dependentes');
+  const dica = document.getElementById('hint-dependentes');
+  if (!cx || !bloco) return;
+  bloco.hidden = !cx.checked;
+  if (cx.checked) {
+    if (dica) dica.textContent = 'Preencha CPF e nascimento — o nome e o cartão SUS vêm sozinhos.';
+    if (!DEPS.length) addDependente();     // marcou: já abre a primeira linha
+  } else {
+    if (dica) dica.textContent = 'Só o titular. Marque se houver mais alguém no contrato.';
+    DEPS = [];
+    renderDeps();
+  }
+  try { mostrarIdades(); } catch (e) {}
 }
 
 // ═══ IDADE ════════════════════════════════════════════════════════════════
@@ -765,7 +868,7 @@ function precisaRespFin(){
   if (tp !== 'PF' && tp !== 'Adesão') return null;
   const at = idadeDe((document.getElementById('data_nasc_titular')||{}).value);
   if (at === null || at >= 18) return null;
-  const nt = (document.getElementById('nome_titular')||{}).value || 'o titular';
+  const nt = nomeTitular() || 'o titular';
   return [nt + ' (' + at + ')'];
 }
 // DUAS COMBINACOES QUE NAO EXISTEM. Nao sao preferencia nossa: a operadora
@@ -815,8 +918,101 @@ function mostrarIdades(){
   try { atualizarBarra(); } catch(e){}
 }
 
+// ═══ SÓCIO OU FUNCIONÁRIO ═══════════════════════════════════════════════
+// No empresarial, quem assina pelo CNPJ tem que estar na proposta. Se o
+// titular do plano JÁ É o sócio, pedir os dados de novo é pedir o que está na
+// tela. Se ele é funcionário, os dados do sócio são obrigatórios — e ele não
+// é vida do contrato, só responde por ele.
+//
+// O casamento é por CPF, não por nome: a consulta de CNPJ traz o CPF do sócio
+// mascarado ('***547078**'), com seis dígitos em posição fixa. Casar por nome
+// deixava homônimo passar como sócio e reprovava sócia com nome de casada.
+let SOCIOS_CNPJ = [];
+let SOCIO_CONFIRMADO = null;   // override do consultor: true, false ou null
+
+function _cpfMioloBate(cpf, mascarado) {
+  const d = String(cpf || '').replace(/\D/g, '');
+  const vis = String(mascarado || '').replace(/\D/g, '');
+  return d.length === 11 && vis.length === 6 && d.slice(3, 9) === vis;
+}
+function socioQueBate() {
+  const cpf = (document.getElementById('cpf_titular') || {}).value || '';
+  for (const s of SOCIOS_CNPJ) if (_cpfMioloBate(cpf, s.cpf_mascarado)) return s;
+  // Só cai no nome quando a Receita não devolveu o CPF daquele sócio.
+  const n = _cnsNorm(nomeTitular());
+  if (n) for (const s of SOCIOS_CNPJ) {
+    if (!String(s.cpf_mascarado || '').replace(/\D/g, '') && _cnsNorm(s.nome) === n) return s;
+  }
+  return null;
+}
+function marcarSeSocio() {
+  const tp = (document.getElementById('tipo_pessoa') || {}).value || '';
+  const bloco = document.getElementById('bloco-socio');
+  const aviso = document.getElementById('socio-aviso');
+  if (!bloco || !aviso) return;
+  if (tp !== 'PME' && tp !== 'PJ') { bloco.hidden = true; aviso.hidden = true; return; }
+
+  const achado = socioQueBate();
+  const eSocio = (SOCIO_CONFIRMADO === null) ? !!achado : SOCIO_CONFIRMADO;
+  aviso.hidden = false;
+  aviso.className = 'hint' + (eSocio ? ' socio-ok' : '');
+  const _esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  aviso.innerHTML = eSocio
+    ? 'Este titular <b>é sócio da empresa</b>'
+      + (achado && achado.qualificacao ? ' (' + _esc(achado.qualificacao) + ')' : '')
+      + '. Não precisa informar quem assina pelo CNPJ. '
+      + '<a href="#" onclick="corrigirSocio(false);return false;">não é sócio</a>'
+    : 'Este titular <b>não consta no quadro societário</b> — então é funcionário, e a proposta '
+      + 'precisa de quem assina pelo CNPJ. '
+      + '<a href="#" onclick="corrigirSocio(true);return false;">é sócio, sim</a>';
+  bloco.hidden = eSocio;
+  ['socio_nome', 'socio_cpf'].forEach(id => {
+    const e = document.getElementById(id); if (e) e.required = !eSocio;
+  });
+  try { atualizarBarra(); } catch (e) {}
+}
+// A máquina erra nos dois sentidos: homônimo e nome de casada. Quem está com o
+// contrato na mão desempata — e a escolha dele manda.
+function corrigirSocio(v) { SOCIO_CONFIRMADO = v; marcarSeSocio(); }
+
+function buscarCNSSocio() {
+  const cpf  = (document.getElementById('socio_cpf') || {}).value || '';
+  const nasc = (document.getElementById('socio_nascimento') || {}).value || '';
+  _cnsBusca('socio', cpf, nasc, document.getElementById('cns-socio'),
+            (document.getElementById('socio_nome') || {}).value || '',
+    (v, d) => {
+      if (d && d.nome) _cnsPreencheSeVazio(document.getElementById('socio_nome'), d.nome);
+    });
+}
+function buscarCNSRespFin() {
+  const cpf  = (document.getElementById('resp_fin_cpf') || {}).value || '';
+  const nasc = (document.getElementById('resp_fin_nascimento') || {}).value || '';
+  _cnsBusca('respfin', cpf, nasc, document.getElementById('cns-resp-fin'),
+            (document.getElementById('resp_fin_nome') || {}).value || '',
+    (v, d) => {
+      if (d && d.nome) _cnsPreencheSeVazio(document.getElementById('resp_fin_nome'), d.nome);
+      try { mostrarIdades(); } catch (e) {}
+    });
+}
+
+// QUEM É O TITULAR DEPENDE DO TIPO DE PLANO — e essa pergunta era respondida
+// em seis lugares diferentes, cada um lendo direto o campo nome_titular.
+//   PF e Adesão → o campo de cima. Ele É o beneficiário titular.
+//   PME e PJ    → o campo próprio, porque o de cima é a EMPRESA.
+// Uma função só responde, e o resto pergunta pra ela.
+function campoTitular() {
+  const tp = (document.getElementById('tipo_pessoa') || {}).value || '';
+  const emp = (tp === 'PME' || tp === 'PJ');
+  return document.getElementById(emp ? 'nome_titular' : 'razao_social');
+}
+function nomeTitular() {
+  const e = campoTitular();
+  return e ? (e.value || '').trim() : '';
+}
+
 function syncDeps() {
-  const tit = document.getElementById('nome_titular').value;
+  const tit = nomeTitular();
   let txt = tit ? ('Titular: '+tit) : '';
   DEPS.forEach(d=>{ if(d.nome) txt += '\nDependente: '+d.nome+(d.parentesco?' ('+d.parentesco+')':''); });
   document.getElementById('titular_dependentes').value = txt;
@@ -833,9 +1029,9 @@ let VIDAS_NA_MAO = false;
 function somarVidas() {
   const el = document.getElementById('total_vidas');
   if (!el) return;
-  const tit = (document.getElementById('nome_titular').value || '').trim() ? 1 : 0;
-  const rf = (document.getElementById('resp_fin_no_plano') || {}).checked ? 1 : 0;
-  const n = tit + DEPS.filter(d => (d.nome || '').trim()).length + rf;
+  const tit = nomeTitular() ? 1 : 0;
+  // O responsável financeiro não entra nesta conta: ele paga, não é vida.
+  const n = tit + DEPS.filter(d => (d.nome || '').trim()).length;
   const dica = document.getElementById('vidas-dica');
   if (!VIDAS_NA_MAO) {
     if (n > 0) el.value = n;
@@ -851,7 +1047,10 @@ function somarVidas() {
   }
   try { calcPreview(); conferirPorte(); mostrarIdades(); } catch (e) {}
 }
-document.getElementById('nome_titular').addEventListener('input', syncDeps);
+['nome_titular','razao_social'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('input', syncDeps);
+});
 
 // ─── Repique ───
 function toggleRepique() {
@@ -934,6 +1133,16 @@ function toggleDocs() {
   campoCnpj.style.display = empresarial ? 'block' : 'none';
   document.getElementById('cnpj').required = empresarial;
   document.getElementById('cpf_titular').required = true;
+  // Nome do titular só existe como campo separado no empresarial: em PF e
+  // Adesão ele É o "Nome do beneficiário" de cima.
+  const cnt = document.getElementById('campo-nome-titular');
+  const nt = document.getElementById('nome_titular');
+  if (cnt) cnt.style.display = empresarial ? 'block' : 'none';
+  if (nt) {
+    nt.required = empresarial;
+    if (!empresarial) nt.value = '';   // não deixa sobra de PJ virar vida em PF
+  }
+  try { syncDeps(); } catch (e) {}
 }
 function mascaraCPF(el) {
   let v = el.value.replace(/\D/g,'').slice(0,11);
@@ -1217,6 +1426,10 @@ function preencherFormulario(dados, bannerMsg) {
   if (dados.dependentes && dados.dependentes.length) {
     DEPS = dados.dependentes.map(d => ({nome:d.nome||'', nasc:d.nasc||'', cpf:d.cpf||'',
                                         parentesco:d.parentesco||'', cns:d.cns||''}));
+    // A leitura do documento achou dependente: a pergunta se responde sozinha,
+    // senão o bloco viria escondido com gente dentro.
+    const cx = document.getElementById('tem-dependentes');
+    if (cx && !cx.checked) { cx.checked = true; toggleDependentes(); }
     renderDeps();
   }
   const obs = document.querySelector('[name="observacoes"]');
@@ -1249,8 +1462,11 @@ function buscarDadosCNPJ(dig) {
     const c = data.cnpj;
     const setName = (n, v) => { const el = document.querySelector('[name="'+n+'"]'); if (el && v) el.value = v; };
     if (c.nome) setName('razao_social', c.nome);
+    SOCIOS_CNPJ = (c.socios || []).slice();
+    if (c.titular_mei && !SOCIOS_CNPJ.length) SOCIOS_CNPJ = [{nome: c.titular_mei, qualificacao: 'Titular MEI', cpf_mascarado: ''}];
     const titular = c.titular_mei || (c.socios && c.socios.length ? c.socios[0].nome : '');
     if (titular) { const el = document.getElementById('nome_titular'); if (el && !el.value) el.value = titular; }
+    try { marcarSeSocio(); } catch (e) {}
     if (status) status.textContent = '✓ ' + (c.nome || 'Dados encontrados') + (c.eh_mei ? ' · MEI' : '') + (c.situacao ? ' · ' + c.situacao : '');
     try { syncDeps(); } catch(e){}
   }).catch(() => { if (status) status.textContent = 'Não foi possível consultar agora.'; });
@@ -1379,26 +1595,25 @@ function _cnsPreencheSeVazio(el, valor) {
 function buscarCNSTitular() {
   const cpf  = (document.getElementById('cpf_titular') || {}).value || '';
   const nasc = (document.getElementById('data_nasc_titular') || {}).value || '';
-  const nome = (document.getElementById('nome_titular') || {}).value || '';
-  _cnsBusca('titular', cpf, nasc, document.getElementById('cns-titular'), nome,
+  _cnsBusca('titular', cpf, nasc, document.getElementById('cns-titular'), nomeTitular(),
     (v, d) => {
       const h = document.getElementById('cns_titular'); if (h) h.value = v;
+      const guardaPf = document.getElementById('nome_titular_pf');
+      if (guardaPf) guardaPf.value = (d && d.nome) || '';
       if (!d || !d.nome) return;
-      const pin = [];
-      if (_cnsPreencheSeVazio(document.getElementById('nome_titular'), d.nome)) pin.push('nome do titular');
-      // Razão social só entra em pessoa física: em PME e PJ esse campo é o
-      // nome da EMPRESA, e preencher com o nome do titular estragaria a
-      // proposta em silêncio.
-      const tp = (document.getElementById('tipo_pessoa') || {}).value || '';
-      if (tp === 'PF' || tp === 'Adesão') {
-        if (_cnsPreencheSeVazio(document.getElementById('razao_social'), d.nome)) pin.push('beneficiário');
-      }
+      // Preenche o campo que representa o titular NAQUELE tipo de plano — um
+      // só, nunca os dois. Preencher os dois era o que duplicava o nome na
+      // tela; e em PME/PJ o de cima é a empresa, escrever nome de pessoa ali
+      // estragaria a proposta em silêncio.
+      const alvo = campoTitular();
+      const preencheu = _cnsPreencheSeVazio(alvo, d.nome);
+      const dica = (alvo && alvo.id === 'nome_titular')
+        ? document.getElementById('hint-titular')
+        : document.getElementById('hint-razao');
       // O óbvio dito: campo que se preenche sozinho sem avisar parece defeito.
-      const hr = document.getElementById('hint-razao');
-      if (hr) hr.textContent = pin.length
-        ? 'Preenchido pelo cadastro do SUS (' + pin.join(' e ') + '). Pode corrigir se precisar.'
-        : '';
-      try { syncDeps(); atualizarBarra(); } catch (e) {}
+      if (dica) dica.textContent = preencheu
+        ? 'Preenchido pelo cadastro do SUS. Pode corrigir se precisar.' : '';
+      try { syncDeps(); atualizarBarra(); marcarSeSocio(); } catch (e) {}
     });
 }
 
@@ -1419,14 +1634,21 @@ function buscarCNSDep(i) {
 }
 
 (function () {
-  ['cpf_titular', 'data_nasc_titular'].forEach(id => {
+  // 'change' e 'blur', não 'input': a busca sai da máquina do consultor pra um
+  // sistema do governo — não vale disparar a cada tecla digitada.
+  const liga = (ids, fn) => ids.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
-    // 'change' e não 'input': a busca sai da máquina do consultor pra um
-    // sistema do governo — não vale disparar a cada tecla digitada.
-    el.addEventListener('change', buscarCNSTitular);
-    el.addEventListener('blur', buscarCNSTitular);
+    el.addEventListener('change', fn);
+    el.addEventListener('blur', fn);
   });
+  liga(['cpf_titular', 'data_nasc_titular'], buscarCNSTitular);
+  liga(['resp_fin_cpf', 'resp_fin_nascimento'], buscarCNSRespFin);
+  liga(['socio_cpf', 'socio_nascimento'], buscarCNSSocio);
+  // Trocar o tipo de plano muda quem é o titular e se o bloco do sócio faz
+  // sentido — sem isto o aviso ficava mostrando a conclusão do tipo anterior.
+  const tp = document.getElementById('tipo_pessoa');
+  if (tp) tp.addEventListener('change', () => { SOCIO_CONFIRMADO = null; try { marcarSeSocio(); } catch (e) {} });
   // O pré-preenchimento pela leitura de documento já traz CPF e nascimento:
   // nesse caso o cartão SUS aparece junto, sem ninguém tocar em nada.
   setTimeout(buscarCNSTitular, 300);

@@ -3602,6 +3602,12 @@ def init_db():
         # junto do CPF de cada um — não vale coluna porque o número de
         # dependentes varia por proposta.
         ("propostas", "cns_titular", "TEXT"),
+        # Sócio que assina pelo CNPJ quando o titular do plano é FUNCIONÁRIO.
+        # Não é vida do contrato: responde pela empresa. Quando o titular é o
+        # próprio sócio, estes ficam vazios — o dado já está no titular.
+        ("propostas", "socio_nome", "TEXT"),
+        ("propostas", "socio_cpf", "TEXT"),
+        ("propostas", "socio_nascimento", "TEXT"),
         # Cotação: link público imutável, orientação e vínculo com lead do CRM
         ("cotacao_salva", "token", "TEXT"),
         ("cotacao_salva", "orientacao", "TEXT"),
@@ -10299,8 +10305,9 @@ def salvar_proposta():
             consultor_usuario_id,subido_por_usuario_id,vigencia_confirmada,
             plataforma_venda,plataforma_papel,
             resp_fin_nome,resp_fin_cpf,resp_fin_nascimento,resp_fin_parentesco,
-            resp_fin_telefone,resp_fin_email,resp_fin_no_plano
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            resp_fin_telefone,resp_fin_email,resp_fin_no_plano,
+            socio_nome,socio_cpf,socio_nascimento
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
             dono_uid,dono_nome,d.get('supervisora_id') or None,
             d.get('proposta_tem_numero'),d.get('numero_proposta'),
             d.get('vigencia'),d.get('modalidade'),d.get('tipo_pessoa'),
@@ -10336,7 +10343,13 @@ def salvar_proposta():
             (d.get('resp_fin_parentesco') or '').strip() or None,
             (d.get('resp_fin_telefone') or '').strip() or None,
             (d.get('resp_fin_email') or '').strip() or None,
-            1 if d.get('resp_fin_no_plano') == '1' else 0
+            0,
+            # Socio que assina pelo CNPJ. So vem preenchido quando o titular do
+            # plano e FUNCIONARIO; quando o titular e o proprio socio, o dado ja
+            # esta nos campos do titular e estes ficam vazios de proposito.
+            (d.get('socio_nome') or '').strip() or None,
+            re.sub(r'\D', '', d.get('socio_cpf') or '') or None,
+            (d.get('socio_nascimento') or '').strip() or None
         ))
         proposta_id = _last_insert_id(cur)
         # Amarra ao lead na hora: é aqui que o telefone/CNPJ estão frescos e certos.
@@ -21718,7 +21731,14 @@ def _consultar_cnpj(dig):
             for s in (d.get('qsa') or []):
                 nome = (s.get('nome_socio') or '').strip()
                 if nome:
-                    socios.append({"nome": nome, "qualificacao": (s.get('qualificacao_socio') or '').strip()})
+                    # O CPF do sócio vem parcialmente mascarado ('***547078**'):
+                    # seis dígitos em posição fixa, do 4º ao 9º. Isso basta pra
+                    # dizer se o titular que está sendo cadastrado É o sócio, e
+                    # é MUITO mais seguro que casar por nome — homônimo passava,
+                    # e sócia com nome de casada não batia.
+                    socios.append({"nome": nome,
+                                   "qualificacao": (s.get('qualificacao_socio') or '').strip(),
+                                   "cpf_mascarado": (s.get('cnpj_cpf_do_socio') or '').strip()})
             sit = (d.get('descricao_situacao_cadastral') or '').strip()
             mun = (d.get('municipio') or '').strip()
             uf = (d.get('uf') or '').strip()
@@ -21804,6 +21824,40 @@ _CNS_CACHE = {}                     # {(cpf, nasc): (ts, status, dados)}
 _CNS_CACHE_TTL = 30 * 24 * 3600     # 30 dias — o CNS de uma pessoa não muda
 _CNS_URL = 'https://cnesadm.datasus.gov.br/cnesadm/publico/usuarios/cadastro'
 
+# CONEXÃO REAPROVEITADA. Medido: os três passos no CNES somam 357-718 ms — a
+# base do governo NÃO é lenta. O que doía era abrir conexão TLS nova a cada
+# consulta: saindo do Railway até um servidor no Brasil, o apertar de mão custa
+# mais que a consulta inteira, e a gente pagava isso toda vez.
+#
+# Aqui a conexão fica de pé e é reusada. Mas com TRAVA, e a trava não é
+# preciosismo: o resultado da busca mora no flash da SESSÃO do Spring, então
+# duas consultas ao mesmo tempo na mesma sessão trocariam de resposta entre si
+# — o consultor A receberia o cartão do cliente do consultor B. Uma de cada vez
+# por sessão; quem chegar junto abre a sua.
+_CNS_SESSOES = []
+_CNS_SESSOES_LOCK = threading.Lock()
+_CNS_SESSOES_MAX = 4
+
+
+class _CnsSessao:
+    """Empresta uma sessão HTTP do pool e devolve no fim, sempre."""
+
+    def __enter__(self):
+        with _CNS_SESSOES_LOCK:
+            self.ses = _CNS_SESSOES.pop() if _CNS_SESSOES else _requests.Session()
+        return self.ses
+
+    def __exit__(self, *e):
+        # Cookie sujo de uma busca não pode contaminar a próxima: o JSESSIONID
+        # continua (é ele que segura a conexão), mas o flash do resultado, não.
+        with _CNS_SESSOES_LOCK:
+            if len(_CNS_SESSOES) < _CNS_SESSOES_MAX:
+                _CNS_SESSOES.append(self.ses)
+            else:
+                try: self.ses.close()
+                except Exception: pass
+        return False
+
 
 def _cns_valido(cns):
     """Valida o dígito verificador do CNS (algoritmo do DATASUS). Serve pra
@@ -21864,8 +21918,9 @@ def _consultar_cns(cpf, nascimento):
     cache = _CNS_CACHE.get(chave)
     if cache and (time.time() - cache[0]) < _CNS_CACHE_TTL:
         return cache[1], cache[2]
+    t0 = time.time()
     try:
-        ses = _requests.Session()
+      with _CnsSessao() as ses:
         # Timeout curto: isto roda com o consultor olhando a tela.
         r1 = ses.get(_CNS_URL, timeout=(5, 12))
         if r1.status_code != 200:
@@ -21905,9 +21960,13 @@ def _consultar_cns(cpf, nascimento):
             'consultado_em': datetime.now().strftime('%d/%m/%Y %H:%M'),
         }
         _CNS_CACHE[chave] = (time.time(), 'ok', dados)
+        # Log do tempo real da consulta. Sem isto, "está demorando" continua
+        # sendo opinião — e a demora pode estar no CNES, na rede do Railway ou
+        # na tela, que são três consertos diferentes.
+        app.logger.info(f"[CNS] consulta ok em {int((time.time() - t0) * 1000)} ms")
         return 'ok', dados
     except Exception as e:
-        app.logger.info(f"[CNS] falha na consulta: {e}")
+        app.logger.info(f"[CNS] falha na consulta em {int((time.time() - t0) * 1000)} ms: {e}")
         return 'indisponivel', {}
 
 
