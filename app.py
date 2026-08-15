@@ -16576,6 +16576,115 @@ def estorno_importar_regras():
     return jsonify({'ok': bool(nr), 'regras': nr, 'faixas': nf})
 
 
+# ═══════════ CONFERÊNCIA DE COMISSÃO — TRÊS PONTAS ═══════════
+# Fechar o mês é responder três perguntas que hoje moram em telas diferentes:
+#   1. ESPERADO   — o que a régua da operadora dizia que ia entrar
+#   2. RECEBIDO   — o que o extrato da Affinity mostra que entrou de fato
+#   3. REPASSADO  — o que foi/será pago ao consultor pelo regime dele
+# Divergência entre 1 e 2 é erro de tabela, de parcela ou de estorno silencioso.
+# Divergência entre 2 e 3 é erro de repasse. As duas precisam de nome e valor,
+# senão o fechamento vira conferência de olho em planilha.
+
+_TOLERANCIA_CENTAVOS = 0.05   # abaixo disso é arredondamento, não divergência
+
+
+def conferir_comissao(conn, competencia=None, proposta_id=None, limite=500):
+    """Linha a linha: esperado × recebido × repassado, com o motivo da diferença.
+
+    Funciona sobre o passado também — é assim que os erros anteriores aparecem
+    sem precisar recalcular nada (o passado fica como está; só fica visível)."""
+    where, params = ["COALESCE(pr.status,'') <> 'Excluída'"], []
+    if competencia:
+        where.append("p.competencia = ?"); params.append(competencia)
+    if proposta_id:
+        where.append("p.proposta_id = ?"); params.append(proposta_id)
+
+    linhas = conn.execute(f"""
+        SELECT p.id parcela_id, p.proposta_id, p.numero, p.competencia,
+               p.valor repasse_previsto, p.valor_corretora esperado, p.status,
+               pr.razao_social, pr.adm_operadora, pr.usuario_id,
+               COALESCE(pr.estornada,0) estornada,
+               u.nome consultor_nome, u.regime_base,
+               (SELECT COALESCE(SUM(ac.bruto),0) FROM affinity_conciliacao ac
+                 WHERE ac.parcela_id = p.id) recebido,
+               (SELECT COUNT(*) FROM affinity_conciliacao ac
+                 WHERE ac.parcela_id = p.id) n_extrato
+          FROM parcelas p
+          JOIN propostas pr ON pr.id = p.proposta_id
+          LEFT JOIN usuarios u ON u.id = pr.usuario_id
+         WHERE {' AND '.join(where)}
+         ORDER BY p.competencia DESC, p.proposta_id DESC, p.numero
+         LIMIT ?""", tuple(params) + (limite,)).fetchall()
+
+    saida, resumo = [], {'linhas': 0, 'ok': 0, 'divergentes': 0,
+                         'sem_extrato': 0, 'total_esperado': 0.0,
+                         'total_recebido': 0.0, 'total_diferenca': 0.0}
+    for r in linhas:
+        d = dict(r)
+        esperado = float(d.get('esperado') or 0)
+        recebido = float(d.get('recebido') or 0)
+        tem_extrato = int(d.get('n_extrato') or 0) > 0
+        dif = round(recebido - esperado, 2)
+
+        if not tem_extrato:
+            situacao, motivo = 'sem_extrato', 'Ainda não apareceu em nenhum extrato da Affinity.'
+            resumo['sem_extrato'] += 1
+        elif abs(dif) <= _TOLERANCIA_CENTAVOS:
+            situacao, motivo = 'ok', 'Extrato bate com o esperado.'
+            resumo['ok'] += 1
+        elif dif < 0:
+            situacao = 'a_menor'
+            motivo = (f'Entrou {_moeda(abs(dif))} A MENOS que o esperado. '
+                      + ('A proposta está estornada — confira se o estorno explica a diferença.'
+                         if d.get('estornada') else
+                         'Verifique tabela da operadora, número de parcelas ou estorno não registrado.'))
+            resumo['divergentes'] += 1
+        else:
+            situacao = 'a_maior'
+            motivo = (f'Entrou {_moeda(dif)} A MAIS que o esperado. '
+                      'Verifique se há bônus/campanha ou se a régua cadastrada está desatualizada.')
+            resumo['divergentes'] += 1
+
+        resumo['linhas'] += 1
+        resumo['total_esperado'] += esperado
+        resumo['total_recebido'] += recebido
+        resumo['total_diferenca'] += dif if tem_extrato else 0.0
+        saida.append({
+            'parcela_id': d['parcela_id'], 'proposta_id': d['proposta_id'],
+            'numero': d['numero'], 'competencia': d.get('competencia'),
+            'cliente': d.get('razao_social'), 'operadora': d.get('adm_operadora'),
+            'consultor': d.get('consultor_nome'), 'regime': d.get('regime_base'),
+            'esperado': round(esperado, 2), 'recebido': round(recebido, 2),
+            'diferenca': dif if tem_extrato else 0.0,
+            'repasse_previsto': round(float(d.get('repasse_previsto') or 0), 2),
+            'status_parcela': d.get('status'), 'estornada': bool(d.get('estornada')),
+            'situacao': situacao, 'motivo': motivo,
+        })
+    for k in ('total_esperado', 'total_recebido', 'total_diferenca'):
+        resumo[k] = round(resumo[k], 2)
+    return {'resumo': resumo, 'linhas': saida}
+
+
+@app.route('/api/comissao/conferencia')
+@login_required
+@admin_required
+def api_comissao_conferencia():
+    """Esperado × recebido × repassado. Sem competência, varre o histórico —
+    é o relatório dos erros anteriores."""
+    prop = (request.args.get('proposta') or '').strip()
+    try:
+        limite = min(int(request.args.get('limite') or 500), 2000)
+    except (TypeError, ValueError):
+        limite = 500
+    conn = db()
+    r = conferir_comissao(conn,
+                          competencia=(request.args.get('competencia') or '').strip() or None,
+                          proposta_id=int(prop) if prop.isdigit() else None,
+                          limite=limite)
+    close_db(conn)
+    return jsonify(r)
+
+
 @app.route('/proposta/<int:pid>/estorno/previa')
 @login_required
 @admin_required
