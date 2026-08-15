@@ -986,7 +986,32 @@
                   border-radius:10px; padding:10px 12px; font-size:11.5px; color:var(--texto);
                   line-height:1.75; }
   .pr-pendencia a { color:var(--amarelo); font-weight:600; text-decoration:underline; }
+
+  /* ═══ SUBABAS: a família da tela atual, sem voltar ao menu ═══ */
+  .subabas { display:flex; align-items:center; gap:4px; flex-wrap:wrap;
+    padding:9px 28px; border-bottom:1px solid var(--borda);
+    background:rgba(12,12,18,.55); backdrop-filter:blur(10px);
+    position:sticky; top:0; z-index:80; }
+  .subabas-rot { font-size:9.5px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.7px; color:var(--cinza-2); margin-right:8px; }
+  .subaba { padding:6px 13px; border-radius:8px; font-size:12.5px; font-weight:600;
+    color:var(--cinza); text-decoration:none; transition:background .12s, color .12s; }
+  .subaba:hover { background:rgba(255,255,255,.05); color:var(--texto); }
+  .subaba:active { transform:scale(.97); }
+  .subaba.atual { background:var(--azul); color:#fff; }
+  @media (max-width:760px){ .subabas { padding:8px 14px; overflow-x:auto; flex-wrap:nowrap; } }
+  @media (prefers-reduced-motion: reduce){ .subaba:active { transform:none; } }
+  @media (prefers-reduced-transparency: reduce){ .subabas { background:var(--panel); backdrop-filter:none; } }
 </style>
+{% if subabas %}
+<div class="subabas" role="tablist" aria-label="{{ subaba_grupo }}">
+  <span class="subabas-rot">{{ subaba_grupo }}</span>
+  {% for a in subabas %}
+  <a href="{{ a.href }}" role="tab" class="subaba {% if a.href == subaba_atual %}atual{% endif %}"
+     {% if a.href == subaba_atual %}aria-current="page"{% endif %}>{{ a.label }}</a>
+  {% endfor %}
+</div>
+{% endif %}
 {% block content %}{% endblock %}
 </div>
 

@@ -23,6 +23,46 @@
   .man-h1 { font-size:28px; line-height:1.15; margin:0 0 8px; letter-spacing:-.02em; color:var(--texto); font-family:'Sora',sans-serif; }
   .man-lede { color:var(--cinza); max-width:64ch; margin:0; font-size:14.5px; }
 
+  /* ═══ TRILHO DO GESTOR: a ordem do processo, não a lista de módulos ═══ */
+  .trilho-intro { max-width:70ch; }
+  .trilho { list-style:none; padding:0; margin:22px 0 0; position:relative; }
+  /* A linha contínua é o que faz ler como caminho, e não como lista solta */
+  .trilho::before { content:''; position:absolute; left:17px; top:14px; bottom:14px;
+                    width:2px; background:var(--borda); }
+  .tr-passo { position:relative; display:flex; gap:15px; padding:0 0 18px 0; }
+  .tr-n { position:relative; z-index:1; flex-shrink:0; width:36px; height:36px; border-radius:50%;
+          display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px;
+          background:var(--panel); border:2px solid var(--borda); color:var(--cinza); }
+  .tr-fase-a .tr-n { border-color:#8b5cf6; color:#8b5cf6; }
+  .tr-fase-b .tr-n { border-color:#3b82f6; color:#3b82f6; }
+  .tr-fase-c .tr-n { border-color:#f59e0b; color:#f59e0b; }
+  .tr-fase-d .tr-n { border-color:#1fd8a4; color:#1fd8a4; }
+  .tr-fase-e .tr-n { border-color:#f43f5e; color:#f43f5e; }
+  .tr-txt { flex:1; min-width:0; background:var(--panel); border:1px solid var(--borda);
+            border-radius:11px; padding:13px 16px; }
+  .tr-chave .tr-txt { border-color:rgba(31,216,164,.45); background:rgba(31,216,164,.05); }
+  .tr-txt b { display:block; font-size:14px; color:var(--texto); margin-bottom:4px;
+              font-family:'Sora',sans-serif; }
+  .tr-txt span { display:block; font-size:13px; color:var(--cinza); line-height:1.6; max-width:68ch; }
+  /* O "confira" é o que impede seguir adiante com o passo anterior quebrado */
+  .tr-txt em { display:block; font-style:normal; font-size:12px; color:var(--cinza-2);
+               line-height:1.55; margin-top:7px; padding-left:10px;
+               border-left:2px solid var(--borda-2); max-width:68ch; }
+  .tr-ir { display:inline-block; margin-top:10px; font-size:12px; font-weight:600;
+           color:var(--azul); text-decoration:none; border:1px solid var(--borda);
+           border-radius:7px; padding:5px 12px; transition:background .12s, border-color .12s; }
+  .tr-ir:hover { background:rgba(59,130,246,.1); border-color:var(--azul); }
+  .tr-ir:active { transform:scale(.97); }
+  .trilho-legenda { display:flex; gap:16px; flex-wrap:wrap; margin-top:6px; padding-left:2px;
+                    font-size:11.5px; color:var(--cinza-2); }
+  .trilho-legenda span { display:flex; align-items:center; gap:6px; }
+  .lg { width:9px; height:9px; border-radius:50%; display:inline-block; }
+  .lg-a { background:#8b5cf6; } .lg-b { background:#3b82f6; } .lg-c { background:#f59e0b; }
+  .lg-d { background:#1fd8a4; } .lg-e { background:#f43f5e; }
+  @media (max-width:640px){ .trilho::before { display:none; } .tr-passo { gap:11px; } }
+  @media (prefers-reduced-motion: reduce){ .tr-ir:active { transform:none; } }
+  @media print { .tr-ir { display:none; } .trilho::before { background:#ccc; } }
+
   .man-body section { margin-bottom:46px; }
   .man-body h2 {
     font-size:20px; letter-spacing:-.01em; margin:0 0 14px; padding-top:16px; scroll-margin-top:80px;
@@ -108,6 +148,7 @@
 <div class="page man-wrap">
 <nav class="man-toc" aria-label="Sumário">
   <p class="toc-title">Sumário</p>
+  <a href="#trilho" style="color:var(--teal);font-weight:600;">O caminho completo</a>
   <a href="#comecando">1. Começando</a>
   <a href="#propostas">2. Propostas</a>
   <a class="sub" href="#prop-fases">As fases, uma a uma</a>
@@ -156,6 +197,131 @@
     <a href="#usuarios"><b>Usuários</b><span>Equipe, perfis e regimes</span></a>
   </div>
 </header>
+
+<!-- ══════════ TRILHO DO GESTOR ══════════
+     O manual conta o que cada módulo faz. Isto conta a ORDEM: o caminho
+     inteiro, do lead até o dinheiro na conta, com o link da tela em cada passo
+     e o que precisa estar verdadeiro para poder seguir adiante. -->
+<section id="trilho" class="trilho-sec">
+  <h2><span class="mod">Comece por aqui</span>O caminho completo, do lead ao dinheiro</h2>
+  <p class="trilho-intro">Onze passos, na ordem em que acontecem. Cada um leva à tela onde se faz,
+     e diz o que precisa estar pronto antes de avançar. <strong>Se um passo está travado, a causa
+     está sempre no passo anterior.</strong></p>
+
+  <ol class="trilho">
+    <li class="tr-passo tr-fase-a">
+      <div class="tr-n">1</div>
+      <div class="tr-txt">
+        <b>O lead chega sozinho</b>
+        <span>Facebook e Google caem no CRM a cada 15 min. Ninguém digita lead à mão.</span>
+        <em>Confira: o lead novo aparece na coluna Lead Novo com o consultor certo.</em>
+        <a class="tr-ir" href="/crm">Abrir CRM</a>
+      </div>
+    </li>
+    <li class="tr-passo tr-fase-a">
+      <div class="tr-n">2</div>
+      <div class="tr-txt">
+        <b>O consultor atende e cota</b>
+        <span>A cotação vira um link próprio para o cliente. Cada versão nova gera um link novo — o antigo nunca muda.</span>
+        <em>Confira: a cotação ficou vinculada ao lead no card dele.</em>
+        <a class="tr-ir" href="/cotacao">Abrir Cotação</a>
+      </div>
+    </li>
+    <li class="tr-passo tr-fase-a">
+      <div class="tr-n">3</div>
+      <div class="tr-txt">
+        <b>Fechou: vira proposta</b>
+        <span>A venda entra com operadora, plano, vidas e vigência. É aqui que o motor calcula a comissão.</span>
+        <em>Confira: apareceu aviso de "falta recebimento/repasse"? A regra da operadora não está cadastrada — resolva antes.</em>
+        <a class="tr-ir" href="/nova-proposta">Nova Proposta</a>
+      </div>
+    </li>
+
+    <li class="tr-passo tr-fase-b">
+      <div class="tr-n">4</div>
+      <div class="tr-txt">
+        <b>A regra da operadora precisa existir</b>
+        <span>Quanto a corretora recebe e <strong>em que meses</strong>. A régua da Amil é 100/100/40 em três meses — sem isso o caixa projeta errado.</span>
+        <em>Confira: a operadora tem total e régua preenchidos no plano vendido.</em>
+        <a class="tr-ir" href="/operadoras">Operadoras</a>
+      </div>
+    </li>
+    <li class="tr-passo tr-fase-b">
+      <div class="tr-n">5</div>
+      <div class="tr-txt">
+        <b>E a regra do consultor também</b>
+        <span>Quanto vai para quem vendeu, pelo regime dele. Gestor que vende tem régua própria, separada.</span>
+        <em>Confira: o regime do consultor está preenchido no cadastro dele.</em>
+        <a class="tr-ir" href="/repasses">Repasses</a>
+      </div>
+    </li>
+
+    <li class="tr-passo tr-fase-c">
+      <div class="tr-n">6</div>
+      <div class="tr-txt">
+        <b>A esteira leva a proposta até implantada</b>
+        <span>Documentos, análise e vigência confirmada. A comissão só nasce de venda implantada.</span>
+        <em>Confira: a fase avançou e a vigência foi confirmada.</em>
+        <a class="tr-ir" href="/propostas">Propostas</a>
+      </div>
+    </li>
+    <li class="tr-passo tr-fase-c">
+      <div class="tr-n">7</div>
+      <div class="tr-txt">
+        <b>As parcelas ficam previstas</b>
+        <span>O JOB projeta mês a mês o que a operadora deve pagar e o que vai ao consultor. Ainda é previsão, não dinheiro.</span>
+        <em>Confira: os meses batem com a régua da operadora, não com a do consultor.</em>
+        <a class="tr-ir" href="/fluxo-caixa">Fluxo de Caixa</a>
+      </div>
+    </li>
+
+    <li class="tr-passo tr-fase-d">
+      <div class="tr-n">8</div>
+      <div class="tr-txt">
+        <b>Chega o extrato da Affinity</b>
+        <span>Suba os PDFs na pré-conferência. Nada é gravado antes de você conferir linha a linha.</span>
+        <em>Confira: todo item achou a proposta dele. O que não achou fica na fila de revisão.</em>
+        <a class="tr-ir" href="/comissoes/extrato">Extrato Affinity</a>
+      </div>
+    </li>
+    <li class="tr-passo tr-fase-d tr-chave">
+      <div class="tr-n">9</div>
+      <div class="tr-txt">
+        <b>Conferência: previsto contra pago</b>
+        <span>Aqui o mês fecha. Compara no líquido — o que cai na conta. Imposto aparece em coluna própria e não conta como erro.</span>
+        <em>Confira: diferença a menor sem estorno registrado é dinheiro que não veio. Investigue antes de liberar.</em>
+        <a class="tr-ir" href="/comissoes/conferencia">Conferência</a>
+      </div>
+    </li>
+
+    <li class="tr-passo tr-fase-e">
+      <div class="tr-n">10</div>
+      <div class="tr-txt">
+        <b>Libere e pague</b>
+        <span>Só depois da entrada confirmada. Liberar antes é pagar comissão de dinheiro que ainda não entrou.</span>
+        <em>Confira: a parcela está com entrada confirmada, não só apurada no extrato.</em>
+        <a class="tr-ir" href="/fluxo-caixa">Liberar parcelas</a>
+      </div>
+    </li>
+    <li class="tr-passo tr-fase-e">
+      <div class="tr-n">11</div>
+      <div class="tr-txt">
+        <b>Se o cliente cancelar, o estorno volta</b>
+        <span>O sistema calcula quanto a operadora tira de volta, pela curva dela e pela regra vigente na data da venda.</span>
+        <em>Confira: veja a prévia com a memória de cálculo antes de confirmar a cobrança.</em>
+        <a class="tr-ir" href="/estornos">Estornos</a>
+      </div>
+    </li>
+  </ol>
+
+  <div class="trilho-legenda">
+    <span><i class="lg lg-a"></i>Vender</span>
+    <span><i class="lg lg-b"></i>Regras</span>
+    <span><i class="lg lg-c"></i>Implantar</span>
+    <span><i class="lg lg-d"></i>Conferir</span>
+    <span><i class="lg lg-e"></i>Pagar</span>
+  </div>
+</section>
 
 <!-- ══════════ 1. COMEÇANDO ══════════ -->
 <section id="comecando">

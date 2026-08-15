@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Conferência de Comissão{% endblock %}
+
+{% block head %}
+<style>
+  .cf-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin:16px 0 18px; }
+  .cf-card { background:var(--panel); border:1px solid var(--borda); border-left:3px solid var(--borda-2);
+             border-radius:11px; padding:13px 15px; }
+  .cf-card .l { font-size:9.5px; font-weight:700; letter-spacing:.5px; text-transform:uppercase;
+                color:var(--cinza-2); margin-bottom:5px; }
+  .cf-card .v { font-size:19px; font-weight:700; font-variant-numeric:tabular-nums; color:var(--texto); }
+  .cf-card .n { font-size:10.5px; color:var(--cinza); margin-top:3px; display:block; }
+  .cf-card.ok   { border-left-color:var(--verde); }
+  .cf-card.ok .v { color:var(--verde); }
+  .cf-card.dif  { border-left-color:var(--erro); }
+  .cf-card.dif .v { color:var(--erro); }
+  .cf-card.esp  { border-left-color:var(--azul); }
+  .cf-card.pend { border-left-color:var(--amarelo); }
+  .cf-card.pend .v { color:var(--amarelo); }
+
+  .cf-filtro { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
+  .cf-filtro select { background:var(--panel-2); border:1px solid var(--borda); border-radius:8px;
+                      padding:8px 11px; color:var(--texto); font-size:13px; }
+  .cf-info { background:rgba(59,130,246,.07); border:1px solid rgba(59,130,246,.22); border-radius:10px;
+             padding:11px 14px; font-size:12.5px; color:var(--cinza); line-height:1.7; margin-bottom:16px; }
+  .cf-info b { color:var(--texto); }
+
+  table.cf { width:100%; border-collapse:collapse; font-size:12.5px; background:var(--panel);
+             border:1px solid var(--borda); border-radius:12px; overflow:hidden; }
+  table.cf th { text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:.5px;
+                font-weight:700; color:var(--cinza-2); padding:11px 12px; background:var(--panel-2);
+                border-bottom:1px solid var(--borda); white-space:nowrap; }
+  table.cf td { padding:11px 12px; border-bottom:1px solid var(--borda); color:var(--texto); vertical-align:top; }
+  table.cf tr:last-child td { border-bottom:none; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  td.dif-neg { color:var(--erro); font-weight:700; }
+  td.dif-pos { color:var(--amarelo); font-weight:700; }
+  td.dif-zero { color:var(--cinza-2); }
+  .cli { font-weight:600; }
+  .cli-sub { font-size:10.5px; color:var(--cinza-2); margin-top:2px; }
+  .tag { display:inline-block; font-size:9.5px; font-weight:700; letter-spacing:.4px; text-transform:uppercase;
+         padding:2px 7px; border-radius:5px; }
+  .tag.ok { background:rgba(31,216,164,.14); color:var(--verde); }
+  .tag.a_menor { background:rgba(244,63,94,.14); color:var(--erro); }
+  .tag.a_maior { background:rgba(250,204,21,.14); color:var(--amarelo); }
+  .tag.sem_extrato { background:rgba(154,161,181,.14); color:var(--cinza-2); }
+  .motivo { font-size:11.5px; color:var(--cinza); line-height:1.55; margin-top:4px; max-width:430px; }
+  .vazio { padding:44px; text-align:center; color:var(--cinza-2); font-size:13px;
+           background:var(--panel); border:1px dashed var(--borda); border-radius:12px; }
+  .tbl-wrap { overflow-x:auto; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Conferência de Comissão</h1>
+    <div class="sub">O que era esperado, o que a Affinity pagou e o que vai para o consultor</div>
+  </div>
+</div>
+
+<div class="cf-info">
+  A conferência fecha no <b>líquido</b> — o valor que cai na conta e que o Fluxo de Caixa enxerga.
+  As retenções da Affinity (taxa, despesa administrativa e ISS) aparecem em coluna própria e
+  <b>não contam como divergência</b>: imposto não é erro.
+  {% if not competencia %}<br>Sem mês escolhido, a lista mostra <b>todo o histórico</b> — é aqui que os erros anteriores aparecem.{% endif %}
+</div>
+
+<form class="cf-filtro" method="GET" action="/comissao/conferencia">
+  <select name="competencia" onchange="this.form.submit()">
+    <option value="">Todo o histórico</option>
+    {% for m in meses %}
+    <option value="{{ m }}" {% if m == competencia %}selected{% endif %}>{{ m }}</option>
+    {% endfor %}
+  </select>
+  <noscript><button type="submit">Filtrar</button></noscript>
+</form>
+
+<div class="cf-cards">
+  <div class="cf-card esp">
+    <div class="l">Esperado (líquido)</div>
+    <span class="v">{{ resumo.total_esperado|moeda }}</span>
+    <span class="n">{{ resumo.linhas }} parcela(s) conferida(s)</span>
+  </div>
+  <div class="cf-card">
+    <div class="l">Recebido (líquido)</div>
+    <span class="v">{{ resumo.total_recebido|moeda }}</span>
+    <span class="n">conforme extrato da Affinity</span>
+  </div>
+  <div class="cf-card">
+    <div class="l">Retenções</div>
+    <span class="v">{{ resumo.total_retencoes|moeda }}</span>
+    <span class="n">taxa, desp. adm. e ISS</span>
+  </div>
+  <div class="cf-card {% if resumo.total_diferenca < 0 %}dif{% else %}ok{% endif %}">
+    <div class="l">Diferença</div>
+    <span class="v">{{ resumo.total_diferenca|moeda }}</span>
+    <span class="n">{{ resumo.divergentes }} linha(s) divergente(s)</span>
+  </div>
+  <div class="cf-card ok">
+    <div class="l">Conferem</div>
+    <span class="v">{{ resumo.ok }}</span>
+    <span class="n">bateram com o esperado</span>
+  </div>
+  <div class="cf-card pend">
+    <div class="l">Sem extrato</div>
+    <span class="v">{{ resumo.sem_extrato }}</span>
+    <span class="n">ainda não vieram no relatório</span>
+  </div>
+</div>
+
+{% if linhas %}
+<div class="tbl-wrap">
+<table class="cf">
+  <thead>
+    <tr>
+      <th>Cliente</th><th>Parcela</th><th>Consultor</th>
+      <th style="text-align:right;">Esperado</th>
+      <th style="text-align:right;">Recebido</th>
+      <th style="text-align:right;">Retenções</th>
+      <th style="text-align:right;">Diferença</th>
+      <th>Situação</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for l in linhas %}
+    <tr>
+      <td>
+        <div class="cli">{{ l.cliente or 'Sem nome' }}</div>
+        <div class="cli-sub">{{ l.operadora or '—' }}{% if l.competencia %} · {{ l.competencia }}{% endif %}</div>
+      </td>
+      <td>{{ l.numero }}ª</td>
+      <td>{{ l.consultor or '—' }}</td>
+      <td class="num">{{ l.esperado|moeda }}</td>
+      <td class="num">{{ l.recebido|moeda }}</td>
+      <td class="num">{{ l.retencoes|moeda }}</td>
+      <td class="num {% if l.diferenca < 0 %}dif-neg{% elif l.diferenca > 0 %}dif-pos{% else %}dif-zero{% endif %}">
+        {{ l.diferenca|moeda }}
+      </td>
+      <td>
+        <span class="tag {{ l.situacao }}">
+          {% if l.situacao == 'ok' %}Confere{% elif l.situacao == 'a_menor' %}A menor
+          {% elif l.situacao == 'a_maior' %}A maior{% else %}Sem extrato{% endif %}
+        </span>
+        <div class="motivo">{{ l.motivo }}</div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="vazio">
+  Nenhuma parcela para conferir{% if competencia %} em {{ competencia }}{% endif %}.<br>
+  A conferência compara as parcelas geradas pelo JOB com o extrato importado da Affinity.
+</div>
+{% endif %}
+{% endblock %}

@@ -6275,6 +6275,59 @@ BRAND = {
 }
 
 
+# ─── SUBABAS: telas irmãs se alcançam sem voltar ao menu ────────────────────
+# Operadoras, Repasses, Níveis e Estornos são a MESMA tarefa vista de ângulos
+# diferentes, mas viviam como itens soltos do menu: pra ir de uma à outra, o
+# gestor voltava à barra lateral e procurava. Agrupar por proximidade é o que
+# faz cada uma dizer onde está e o que tem ao lado.
+SUBABAS = [
+    {'grupo': 'Dinheiro', 'itens': [
+        {'label': 'Financeiro',   'href': '/financeiro',           'admin': True},
+        {'label': 'Fluxo de Caixa','href': '/fluxo-caixa',         'admin': False},
+        {'label': 'Conferência',  'href': '/comissoes/conferencia', 'admin': True},
+        {'label': 'Extrato Affinity','href': '/comissoes/extrato',    'admin': True},
+        {'label': 'Conciliação',  'href': '/comissoes/conciliacao','admin': True},
+        {'label': 'Estornos',     'href': '/estornos',             'admin': True},
+        {'label': 'Fechamento',   'href': '/fechamento',           'admin': True},
+    ]},
+    {'grupo': 'Regras de comissão', 'itens': [
+        {'label': 'Operadoras',   'href': '/operadoras', 'admin': True},
+        {'label': 'Repasses',     'href': '/repasses',   'admin': True},
+        {'label': 'Níveis',       'href': '/niveis',     'admin': True},
+        {'label': 'Regimes',      'href': '/regimes',    'admin': True},
+        {'label': 'Produtos',     'href': '/produtos',   'admin': True},
+    ]},
+    {'grupo': 'CRM', 'itens': [
+        {'label': 'Kanban',       'href': '/crm',           'admin': False},
+        {'label': 'Base Fria',    'href': '/crm/frios',     'admin': True},
+        {'label': 'Fluxos',       'href': '/crm/fluxos',    'admin': True},
+        {'label': 'Funis',        'href': '/crm/funis',     'admin': False},
+        {'label': 'Biblioteca',   'href': '/crm/modelos',   'admin': False},
+    ]},
+]
+
+
+@app.context_processor
+def _inject_subabas():
+    """Faixa de abas da família da tela atual — ou nada, se ela não tem família."""
+    p = request.path or ''
+    eh_admin = session.get('perfil') == 'admin'
+    for g in SUBABAS:
+        # Casa a aba mais específica (evita /crm pegar tudo que começa com /crm)
+        atual = None
+        for it in g['itens']:
+            if p == it['href'] or p.startswith(it['href'] + '/'):
+                if atual is None or len(it['href']) > len(atual['href']):
+                    atual = it
+        if not atual:
+            continue
+        visiveis = [it for it in g['itens'] if eh_admin or not it.get('admin')]
+        if len(visiveis) < 2:
+            return {}
+        return {'subabas': visiveis, 'subaba_atual': atual['href'], 'subaba_grupo': g['grupo']}
+    return {}
+
+
 @app.context_processor
 def _inject_ano_atual():
     """`ano_atual` em qualquer template — serve pra travar o min/max dos campos
@@ -16606,7 +16659,9 @@ def conferir_comissao(conn, competencia=None, proposta_id=None, limite=500):
                COALESCE(pr.estornada,0) estornada,
                u.nome consultor_nome, u.regime_base,
                (SELECT COALESCE(SUM(ac.bruto),0) FROM affinity_conciliacao ac
-                 WHERE ac.parcela_id = p.id) recebido,
+                 WHERE ac.parcela_id = p.id) recebido_bruto,
+               (SELECT COALESCE(SUM(ac.liquido),0) FROM affinity_conciliacao ac
+                 WHERE ac.parcela_id = p.id) recebido_liquido,
                (SELECT COUNT(*) FROM affinity_conciliacao ac
                  WHERE ac.parcela_id = p.id) n_extrato
           FROM parcelas p
@@ -16618,54 +16673,87 @@ def conferir_comissao(conn, competencia=None, proposta_id=None, limite=500):
 
     saida, resumo = [], {'linhas': 0, 'ok': 0, 'divergentes': 0,
                          'sem_extrato': 0, 'total_esperado': 0.0,
-                         'total_recebido': 0.0, 'total_diferenca': 0.0}
+                         'total_recebido': 0.0, 'total_retencoes': 0.0,
+                         'total_diferenca': 0.0}
     for r in linhas:
         d = dict(r)
-        esperado = float(d.get('esperado') or 0)
-        recebido = float(d.get('recebido') or 0)
+        # A conferência fecha no LÍQUIDO: é o valor que cai na conta e o que o
+        # fluxo de caixa enxerga. As retenções da Affinity (taxa, desp. adm.,
+        # ISS) saem numa coluna própria — se entrassem na diferença, todo mês
+        # apareceria "divergência" que na verdade é só imposto.
+        esperado_bruto = float(d.get('esperado') or 0)
+        rec_bruto = float(d.get('recebido_bruto') or 0)
+        rec_liq = float(d.get('recebido_liquido') or 0)
         tem_extrato = int(d.get('n_extrato') or 0) > 0
-        dif = round(recebido - esperado, 2)
+        retencoes = round(rec_bruto - rec_liq, 2) if tem_extrato else 0.0
+        # Esperado líquido = o que esperávamos receber, menos as retenções que o
+        # próprio extrato declarou. Assim a diferença isola erro de verdade.
+        esperado_liq = round(esperado_bruto - retencoes, 2)
+        dif = round(rec_liq - esperado_liq, 2)
 
         if not tem_extrato:
             situacao, motivo = 'sem_extrato', 'Ainda não apareceu em nenhum extrato da Affinity.'
             resumo['sem_extrato'] += 1
         elif abs(dif) <= _TOLERANCIA_CENTAVOS:
-            situacao, motivo = 'ok', 'Extrato bate com o esperado.'
+            situacao = 'ok'
+            motivo = (f'Líquido bate com o esperado.'
+                      + (f' Retenções da Affinity no período: {_moeda(retencoes)}.' if retencoes else ''))
             resumo['ok'] += 1
         elif dif < 0:
             situacao = 'a_menor'
-            motivo = (f'Entrou {_moeda(abs(dif))} A MENOS que o esperado. '
+            motivo = (f'Caiu {_moeda(abs(dif))} A MENOS que o esperado, já descontadas as retenções. '
                       + ('A proposta está estornada — confira se o estorno explica a diferença.'
                          if d.get('estornada') else
                          'Verifique tabela da operadora, número de parcelas ou estorno não registrado.'))
             resumo['divergentes'] += 1
         else:
             situacao = 'a_maior'
-            motivo = (f'Entrou {_moeda(dif)} A MAIS que o esperado. '
+            motivo = (f'Caiu {_moeda(dif)} A MAIS que o esperado, já descontadas as retenções. '
                       'Verifique se há bônus/campanha ou se a régua cadastrada está desatualizada.')
             resumo['divergentes'] += 1
 
         resumo['linhas'] += 1
-        resumo['total_esperado'] += esperado
-        resumo['total_recebido'] += recebido
+        resumo['total_esperado'] += esperado_liq
+        resumo['total_recebido'] += rec_liq
+        resumo['total_retencoes'] += retencoes
         resumo['total_diferenca'] += dif if tem_extrato else 0.0
         saida.append({
             'parcela_id': d['parcela_id'], 'proposta_id': d['proposta_id'],
             'numero': d['numero'], 'competencia': d.get('competencia'),
             'cliente': d.get('razao_social'), 'operadora': d.get('adm_operadora'),
             'consultor': d.get('consultor_nome'), 'regime': d.get('regime_base'),
-            'esperado': round(esperado, 2), 'recebido': round(recebido, 2),
-            'diferenca': dif if tem_extrato else 0.0,
+            'esperado_bruto': round(esperado_bruto, 2), 'esperado': esperado_liq,
+            'recebido_bruto': round(rec_bruto, 2), 'recebido': round(rec_liq, 2),
+            'retencoes': retencoes, 'diferenca': dif if tem_extrato else 0.0,
             'repasse_previsto': round(float(d.get('repasse_previsto') or 0), 2),
             'status_parcela': d.get('status'), 'estornada': bool(d.get('estornada')),
             'situacao': situacao, 'motivo': motivo,
         })
-    for k in ('total_esperado', 'total_recebido', 'total_diferenca'):
+    for k in ('total_esperado', 'total_recebido', 'total_retencoes', 'total_diferenca'):
         resumo[k] = round(resumo[k], 2)
     return {'resumo': resumo, 'linhas': saida}
 
 
-@app.route('/api/comissao/conferencia')
+@app.route('/comissoes/conferencia')
+@login_required
+@admin_required
+def comissao_conferencia_tela():
+    """Esperado × recebido × repassado, mês a mês. Sem mês escolhido mostra o
+    histórico inteiro — é a lista dos erros anteriores."""
+    comp = (request.args.get('competencia') or '').strip()
+    conn = db()
+    dados = conferir_comissao(conn, competencia=comp or None, limite=1000)
+    meses = [dict(r)['competencia'] for r in conn.execute(
+        """SELECT DISTINCT competencia FROM parcelas
+            WHERE competencia IS NOT NULL AND competencia <> ''
+            ORDER BY competencia DESC LIMIT 24""").fetchall()]
+    close_db(conn)
+    return render_template('comissao_conferencia.html',
+                           resumo=dados['resumo'], linhas=dados['linhas'],
+                           meses=meses, competencia=comp)
+
+
+@app.route('/api/comissoes/conferencia')
 @login_required
 @admin_required
 def api_comissao_conferencia():
