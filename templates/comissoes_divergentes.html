@@ -63,9 +63,15 @@
     <div class="n">{{ linhas|length }}</div>
     <div class="l">Vendas divergentes</div>
   </div>
-  <div class="dv-r {% if total >= 0 %}ok{% endif %}">
+  {# Verde só quando não há divergência nenhuma. Diferença positiva quer dizer que a
+     comissão gravada está ABAIXO da regra — dinheiro escondido, não motivo pra verde. #}
+  <div class="dv-r {% if not linhas %}ok{% endif %}">
     <div class="n">{{ total|moeda }}</div>
     <div class="l">Diferença total</div>
+  </div>
+  <div class="dv-r neutro">
+    <div class="n">{{ conferidas }}</div>
+    <div class="l">Vendas conferidas</div>
   </div>
   {% if sem_regra %}
   <div class="dv-r neutro">
@@ -126,7 +132,11 @@
 </div>
 {% else %}
 <div class="vazio">
-  Nenhuma comissão divergente. Todo valor gravado bate com a regra atual.
+  Nenhuma comissão divergente entre as <b>{{ conferidas }}</b> vendas conferidas.
+  Todo valor gravado bate com a regra atual.<br>
+  <span style="font-size:11.5px;">Isto compara o gravado com o <b>cadastro de hoje</b>. Se o próprio
+  cadastro da operadora estiver com a taxa errada, os dois batem e nada aparece aqui —
+  a régua é <a href="/operadoras" style="color:var(--azul);">Operadoras</a>.</span>
 </div>
 {% endif %}
 

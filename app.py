@@ -5115,9 +5115,22 @@ def _aplicar_promocao(regua, receb_row):
     return nova
 
 
-def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidade='', tipo_pessoa=''):
-    """Motor de comissão isolando a regra da Taxa de Adesão."""
-    conn = db()
+def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidade='',
+                  tipo_pessoa='', conn=None):
+    """Motor de comissão isolando a regra da Taxa de Adesão.
+
+    `conn` opcional: quem já tem conexão aberta empresta a sua e fica dono dela.
+    Sem isso, varrer a base chamava `db()` uma vez por venda — em Postgres cada
+    chamada é uma conexão nova pela rede (não há pool), e a auditoria de milhares
+    de vendas viraria milhares de conexões."""
+    conn_propria = conn is None
+    if conn_propria:
+        conn = db()
+
+    def _fecha():
+        if conn_propria:
+            close_db(conn)
+
     valor = float(valor_venda or 0)
     op_nome, op_obs = _split_operadora(operadora)
     plano = _plano_from_modalidade(modalidade, tipo_pessoa)
@@ -5150,7 +5163,7 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
 
     # GESTOR VENDEDOR: leva 100% da corretora
     if regime_base == 'gestor_vendedor':
-        close_db(conn)
+        _fecha()
         regua = [receb_mens] if receb_mens else [1.0]
         return {
             'codigo': 'gestor_vendedor', 'modelo': 'gestor_vendedor', 'nivel': '', 'plano': plano,
@@ -5189,7 +5202,7 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
         consultor = round(valor * rep_mens, 2)
         # O líquido da corretora = Total de recebíveis da operadora - O que foi pago de taxa pro consultor
         liquido = round(total_corretora - consultor, 2)
-        close_db(conn)
+        _fecha()
         
         avisos = []
         if receb_mens == 0: avisos.append(f"Falta RECEBIMENTO: {op_nome} / ADESAO")
@@ -5215,7 +5228,7 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
     if not regua:
         regua = [rep_mens] if rep_mens else [0.0]
 
-    close_db(conn)
+    _fecha()
     avisos = []
     if receb_mens == 0:
         avisos.append(f"Falta RECEBIMENTO: {op_nome} / {plano}")
@@ -13042,7 +13055,31 @@ CAMPOS_EDITAVEIS = {c['k']: c['label'] for s in CAMPOS_EDIT_SECOES for c in s['c
 # número gravado envelhece em silêncio: nada avisa, e a soma continua saindo
 # errada. Isto compara o gravado com o que a regra diz HOJE.
 
-def _comissao_calculada(conn, p):
+def _producao_mes_cacheada(conn, d, cache):
+    """`_producao_mes(excluir_pid=id)` sem repetir a consulta por venda.
+
+    Varrer a base inteira chamava esta soma uma vez por proposta, e todas as
+    vendas do mesmo consultor no mesmo mês faziam a MESMA consulta. Aqui o total
+    do par (consultor, mês) é lido uma vez e a própria venda é subtraída na mão —
+    o mesmo que o `id<>?` fazia no banco.
+
+    A subtração só vale se a venda entra na soma. Produção ignora excluída e
+    estornada, e `status <> 'Excluída'` no SQL descarta status nulo (comparação
+    com NULL não é verdadeira) — por isso a checagem abaixo repete essa regra em
+    vez de assumir que toda venda varrida conta."""
+    uid, ma = d.get('usuario_id'), str(d.get('mes_meta') or '')[:7]
+    if len(ma) != 7:
+        return 0
+    chave = (uid, ma)
+    if chave not in cache:
+        cache[chave] = _producao_mes(conn, uid, ma)
+    total = cache[chave]
+    st = d.get('status')
+    na_soma = (st is not None and st != 'Excluída' and not (d.get('estornada') or 0))
+    return total - float(d.get('valor') or 0) if na_soma else total
+
+
+def _comissao_calculada(conn, p, prod_cache=None):
     """O que a regra de hoje produziria para esta venda. None se não dá pra saber."""
     d = dict(p)
     regime = d.get('regime_aplicado') or ''
@@ -13057,27 +13094,28 @@ def _comissao_calculada(conn, p):
             if not c or c.get('falta_regra_gestor'):
                 return None
             return c
-        prod = _producao_mes(conn, d.get('usuario_id'), d.get('mes_meta'),
-                             excluir_pid=d.get('id')) + valor
+        prod = (_producao_mes_cacheada(conn, d, prod_cache) if prod_cache is not None
+                else _producao_mes(conn, d.get('usuario_id'), d.get('mes_meta'),
+                                   excluir_pid=d.get('id'))) + valor
         base = d.get('regime_base')
         if not base:
             u = conn.execute("SELECT regime_base FROM usuarios WHERE id=?",
                              (d.get('usuario_id'),)).fetchone()
             base = (dict(u).get('regime_base') if u else '') or 'sem_lead_sem_fixo'
         return calc_comissao(operadora, base, prod, valor,
-                             d.get('modalidade'), d.get('tipo_pessoa'))
+                             d.get('modalidade'), d.get('tipo_pessoa'), conn=conn)
     except Exception as e:
         app.logger.warning(f"[COMISSAO] nao consegui recalcular a proposta {d.get('id')}: {e}")
         return None
 
 
-def comissao_divergente(conn, p, tolerancia=0.05):
+def comissao_divergente(conn, p, tolerancia=0.05, prod_cache=None):
     """Compara o valor GRAVADO com o que a regra diz hoje.
 
     Devolve None quando não há como comparar (falta regra, valor zerado) — e
     isso é diferente de 'está certo'. Divergência sem explicação é pior que
     divergência conhecida."""
-    calc = _comissao_calculada(conn, p)
+    calc = _comissao_calculada(conn, p, prod_cache=prod_cache)
     if not calc:
         return None
     d = dict(p)
@@ -13166,12 +13204,17 @@ def comissoes_divergentes():
     É a rede de segurança: erro de comissão não some sozinho, e sem uma lista
     ninguém descobre que existe até o fechamento não bater."""
     conn = db()
-    linhas, sem_regra = [], 0
+    linhas, sem_regra, conferidas, prod_cache = [], 0, 0, {}
+    # Sem LIMIT de propósito. Havia um teto de 800 aqui, e um teto silencioso numa
+    # tela de auditoria mente: ela dizia "0 divergências" quando o certo era
+    # "0 entre as 800 mais recentes" — e venda antiga é justamente onde a comissão
+    # gravada teve mais tempo pra envelhecer. Custo medido: ~1,3s pra 6 mil vendas.
     for p in conn.execute("""SELECT * FROM propostas
                               WHERE COALESCE(status,'') <> 'Excluída'
                                 AND COALESCE(estornada,0) = 0
-                              ORDER BY id DESC LIMIT 800""").fetchall():
-        dv = comissao_divergente(conn, p)
+                              ORDER BY id DESC""").fetchall():
+        conferidas += 1
+        dv = comissao_divergente(conn, p, prod_cache=prod_cache)
         if dv is None:
             sem_regra += 1
             continue
@@ -13187,7 +13230,7 @@ def comissoes_divergentes():
     close_db(conn)
     total = round(sum(l['diferenca'] for l in linhas), 2)
     return render_template('comissoes_divergentes.html', linhas=linhas,
-                           total=total, sem_regra=sem_regra)
+                           total=total, sem_regra=sem_regra, conferidas=conferidas)
 
 
 @app.route('/admin/comissoes-divergentes/corrigir', methods=['POST'])
