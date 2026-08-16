@@ -323,6 +323,40 @@ async function akRevogar(id, nome){
   </div>
 </div>
 
+{# MANUTENCAO DE DADOS mora aqui, e nao no menu.
+   Sao ferramentas de UMA VEZ SO: depois de rodadas, respondem "nada a fazer"
+   pra sempre, porque a regra passou a valer na entrada do dado. Item fixo no
+   menu custaria atencao de todo mundo, todo dia, por tarefa que ninguem
+   repete — e o menu do JOB ja tem item demais.
+   Configuracoes e onde se entra de proposito, que e o lugar certo. #}
+{% if session.perfil == 'admin' %}
+<div class="card" style="margin-top:18px;">
+  <div class="card-header"><h3>Manutenção de dados</h3></div>
+  <div style="padding:0 16px 16px; font-size:13px; color:var(--cinza); line-height:1.7;">
+    Consertos de uma vez só, para dado que entrou antes de a regra existir.
+    Não precisam ser repetidos: o que entra hoje já nasce certo.
+
+    <div style="margin-top:14px; padding:14px; border:1px solid var(--borda);
+                border-radius:10px; background:var(--panel-2);">
+      <div style="font-size:13.5px; font-weight:600; color:var(--texto); margin-bottom:5px;">
+        Padronizar caixa alta
+      </div>
+      <div style="line-height:1.65;">
+        Sobe a caixa dos nomes já gravados nas propostas — titular, dependentes,
+        responsáveis e endereço. Existe porque o formulário só subia a caixa dos
+        campos no envio, e o bloco de dependentes era montado antes disso: o
+        titular saía em caixa alta e os filhos em minúscula.
+        <b style="color:var(--texto);">Não toca em operadora, modalidade, fase nem regime</b>,
+        que são chave de cálculo da comissão, nem em e-mail e observação.
+        Mostra tudo que vai mudar antes de aplicar.
+      </div>
+      <a href="/admin/normalizar-caixa" class="btn-outline"
+         style="display:inline-block; margin-top:12px; font-size:12.5px;">Abrir</a>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <div class="card" style="margin-top:18px;">
   <div class="card-header"><h3>Leitura automática das conversas</h3></div>
   <div style="padding:0 16px 8px; font-size:13px; color:var(--cinza); line-height:1.6;">
