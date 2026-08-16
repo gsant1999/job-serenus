@@ -9655,7 +9655,7 @@ _AGENDA_POR_CHAVE = {r['chave']: r for r in _AGENDA_REGRAS}
 
 
 def _agenda_frase(regra, lead, consultor):
-    nome = (lead['nome'] or '').strip().split(' ')[0] if lead['nome'] else 'tudo bem'
+    nome = _nome_pra_pessoa((lead['nome'] or '').strip().split(' ')[0]) if lead['nome'] else 'tudo bem'
     return (regra['frase']
             .replace('{primeiro_nome}', nome)
             .replace('{consultor}', (consultor or 'Serenus').split(' ')[0]))
@@ -11281,7 +11281,9 @@ def _preencher_texto(texto, nome, agora=None):
     noite pela hora real) — usado em toda mensagem de abertura automática."""
     txt = texto or ''
     if '{nome}' in txt:
-        txt = txt.replace('{nome}', (nome or '').strip().split(' ')[0] or 'tudo bem')
+        # _nome_pra_pessoa: o CRM guarda em caixa alta, a mensagem fala com
+        # gente. "Oi MARIA" e grito; "Oi Maria" e conversa.
+        txt = txt.replace('{nome}', _nome_pra_pessoa((nome or '').strip().split(' ')[0]) or 'tudo bem')
     if '{saudacao}' in txt:
         txt = txt.replace('{saudacao}', _saudacao_hora(agora))
     return txt
@@ -21684,6 +21686,28 @@ def _maiusc_dependentes(bruto):
     return json.dumps(deps, ensure_ascii=False)
 
 
+def _nome_pra_pessoa(v):
+    """MARIA SILVA -> Maria Silva.
+
+    O CRM guarda o nome em caixa alta pra ficar padronizado na tela, mas esse
+    mesmo nome alimenta a mensagem de primeiro contato ("Oi {nome}, tudo bem?").
+    Caixa alta em mensagem le como GRITO, e isso sai daqui pra prospect no
+    WhatsApp e no e-mail — nao e tela interna.
+
+    Preposicao fica minuscula: "MARIA DA SILVA" vira "Maria da Silva", e nao
+    "Maria Da Silva".
+    """
+    s = (v or '').strip()
+    if not s:
+        return s
+    miudas = {'da', 'de', 'do', 'das', 'dos', 'e', 'di', 'du', "d'"}
+    partes = []
+    for i, p in enumerate(s.split()):
+        b = p.lower()
+        partes.append(b if (i and b in miudas) else b[:1].upper() + b[1:])
+    return ' '.join(partes)
+
+
 def _doc_prefixo_arquivo(tipo):
     """Prefixo que vai no nome do arquivo. É ele que carrega o TIPO: o anexo
     não tem tabela própria, o tipo mora no nome."""
@@ -23139,8 +23163,22 @@ def admin_normalizar_caixa():
     por_col = {}
     for _pid, col, _a, _d in plano:
         por_col[col] = por_col.get(col, 0) + 1
-    amostra = [{"proposta": i, "campo": c, "antes": a[:55], "depois": d[:55]}
+    amostra = [{"proposta": (f"lead {i[1]}" if isinstance(i, tuple) else f"#{i}"),
+                "campo": c, "antes": a[:55], "depois": d[:55]}
                for i, c, a, d in plano[:12]]
+
+    # LEADS DO CRM entram na mesma ferramenta. O nome deles nao e chave: a busca
+    # do funil ja compara com LOWER dos dois lados, e o casamento de lead e por
+    # telefone_norm. O que fala com o cliente ("Oi {nome}") passa pelo
+    # _nome_pra_pessoa, entao o prospect continua recebendo "Oi Maria".
+    try:
+        for l in conn.execute("SELECT id, nome, empresa FROM crm_leads").fetchall():
+            for col in ('nome', 'empresa'):
+                antes = l[col]
+                if antes and isinstance(antes, str) and _maiusc(antes) != antes:
+                    plano.append((('lead', l['id']), col, antes, _maiusc(antes)))
+    except Exception:
+        pass
 
     if request.method == 'GET':
         close_db(conn)
@@ -23150,14 +23188,18 @@ def admin_normalizar_caixa():
                                propostas_tocadas=0)
 
     for pid, col, antes, depois in plano:
-        conn.execute(f"UPDATE propostas SET {col}=? WHERE id=?", (depois, pid))
-    if plano:
+        if isinstance(pid, tuple):          # ('lead', id)
+            conn.execute(f"UPDATE crm_leads SET {col}=? WHERE id=?", (depois, pid[1]))
+        else:
+            conn.execute(f"UPDATE propostas SET {col}=? WHERE id=?", (depois, pid))
+    pid_prop = next((x[0] for x in plano if not isinstance(x[0], tuple)), None)
+    if pid_prop:
         conn.execute("""INSERT INTO historico_proposta
             (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
             VALUES (?,?,?,?,?,?)""",
-            (plano[0][0], session.get('user_id'), session.get('nome', 'admin'), 'sistema',
-             f"Padronização de caixa alta: {len(plano)} campo(s) em "
-             f"{len({x[0] for x in plano})} proposta(s)", datetime.now(TZ_SP)))
+            (pid_prop, session.get('user_id'), session.get('nome', 'admin'), 'sistema',
+             f"Padronização de caixa alta: {len(plano)} campo(s)", datetime.now(TZ_SP)))
+    if plano:
         conn.commit()
     close_db(conn)
     app.logger.info(f"[CAIXA] normalizadas {len(plano)} celula(s) por {session.get('nome')}")
@@ -39216,7 +39258,7 @@ def _corpo_email_contato(tpl, nome_lead, corretor_nome, link_click, pixel_url, f
     """HTML bonito no padrão do e-mail de cotação, com pixel + link rastreado.
     foto_url: URL pública da foto do consultor (rota /avatar/<uid>) — se não tiver
     foto cadastrada, mostra só o nome, sem quebrar o layout."""
-    primeiro = (nome_lead or '').strip().split(' ')[0].title() if nome_lead else ''
+    primeiro = (_nome_pra_pessoa(nome_lead or '')).strip().split(' ')[0].title() if nome_lead else ''
     saudacao = f"Olá{', ' + primeiro if primeiro else ''}!"
     cartao_consultor = (
         "<table role='presentation' cellpadding='0' cellspacing='0' border='0' "
@@ -42427,8 +42469,12 @@ def crm_transferir_em_massa():
         sql += " AND DATE(criado_em) <= ?"
         params.append(f_data_ate)
     if f_busca:
-        sql += " AND (nome LIKE ? OR telefone LIKE ? OR email LIKE ?)"
-        busca_like = '%' + f_busca + '%'
+        # LOWER dos DOIS lados. No Postgres o LIKE e sensivel a maiuscula, e o
+        # nome do lead agora e gravado em caixa alta: sem isto, quem digitasse
+        # "joao" deixaria de achar "JOAO" — e a busca principal do CRM ja fazia
+        # certo, so esta tinha ficado pra tras.
+        sql += " AND (LOWER(nome) LIKE ? OR telefone LIKE ? OR LOWER(email) LIKE ?)"
+        busca_like = '%' + f_busca.lower() + '%'
         params.extend([busca_like, busca_like, busca_like])
     leads_a_transferir = conn.execute(sql, params).fetchall()
     qtd = len(leads_a_transferir)
@@ -43058,7 +43104,7 @@ def _corpo_email_fluxo(tpl, nome_lead, corretor_nome, link_click, foto_url=None)
     tabela, não flexbox — ver histórico do bug de renderização no Gmail/Outlook),
     mas com múltiplos parágrafos (fluxos são narrativos, não uma frase só)."""
     import html as _html
-    primeiro = (nome_lead or '').strip().split(' ')[0].title() if nome_lead else ''
+    primeiro = (_nome_pra_pessoa(nome_lead or '')).strip().split(' ')[0].title() if nome_lead else ''
     # Escape DEPOIS de substituir os placeholders: nome do lead vem de fonte
     # externa (LP/planilha) e texto de passo personalizado vem do editor —
     # nenhum dos dois pode injetar HTML no e-mail.

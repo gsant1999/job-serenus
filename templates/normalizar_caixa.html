@@ -5,7 +5,7 @@
 <div class="topbar">
   <div>
     <h1 style="margin:0;">Padronizar caixa alta</h1>
-    <div class="sub">Sobe a caixa dos nomes já gravados nas propostas</div>
+    <div class="sub">Sobe a caixa dos nomes já gravados nas propostas e nos leads</div>
   </div>
 </div>
 
@@ -21,7 +21,7 @@
     <p style="font-size:14px;">Nada a fazer — todos os nomes já estão padronizados.</p>
     {% elif not aplicado %}
     <p style="font-size:14px;line-height:1.6;margin-bottom:14px;">
-      Encontrei <b>{{ alteracoes }}</b> campo(s) fora do padrão em {{ propostas }} proposta(s).
+      Encontrei <b>{{ alteracoes }}</b> campo(s) fora do padrão em propostas e leads.
       Isto reescreve proposta já fechada — confira antes.
     </p>
 
@@ -35,7 +35,7 @@
       {% for a in amostra %}
       <div style="display:grid;grid-template-columns:70px 1fr 1fr;gap:10px;padding:9px 12px;
                   border-bottom:1px solid var(--borda);font-size:12.5px;align-items:center;">
-        <span class="hint">#{{ a.proposta }}</span>
+        <span class="hint">{{ a.proposta }}</span>
         <span style="color:var(--cinza);text-decoration:line-through;">{{ a.antes }}</span>
         <span style="color:var(--texto);font-weight:600;">{{ a.depois }}</span>
       </div>
