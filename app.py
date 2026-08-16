@@ -22950,6 +22950,83 @@ def anexar_cartao_sus(pid):
                     "msg": "Cartão SUS anexado na proposta."})
 
 
+# Colunas de propostas que podem ir pra caixa alta no historico.
+#
+# O QUE FICA DE FORA, e nao e cautela vazia:
+#  - adm_operadora, modalidade, tipo_pessoa, tipo_contrato, acomodacao,
+#    fator_moderador, fase, status, regime_aplicado: sao CHAVE. O calculo de
+#    comissao faz "SELECT ... FROM recebimento WHERE operadora=?" com
+#    comparacao exata — subir a caixa aqui e zerar a comissao de toda proposta
+#    antiga.
+#  - consultor e quem_subiu: espelham usuarios.nome. Subir so na proposta
+#    dessincroniza os dois.
+#  - email, observacoes, descricoes: mesma regra do cadastro.
+_COLS_MAIUSCULA_HISTORICO = (
+    'razao_social', 'nome_titular', 'titular_dependentes',
+    'resp_fin_nome', 'resp_fin_parentesco', 'socio_nome',
+    'resp_contrato', 'resp_negociacao', 'contatos_adicionais',
+    'end_logradouro', 'end_bairro', 'end_cidade', 'end_complemento',
+)
+
+
+@app.route('/admin/normalizar-caixa', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def admin_normalizar_caixa():
+    """Sobe a caixa dos nomes já gravados. GET mostra o que mudaria; POST aplica.
+
+    Prévia antes de aplicar porque isto reescreve proposta já fechada, e o
+    caminho de volta seria restaurar backup."""
+    conn = db()
+    linhas = conn.execute("SELECT * FROM propostas").fetchall()
+    plano = []          # (id, coluna, antes, depois)
+    for p in linhas:
+        for col in _COLS_MAIUSCULA_HISTORICO:
+            if col not in p.keys():
+                continue
+            antes = p[col]
+            if not antes or not isinstance(antes, str):
+                continue
+            depois = _maiusc(antes)
+            if depois != antes:
+                plano.append((p['id'], col, antes, depois))
+        # Dependentes moram dentro do JSON
+        if 'dependentes_json' in p.keys() and p['dependentes_json']:
+            novo = _maiusc_dependentes(p['dependentes_json'])
+            if novo and novo != p['dependentes_json']:
+                plano.append((p['id'], 'dependentes_json', p['dependentes_json'], novo))
+
+    por_col = {}
+    for _pid, col, _a, _d in plano:
+        por_col[col] = por_col.get(col, 0) + 1
+    amostra = [{"proposta": i, "campo": c, "antes": a[:55], "depois": d[:55]}
+               for i, c, a, d in plano[:12]]
+
+    if request.method == 'GET':
+        close_db(conn)
+        return render_template('normalizar_caixa.html', aplicado=False,
+                               propostas=len(linhas), alteracoes=len(plano),
+                               por_campo=por_col, amostra=amostra,
+                               propostas_tocadas=0)
+
+    for pid, col, antes, depois in plano:
+        conn.execute(f"UPDATE propostas SET {col}=? WHERE id=?", (depois, pid))
+    if plano:
+        conn.execute("""INSERT INTO historico_proposta
+            (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+            VALUES (?,?,?,?,?,?)""",
+            (plano[0][0], session.get('user_id'), session.get('nome', 'admin'), 'sistema',
+             f"Padronização de caixa alta: {len(plano)} campo(s) em "
+             f"{len({x[0] for x in plano})} proposta(s)", datetime.now(TZ_SP)))
+        conn.commit()
+    close_db(conn)
+    app.logger.info(f"[CAIXA] normalizadas {len(plano)} celula(s) por {session.get('nome')}")
+    return render_template('normalizar_caixa.html', aplicado=True,
+                           propostas=len(linhas), alteracoes=len(plano),
+                           por_campo=por_col, amostra=amostra,
+                           propostas_tocadas=len({x[0] for x in plano}))
+
+
 @app.route('/anexos-email', methods=['GET', 'POST'])
 @login_required
 @admin_required

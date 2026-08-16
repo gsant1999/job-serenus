@@ -922,6 +922,11 @@
     </a>
     {% endif %}
     {% if pode_modulo('campos') %}
+    <a href="/admin/normalizar-caixa" class="nav-link {% if '/normalizar-caixa' in request.path %}active{% endif %}" onclick="closeSidebar()"
+       title="Sobe a caixa dos nomes ja gravados nas propostas">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
+      Padronizar Caixa Alta
+    </a>
     <a href="/anexos-email" class="nav-link {% if '/anexos-email' in request.path %}active{% endif %}" onclick="closeSidebar()"
        title="O que segue anexado em cada e-mail que sai do JOB">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
