@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Extensão{% endblock %}
+
+{% block head %}
+<style>
+  /* O ESTADO VEM PRIMEIRO, EM NÚMERO. Quando a extensão quebra, a pergunta é
+     "está todo mundo fora ou é um só?" — e isso se responde com contagem, não
+     com uma lista de links. */
+  .ex-estado { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+    gap:10px; margin-bottom:24px; }
+  .ex-num { padding:15px 17px; border:1px solid var(--borda); border-radius:12px;
+    background:var(--panel); }
+  .ex-num .rot { font-size:9.5px; text-transform:uppercase; letter-spacing:.7px;
+    font-weight:700; color:var(--cinza-2); }
+  .ex-num .val { font-family:'Sora',sans-serif; font-size:26px; font-weight:700;
+    color:var(--texto); line-height:1.15; margin-top:6px; }
+  .ex-num .sub { font-size:11.5px; color:var(--cinza); margin-top:2px; }
+  .ex-num.alerta { border-color:rgba(244,63,94,.35); background:rgba(244,63,94,.06); }
+  .ex-num.alerta .val { color:var(--erro); }
+  .ex-num.ok .val { color:var(--verde); }
+
+  .ex-secao { margin-bottom:24px; }
+  .ex-secao h2 { font-family:'Sora',sans-serif; font-size:15.5px; font-weight:700;
+    color:var(--texto); margin-bottom:3px; }
+  .ex-sobre { font-size:12.5px; color:var(--cinza); line-height:1.6; margin-bottom:11px;
+    max-width:70ch; }
+  .ex-lista { display:grid; gap:8px; }
+  .ex-item { display:block; text-decoration:none; padding:13px 15px;
+    border:1px solid var(--borda); border-radius:11px; background:var(--panel);
+    transition:border-color .14s cubic-bezier(.23,1,.32,1),
+               background .14s cubic-bezier(.23,1,.32,1),
+               transform .1s cubic-bezier(.23,1,.32,1); }
+  @media (hover:hover) and (pointer:fine) {
+    .ex-item:hover { border-color:var(--azul); background:var(--panel-2); }
+  }
+  .ex-item:active { transform:scale(.995); }
+  .ex-nome { font-size:13.5px; font-weight:600; color:var(--texto); margin-bottom:3px; }
+  .ex-faz { font-size:12.5px; color:var(--cinza); line-height:1.55; }
+  .ex-quando { font-size:12px; color:var(--texto); margin-top:5px; }
+  .ex-quando b { color:var(--cinza-2); font-weight:600; text-transform:uppercase;
+    font-size:9.5px; letter-spacing:.6px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ex-item { transition:none; } .ex-item:active { transform:none; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Extensão</h1>
+    <div class="sub">Quem usa, se está funcionando e o que ela faz sozinha</div>
+  </div>
+</div>
+
+<div class="ex-estado">
+  <div class="ex-num {{ 'ok' if est.ativas else '' }}">
+    <div class="rot">Aparelhos ligados</div>
+    <div class="val">{{ est.ativas }}</div>
+    <div class="sub">{% if est.revogadas %}{{ est.revogadas }} revogado(s){% else %}nenhum revogado{% endif %}</div>
+  </div>
+  <div class="ex-num {{ 'alerta' if est.erros_24h else '' }}">
+    <div class="rot">Erros em 24h</div>
+    <div class="val">{{ est.erros_24h }}</div>
+    <div class="sub">{% if est.erros_24h %}vale abrir a lista{% else %}nada reportado{% endif %}</div>
+  </div>
+  <div class="ex-num">
+    <div class="rot">Último uso</div>
+    <div class="val" style="font-size:17px;">{{ est.ultimo_uso or '—' }}</div>
+    <div class="sub">de qualquer aparelho</div>
+  </div>
+  <div class="ex-num">
+    <div class="rot">Leitura automática</div>
+    <div class="val" style="font-size:17px;">{% if varr and varr.ativa %}Ligada{% else %}Desligada{% endif %}</div>
+    <div class="sub">alimenta o CRM sozinha</div>
+  </div>
+</div>
+
+{% for s in secoes %}
+<div class="ex-secao">
+  <h2>{{ s.titulo }}</h2>
+  <div class="ex-sobre">{{ s.sobre }}</div>
+  <div class="ex-lista">
+    {% for i in s.itens %}
+    <a href="{{ i.url }}" class="ex-item">
+      <div class="ex-nome">{{ i.nome }}</div>
+      <div class="ex-faz">{{ i.faz }}</div>
+      <div class="ex-quando"><b>Quando usar</b> · {{ i.quando }}</div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endfor %}
+
+{# O óbvio dito: a extensão roda na máquina do consultor, e isso explica metade
+   dos "não funciona" que chegam. #}
+<div class="ex-sobre" style="border-top:1px solid var(--borda);padding-top:14px;">
+  A extensão roda <b style="color:var(--texto);">na máquina do consultor</b>, dentro do
+  WhatsApp Web. Se ele fechar a aba, tudo que depende dela para — inclusive a leitura
+  automática. Versão nova exige que cada um recarregue a extensão e dê F5 no WhatsApp.
+</div>
+{% endblock %}
