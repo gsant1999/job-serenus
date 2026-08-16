@@ -12863,18 +12863,33 @@ def proposta_editar(pid):
                     VALUES (?,?,?,?,?,?,?)""", (pid, user_id, nome_user, label, str(antes or '—'), str(depois or '—'), datetime.now(TZ_SP)))
                 mudou.append(label)
     
-    # Se valor foi alterado, recalcular e regenerar parcelas se necessário
-    if 'valor' in d:
-        valor_antes = float(p['valor'] or 0)
-        novo_valor = _num_brl(d['valor'])
-        # Só recalcula se o valor MUDOU de fato — 'valor' vem sempre no payload
-        # (o modal envia todos os campos), então checar só a presença disparava
-        # o recálculo em toda edição, mesmo de campos sem relação com valor.
-        if round(valor_antes, 2) != round(novo_valor, 2):
-            operadora = p['adm_operadora']
-            regime = p['regime_aplicado']
-            mod = p['modalidade']
-            tipo_p = p['tipo_pessoa']
+    # ── O QUE FAZ A COMISSÃO MUDAR ──
+    # Antes só o VALOR disparava recálculo. Trocar a operadora — que muda o
+    # percentual inteiro — não recalculava nada: a venda ficava com o número da
+    # operadora antiga e o Dashboard somava esse número errado. Mesmo problema
+    # com modalidade e tipo de pessoa, que decidem o plano (PME/PF/ADESÃO).
+    def _mudou(campo, conv_num=False):
+        if campo not in d:
+            return False
+        antes = p[campo] if campo in p.keys() else None
+        depois = d[campo]
+        if conv_num:
+            return round(float(antes or 0), 2) != round(_num_brl(depois), 2)
+        return str(antes or '').strip() != str(depois or '').strip()
+
+    muda_comissao = (_mudou('valor', conv_num=True) or _mudou('adm_operadora')
+                     or _mudou('modalidade') or _mudou('tipo_pessoa'))
+
+    if muda_comissao:
+        # Os valores NOVOS mandam. Ler p['adm_operadora'] aqui pegava a
+        # operadora ANTIGA (p foi lido antes dos updates), então trocar de
+        # operadora recalculava com o percentual da anterior.
+        novo_valor = _num_brl(d['valor']) if 'valor' in d else float(p['valor'] or 0)
+        operadora = d.get('adm_operadora') if 'adm_operadora' in d else p['adm_operadora']
+        mod = d.get('modalidade') if 'modalidade' in d else p['modalidade']
+        tipo_p = d.get('tipo_pessoa') if 'tipo_pessoa' in d else p['tipo_pessoa']
+        regime = p['regime_aplicado']
+        if True:
             # ERA 'prod_acum = 0 # Simplificado'. Editar o valor de UMA proposta
             # recalculava a comissao como se o consultor tivesse produzido ZERO
             # no mes — mesmo que ele ja tivesse batido N3 com outras vendas.
@@ -12890,11 +12905,42 @@ def proposta_editar(pid):
             # motor de consultor por uma edição de valor. A alteração comercial
             # precisa de uma revisão própria, com as frações visíveis.
             if regime in ('socio_gestor_regra', 'socio_gestor_pendente'):
-                close_db(conn)
-                return jsonify({"ok": False, "erro": "A venda usa a regra de sócio/gestor. "
-                                  "O valor não foi alterado para evitar recalcular pelo regime de consultor."}), 409
-            # Recalcular comissão do consultor.
-            calc = calc_comissao(operadora, regime, prod_acum, novo_valor, mod, tipo_p)
+                # Venda de sócio/gestor NÃO passa pelo motor de consultor. Antes
+                # a rota devolvia 409 e fechava a conexão sem commit — o que
+                # descartava TODA a edição em silêncio, inclusive campos sem
+                # relação com dinheiro, dizendo apenas que "o valor não foi
+                # alterado". Agora ou recalcula pelo motor certo, ou recusa
+                # dizendo exatamente o que trava e desfazendo de forma explícita.
+                travas = _historico_travas(conn, pid)
+                if travas:
+                    try: conn.rollback()
+                    except Exception: pass
+                    close_db(conn)
+                    return jsonify({"ok": False, "erro": (
+                        "Esta venda de sócio/gestor já tem dinheiro em movimento, então "
+                        "mudar operadora ou valor mudaria número que já foi pago ou conciliado. "
+                        "NENHUMA alteração foi salva. Travas: " + ' '.join(travas))}), 409
+                # Sem dinheiro em movimento: a regra é recongelada para a
+                # operadora/plano NOVOS — o acordo antigo descrevia uma
+                # operadora que esta venda não tem mais.
+                cg = _gestor_calculo_inicial(conn, operadora, mod, tipo_p, novo_valor)
+                if not cg or cg.get('falta_regra_gestor'):
+                    try: conn.rollback()
+                    except Exception: pass
+                    close_db(conn)
+                    falta = ' · '.join((cg or {}).get('falta_regra_gestor')
+                                       or ['regra de sócio/gestor não cadastrada'])
+                    return jsonify({"ok": False, "erro": (
+                        f"Não há regra de sócio/gestor completa para {operadora} neste plano, "
+                        f"então a comissão não pode ser recalculada. NENHUMA alteração foi salva. "
+                        f"Falta: {falta}")}), 409
+                calc = cg
+                _gestor_congelar_snapshot(conn, pid, operadora, calc.get('plano') or '',
+                                          p['usuario_id'], p['consultor'] or nome_user)
+                mudou.append("Regra de sócio/gestor recongelada para a nova operadora")
+            else:
+                # Recalcular comissão do consultor.
+                calc = calc_comissao(operadora, regime, prod_acum, novo_valor, mod, tipo_p)
 
             # Atualizar comissões na proposta
             conn.execute("""
