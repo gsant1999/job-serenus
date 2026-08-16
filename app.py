@@ -10254,6 +10254,171 @@ def api_crm_lead_criar_rapido():
     return jsonify({"ok": True, "id": lid, "nome": nome, "ja_existia": False})
 
 
+# ═══════════ EDITAR = O MESMO FORMULARIO DO CADASTRO ═══════════════════════
+# Antes existiam DOIS formularios: o cadastro, com ~60 campos e toda a logica
+# (dependentes, cartao SUS, socio, responsavel financeiro), e um modal de
+# edicao com 24 campos chapados, um deles um TEXTO colado com "Titular: X
+# Dependente: Y" dentro. Editar dependente era editar string.
+#
+# Dois formularios em paralelo significam que todo campo novo nasce so no
+# cadastro — foi o que aconteceu com tudo que subiu hoje. Agora e um so.
+#
+# O QUE A EDICAO NAO PODE FAZER: mexer em parcela, comissao, regime, fase ou
+# estorno. Essa venda ja pode estar no fluxo de caixa, com parcela paga e
+# repasse feito; regerar isso a partir de uma correcao de nome seria estragar
+# dinheiro conferido. Por isso a lista abaixo e branca, e nao preta.
+_COLS_EDICAO_FORM = (
+    'razao_social', 'cnpj', 'cpf_titular', 'data_nasc_titular', 'cns_titular',
+    'nome_titular_pf', 'titular_dependentes', 'dependentes_json', 'total_vidas',
+    'socio_nome', 'socio_cpf', 'socio_nascimento',
+    'resp_fin_nome', 'resp_fin_cpf', 'resp_fin_nascimento', 'resp_fin_parentesco',
+    'resp_fin_telefone', 'resp_fin_email',
+    'adm_operadora', 'produto', 'modalidade', 'tipo_pessoa', 'tipo_contrato',
+    'acomodacao', 'fator_moderador', 'valor', 'vigencia', 'dia_vencimento',
+    'numero_proposta', 'proposta_tem_numero', 'venda_status', 'elegivel_campanha',
+    'resp_contrato', 'email_resp_contrato', 'tel_resp_contrato',
+    'resp_negociacao', 'email_resp_negociacao', 'tel_resp_negociacao',
+    'contatos_adicionais', 'desc_contatos_adicionais', 'observacoes',
+    'operadora_obs', 'mes_meta',
+    'end_logradouro', 'end_numero', 'end_complemento', 'end_bairro',
+    'end_cidade', 'end_estado', 'end_cep',
+)
+_COLS_EDICAO_NUM = {'total_vidas', 'dia_vencimento'}
+_COLS_EDICAO_MOEDA = {'valor'}
+
+
+@app.route('/proposta/<int:pid>/editar-completo')
+@login_required
+def proposta_editar_form(pid):
+    """Abre a proposta no MESMO formulário do cadastro, já preenchida."""
+    conn = db()
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn)
+        abort(404)
+    if session.get('perfil') != 'admin' and p['usuario_id'] != session.get('user_id'):
+        close_db(conn)
+        abort(403)
+    sups = conn.execute("SELECT * FROM supervisoras WHERE ativo=1 ORDER BY nome").fetchall()
+    ops = [o['display'] for o in _operadoras_lista(conn)]
+    consultores = conn.execute(
+        "SELECT id, nome FROM usuarios WHERE ativo=1 ORDER BY nome").fetchall()
+    close_db(conn)
+
+    # Só valor simples: o formulário preenche por name=, e blob/objeto não tem
+    # campo correspondente na tela.
+    linha = dict(p)
+    valores = {k: ('' if v is None else v) for k, v in linha.items()
+               if isinstance(v, (str, int, float)) or v is None}
+    return render_template('form.html', supervisoras=sups, operadoras=ops,
+                           prefill={}, consultores=consultores,
+                           papeis=_PLATAFORMA_PAPEL, lead_id_origem='',
+                           modo_edicao=True, edicao_id=pid, edicao_valores=valores,
+                           edicao_anexos=_anexos_da_proposta(linha))
+
+
+def _anexos_da_proposta(p):
+    """Os arquivos já anexados, com o tipo que o nome carrega. Na edição eles
+    são LISTADOS, não re-enviados: obrigar a subir tudo de novo pra corrigir um
+    nome é o que fazia ninguém corrigir nada."""
+    saida = []
+    try:
+        lista = json.loads(p.get('anexos') or '[]') or []
+    except Exception:
+        lista = []
+    for item in lista:
+        nome = item.get('nome') if isinstance(item, dict) else item
+        if not nome:
+            continue
+        base = os.path.basename(nome)
+        tipo = _doc_tipo_do_nome(base)
+        saida.append({'arquivo': nome, 'tipo': tipo,
+                      'rotulo': _DOC_TIPO_NOME.get(tipo, 'Outro'),
+                      'nome_curto': re.sub(r'^[A-Z0-9-]+_\d+_', '', base)[:60] or base[:60]})
+    return saida
+
+
+@app.route('/proposta/<int:pid>/salvar-edicao', methods=['POST'])
+@login_required
+def proposta_salvar_edicao(pid):
+    """Grava a edição feita no formulário completo.
+
+    UPDATE e só. Não gera parcela, não recalcula comissão, não mexe em fase nem
+    em estorno — a venda já pode estar no fluxo de caixa com parcela paga."""
+    conn = db()
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Proposta não encontrada."}), 404
+    if session.get('perfil') != 'admin' and p['usuario_id'] != session.get('user_id'):
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Sem permissão para editar esta proposta."}), 403
+
+    d = request.form
+    campos, valores, mudou = [], [], []
+    for col in _COLS_EDICAO_FORM:
+        if col not in d:
+            continue
+        bruto = d.get(col)
+        if col in _COLS_EDICAO_MOEDA:
+            novo = _num_brl(bruto)
+        elif col in _COLS_EDICAO_NUM:
+            try:
+                novo = int(str(bruto or '').strip() or 0)
+            except Exception:
+                novo = 0
+        elif col in ('cpf_titular', 'socio_cpf', 'resp_fin_cpf', 'cns_titular'):
+            novo = re.sub(r'\D', '', bruto or '') or None
+        else:
+            novo = (bruto or '').strip() or None
+        antes = p[col] if col in p.keys() else None
+        if str(antes or '') == str(novo or ''):
+            continue
+        campos.append(f"{col}=?")
+        valores.append(novo)
+        mudou.append(col)
+        conn.execute("""INSERT INTO historico_proposta
+            (proposta_id,usuario_id,usuario_nome,campo,valor_antes,valor_depois,criado_em)
+            VALUES (?,?,?,?,?,?,?)""",
+            (pid, session.get('user_id'), session.get('nome', 'admin'), col,
+             str(antes or ''), str(novo or ''), datetime.now(TZ_SP)))
+
+    # Documento novo ENTRA; o que já existia continua. Substituir a lista seria
+    # apagar anexo de quem só quis corrigir um telefone.
+    try:
+        anexos = json.loads(p['anexos'] or '[]') or []
+    except Exception:
+        anexos = []
+    tipos = request.form.getlist('anexo_tipos')
+    novos = 0
+    for i, f in enumerate(request.files.getlist('anexos')):
+        if f and f.filename:
+            tipo = tipos[i] if i < len(tipos) else 'outro'
+            nome = (f"{_doc_prefixo_arquivo(tipo)}_"
+                    f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{_sanitizar_filename(f.filename)}")
+            f.save(os.path.join(UPLOAD_FOLDER, nome))
+            anexos.append(nome)
+            novos += 1
+    if novos:
+        campos.append("anexos=?")
+        valores.append(json.dumps(anexos, ensure_ascii=False))
+        mudou.append(f"{novos} documento(s)")
+        conn.execute("""INSERT INTO historico_proposta
+            (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+            VALUES (?,?,?,?,?,?)""",
+            (pid, session.get('user_id'), session.get('nome', 'admin'), 'documento',
+             f"{novos} documento(s) anexado(s) na edição", datetime.now(TZ_SP)))
+
+    if campos:
+        valores.append(pid)
+        conn.execute(f"UPDATE propostas SET {', '.join(campos)} WHERE id=?", tuple(valores))
+        conn.commit()
+    close_db(conn)
+    return jsonify({"ok": True, "id": pid, "mudou": mudou,
+                    "msg": ("Nada mudou." if not mudou
+                            else f"{len(mudou)} alteração(ões) salva(s).")})
+
+
 @app.route('/salvar-proposta', methods=['POST'])
 @login_required
 def salvar_proposta():

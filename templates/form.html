@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Nova proposta{% endblock %}
+{% block title %}{% if modo_edicao %}Editar proposta #{{ edicao_id }}{% else %}Nova proposta{% endif %}{% endblock %}
 
 {% block head %}
 <style>
@@ -181,10 +181,10 @@
 {% block content %}
 <div class="topbar">
   <div>
-    <h1>Nova proposta</h1>
-    <div class="sub">Cadastro de venda</div>
+    <h1>{% if modo_edicao %}Editar proposta #{{ edicao_id }}{% else %}Nova proposta{% endif %}</h1>
+    <div class="sub">{% if modo_edicao %}Toda alteração fica registrada na linha do tempo{% else %}Cadastro de venda{% endif %}</div>
   </div>
-  <div><a href="/propostas" class="btn-outline">Voltar</a></div>
+  <div><a href="{% if modo_edicao %}/proposta/{{ edicao_id }}{% else %}/propostas{% endif %}" class="btn-outline">Voltar</a></div>
 </div>
 
 <div class="page" style="max-width:860px;">
@@ -748,6 +748,20 @@
       </div>
       <div id="file-list" style="margin-top:10px;"></div>
       <div class="erro-campo" id="erro-docs" style="margin-top:6px;"></div>
+      {% if modo_edicao and edicao_anexos %}
+      {# O QUE JA ESTA ANEXADO. Sem esta lista o consultor nao sabe o que a
+         proposta ja tem e sobe tudo de novo — que era exatamente a bagunca. #}
+      <div style="margin-top:14px;">
+        <div class="hint" style="margin-bottom:6px;">Já anexados nesta proposta ({{ edicao_anexos|length }}):</div>
+        {% for a in edicao_anexos %}
+        <div class="doc-linha" style="grid-template-columns:1fr auto;">
+          <div class="doc-nome" title="{{ a.arquivo }}">{{ a.nome_curto }}</div>
+          <span class="hint" style="white-space:nowrap;">{{ a.rotulo }}</span>
+        </div>
+        {% endfor %}
+        <div class="hint" style="margin-top:4px;">O que você anexar agora entra junto — nada é apagado.</div>
+      </div>
+      {% endif %}
     </div>
     <div class="campo" style="margin-top:14px;">
       <label>Observações</label>
@@ -814,7 +828,7 @@
 
   <div class="barra-salvar">
     <div class="barra-estado" id="barra-estado"></div>
-    <button type="button" class="btn-salvar" onclick="enviar()">Salvar proposta</button>
+    <button type="button" class="btn-salvar" onclick="enviar()">{% if modo_edicao %}Salvar alterações{% else %}Salvar proposta{% endif %}</button>
   </div>
 
 </form>
@@ -1620,11 +1634,16 @@ async function enviar() {
   const btn = document.querySelector('.btn-salvar');
   btn.textContent='Salvando...'; btn.disabled=true;
   try {
-    const res = await fetch('/salvar-proposta', {method:'POST', body:new FormData(form)});
+    const destino = EDICAO_ID ? ('/proposta/' + EDICAO_ID + '/salvar-edicao') : '/salvar-proposta';
+    const res = await fetch(destino, {method:'POST', body:new FormData(form)});
     const data = await res.json();
-    if (data.ok) { toast('Proposta salva','ok'); setTimeout(()=>location.href = data.id ? ('/proposta/'+data.id) : '/propostas', 900); }
-    else { toast('Erro: '+data.msg,'err'); btn.textContent='Salvar proposta'; btn.disabled=false; }
-  } catch(e) { toast('Erro de conexão','err'); btn.textContent='Salvar proposta'; btn.disabled=false; }
+    const rotulo = EDICAO_ID ? 'Salvar alterações' : 'Salvar proposta';
+    if (data.ok) {
+      toast(data.msg || (EDICAO_ID ? 'Alterações salvas' : 'Proposta salva'), 'ok');
+      setTimeout(()=>location.href = data.id ? ('/proposta/'+data.id) : '/propostas', 900);
+    }
+    else { toast('Erro: '+data.msg,'err'); btn.textContent=rotulo; btn.disabled=false; }
+  } catch(e) { toast('Erro de conexão','err'); btn.textContent=(EDICAO_ID?'Salvar alterações':'Salvar proposta'); btn.disabled=false; }
 }
 fetch('/api/comissoes-publicas').then(r=>r.json()).then(d=>{ RECEBIMENTO = d.recebimento||{}; REPASSES = d.repasses||{}; NIVEIS = d.niveis||[]; });
 fetch('/api/campos-ativos').then(r=>r.json()).then(campos=>{
@@ -1671,6 +1690,75 @@ function preencherFormulario(dados, bannerMsg) {
 
 // ─── Pré-preenchimento a partir da análise do lead (extensão) ───
 const USUARIO_ID = {{ session.user_id|tojson }};
+// ═══ MODO EDIÇÃO ════════════════════════════════════════════════════════
+// É o MESMO formulário do cadastro. A diferença é só o que ele faz ao salvar
+// e o que já vem preenchido — não uma segunda tela com metade dos campos.
+const EDICAO_ID = {{ edicao_id|tojson if modo_edicao else 'null' }};
+const EDICAO_VALORES = {{ edicao_valores|tojson if modo_edicao else '{}' }};
+
+function preencherEdicao() {
+  if (!EDICAO_ID) return;
+  const form = document.getElementById('form');
+
+  // Tipo de pessoa PRIMEIRO: é ele que abre CNPJ, bloco do sócio e o resto.
+  const tp = document.getElementById('tipo_pessoa');
+  if (tp && EDICAO_VALORES.tipo_pessoa) {
+    tp.value = EDICAO_VALORES.tipo_pessoa;
+    tp.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  // Depois todo o resto, por name — campo que existir na tela é preenchido.
+  Object.keys(EDICAO_VALORES).forEach((k) => {
+    const v = EDICAO_VALORES[k];
+    if (v === '' || v === null || k === 'tipo_pessoa') return;
+    form.querySelectorAll('[name="' + k + '"]').forEach((el) => {
+      if (el.type === 'file' || el.type === 'checkbox' || el.type === 'radio') return;
+      // Dinheiro sai do banco como 2000.0 e a tela trabalha em 2.000,00. Sem
+      // isto o consultor via "2000" e, ao salvar, o parser lia dois mil — mas
+      // um valor como 1234.5 apareceria como "1234.5" e viraria outra coisa.
+      if (k === 'valor' || k.startsWith('comissao')) {
+        el.value = Number(v).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      } else {
+        el.value = (k === 'cns_titular') ? _cnsFmtBloco(v) : v;
+      }
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  });
+
+  // Dependentes voltam como LINHAS, não como aquele texto colado que existia
+  // no modal antigo ("Titular: X Dependente: Y" numa string só).
+  try {
+    const deps = JSON.parse(EDICAO_VALORES.dependentes_json || '[]') || [];
+    if (deps.length) {
+      DEPS = deps.map(x => ({ nome: x.nome || '', nasc: x.nasc || '', cpf: x.cpf || '',
+                              parentesco: x.parentesco || '', cns: x.cns || '' }));
+      const cx = document.getElementById('tem-dependentes');
+      if (cx && !cx.disabled) { cx.checked = true; document.getElementById('bloco-dependentes').hidden = false; }
+      renderDeps();
+    }
+  } catch (e) {}
+
+  // O flag do sócio se responde sozinho: se o CPF do sócio é o mesmo do
+  // titular, é a mesma pessoa. Proposta antiga não tem sócio gravado — aí
+  // fica desmarcado e o consultor completa, que é o certo.
+  const so = (EDICAO_VALORES.socio_cpf || '').replace(/\D/g, '');
+  const ti = (EDICAO_VALORES.cpf_titular || '').replace(/\D/g, '');
+  const flag = document.getElementById('socio-e-titular');
+  if (flag && so && so === ti) { flag.checked = true; }
+  try { marcarSeSocio(); mostrarIdades(); syncDeps(); atualizarBarra(); } catch (e) {}
+
+  // Busca o cartão SUS de quem já está na proposta, pra proposta antiga ganhar
+  // o dado sem ninguém digitar.
+  setTimeout(() => { try { buscarCNSTitular(); } catch (e) {} }, 350);
+
+  // Um CNPJ já gravado precisa trazer o quadro societário de volta, senão a
+  // conferência do sócio abre sem base pra comparar.
+  const cnpj = (EDICAO_VALORES.cnpj || '').replace(/\D/g, '');
+  if (cnpj.length === 14) { try { buscarDadosCNPJ(cnpj); } catch (e) {} }
+}
+
+preencherEdicao();
+
 const PREFILL = {{ prefill|tojson }};
 if (PREFILL && Object.keys(PREFILL).length) {
   preencherFormulario(PREFILL, 'Pré-preenchido com os dados extraídos da análise do lead. <b>Confira tudo</b> (principalmente CPF/RG e valores) e complete o financeiro antes de salvar.');

@@ -1275,7 +1275,12 @@ async function mudarFase() {
 }
 
 // ── EDIÇÃO ──
-function abrirEdicao(){document.getElementById('modal-edicao').classList.add('open');}
+// EDITAR ABRE O FORMULÁRIO COMPLETO, o mesmo do cadastro.
+// O modal daqui mostrava 24 dos 106 campos da proposta, e um deles era um
+// texto colado com "Titular: X Dependente: Y" dentro — editar dependente era
+// editar string. Ele continua no HTML só pra não quebrar link antigo; quem
+// clica em Editar vai pro formulário de verdade.
+function abrirEdicao(){ location.href = '/proposta/' + PROP_ID + '/editar-completo'; }
 function _coletarCampos(){const b={};document.querySelectorAll('.ed-field').forEach(el=>{if(el.dataset.campo)b[el.dataset.campo]=el.value;});return b;}
 function _statusEd(msg,tipo){const s=document.getElementById('ed-status');if(!s)return;s.style.display='block';s.textContent=msg;s.style.background=tipo==='err'?'rgba(244,63,124,.1)':tipo==='ok'?'rgba(31,216,164,.12)':'var(--panel-2)';s.style.color=tipo==='err'?'#f43f7c':tipo==='ok'?'var(--teal)':'var(--cinza)';}
 async function salvarEdicao(){
