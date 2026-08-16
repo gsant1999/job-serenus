@@ -5479,14 +5479,26 @@ def _gestor_calculo_inicial(conn, operadora, modalidade, tipo_pessoa, valor):
     }
     # O valor de recebimento da corretora continua vindo da tabela Operadoras.
     # A nova regra divide esse recebimento; ela não inventa a comissão total.
+    # Mesma resolucao que calc_comissao usa: 'MedSenior' PF e 'Med Senior SP/RJ'
+    # PF sao a mesma operadora, e sem resolver o nome a busca falha e a comissao
+    # zera. Antes esta funcao buscava so pelo nome cru, entao venda de gestor e
+    # venda de consultor podiam achar linhas DIFERENTES para a mesma operadora.
+    op_nome = _resolver_nome_operadora(conn, op_nome, plano)
     receb = conn.execute(
-        "SELECT total FROM recebimento WHERE operadora=? AND obs=? AND plano=?",
-        _split_operadora(operadora) + (plano,)).fetchone()
+        "SELECT * FROM recebimento WHERE operadora=? AND obs=? AND plano=?",
+        (op_nome, _op_obs, plano)).fetchone()
     if not receb:
         receb = conn.execute(
-            "SELECT total FROM recebimento WHERE operadora=? AND plano=? ORDER BY (obs='') DESC LIMIT 1",
+            "SELECT * FROM recebimento WHERE operadora=? AND plano=? ORDER BY (obs='') DESC LIMIT 1",
             (op_nome, plano)).fetchone()
-    total_corretora = round(float(valor or 0) * float(receb['total'] or 0), 2) if receb else 0.0
+    # A promocao vale para QUEM vendeu, nao so para consultor. Sem isto a venda
+    # de socio/gestor era calculada pela tabela e a diferenca negociada sumia.
+    _rd = dict(receb) if receb else {}
+    receb_mens = float(_rd.get('total') or 0)
+    if _rd.get('promo_total'):
+        try: receb_mens = float(_rd['promo_total'])
+        except (TypeError, ValueError): pass
+    total_corretora = round(float(valor or 0) * receb_mens, 2) if receb else 0.0
     if not receb:
         return {
             'codigo': 'socio_gestor_pendente', 'modelo': 'socio_gestor_pendente',
@@ -5504,7 +5516,9 @@ def _gestor_calculo_inicial(conn, operadora, modalidade, tipo_pessoa, valor):
         'codigo': 'socio_gestor_regra', 'modelo': 'socio_gestor_regra',
         'nivel': '', 'plano': plano, 'num_parcelas': len(regua),
         'dist_corretora': ';'.join(str(x) for x in regua), 'regua_mens': regua,
-        'receb_mens': float(receb['total'] or 0), 'rep_mens': 0.0, 'taxa': 0,
+        'receb_mens': receb_mens, 'receb_operadora': op_nome,
+        'receb_tabela': float(_rd.get('total') or 0),
+        'receb_promo': bool(_rd.get('promo_total')), 'rep_mens': 0.0, 'taxa': 0,
         'valor': valor, 'total_corretora': total_corretora,
         # A coluna histórica continua populada para compatibilidade; o número
         # definitivo para pagamento vem do snapshot congelado e da retenção.
@@ -10819,6 +10833,19 @@ def ver_proposta(pid):
     atual_op = ((p['adm_operadora'] if 'adm_operadora' in p.keys() else '') or '').strip()
     if atual_op and atual_op not in op_lista:
         op_lista = [atual_op] + op_lista
+    # QUAL taxa produziu este numero. Sem isso, comissao errada vira misterio:
+    # ninguem consegue dizer se o problema foi a operadora, o plano ou a promo.
+    taxa_usada = None
+    try:
+        _c = _comissao_calculada(conn, p)
+        if _c:
+            taxa_usada = {'mens': _c.get('receb_mens') or _c.get('rep_mens'),
+                          'operadora': _c.get('receb_operadora') or (p['adm_operadora'] or ''),
+                          'plano': _c.get('plano') or '',
+                          'tabela': _c.get('receb_tabela'), 'promo': _c.get('receb_promo')}
+    except Exception:
+        taxa_usada = None
+
     # A comissao gravada envelhece quando a venda e corrigida depois. Em vez de
     # esperar alguem abrir a lista de divergentes, a propria proposta avisa.
     # CALCULADO AQUI, antes do close_db — depois dele a consulta falha calada.
@@ -10926,7 +10953,7 @@ def ver_proposta(pid):
         }
 
     return render_template('detalhe.html', p=p, parcelas=parcelas, regime=regime, extras=extras_view,
-                           divergencia=divergencia,
+                           divergencia=divergencia, taxa_usada=taxa_usada,
                            campos_secoes=campos_secoes, valores_edit=valores_edit,
                            solic_pendente=solic_pendente, comissao_aviso=comissao_aviso,
                            lead_crm=lead_crm, lead_wa=lead_wa,

@@ -310,6 +310,15 @@
           <div style="background:rgba(59,130,246,.12);padding:14px;border-radius:8px;text-align:center;">
             <div style="font-size:10px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Recebimento previsto da corretora<i class="ajuda-i" title="Quanto a operadora deve pagar à Serenus por esta venda, conforme o cadastro de Recebimento. Não é o valor que será pago ao vendedor.">i</i></div>
             <div style="font-family:'Sora',sans-serif;font-size:20px;color:var(--info);margin-top:5px;">{{ comissao_exibicao.recebimento|moeda  }}</div>
+            {% if taxa_usada and taxa_usada.mens %}
+            {# A taxa que produziu o numero. Sem ela, comissao errada vira misterio. #}
+            <div style="font-size:10.5px;color:var(--cinza);margin-top:6px;line-height:1.5;">
+              {{ taxa_usada.operadora }} · {{ taxa_usada.plano }} ·
+              <b style="color:var(--texto);">{{ ('%g' % (taxa_usada.mens * 100))|replace('.', ',') }}%</b>
+              {% if taxa_usada.promo %}<br><span style="color:var(--teal);">promoção aplicada</span>
+              (tabela {{ ('%g' % ((taxa_usada.tabela or 0) * 100))|replace('.', ',') }}%){% endif %}
+            </div>
+            {% endif %}
           </div>
           <div style="background:rgba(244,63,94,.1);padding:14px;border-radius:8px;text-align:center;">
             <div style="font-size:10px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Repasse ao vendedor<i class="ajuda-i" title="Valor destinado ao vendedor. Em vendas de consultor segue o regime de consultor; em vendas de sócio/gestor segue a regra comercial congelada nesta proposta.">i</i></div>
