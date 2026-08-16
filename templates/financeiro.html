@@ -482,7 +482,7 @@
         <tbody>
           {% for f in futuras %}
           <tr>
-            <td><strong>{{ f.competencia }}</strong></td>
+            <td><strong>{{ f.competencia|competencia_br }}</strong></td>
             <td>{{ f.qtd }}</td>
             <td class="pos">{{ f.corretora|moeda  }}</td>
             <td class="neg">{{ f.consultor|moeda  }}</td>

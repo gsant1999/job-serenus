@@ -141,8 +141,8 @@
             <b>{{ c.codigo_comissao }}</b>
             <div class="cc-linha2">{{ c.arquivo }}</div>
             <div class="cc-linha2">
-              {% if c.data_pagamento_informada %}Affinity informa pagamento em {{ c.data_pagamento_informada }}
-              {% elif c.previsao %}previsão {{ c.previsao }}{% else %}sem data{% endif %}
+              {% if c.data_pagamento_informada %}Affinity informa pagamento em {{ c.data_pagamento_informada|data_br }}
+              {% elif c.previsao %}previsão {{ c.previsao|data_br }}{% else %}sem data{% endif %}
             </div>
             {% if c.cadastro_cod %}<div class="cc-linha2"><span class="pill pill-cinza">{{ c.cadastro_cod }}</span> {{ (c.cadastro_nome or '')[:28] }}</div>{% endif %}
           </td>
@@ -197,7 +197,7 @@
               <span class="pill pill-verde">entrada confirmada</span>
               <div class="cc-linha2">
                 {% if c.entrada_forma == 'asaas' %}Asaas {{ c.entrada_ref }}{% else %}confirmada por {{ c.entrada_por }}{% endif %}
-                {%- if c.entrada_em %} em {{ c.entrada_em[:16] }}{% endif %}
+                {%- if c.entrada_em %} em {{ c.entrada_em|datahora_br }}{% endif %}
               </div>
               {% if c.entrada_observacao %}<div class="cc-linha2">{{ c.entrada_observacao[:110] }}</div>{% endif %}
             {% elif c.estado == 'ajuste_sem_efeito' %}

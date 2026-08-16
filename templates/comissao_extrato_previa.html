@@ -211,8 +211,8 @@
           </td>
           <td>{% for t in l.tipos %}<span class="pill {{ 'pill-amarelo' if t in ('antecipação','estorno','transferência') else 'pill-cinza' }}">{{ t }}</span> {% endfor %}</td>
           <td class="pv-linha2" style="color:var(--texto);">
-            {% if l.previsao %}previsão {{ l.previsao }}<br>{% endif %}
-            {% if l.data_pagamento %}pago em {{ l.data_pagamento }}{% else %}<span style="color:var(--cinza);">sem data de pagamento</span>{% endif %}
+            {% if l.previsao %}previsão {{ l.previsao|data_br }}<br>{% endif %}
+            {% if l.data_pagamento %}pago em {{ l.data_pagamento|data_br }}{% else %}<span style="color:var(--cinza);">sem data de pagamento</span>{% endif %}
           </td>
           <td class="num">{{ l.n_itens }}</td>
           <td class="num">{{ l.total_bruto|moeda }}
