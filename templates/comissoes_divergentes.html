@@ -14,6 +14,10 @@
              color:var(--cinza-2); margin-top:4px; }
   .dv-r.ok { border-left-color:var(--verde); } .dv-r.ok .n { color:var(--verde); }
   .dv-r.neutro { border-left-color:var(--cinza-2); } .dv-r.neutro .n { color:var(--texto); }
+  .dv-r.alerta { border-left-color:var(--amarelo); } .dv-r.alerta .n { color:var(--amarelo); }
+  h2.dv-h { font:700 15px 'Sora',sans-serif; margin:28px 0 4px; color:var(--texto); }
+  .dv-h-sub { font-size:12.5px; color:var(--cinza); line-height:1.6; margin-bottom:12px; }
+  .motivo { font-size:11.5px; color:var(--amarelo); line-height:1.5; max-width:340px; }
 
   table.dv { width:100%; border-collapse:collapse; font-size:12.5px; background:var(--panel);
              border:1px solid var(--borda); border-radius:12px; overflow:hidden; }
@@ -74,9 +78,9 @@
     <div class="l">Vendas conferidas</div>
   </div>
   {% if sem_regra %}
-  <div class="dv-r neutro">
+  <div class="dv-r alerta">
     <div class="n">{{ sem_regra }}</div>
-    <div class="l">Sem regra para comparar</div>
+    <div class="l">Não foi possível conferir</div>
   </div>
   {% endif %}
 </div>
@@ -132,11 +136,46 @@
 </div>
 {% else %}
 <div class="vazio">
-  Nenhuma comissão divergente entre as <b>{{ conferidas }}</b> vendas conferidas.
-  Todo valor gravado bate com a regra atual.<br>
+  Nenhuma comissão divergente entre as <b>{{ conferidas - sem_regra }}</b> vendas que deu para conferir.
+  O valor gravado bate com a regra atual.<br>
   <span style="font-size:11.5px;">Isto compara o gravado com o <b>cadastro de hoje</b>. Se o próprio
   cadastro da operadora estiver com a taxa errada, os dois batem e nada aparece aqui —
   a régua é <a href="/operadoras" style="color:var(--azul);">Operadoras</a>.</span>
+</div>
+{% endif %}
+
+{% if nao_confere %}
+<h2 class="dv-h">Não foi possível conferir</h2>
+<div class="dv-h-sub">
+  Estas vendas <b>não entraram na conta acima</b>. O sistema não conseguiu recalcular a comissão
+  delas, então não sabe se o valor gravado está certo ou errado — e não saber não é o mesmo que
+  estar certo. Resolva a causa e a venda passa a ser conferida junto com as outras.
+</div>
+<div class="tbl-wrap">
+<table class="dv">
+  <thead>
+    <tr>
+      <th>Venda</th><th>Consultor</th>
+      <th style="text-align:right;">Mensalidade</th>
+      <th style="text-align:right;">Gravado</th>
+      <th>Por que não deu para conferir</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for l in nao_confere %}
+    <tr>
+      <td>
+        <div class="cli"><a href="/proposta/{{ l.id }}" target="_blank">#{{ l.id }} {{ l.cliente or 'Sem nome' }}</a></div>
+        <div class="cli-sub">{{ l.operadora or 'sem operadora' }}</div>
+      </td>
+      <td>{{ l.consultor or '—' }}</td>
+      <td class="num">{{ l.valor|moeda }}</td>
+      <td class="num">{{ l.gravado|moeda }}</td>
+      <td><div class="motivo">{{ l.motivo }}</div></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
 </div>
 {% endif %}
 

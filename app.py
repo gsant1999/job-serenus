@@ -13079,20 +13079,33 @@ def _producao_mes_cacheada(conn, d, cache):
     return total - float(d.get('valor') or 0) if na_soma else total
 
 
-def _comissao_calculada(conn, p, prod_cache=None):
-    """O que a regra de hoje produziria para esta venda. None se não dá pra saber."""
+def _comissao_calculada(conn, p, prod_cache=None, motivo=None):
+    """O que a regra de hoje produziria para esta venda. None se não dá pra saber.
+
+    `motivo`: lista opcional onde a razão de não dar pra saber é anotada. Sem
+    ela, "não consegui conferir" e "está certo" viram o mesmo resultado na tela
+    — e uma venda quebrada some dentro de um contador."""
+    def _nao(por_que):
+        if motivo is not None:
+            motivo.append(por_que)
+        return None
+
     d = dict(p)
     regime = d.get('regime_aplicado') or ''
     operadora = d.get('adm_operadora') or ''
     valor = float(d.get('valor') or 0)
-    if not operadora or valor <= 0:
-        return None
+    if not operadora:
+        return _nao('Operadora não preenchida nesta venda.')
+    if valor <= 0:
+        return _nao('Valor da venda está zerado.')
     try:
         if regime in ('socio_gestor_regra', 'socio_gestor_pendente'):
             c = _gestor_calculo_inicial(conn, operadora, d.get('modalidade'),
                                         d.get('tipo_pessoa'), valor)
-            if not c or c.get('falta_regra_gestor'):
-                return None
+            if not c:
+                return _nao('Não foi possível montar a regra de sócio/gestor.')
+            if c.get('falta_regra_gestor'):
+                return _nao(c.get('aviso') or c['falta_regra_gestor'][0])
             return c
         prod = (_producao_mes_cacheada(conn, d, prod_cache) if prod_cache is not None
                 else _producao_mes(conn, d.get('usuario_id'), d.get('mes_meta'),
@@ -13106,16 +13119,16 @@ def _comissao_calculada(conn, p, prod_cache=None):
                              d.get('modalidade'), d.get('tipo_pessoa'), conn=conn)
     except Exception as e:
         app.logger.warning(f"[COMISSAO] nao consegui recalcular a proposta {d.get('id')}: {e}")
-        return None
+        return _nao(f'Erro ao recalcular: {e}')
 
 
-def comissao_divergente(conn, p, tolerancia=0.05, prod_cache=None):
+def comissao_divergente(conn, p, tolerancia=0.05, prod_cache=None, motivo=None):
     """Compara o valor GRAVADO com o que a regra diz hoje.
 
     Devolve None quando não há como comparar (falta regra, valor zerado) — e
     isso é diferente de 'está certo'. Divergência sem explicação é pior que
     divergência conhecida."""
-    calc = _comissao_calculada(conn, p, prod_cache=prod_cache)
+    calc = _comissao_calculada(conn, p, prod_cache=prod_cache, motivo=motivo)
     if not calc:
         return None
     d = dict(p)
@@ -13204,7 +13217,7 @@ def comissoes_divergentes():
     É a rede de segurança: erro de comissão não some sozinho, e sem uma lista
     ninguém descobre que existe até o fechamento não bater."""
     conn = db()
-    linhas, sem_regra, conferidas, prod_cache = [], 0, 0, {}
+    linhas, nao_confere, conferidas, prod_cache = [], [], 0, {}
     # Sem LIMIT de propósito. Havia um teto de 800 aqui, e um teto silencioso numa
     # tela de auditoria mente: ela dizia "0 divergências" quando o certo era
     # "0 entre as 800 mais recentes" — e venda antiga é justamente onde a comissão
@@ -13214,13 +13227,22 @@ def comissoes_divergentes():
                                 AND COALESCE(estornada,0) = 0
                               ORDER BY id DESC""").fetchall():
         conferidas += 1
-        dv = comissao_divergente(conn, p, prod_cache=prod_cache)
+        d = dict(p)
+        por_que = []
+        dv = comissao_divergente(conn, p, prod_cache=prod_cache, motivo=por_que)
         if dv is None:
-            sem_regra += 1
+            # Antes isto virava só um contador. Venda de gestor com regra
+            # incompleta caía aqui e sumia: a tela dizia "0 divergências" sem
+            # dizer que nem tinha conseguido olhar pra ela.
+            nao_confere.append({
+                'id': d['id'], 'cliente': d.get('razao_social'),
+                'operadora': d.get('adm_operadora'), 'consultor': d.get('consultor'),
+                'valor': float(d.get('valor') or 0),
+                'gravado': round(float(d.get('comissao_total_corretora') or 0), 2),
+                'motivo': por_que[0] if por_que else 'Não foi possível comparar.'})
             continue
         if not dv['divergente']:
             continue
-        d = dict(p)
         linhas.append({'id': d['id'], 'cliente': d.get('razao_social'),
                        'operadora': d.get('adm_operadora'), 'consultor': d.get('consultor'),
                        'valor': float(d.get('valor') or 0),
@@ -13229,8 +13251,9 @@ def comissoes_divergentes():
                        'travas': _historico_travas(conn, d['id'])})
     close_db(conn)
     total = round(sum(l['diferenca'] for l in linhas), 2)
-    return render_template('comissoes_divergentes.html', linhas=linhas,
-                           total=total, sem_regra=sem_regra, conferidas=conferidas)
+    return render_template('comissoes_divergentes.html', linhas=linhas, total=total,
+                           sem_regra=len(nao_confere), nao_confere=nao_confere,
+                           conferidas=conferidas)
 
 
 @app.route('/admin/comissoes-divergentes/corrigir', methods=['POST'])
