@@ -6435,6 +6435,7 @@ SUBABAS = [
         {'label': 'Financeiro',   'href': '/financeiro',           'admin': True},
         {'label': 'Fluxo de Caixa','href': '/fluxo-caixa',         'admin': False},
         {'label': 'Conferência',  'href': '/comissoes/conferencia','admin': True},
+        {'label': 'Divergências', 'href': '/admin/comissoes-divergentes','admin': True},
         {'label': 'Extrato Affinity','href': '/comissoes/extrato',    'admin': True},
         {'label': 'Conciliação',  'href': '/comissoes/conciliacao','admin': True},
         {'label': 'Estornos',     'href': '/estornos',             'admin': True},
@@ -10786,6 +10787,17 @@ def ver_proposta(pid):
     atual_op = ((p['adm_operadora'] if 'adm_operadora' in p.keys() else '') or '').strip()
     if atual_op and atual_op not in op_lista:
         op_lista = [atual_op] + op_lista
+    # A comissao gravada envelhece quando a venda e corrigida depois. Em vez de
+    # esperar alguem abrir a lista de divergentes, a propria proposta avisa.
+    # CALCULADO AQUI, antes do close_db — depois dele a consulta falha calada.
+    try:
+        _dv = comissao_divergente(conn, p)
+        divergencia = _dv if (_dv and _dv['divergente']) else None
+        if divergencia:
+            divergencia['travas'] = _historico_travas(conn, p['id'])
+    except Exception as _e:
+        app.logger.warning(f"[DETALHE] divergencia nao calculada: {_e}")
+        divergencia = None
     close_db(conn)
     campos_secoes = []
     for s in CAMPOS_EDIT_SECOES:
@@ -10882,6 +10894,7 @@ def ver_proposta(pid):
         }
 
     return render_template('detalhe.html', p=p, parcelas=parcelas, regime=regime, extras=extras_view,
+                           divergencia=divergencia,
                            campos_secoes=campos_secoes, valores_edit=valores_edit,
                            solic_pendente=solic_pendente, comissao_aviso=comissao_aviso,
                            lead_crm=lead_crm, lead_wa=lead_wa,
@@ -12962,6 +12975,182 @@ CAMPOS_EDIT_SECOES = [
 ]
 # Mapa plano {campo: label} derivado das seções (compatível com código existente).
 CAMPOS_EDITAVEIS = {c['k']: c['label'] for s in CAMPOS_EDIT_SECOES for c in s['campos']}
+
+# ═══════════ COMISSÃO GRAVADA × REGRA ATUAL ═══════════
+# A comissão fica GRAVADA na proposta (comissao_total_corretora e irmãs), e é
+# dela que o Dashboard e o Financeiro somam. Quando a venda é corrigida depois
+# — operadora trocada, valor ajustado — ou quando a régua da operadora muda, o
+# número gravado envelhece em silêncio: nada avisa, e a soma continua saindo
+# errada. Isto compara o gravado com o que a regra diz HOJE.
+
+def _comissao_calculada(conn, p):
+    """O que a regra de hoje produziria para esta venda. None se não dá pra saber."""
+    d = dict(p)
+    regime = d.get('regime_aplicado') or ''
+    operadora = d.get('adm_operadora') or ''
+    valor = float(d.get('valor') or 0)
+    if not operadora or valor <= 0:
+        return None
+    try:
+        if regime in ('socio_gestor_regra', 'socio_gestor_pendente'):
+            c = _gestor_calculo_inicial(conn, operadora, d.get('modalidade'),
+                                        d.get('tipo_pessoa'), valor)
+            if not c or c.get('falta_regra_gestor'):
+                return None
+            return c
+        prod = _producao_mes(conn, d.get('usuario_id'), d.get('mes_meta'),
+                             excluir_pid=d.get('id')) + valor
+        base = d.get('regime_base')
+        if not base:
+            u = conn.execute("SELECT regime_base FROM usuarios WHERE id=?",
+                             (d.get('usuario_id'),)).fetchone()
+            base = (dict(u).get('regime_base') if u else '') or 'sem_lead_sem_fixo'
+        return calc_comissao(operadora, base, prod, valor,
+                             d.get('modalidade'), d.get('tipo_pessoa'))
+    except Exception as e:
+        app.logger.warning(f"[COMISSAO] nao consegui recalcular a proposta {d.get('id')}: {e}")
+        return None
+
+
+def comissao_divergente(conn, p, tolerancia=0.05):
+    """Compara o valor GRAVADO com o que a regra diz hoje.
+
+    Devolve None quando não há como comparar (falta regra, valor zerado) — e
+    isso é diferente de 'está certo'. Divergência sem explicação é pior que
+    divergência conhecida."""
+    calc = _comissao_calculada(conn, p)
+    if not calc:
+        return None
+    d = dict(p)
+    gravado = round(float(d.get('comissao_total_corretora') or 0), 2)
+    correto = round(float(calc.get('total_corretora') or 0), 2)
+    dif = round(correto - gravado, 2)
+    return {'gravado': gravado, 'correto': correto, 'diferenca': dif,
+            'divergente': abs(dif) > tolerancia,
+            'consultor_correto': round(float(calc.get('consultor') or 0), 2),
+            'liquido_correto': round(float(calc.get('liquido') or 0), 2),
+            'calc': calc}
+
+
+def _recalcular_proposta(conn, pid, quem='admin'):
+    """Regrava a comissão desta venda pela regra de hoje. Devolve (ok, msg).
+
+    Respeita as mesmas travas da edição: dinheiro que já andou não se toca."""
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        return False, 'Proposta não encontrada.'
+    d = dict(p)
+    dv = comissao_divergente(conn, p)
+    if not dv:
+        return False, ('Não há regra completa para esta operadora/plano, então não dá '
+                       'para dizer qual seria o valor certo. Cadastre a regra primeiro.')
+    if not dv['divergente']:
+        return True, 'A comissão gravada já está de acordo com a regra atual.'
+    travas = _historico_travas(conn, pid)
+    if travas:
+        return False, ('Esta venda já tem dinheiro em movimento — recalcular mudaria número '
+                       'que já foi pago ou conciliado. ' + ' '.join(travas))
+    calc = dv['calc']
+    conn.execute("""UPDATE propostas
+                       SET comissao_total_corretora=?, comissao_consultor=?,
+                           comissao_corretora_liquida=?, num_parcelas=?, distribuicao_parcelas=?
+                     WHERE id=?""",
+                 (calc['total_corretora'], calc['consultor'], calc['liquido'],
+                  calc.get('num_parcelas'), calc.get('dist_corretora'), pid))
+    # Parcelas: só as que ainda não andaram
+    pagas = conn.execute("""SELECT COUNT(*) n FROM parcelas
+                             WHERE proposta_id=? AND status<>'Pendente de receber'""",
+                         (pid,)).fetchone()['n']
+    if pagas == 0:
+        conn.execute("DELETE FROM parcelas WHERE proposta_id=?", (pid,))
+        for parc in gerar_parcelas(pid, d.get('vigencia'), calc, d.get('dia_vencimento')):
+            conn.execute("""INSERT INTO parcelas (proposta_id,numero,percentual,valor,valor_corretora,
+                            perc_cliente,data_prevista,status,competencia,mensalidade_ref,tipo_origem)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,'comissao')""",
+                (parc['proposta_id'], parc['numero'], parc['percentual'], parc['valor'],
+                 parc['valor_corretora'], parc['perc_cliente'], parc['data_prevista'],
+                 parc['status'], parc['competencia'], parc['mensalidade_ref']))
+        extra = ' Parcelas regeradas.'
+    else:
+        extra = ' Parcelas já em fluxo foram mantidas.'
+    conn.execute("""INSERT INTO historico_proposta
+                    (proposta_id,usuario_id,usuario_nome,campo,valor_antes,valor_depois,criado_em)
+                    VALUES (?,?,?,?,?,?,?)""",
+                 (pid, None, quem, 'Comissão recalculada',
+                  _moeda(dv['gravado']), _moeda(dv['correto']), datetime.now(TZ_SP)))
+    return True, (f"Comissão atualizada de {_moeda(dv['gravado'])} para "
+                  f"{_moeda(dv['correto'])}.{extra}")
+
+
+@app.route('/proposta/<int:pid>/recalcular-comissao', methods=['POST'])
+@login_required
+@admin_required
+def proposta_recalcular_comissao(pid):
+    """Força o recálculo desta venda pela regra de hoje."""
+    conn = db()
+    ok, msg = _recalcular_proposta(conn, pid, session.get('nome', 'admin'))
+    if ok:
+        conn.commit()
+    else:
+        try: conn.rollback()
+        except Exception: pass
+    close_db(conn)
+    return jsonify({'ok': ok, 'msg' if ok else 'erro': msg}), (200 if ok else 409)
+
+
+@app.route('/admin/comissoes-divergentes')
+@login_required
+@admin_required
+def comissoes_divergentes():
+    """Toda venda cuja comissão gravada discorda da regra de hoje.
+
+    É a rede de segurança: erro de comissão não some sozinho, e sem uma lista
+    ninguém descobre que existe até o fechamento não bater."""
+    conn = db()
+    linhas, sem_regra = [], 0
+    for p in conn.execute("""SELECT * FROM propostas
+                              WHERE COALESCE(status,'') <> 'Excluída'
+                                AND COALESCE(estornada,0) = 0
+                              ORDER BY id DESC LIMIT 800""").fetchall():
+        dv = comissao_divergente(conn, p)
+        if dv is None:
+            sem_regra += 1
+            continue
+        if not dv['divergente']:
+            continue
+        d = dict(p)
+        linhas.append({'id': d['id'], 'cliente': d.get('razao_social'),
+                       'operadora': d.get('adm_operadora'), 'consultor': d.get('consultor'),
+                       'valor': float(d.get('valor') or 0),
+                       'gravado': dv['gravado'], 'correto': dv['correto'],
+                       'diferenca': dv['diferenca'],
+                       'travas': _historico_travas(conn, d['id'])})
+    close_db(conn)
+    total = round(sum(l['diferenca'] for l in linhas), 2)
+    return render_template('comissoes_divergentes.html', linhas=linhas,
+                           total=total, sem_regra=sem_regra)
+
+
+@app.route('/admin/comissoes-divergentes/corrigir', methods=['POST'])
+@login_required
+@admin_required
+def comissoes_divergentes_corrigir():
+    """Corrige em lote — só o que foi marcado, e só o que não tem trava."""
+    ids = (request.json or {}).get('ids') or []
+    conn = db()
+    ok, falhou = 0, []
+    for pid in ids:
+        try:
+            feito, msg = _recalcular_proposta(conn, int(pid), session.get('nome', 'admin'))
+        except (TypeError, ValueError):
+            continue
+        if feito:
+            ok += 1
+        else:
+            falhou.append({'id': pid, 'motivo': msg})
+    conn.commit(); close_db(conn)
+    return jsonify({'ok': True, 'corrigidas': ok, 'falharam': falhou})
+
 
 @app.route('/proposta/<int:pid>/editar', methods=['POST'])
 @login_required
@@ -15276,6 +15465,20 @@ def central_comissoes():
                   AND COALESCE(p.regime_aplicado,'') NOT IN ('socio_gestor_regra','socio_gestor_pendente')""").fetchone()['c'],
         }
         resumo['regras_pendentes'] = len(_gestor_regras_faltando(conn))
+        # Comissao gravada que discorda da regra: erro silencioso que so
+        # aparece no fechamento se ninguem contar antes.
+        try:
+            _dv = 0
+            for _p in conn.execute("""SELECT * FROM propostas
+                                       WHERE COALESCE(status,'') <> 'Excluída'
+                                         AND COALESCE(estornada,0)=0
+                                       ORDER BY id DESC LIMIT 400""").fetchall():
+                _r = comissao_divergente(conn, _p)
+                if _r and _r['divergente']:
+                    _dv += 1
+            resumo['comissoes_divergentes'] = _dv
+        except Exception:
+            resumo['comissoes_divergentes'] = 0
         # A conferencia vira o 5o elo da cadeia, DENTRO da central — em vez de
         # uma tela solta que dava uma quinta versao dos mesmos numeros.
         try:

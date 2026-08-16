@@ -215,6 +215,30 @@
       </button>
       {% endif %}
 
+      {# A comissão gravada discorda da regra? Isso não pode ficar escondido:
+         é dela que o Dashboard e o Financeiro somam. #}
+      {% if divergencia and session.perfil == 'admin' %}
+      <div style="flex-basis:100%;background:rgba(244,63,94,.08);border:1px solid rgba(244,63,94,.3);
+                  border-radius:9px;padding:11px 14px;font-size:12.5px;color:var(--texto);
+                  line-height:1.65;margin-top:4px;">
+        <b style="color:var(--erro);">A comissão gravada não bate com a regra atual.</b>
+        Está gravado <b>{{ divergencia.gravado|moeda }}</b> e a regra de hoje daria
+        <b>{{ divergencia.correto|moeda }}</b>
+        ({{ divergencia.diferenca|moeda }} de diferença).
+        {% if divergencia.travas %}
+        <div style="margin-top:6px;color:var(--amarelo);font-size:11.5px;">
+          Não dá para corrigir por aqui: {% for t in divergencia.travas %}{{ t }} {% endfor %}
+        </div>
+        {% else %}
+        <button onclick="recalcularComissao(this)"
+                style="margin-top:8px;padding:6px 13px;border-radius:7px;background:var(--azul);
+                       color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600;">
+          Recalcular agora
+        </button>
+        {% endif %}
+      </div>
+      {% endif %}
+
       {# Previsão de crédito: 72h úteis contadas do e-mail. Antes o pedido saía
          e ninguém sabia quando cobrar da Affinity nem o que dizer ao consultor. #}
       {% if p.antecipacao_pedida_em %}
@@ -1352,6 +1376,16 @@ async function excluirAnexo(tipo,nome){
 }
 
 // ── ESTORNO / EXCLUSÃO ──
+function recalcularComissao(btn){
+  btn.disabled = true; btn.textContent = 'Recalculando...';
+  fetch(`/proposta/${PROP_ID}/recalcular-comissao`, {method:'POST'})
+    .then(r => r.json().then(d => ({st:r.status, d:d})))
+    .then(res => {
+      if (res.d.ok) { toast(res.d.msg || 'Comissão recalculada', 'ok'); setTimeout(()=>location.reload(), 1400); }
+      else { btn.disabled=false; btn.textContent='Recalcular agora'; toast(res.d.erro || 'Não foi possível', 'err'); }
+    }).catch(()=>{ btn.disabled=false; btn.textContent='Recalcular agora'; toast('Erro de conexão','err'); });
+}
+
 // Estorno: mostra a CONTA antes de cobrar. Ninguém confirma cobrança de
 // comissão às cegas — e a memória de cálculo é o que se mostra ao consultor
 // quando ele contestar.
