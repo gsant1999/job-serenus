@@ -1631,6 +1631,12 @@ async function enviar() {
     if (/e?mail/i.test(el.name || '') || /e?mail/i.test(el.id || '')) return;
     if (el.value) el.value = el.value.toUpperCase();
   });
+  // Os dependentes vivem num array e o JSON deles ja foi montado antes deste
+  // laco — por isso o titular subia em caixa alta e os filhos nao. Aqui eles
+  // acompanham, e o servidor ainda confere depois.
+  DEPS.forEach(d => { if (d.nome) d.nome = d.nome.toUpperCase();
+                      if (d.parentesco) d.parentesco = d.parentesco.toUpperCase(); });
+  try { syncDeps(); } catch (e) {}
   const btn = document.querySelector('.btn-salvar');
   btn.textContent='Salvando...'; btn.disabled=true;
   try {

@@ -286,6 +286,15 @@ def _moeda_doc(v):
     except:
         return '0,00'
 
+@app.template_filter('competencia_br')
+def _competencia_br(v):
+    """08/2026 — competência é MÊS de referência, não data. Saía como
+    '2026-08' em cinco telas do financeiro, que é o único lugar do sistema
+    onde o corretor lê mês sem dia."""
+    m = re.match(r'^(\d{4})-(\d{2})$', str(v or '').strip())
+    return f"{m.group(2)}/{m.group(1)}" if m else (v or '')
+
+
 @app.template_filter('cns_fmt')
 def _cns_fmt_filtro(v):
     """709 2002 5465 8438 — o CNS em blocos, como sai no cartão físico. Ele é
@@ -10379,8 +10388,12 @@ def proposta_salvar_edicao(pid):
             # NÃO se mexe: o cadastro grava com máscara, e limpar aqui faria o
             # mesmo dado mudar de cara só por ter passado pela edição.
             novo = re.sub(r'\D', '', bruto or '') or None
+        elif col == 'dependentes_json':
+            novo = _maiusc_dependentes(bruto) or None
         else:
             novo = (bruto or '').strip() or None
+            if novo and not _e_campo_de_texto_livre(col):
+                novo = _maiusc(novo)
         antes = p[col] if col in p.keys() else None
         if str(antes or '') == str(novo or ''):
             continue
@@ -10653,6 +10666,11 @@ def salvar_proposta():
         nome_tit = ((d.get('nome_titular') or '').strip()
                     or (d.get('nome_titular_pf') or '').strip()
                     or (d.get('razao_social') or '').strip())
+        # Caixa alta tambem no que ja foi serializado: o formulario sobe a caixa
+        # dos campos no envio, mas o dependentes_json e montado ANTES disso —
+        # por isso o titular saia em caixa alta e os filhos em minuscula.
+        deps = [{**x, 'nome': _maiusc(x.get('nome')), 'parentesco': _maiusc(x.get('parentesco'))}
+                if isinstance(x, dict) else x for x in deps]
         cur.execute("""UPDATE propostas SET data_nasc_titular=?, dependentes_json=?, tem_repique=?, repique_json=?,
                        cns_titular=?, nome_titular=? WHERE id=?""",
             (d.get('data_nasc_titular',''), json.dumps(deps, ensure_ascii=False),
@@ -21694,6 +21712,47 @@ def _inject_doc_tipos():
     Antes cada tela tinha a sua, e o que era 'RG' numa era 'identidade' na
     outra — daí o anexo não ter tipo confiável em lugar nenhum."""
     return {'doc_tipos': [(k, _DOC_TIPO_NOME[k]) for k in _DOC_TIPO_NOME]}
+
+
+# ═══════════ PADRAO DE ESCRITA: CAIXA ALTA NO DADO CADASTRAL ═══════════════
+# O formulario ja subia a caixa dos campos no envio, mas o dependentes_json era
+# montado ANTES disso, com os valores como foram digitados — por isso o titular
+# saia "CHARLES SEVERINO PINHEIRO" e os filhos "maria isabella".
+#
+# Resolver no servidor cobre TODO caminho de entrada: formulario, extensao,
+# leitura de documento e edicao. E cobre o que vem de fora ja torto.
+#
+# E-MAIL NUNCA: endereco de e-mail e literal, e caixa alta em e-mail de cliente
+# ou da Affinity e coisa que a gente manda pra fora.
+# TEXTO LONGO NUNCA: observacao em caixa alta vira grito e ninguem le. E a
+# mesma regra que o formulario ja seguia — ele subia input, nunca textarea.
+_NAO_MAIUSCULA = ('email', 'e_mail', 'mail', 'senha', 'token', 'url', 'link',
+                  'observac', 'descricao', 'desc_', 'texto', 'corpo', 'nota')
+
+
+def _e_campo_de_texto_livre(nome):
+    n = (nome or '').lower()
+    return any(x in n for x in _NAO_MAIUSCULA)
+
+
+def _maiusc(v):
+    """Sobe a caixa preservando o resto. Vazio continua vazio."""
+    s = (v or '')
+    return s.upper() if isinstance(s, str) else s
+
+
+def _maiusc_dependentes(bruto):
+    """Nome e parentesco do dependente em caixa alta, dentro do JSON."""
+    try:
+        deps = json.loads(bruto or '[]') or []
+    except Exception:
+        return bruto
+    for d in deps:
+        if isinstance(d, dict):
+            for k in ('nome', 'parentesco'):
+                if d.get(k):
+                    d[k] = _maiusc(d[k])
+    return json.dumps(deps, ensure_ascii=False)
 
 
 def _doc_prefixo_arquivo(tipo):

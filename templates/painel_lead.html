@@ -667,7 +667,7 @@
             {% for p in v.parcelas %}
             <tr>
               <td>{{ p.numero }}/{{ v.num_parcelas or v.parcelas|length }}</td>
-              <td>{{ p.competencia or '—' }}</td>
+              <td>{{ p.competencia|competencia_br or '—' }}</td>
               <td>{{ p.data_prevista|data_br or '—' }}</td>
               <td class="num">{{ p.valor_consultor|moeda }}</td>
               <td class="num">{{ p.valor_corretora|moeda }}</td>

@@ -263,7 +263,7 @@
       <div style="flex-basis:100%;background:rgba(31,216,164,.07);border:1px solid rgba(31,216,164,.25);
                   border-radius:9px;padding:9px 13px;font-size:12.5px;color:var(--texto);
                   line-height:1.6;margin-top:4px;">
-        Antecipação pedida em <b>{{ p.antecipacao_pedida_em }}</b>.
+        Antecipação pedida em <b>{{ p.antecipacao_pedida_em|data_br }}</b>.
         {% if p.antecipacao_prevista_para %}
         Previsão de crédito: <b style="color:var(--teal);">{{ p.antecipacao_prevista_para|data_br }}</b>
         <span style="color:var(--cinza);">(72h úteis a partir do e-mail)</span>
@@ -1237,7 +1237,7 @@ document.addEventListener('DOMContentLoaded', () => {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${cor}" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
             </div>
             <div>
-              <div style="font-size:13px;font-weight:600;">${d.nome||'Dependente '+(i+1)}</div>
+              <div style="font-size:13px;font-weight:600;text-transform:uppercase;">${d.nome||'Dependente '+(i+1)}</div>
               <div style="font-size:11.5px;color:var(--cinza);margin-top:2px;">
                 <span style="background:${cor}20;color:${cor};padding:1px 8px;border-radius:4px;font-size:11px;font-weight:600;margin-right:6px;">${label}</span>
                 ${d.nasc?'Nasc: '+_dataBR(d.nasc):''}${d.cpf?' · CPF: '+d.cpf:''}

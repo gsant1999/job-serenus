@@ -133,7 +133,7 @@
     <tr>
       <td>
         <div class="cli">{{ l.cliente or 'Sem nome' }}</div>
-        <div class="cli-sub">{{ l.operadora or '—' }}{% if l.competencia %} · {{ l.competencia }}{% endif %}{% if l.parcelas %} · {{ l.parcelas }} parcela(s){% endif %}</div>
+        <div class="cli-sub">{{ l.operadora or '—' }}{% if l.competencia %} · {{ l.competencia|competencia_br }}{% endif %}{% if l.parcelas %} · {{ l.parcelas }} parcela(s){% endif %}</div>
       </td>
       <td>{{ l.consultor or '—' }}</td>
       <td class="num">{{ l.previsto|moeda }}</td>
@@ -157,7 +157,7 @@
 </div>
 {% else %}
 <div class="vazio">
-  Nenhuma parcela para conferir{% if competencia %} em {{ competencia }}{% endif %}.<br>
+  Nenhuma parcela para conferir{% if competencia %} em {{ competencia|competencia_br }}{% endif %}.<br>
   A conferência compara a régua com o razão de eventos. Sem venda no período, não há o que conferir.
 </div>
 {% endif %}

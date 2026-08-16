@@ -17,7 +17,7 @@
            (operadoras)" com TODAS as vendas. Dois números com cara de "o que vamos receber"
            e escopos diferentes, um do lado do outro. Agora o escopo está no título. #}
         Só as vendas de <b>gestor/admin</b>{% if fin_visao.competencia %}, na competência
-        {{ fin_visao.competencia }}{% endif %}. Vendas de consultor aparecem em
+        {{ fin_visao.competencia|competencia_br }}{% endif %}. Vendas de consultor aparecem em
         "A receber (operadoras)", abaixo. Cada valor é um estado diferente do dinheiro —
         não são versões do mesmo número.
       </div>
