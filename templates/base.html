@@ -502,11 +502,15 @@
   .toolbar input { flex:1; min-width:160px; }
 
   /* ═══ MODAL ═══ */
+  /* NO MEIO DA TELA, no computador. A regra base repetia o comportamento de
+     celular — grudava o modal no rodapé — e a regra de celular já existe
+     separada, logo abaixo, comentada como "sheet de baixo". Era duplicação, e
+     o resultado era um diálogo pendurado na borda inferior do monitor. */
   .modal-overlay { position:fixed; inset:0; background:rgba(5,5,10,.8); backdrop-filter:blur(4px);
-    display:none; align-items:flex-end; justify-content:center; z-index:999; padding:0; }
+    display:none; align-items:center; justify-content:center; z-index:999; padding:24px; }
   .modal-overlay.open { display:flex; }
-  .modal { background:var(--panel); border:1px solid var(--borda-2); border-radius:16px 16px 0 0; padding:24px;
-    width:100%; max-height:92vh; overflow-y:auto; animation:fadeUp .25s ease; }
+  .modal { background:var(--panel); border:1px solid var(--borda-2); border-radius:16px; padding:24px;
+    width:100%; max-width:560px; max-height:88vh; overflow-y:auto; animation:fadeUp .25s ease; }
   .modal h3 { font-family:'Sora',sans-serif; font-size:16px; margin-bottom:16px; font-weight:700; color:var(--texto); }
   .modal-close { float:right; background:none; border:none; color:var(--cinza); font-size:22px; cursor:pointer; line-height:1; margin-top:-2px; }
 
@@ -562,9 +566,10 @@
     .form-row-2, .form-row-3 { grid-template-columns:1fr; }
     .charts-grid { grid-template-columns:1fr; }
 
-    /* Modal: sheet de baixo */
-    .modal-overlay { align-items:flex-end; }
-    .modal { border-radius:20px 20px 0 0; padding:20px 16px 32px; max-height:88vh; }
+    /* Modal: sheet de baixo — no celular o polegar alcanca a base da tela,
+       nao o centro. Aqui o formato de gaveta e o certo. */
+    .modal-overlay { align-items:flex-end; padding:0; }
+    .modal { border-radius:20px 20px 0 0; padding:20px 16px 32px; max-height:88vh; max-width:none; }
     .modal h3 { font-size:15px; }
 
     /* Toolbar: coluna */
