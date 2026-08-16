@@ -3610,6 +3610,12 @@ def init_db():
         # Sócio que assina pelo CNPJ quando o titular do plano é FUNCIONÁRIO.
         # Não é vida do contrato: responde pela empresa. Quando o titular é o
         # próprio sócio, estes ficam vazios — o dado já está no titular.
+        # O NOME DO TITULAR NUNCA TEVE COLUNA. Ele so existia dentro do texto
+        # 'titular_dependentes' ("Titular: X\nDependente: Y"), entao a tela de
+        # detalhe caia na razao_social — que em PME e PJ e a EMPRESA, nao a
+        # pessoa. Era isso que fazia o titular aparecer como "25.226.180 CHARLES
+        # SEVERINO PINHEIRO" no lugar do nome dele.
+        ("propostas", "nome_titular", "TEXT"),
         ("propostas", "socio_nome", "TEXT"),
         ("propostas", "socio_cpf", "TEXT"),
         ("propostas", "socio_nascimento", "TEXT"),
@@ -10270,7 +10276,7 @@ def api_crm_lead_criar_rapido():
 # dinheiro conferido. Por isso a lista abaixo e branca, e nao preta.
 _COLS_EDICAO_FORM = (
     'razao_social', 'cnpj', 'cpf_titular', 'data_nasc_titular', 'cns_titular',
-    'nome_titular_pf', 'titular_dependentes', 'dependentes_json', 'total_vidas',
+    'nome_titular', 'titular_dependentes', 'dependentes_json', 'total_vidas',
     'socio_nome', 'socio_cpf', 'socio_nascimento',
     'resp_fin_nome', 'resp_fin_cpf', 'resp_fin_nascimento', 'resp_fin_parentesco',
     'resp_fin_telefone', 'resp_fin_email',
@@ -10368,7 +10374,10 @@ def proposta_salvar_edicao(pid):
                 novo = int(str(bruto or '').strip() or 0)
             except Exception:
                 novo = 0
-        elif col in ('cpf_titular', 'socio_cpf', 'resp_fin_cpf', 'cns_titular'):
+        elif col == 'cns_titular':
+            # O CNS é guardado em dígitos (a tela formata na exibição). Já o CPF
+            # NÃO se mexe: o cadastro grava com máscara, e limpar aqui faria o
+            # mesmo dado mudar de cara só por ter passado pela edição.
             novo = re.sub(r'\D', '', bruto or '') or None
         else:
             novo = (bruto or '').strip() or None
@@ -10639,11 +10648,16 @@ def salvar_proposta():
         # O CNS de cada dependente já vem dentro do dependentes_json; só o do
         # titular precisa de coluna própria. Guardamos só dígitos.
         cns_tit = re.sub(r'\D', '', d.get('cns_titular', '') or '')[:15]
+        # Em PF e Adesao o titular E o campo de cima; em PME/PJ ele tem campo
+        # proprio. Um dos dois sempre responde quem e a pessoa titular.
+        nome_tit = ((d.get('nome_titular') or '').strip()
+                    or (d.get('nome_titular_pf') or '').strip()
+                    or (d.get('razao_social') or '').strip())
         cur.execute("""UPDATE propostas SET data_nasc_titular=?, dependentes_json=?, tem_repique=?, repique_json=?,
-                       cns_titular=? WHERE id=?""",
+                       cns_titular=?, nome_titular=? WHERE id=?""",
             (d.get('data_nasc_titular',''), json.dumps(deps, ensure_ascii=False),
              1 if d.get('tem_repique') else 0, json.dumps(repique, ensure_ascii=False) if repique else None,
-             cns_tit or None, proposta_id))
+             cns_tit or None, nome_tit or None, proposta_id))
         gerador_parcelas = (gerar_parcelas_socio_gestor
                             if c.get('modelo') == 'socio_gestor_regra'
                             else gerar_parcelas)

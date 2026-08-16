@@ -191,6 +191,24 @@
       <div style="text-align:right;flex-shrink:0;">
         <div style="font-family:'Sora',sans-serif;font-size:30px;color:#facc15;font-weight:700;">{{ p.valor|moeda  }}</div>
         <div style="font-size:11px;color:rgba(255,255,255,.6);">mensalidade · {{ p.total_vidas }} vida{{ 's' if p.total_vidas != 1 else '' }}</div>
+        {# DE QUEM E A VENDA, no cabecalho e em destaque.
+           Estava perdido no meio de uma lista de quinze campos mais abaixo, e
+           essa e a pergunta que se faz primeiro numa proposta — inclusive na
+           hora de remanejar, quando nao saber o dono induz a trocar errado. #}
+        <div style="display:inline-flex;align-items:center;gap:8px;margin-top:12px;
+                    background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);
+                    padding:6px 12px 6px 8px;border-radius:999px;">
+          <span style="width:24px;height:24px;border-radius:50%;background:var(--grad-frio);
+                       display:inline-flex;align-items:center;justify-content:center;
+                       font-size:11px;font-weight:700;color:#fff;flex-shrink:0;">
+            {{ (p.consultor or '?')[0]|upper }}
+          </span>
+          <span style="text-align:left;line-height:1.25;">
+            <span style="display:block;font-size:9.5px;text-transform:uppercase;letter-spacing:.7px;
+                         color:rgba(255,255,255,.65);font-weight:700;">Consultor</span>
+            <span style="display:block;font-size:13px;color:#fff;font-weight:600;">{{ p.consultor or 'Não informado' }}</span>
+          </span>
+        </div>
       </div>
     </div>
   </div>
@@ -450,18 +468,28 @@
         {# O cartao SUS entra na lista abaixo como campo, junto de CPF e CNPJ:
            e um numero de documento do titular, e quem procura documento procura
            nesta relacao, nao no bloco de beneficiarios.
-           O comentario mora AQUI FORA de proposito — dentro da expressao do
-           {% for %} o Jinja nao aceita {# #} e a tela inteira da 500. #}
+           Este comentario mora fora do laco de proposito: dentro da expressao
+           de um for, o Jinja nao aceita comentario e a tela toda quebra.
+           E comentario nao pode conter a sequencia de fechamento dentro dele,
+           senao o parser fecha no lugar errado e o resto do texto VAZA pra
+           tela — foi o que aconteceu aqui e apareceu pro Guilherme. #}
         <div class="card-body dados-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          {# AGRUPADO POR ASSUNTO, e nao numa lista corrida. Estava tudo no mesmo
+             monte — consultor ao lado de vigencia, CNPJ ao lado de produto — e
+             quem procura um dado tinha que varrer a lista inteira. Toda data sai
+             pelo filtro data_br: o banco guarda ISO, a tela e brasileira. #}
           {% for label, valor in [
-            ('Consultor', p.consultor), ('Quem subiu', p.quem_subiu),
+            ('Quem vendeu', p.consultor), ('Quem subiu', p.quem_subiu),
             ('Supervisora', p.supervisora_nome), ('Nº Proposta', p.numero_proposta or 'Não possui'),
-            ('Vigência', p.vigencia), ('Tipo de pessoa', p.tipo_pessoa),
+            ('Tipo de pessoa', p.tipo_pessoa), ('Operadora', p.adm_operadora),
+            ('Produto', p.produto), ('Status da venda', p.venda_status),
+            ('Titular', p.nome_titular or p.razao_social),
             ('CPF do titular', p.cpf_titular), ('CNPJ', p.cnpj),
-            ('Operadora', p.adm_operadora), ('Produto', p.produto),
-            ('Vencimento 1ª', p.vencimento_1), ('Previsão 1ª', p.previsao_1),
-            ('Status da venda', p.venda_status), ('Nasc. Titular', p.data_nasc_titular),
+            ('Nasc. Titular', p.data_nasc_titular|data_br),
             ('Cartão SUS', p.cns_titular|cns_fmt if p.cns_titular else ''),
+            ('Sócio que assina', p.socio_nome),
+            ('Vigência', p.vigencia|data_br),
+            ('Vencimento 1ª', p.vencimento_1|data_br), ('Previsão 1ª', p.previsao_1|data_br),
           ] %}{% if valor %}
           <div>
             <div style="font-size:10px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">{{ label }}</div>
@@ -490,7 +518,10 @@
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
             </div>
             <div>
-              <div style="font-size:13px;font-weight:600;">{{ p.razao_social }}</div>
+              {# A PESSOA, nao a empresa. Em PME e PJ a razao_social e o CNPJ
+                 da empresa — e o titular aparecia como "25.226.180 CHARLES
+                 SEVERINO PINHEIRO", que e o nome da firma, nao o dele. #}
+              <div style="font-size:13px;font-weight:600;">{{ p.nome_titular or p.razao_social }}</div>
               <div style="font-size:11.5px;color:var(--cinza);margin-top:2px;">
                 <span style="background:rgba(31,216,164,.12);color:var(--teal);padding:1px 8px;border-radius:4px;font-size:11px;font-weight:600;margin-right:6px;">Titular</span>
                 {% if p.data_nasc_titular %}Nasc: {{ p.data_nasc_titular|data_br }}{% endif %}
@@ -946,7 +977,8 @@
 <div class="modal-overlay" id="modal-consultor">
   <div class="modal" style="max-width:480px;">
     <h3>Remanejar consultor</h3>
-    <p style="font-size:13px;color:var(--cinza);margin-bottom:16px;line-height:1.6;">A comissão será recalculada pelo regime do novo consultor. Parcelas já em fluxo são mantidas.</p>
+    <p style="font-size:13px;color:var(--cinza);margin-bottom:6px;line-height:1.6;">A comissão será recalculada pelo regime do novo consultor. Parcelas já em fluxo são mantidas.</p>
+    <p id="consultor-atual-aviso" style="font-size:13px;color:var(--texto);font-weight:600;margin-bottom:16px;"></p>
     <div class="campo" style="margin-bottom:18px;"><label>Novo consultor</label><select id="sel-consultor"></select></div>
     <div style="display:flex;gap:10px;">
       <button class="btn" style="flex:1;" onclick="salvarConsultor()">Remanejar e recalcular</button>
@@ -1139,6 +1171,7 @@ const PROP_ID = {{ p.id }};
    virava &#34;[]&#34; — e isso quebrava TODO este bloco de script em qualquer
    proposta sem dependentes. `|tojson` já emite JS válido e seguro nos dois
    casos, então o ramo tem que passar por ele também. #}
+const PROP_CONSULTOR = {{ (p.consultor or '')|tojson }};
 const DEPS_JSON = {{ (p.dependentes_json or '[]')|tojson }};
 const REP = {{ p.repique_json|tojson if p.repique_json else 'null' }};
 let ETIQUETAS_MARCADAS = [];
@@ -1332,9 +1365,19 @@ async function resolverSolic(sid,acao){
 }
 
 // ── CONSULTOR ──
+// O DONO ATUAL VEM MARCADO. O select abria no primeiro da lista em ordem
+// alfabética — que quase nunca é o dono — e quem só quisesse conferir de quem
+// era a venda saía do modal achando que era outra pessoa. Pior: bastava clicar
+// em "Remanejar" sem olhar pra transferir a comissão pra quem não vendeu.
 async function abrirConsultor(){
   const res=await fetch('/api/consultores');const lista=await res.json();
-  document.querySelector('#sel-consultor').innerHTML=lista.map(c=>`<option value="${c.id}">${c.nome} — ${c.regime}</option>`).join('');
+  const atual=(PROP_CONSULTOR||'').trim().toLowerCase();
+  document.querySelector('#sel-consultor').innerHTML=lista.map(c=>{
+    const eu=(c.nome||'').trim().toLowerCase()===atual;
+    return `<option value="${c.id}"${eu?' selected':''}>${c.nome} — ${c.regime}${eu?' (atual)':''}</option>`;
+  }).join('');
+  const av=document.getElementById('consultor-atual-aviso');
+  if(av) av.textContent = PROP_CONSULTOR ? ('Hoje esta venda é de ' + PROP_CONSULTOR + '.') : '';
   document.getElementById('modal-consultor').classList.add('open');
 }
 function fecharConsultor(){document.getElementById('modal-consultor').classList.remove('open');}
