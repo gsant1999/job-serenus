@@ -7541,38 +7541,6 @@ def limpar_duplicatas():
     except Exception as e:
         return jsonify({'ok': False, 'erro': str(e)}), 500
 
-@app.route('/admin/emergency/restaurar-dados', methods=['GET', 'POST'])
-@login_required
-@admin_required
-def restaurar_dados():
-    """Emergência: restaurar as 5 propostas perdidas."""
-    try:
-        conn = db()
-        # Usuários
-        conn.execute("""INSERT OR IGNORE INTO usuarios (id, nome, email, perfil, regime_base, ativo) 
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                     (1, 'Guilherme Santos', 'guilherme@serenuscorretora.com.br', 'admin', '', 1))
-        conn.execute("""INSERT OR IGNORE INTO usuarios (id, nome, email, perfil, regime_base, ativo) 
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                     (2, 'Bianca Sampaio', 'bianca@serenuscorretora.com.br', 'consultor', 'com_fixo_lead', 1))
-        # Propostas
-        propostas = [
-            (1, 'Guilherme Santos', 'GC CALDEIRARIA & SERVICOS LTDA', 'PJ', 'SulAmérica PME', 'PME PORTE 1', 'Enfermaria', 'Sem', 1, 3580, '2026-06-18'),
-            (2, 'Bianca Sampaio', 'MAURO JUAREZ TULESKI', 'PF', 'Med Senior SP/RJ', 'Saúde', 'Enfermaria', 'Sem', 1, 767.95, '2026-06-18'),
-            (2, 'Bianca Sampaio', 'ARLETE KAZUE MORI TULESKI', 'PF', 'Med Senior SP/RJ', 'Saúde', 'Enfermaria', 'Sem', 1, 767.95, '2026-06-18'),
-            (1, 'Guilherme Santos', 'WILLAMI HANDERSON DE OLIVEIRA', 'PJ', 'Amil PME', 'PME PORTE 1', 'Enfermaria', 'Sem', 1, 2800, '2026-06-18'),
-            (1, 'Guilherme Santos', 'RANIELLY VICTORIA SILVA DE PAIVA', 'PJ', 'Vera Cruz PME', 'PME PORTE 1', 'Enfermaria', 'Sem', 1, 2500, '2026-06-18'),
-        ]
-        for u, c, r, t, m, tc, a, f, v, val, vig in propostas:
-            conn.execute("""INSERT INTO propostas (usuario_id, consultor, razao_social, tipo_pessoa, modalidade, 
-                           tipo_contrato, acomodacao, fator_moderador, total_vidas, valor, vigencia, status, criado_em)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Ativo', CURRENT_TIMESTAMP)""",
-                         (u, c, r, t, m, tc, a, f, v, val, vig))
-        conn.commit()
-        close_db(conn)
-        return jsonify({'ok': True, 'msg': '5 propostas restauradas com sucesso'}), 200
-    except Exception as e:
-        return jsonify({'ok': False, 'erro': str(e)}), 500
 
 @app.route('/admin/backup/exportar-json', methods=['GET', 'POST'])
 @login_required
@@ -8026,98 +7994,6 @@ def emergency_reenviar_anexo():
         return jsonify({'ok': False, 'erro': str(e)}), 500
 
 
-@app.route('/admin/emergency/buscar-anexos', methods=['GET','POST'])
-@login_required
-@admin_required
-def emergency_buscar_anexos():
-    """
-    Varre o filesystem em busca de arquivos de anexos que existem
-    no banco mas não estão em UPLOAD_FOLDER. Lista onde foram encontrados.
-    GET = diagnóstico / POST = copia para /data/anexos
-    """
-    import shutil
-
-    # Coleta todos os nomes de arquivo referenciados no banco
-    conn = db()
-    rows = conn.execute("""
-        SELECT id, comprovante_boleto, contrato_arquivo, anexos
-        FROM propostas
-        WHERE comprovante_boleto IS NOT NULL
-           OR contrato_arquivo IS NOT NULL
-           OR (anexos IS NOT NULL AND anexos != '[]')
-    """).fetchall()
-    close_db(conn)
-
-    nomes_banco = set()
-    for r in rows:
-        def _add(v):
-            if v: nomes_banco.add(os.path.basename(v))
-        _add(r['comprovante_boleto'] if hasattr(r,'keys') else r[1])
-        _add(r['contrato_arquivo']   if hasattr(r,'keys') else r[2])
-        try:
-            extras = json.loads((r['anexos'] if hasattr(r,'keys') else r[3]) or '[]')
-            for a in extras: _add(a)
-        except: pass
-
-    # Lugares para procurar
-    lugares = [
-        UPLOAD_FOLDER,
-        '/data/anexos',
-        '/data',
-        os.path.join(os.path.expanduser('~'), 'JOB_Serenus_Dados', 'anexos'),
-        os.path.join(os.path.expanduser('~'), 'JOB_Serenus_Dados'),
-        '/app/uploads',
-        '/app/anexos',
-        '/tmp/anexos',
-    ]
-
-    encontrados = {}   # nome → caminho_completo
-    nao_encontrados = []
-
-    # Varre todos os lugares
-    for lugar in lugares:
-        if not os.path.isdir(lugar): continue
-        try:
-            for arq in os.listdir(lugar):
-                caminho = os.path.join(lugar, arq)
-                if os.path.isfile(caminho) and arq in nomes_banco:
-                    if arq not in encontrados:
-                        encontrados[arq] = caminho
-        except: pass
-
-    for nome in sorted(nomes_banco):
-        if nome not in encontrados:
-            nao_encontrados.append(nome)
-
-    if request.method == 'POST':
-        # Copia arquivos encontrados para UPLOAD_FOLDER
-        copiados = 0
-        erros = []
-        for nome, origem in encontrados.items():
-            destino = os.path.join(UPLOAD_FOLDER, nome)
-            if os.path.exists(destino):
-                copiados += 1
-                continue
-            try:
-                shutil.copy2(origem, destino)
-                copiados += 1
-            except Exception as e:
-                erros.append(f"{nome}: {e}")
-        return jsonify({
-            'ok': True,
-            'copiados': copiados,
-            'erros': erros,
-            'ainda_faltando': nao_encontrados
-        })
-
-    return jsonify({
-        'ok': True,
-        'upload_folder': UPLOAD_FOLDER,
-        'total_no_banco': len(nomes_banco),
-        'encontrados_fora': {k: v for k, v in encontrados.items() if not v.startswith(UPLOAD_FOLDER)},
-        'nao_encontrados': nao_encontrados,
-        'lugares_verificados': [l for l in lugares if os.path.isdir(l)],
-    })
 
 
 @app.route('/admin/emergency/status')
@@ -8143,56 +8019,6 @@ def emergency_status():
         "propostas": [dict(p) for p in props[:10]],
     })
 
-@app.route('/admin/emergency/carregar-backup-master', methods=['POST'])
-@login_required
-@admin_required
-def emergency_carregar_backup():
-    """Carrega o backup master com 5 propostas."""
-    import os
-    import shutil
-    
-    backup_master = os.path.join(os.path.expanduser("~"), "JOB_Serenus_Dados", "backups", "job_backup_20260616_212404.db")
-    db_path = os.path.join(DATA_DIR, 'job.db')
-    
-    if not os.path.exists(backup_master):
-        return jsonify({"ok": False, "erro": "Backup master não encontrado"}), 500
-    
-    try:
-        shutil.copy2(backup_master, db_path)
-        
-        conn = sqlite3.connect(db_path)
-        n_props = conn.execute("SELECT COUNT(*) c FROM propostas").fetchone()['c']
-        n_parcs = conn.execute("SELECT COUNT(*) c FROM parcelas").fetchone()['c']
-        close_db(conn)
-        
-        return jsonify({
-            "ok": True, 
-            "msg": f"Backup carregado: {n_props} propostas, {n_parcs} parcelas",
-            "propostas": n_props,
-            "parcelas": n_parcs,
-        })
-    except Exception as e:
-        return jsonify({"ok": False, "erro": str(e)}), 500
-
-
-    """Diagnóstico de emergência — mostra qual banco está sendo usado e dados dentro dele."""
-    import os
-    conn = db()
-    n_props = conn.execute("SELECT COUNT(*) c FROM propostas").fetchone()['c']
-    n_parcelas = conn.execute("SELECT COUNT(*) c FROM parcelas").fetchone()['c']
-    props = conn.execute("SELECT id, razao_social, adm_operadora, valor FROM propostas ORDER BY id").fetchall()
-    close_db(conn)
-    
-    db_path = os.path.join(DATA_DIR, 'job.db')
-    return jsonify({
-        "data_dir": DATA_DIR,
-        "db_path": db_path,
-        "db_exists": os.path.exists(db_path),
-        "db_size_kb": round(os.path.getsize(db_path) / 1024, 1) if os.path.exists(db_path) else 0,
-        "propostas_count": n_props,
-        "parcelas_count": n_parcelas,
-        "propostas": [dict(p) for p in props[:10]],
-    })
 
 @app.route('/admin/emergency/exportar-json')
 @login_required
@@ -23173,14 +22999,12 @@ _FERRAMENTAS = [
 # Rotas de uma emergencia especifica que JA PASSOU — os nomes falam de "as 5
 # propostas perdidas". Ficam listadas pra decisao, e nao escondidas: codigo
 # morto que ainda executa contra producao e risco, nao economia.
-_FERRAMENTAS_OBSOLETAS = [
-    {'url': '/admin/emergency/restaurar-dados', 'nome': 'Restaurar as 5 propostas perdidas',
-     'motivo': 'Feita para um incidente específico já resolvido. O número 5 está escrito no código.'},
-    {'url': '/admin/emergency/carregar-backup-master', 'nome': 'Carregar backup master',
-     'motivo': 'Carrega um backup fixo com 5 propostas. Serve só àquele incidente.'},
-    {'url': '/admin/emergency/buscar-anexos', 'nome': 'Buscar anexos no disco',
-     'motivo': 'Substituída pela reconciliação com o R2, que faz o mesmo com critério.'},
-]
+_FERRAMENTAS_OBSOLETAS = []
+# Ficou vazia em 15/08/2026: as tres que estavam aqui foram REMOVIDAS do codigo.
+# Eram de um incidente ja resolvido e nenhuma tinha referencia em lugar nenhum —
+# a pior delas fazia INSERT INTO propostas com dados fixos, ou seja, rodar hoje
+# injetaria proposta falsa em producao. Codigo morto que ainda executa e risco,
+# nao economia. A lista continua existindo porque o padrao vale pra proxima.
 
 
 @app.route('/extensao')
