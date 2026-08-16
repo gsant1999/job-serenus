@@ -13427,6 +13427,16 @@ def solicitar_edicao(pid):
         VALUES (?,?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','consultor'),
         'solicitacao_edicao', '', f"{len(diff)} campo(s) solicitado(s) para alteração", datetime.now(TZ_SP)))
     conn.commit(); close_db(conn)
+    # AVISA QUEM VAI AVALIAR. O sistema respondia "o administrador vai avaliar"
+    # e nao contava pra ninguem: nenhuma tela apontava pra fila, nao havia sino,
+    # nao havia item de menu. O pedido ficava parado ate alguem tropecar nele.
+    try:
+        _notificar_admins('edicao_pendente',
+                          f"{session.get('nome','Consultor')} pediu edição na proposta #{pid}",
+                          f"{len(diff)} alteração(ões) aguardando sua avaliação.",
+                          '/admin/solicitacoes-edicao')
+    except Exception as e:
+        app.logger.info(f"[SOLIC] falha ao notificar admins: {e}")
     return jsonify({"ok": True, "msg": f"Solicitação enviada ({len(diff)} alteração(ões)). O administrador vai avaliar."})
 
 
@@ -22994,6 +23004,139 @@ _COLS_MAIUSCULA_HISTORICO = (
     'resp_contrato', 'resp_negociacao', 'contatos_adicionais',
     'end_logradouro', 'end_bairro', 'end_cidade', 'end_complemento',
 )
+
+
+# ═══════════ CENTRAL DE FERRAMENTAS DO ADMIN ═══════════════════════════════
+# O JOB tem 55 rotas /admin e SO 3 apareciam em algum lugar da interface. As
+# outras 52 existiam apenas pra quem sabia a URL de cor — inclusive uma fila de
+# aprovacao que o sistema promete avaliar e ninguem via.
+#
+# O catalogo e declarativo de proposito: rota nova entra aqui e aparece na tela,
+# em vez de virar HTML solto que ninguem lembra de atualizar.
+#
+# Cada ferramenta diz O QUE FAZ e QUANDO USAR. Sem o "quando", uma lista de 40
+# links e tao inutil quanto nao ter lista: ninguem sabe qual abrir.
+_FERRAMENTAS = [
+    {'grupo': 'Manutenção de dados', 'perigo': 'baixo',
+     'sobre': 'Consertos de uma vez só, para dado que entrou antes de a regra existir. '
+              'Não precisam ser repetidos: o que entra hoje já nasce certo.',
+     'itens': [
+        {'url': '/admin/normalizar-caixa', 'nome': 'Padronizar caixa alta',
+         'faz': 'Sobe a caixa dos nomes já gravados: titular, dependentes, responsáveis e endereço.',
+         'quando': 'Se você vir nome em minúscula numa proposta antiga.',
+         'nao': 'Não toca em operadora, modalidade, fase nem regime — são chave de cálculo da comissão.'},
+        {'url': '/admin/db/corrigir-operadoras', 'nome': 'Preencher operadora vazia',
+         'faz': 'Acha propostas sem operadora e extrai do próprio cadastro.',
+         'quando': 'Proposta aparece sem operadora e por isso sem comissão.'},
+        {'url': '/admin/razao/duplicidade', 'nome': 'Dinheiro contado duas vezes',
+         'faz': 'Acha e corrige lançamento duplicado no razão.',
+         'quando': 'O fluxo de caixa mostra valor maior que o real.'},
+        {'url': '/admin/comissoes-divergentes', 'nome': 'Comissão fora da regra',
+         'faz': 'Lista toda venda cuja comissão gravada discorda da regra de hoje, e corrige em lote.',
+         'quando': 'Depois de mudar tabela de recebimento ou repasse.',
+         'nao': 'Não mexe no que já tem transferência feita.'},
+        {'url': '/admin/anexos/reconciliar-r2', 'nome': 'Reconciliar anexos com o R2',
+         'faz': 'Varre os documentos de todas as propostas e confere disco contra nuvem.',
+         'quando': 'Anexo some ao abrir, ou depois de troca de storage.'},
+        {'url': '/admin/crm/formatar-telefones', 'nome': 'Formatar telefones do CRM',
+         'faz': 'Padroniza todos os telefones existentes.',
+         'quando': 'Telefone aparece sem máscara ou em formatos diferentes na lista.'},
+        {'url': '/admin/crm/corrigir-datas-servidor', 'nome': 'Corrigir datas dos leads',
+         'faz': 'Lê as planilhas de origem e corrige a data de criação em massa.',
+         'quando': 'Leads antigos aparecem todos com a data da importação.'},
+        {'url': '/admin/crm/restaurar-etapas', 'nome': 'Restaurar etapas de leads',
+         'faz': 'Devolve leads que foram movidos por engano para "lead novo".',
+         'quando': 'Uma importação embaralhou o funil.'},
+     ]},
+    {'grupo': 'Diagnóstico', 'perigo': 'nenhum',
+     'sobre': 'Só olham, não mudam nada. É por aqui que se começa quando algo parou de funcionar.',
+     'itens': [
+        {'url': '/admin/observabilidade', 'nome': 'Painel de observabilidade',
+         'faz': 'Estado geral: logs, integrações e saúde do sistema num lugar só.',
+         'quando': 'Primeira parada quando alguém diz que "o JOB está estranho".'},
+        {'url': '/admin/ultimo-erro', 'nome': 'Últimos erros',
+         'faz': 'Mostra os erros 500 recentes com o rastro completo.',
+         'quando': 'Alguém viu tela de erro e você precisa saber o quê.'},
+        {'url': '/admin/db/validar', 'nome': 'Validar o banco',
+         'faz': 'Confere tabelas, colunas críticas e integridade.',
+         'quando': 'Depois de deploy que mexeu em estrutura.'},
+        {'url': '/admin/testar-r2', 'nome': 'Testar armazenamento',
+         'faz': 'Verifica o R2 e o disco local.',
+         'quando': 'Anexo não sobe ou não abre.'},
+        {'url': '/admin/testar-smtp', 'nome': 'Testar e-mail',
+         'faz': 'Dispara um e-mail de teste pela Brevo.',
+         'quando': 'Protocolo ou antecipação não chegou no destino.'},
+        {'url': '/admin/asaas/diag', 'nome': 'Diagnóstico do Asaas',
+         'faz': 'Mostra o estado da chave sem expor o valor dela.',
+         'quando': 'Boleto ou repasse falhou.'},
+        {'url': '/admin/webhook-diagnostico', 'nome': 'Webhooks recebidos',
+         'faz': 'Últimos avisos que o Asaas mandou pro JOB.',
+         'quando': 'Pagamento aconteceu mas o JOB não registrou.'},
+        {'url': '/admin/comissoes-problemas', 'nome': 'Comissões quebradas',
+         'faz': 'Lista propostas ativas com comissão sem valor.',
+         'quando': 'Conferência de fechamento do mês.'},
+        {'url': '/admin/extensao/sessoes', 'nome': 'Aparelhos da extensão',
+         'faz': 'Quem está conectado, e permite revogar um aparelho.',
+         'quando': 'Alguém saiu da equipe, ou um consultor trocou de máquina.'},
+        {'url': '/admin/crm/analise-quantitativos', 'nome': 'Quantitativos do CRM',
+         'faz': 'Compara o que a planilha diz com o que está no banco.',
+         'quando': 'O número de leads não bate com a origem.'},
+     ]},
+    {'grupo': 'Emergência', 'perigo': 'alto',
+     'sobre': 'Alteram ou apagam dado em massa, e algumas recriam tabela. Não existe desfazer: '
+              'o caminho de volta é restaurar backup. Use só sabendo exatamente o que está fazendo.',
+     'itens': [
+        {'url': '/admin/backup/listar', 'nome': 'Backups disponíveis',
+         'faz': 'Lista o que existe em disco e permite restaurar.',
+         'quando': 'Antes de qualquer coisa desta seção.'},
+        {'url': '/admin/emergency/status', 'nome': 'Estado de emergência',
+         'faz': 'Diz qual banco está em uso e o estado das tabelas.',
+         'quando': 'Suspeita de que o sistema subiu no banco errado.'},
+        {'url': '/admin/emergency/limpar-duplicatas', 'nome': 'Remover propostas duplicadas',
+         'faz': 'APAGA propostas consideradas duplicadas.',
+         'quando': 'Só após conferir uma a uma qual seria apagada.'},
+        {'url': '/admin/emergency/fix-recebimento', 'nome': 'Recriar tabela de recebimento',
+         'faz': 'Recria a tabela que guarda o que cada operadora paga.',
+         'quando': 'A tabela foi perdida — e isso zera a comissão até ser repovoada.'},
+        {'url': '/admin/emergency/init-db', 'nome': 'Inicializar o banco',
+         'faz': 'Cria todas as tabelas do zero.',
+         'quando': 'Instalação nova. Nunca num banco que já tem dado.'},
+     ]},
+]
+
+# Rotas de uma emergencia especifica que JA PASSOU — os nomes falam de "as 5
+# propostas perdidas". Ficam listadas pra decisao, e nao escondidas: codigo
+# morto que ainda executa contra producao e risco, nao economia.
+_FERRAMENTAS_OBSOLETAS = [
+    {'url': '/admin/emergency/restaurar-dados', 'nome': 'Restaurar as 5 propostas perdidas',
+     'motivo': 'Feita para um incidente específico já resolvido. O número 5 está escrito no código.'},
+    {'url': '/admin/emergency/carregar-backup-master', 'nome': 'Carregar backup master',
+     'motivo': 'Carrega um backup fixo com 5 propostas. Serve só àquele incidente.'},
+    {'url': '/admin/emergency/buscar-anexos', 'nome': 'Buscar anexos no disco',
+     'motivo': 'Substituída pela reconciliação com o R2, que faz o mesmo com critério.'},
+]
+
+
+@app.route('/admin/ferramentas')
+@login_required
+@admin_required
+def admin_ferramentas():
+    """Tudo que é ferramenta de administração, num lugar só e explicado."""
+    conn = db()
+    pendencias = []
+    try:
+        n = conn.execute("SELECT COUNT(*) c FROM solicitacoes_edicao WHERE status='Pendente'").fetchone()['c']
+        if n:
+            pendencias.append({
+                'url': '/admin/solicitacoes-edicao', 'n': n,
+                'nome': 'Solicitações de edição esperando você',
+                'texto': ('O consultor pediu para alterar uma proposta e o sistema respondeu que '
+                          'você ia avaliar. Enquanto ninguém abre, o pedido fica parado.')})
+    except Exception:
+        pass
+    close_db(conn)
+    return render_template('ferramentas.html', grupos=_FERRAMENTAS,
+                           obsoletas=_FERRAMENTAS_OBSOLETAS, pendencias=pendencias)
 
 
 @app.route('/admin/normalizar-caixa', methods=['GET', 'POST'])
