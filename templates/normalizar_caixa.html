@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Padronizar caixa alta{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Padronizar caixa alta</h1>
+    <div class="sub">Sobe a caixa dos nomes já gravados nas propostas</div>
+  </div>
+</div>
+
+<div class="card" style="max-width:760px;">
+  <div class="card-body">
+    {% if aplicado %}
+    <div class="aviso" style="border-color:var(--verde);color:var(--verde);margin-bottom:16px;">
+      Pronto: {{ alteracoes }} campo(s) padronizado(s) em {{ propostas_tocadas }} proposta(s).
+    </div>
+    {% endif %}
+
+    {% if not alteracoes and not aplicado %}
+    <p style="font-size:14px;">Nada a fazer — todos os nomes já estão padronizados.</p>
+    {% elif not aplicado %}
+    <p style="font-size:14px;line-height:1.6;margin-bottom:14px;">
+      Encontrei <b>{{ alteracoes }}</b> campo(s) fora do padrão em {{ propostas }} proposta(s).
+      Isto reescreve proposta já fechada — confira antes.
+    </p>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+      {% for campo, n in por_campo.items() %}
+      <span class="tag tag-cinza">{{ campo }} · {{ n }}</span>
+      {% endfor %}
+    </div>
+
+    <div style="border:1px solid var(--borda);border-radius:10px;overflow:hidden;margin-bottom:16px;">
+      {% for a in amostra %}
+      <div style="display:grid;grid-template-columns:70px 1fr 1fr;gap:10px;padding:9px 12px;
+                  border-bottom:1px solid var(--borda);font-size:12.5px;align-items:center;">
+        <span class="hint">#{{ a.proposta }}</span>
+        <span style="color:var(--cinza);text-decoration:line-through;">{{ a.antes }}</span>
+        <span style="color:var(--texto);font-weight:600;">{{ a.depois }}</span>
+      </div>
+      {% endfor %}
+      {% if alteracoes > amostra|length %}
+      <div class="hint" style="padding:9px 12px;">... e mais {{ alteracoes - amostra|length }}.</div>
+      {% endif %}
+    </div>
+
+    <form method="POST" action="/admin/normalizar-caixa">
+      <button type="submit" class="btn" style="padding:11px 20px;">Padronizar {{ alteracoes }} campo(s)</button>
+    </form>
+    {% endif %}
+
+    {# O que NAO entra, escrito na tela: quem roda isto precisa saber o que fica
+       de fora, senao vai procurar depois e achar que falhou. #}
+    <div class="hint" style="margin-top:20px;line-height:1.7;">
+      <b>Fica de fora, de propósito:</b><br>
+      Operadora, modalidade, tipo de contrato, acomodação, coparticipação, fase, status e regime —
+      são <b>chave de cálculo</b>. A comissão é buscada com comparação exata pelo nome da operadora,
+      e mudar a caixa zeraria a comissão de toda proposta antiga.<br>
+      Consultor e quem subiu — espelham o cadastro de usuários, e mudar só aqui dessincroniza os dois.<br>
+      E-mail e observação — pela mesma regra do cadastro.
+    </div>
+  </div>
+</div>
+{% endblock %}
