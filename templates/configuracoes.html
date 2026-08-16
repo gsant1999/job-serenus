@@ -226,7 +226,7 @@ async function akRevogar(id, nome){
 
 {% if canario %}
 <div class="card">
-  <div class="card-header"><h3>Saúde da extensão<i class="ajuda-i" title="A extensão roda dentro do WhatsApp, que muda sem avisar. A cada 6 horas ela testa cada peça em separado e conta o resultado aqui. O objetivo é você descobrir uma quebra em horas, por esta tela, e não dias depois pela reclamação de um consultor. Nada aqui envia mensagem nem baixa arquivo: só verifica se as peças respondem.">i</i></h3></div>
+  <div class="card-header" id="saude-extensao"><h3>Saúde da extensão<i class="ajuda-i" title="A extensão roda dentro do WhatsApp, que muda sem avisar. A cada 6 horas ela testa cada peça em separado e conta o resultado aqui. O objetivo é você descobrir uma quebra em horas, por esta tela, e não dias depois pela reclamação de um consultor. Nada aqui envia mensagem nem baixa arquivo: só verifica se as peças respondem.">i</i></h3></div>
   <div class="card-body">
     {# TESTAR AGORA. Sem este botão, saber se uma peça voltou a funcionar era
        esperar a rodada de 6 h ou reabrir o WhatsApp — e até lá a tela continuava
@@ -358,7 +358,7 @@ async function akRevogar(id, nome){
 {% endif %}
 
 <div class="card" style="margin-top:18px;">
-  <div class="card-header"><h3>Leitura automática das conversas</h3></div>
+  <div class="card-header" id="leitura-automatica"><h3>Leitura automática das conversas</h3></div>
   <div style="padding:0 16px 8px; font-size:13px; color:var(--cinza); line-height:1.6;">
     A extensão lê as conversas do dia no WhatsApp do consultor e alimenta o CRM sozinha.
     Roda <b style="color:var(--texto);">na máquina dele</b>, com o WhatsApp aberto — se a aba fechar, para.

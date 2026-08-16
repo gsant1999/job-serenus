@@ -23117,6 +23117,86 @@ _FERRAMENTAS_OBSOLETAS = [
 ]
 
 
+@app.route('/extensao')
+@login_required
+@admin_required
+def extensao_painel():
+    """Painel único da extensão.
+
+    O controle estava em SETE lugares: sessões numa rota, erros noutra, config
+    remota numa terceira, e saúde, desempenho e leitura automática como cartões
+    perdidos no meio das Configurações pessoais. Ninguém tinha a visão do todo,
+    e quando a extensão quebrava a pergunta era "onde eu olho?".
+
+    Aqui o estado vem primeiro, em número; os controles vêm depois, agrupados
+    por o que a pessoa quer fazer."""
+    conn = db()
+    est = {'ativas': 0, 'revogadas': 0, 'ultimo_uso': None, 'erros_24h': 0, 'versoes': []}
+    try:
+        r = conn.execute("""SELECT
+              SUM(CASE WHEN revogado_em IS NULL THEN 1 ELSE 0 END) ativas,
+              SUM(CASE WHEN revogado_em IS NOT NULL THEN 1 ELSE 0 END) revogadas,
+              MAX(ultimo_uso) ultimo
+            FROM extensao_sessao""").fetchone()
+        if r:
+            est['ativas'] = r['ativas'] or 0
+            est['revogadas'] = r['revogadas'] or 0
+            est['ultimo_uso'] = _fmt_datahora_br(r['ultimo']) if r['ultimo'] else None
+    except Exception:
+        pass
+    try:
+        est['erros_24h'] = conn.execute(
+            "SELECT COUNT(*) c FROM extensao_erro WHERE criado_em >= ?",
+            ((datetime.now(TZ_SP) - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S'),)
+        ).fetchone()['c'] or 0
+    except Exception:
+        pass
+    varr = None
+    try:
+        varr = varredura_cfg(conn)
+    except Exception:
+        pass
+    close_db(conn)
+
+    # Agrupado pelo que a pessoa QUER FAZER, e não pela tabela de origem.
+    secoes = [
+        {'titulo': 'Quem está usando', 'sobre': 'Aparelhos conectados e o acesso de cada um.',
+         'itens': [
+            {'url': '/admin/extensao/sessoes', 'nome': 'Aparelhos conectados',
+             'faz': 'Quem está com a extensão ligada, desde quando, e o botão de revogar.',
+             'quando': 'Alguém saiu da equipe ou trocou de máquina.'},
+         ]},
+        {'titulo': 'Está funcionando?', 'sobre': 'Onde olhar quando alguém diz que a extensão parou.',
+         'itens': [
+            {'url': '/extensao/erros', 'nome': 'Erros reportados',
+             'faz': 'O que a extensão registrou de falha, com a versão e o consultor.',
+             'quando': 'Primeira parada quando algo quebra.'},
+            {'url': '/configuracoes#saude-extensao', 'nome': 'Saúde e desempenho',
+             'faz': 'O teste automático de cada peça, a cada 6 horas, e quanto tempo as coisas levam.',
+             'quando': 'Confirmar se a quebra é geral ou de um consultor só.'},
+         ]},
+        {'titulo': 'Comportamento', 'sobre': 'O que a extensão faz sozinha, e como ela enxerga o WhatsApp.',
+         'itens': [
+            {'url': '/configuracoes#leitura-automatica', 'nome': 'Leitura automática das conversas',
+             'faz': 'Liga ou desliga a varredura, e escolhe quais consultores entram.',
+             'quando': 'Ajustar quem alimenta o CRM sozinho.'},
+            {'url': '/extensao/config-remota', 'nome': 'Config remota (avançado)',
+             'faz': 'Seletores do WhatsApp e chaves de comportamento, aplicados sem publicar versão.',
+             'quando': 'O WhatsApp mudou o HTML e a extensão parou de achar o elemento.'},
+         ]},
+        {'titulo': 'Distribuição', 'sobre': 'Como a extensão chega na máquina do consultor.',
+         'itens': [
+            {'url': '/extensao/instalar', 'nome': 'Instalar',
+             'faz': 'Passo a passo de instalação para mandar a quem está entrando.',
+             'quando': 'Consultora nova, ou máquina nova.'},
+            {'url': '/extensao/download', 'nome': 'Baixar a versão atual',
+             'faz': 'Arquivo da versão publicada.',
+             'quando': 'Instalação manual, fora da loja.'},
+         ]},
+    ]
+    return render_template('extensao_painel.html', est=est, secoes=secoes, varr=varr)
+
+
 @app.route('/admin/ferramentas')
 @login_required
 @admin_required
