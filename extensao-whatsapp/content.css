@@ -1143,6 +1143,8 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-cot-barra i { display: block; height: 100%; border-radius: 4px;
   background: linear-gradient(90deg, #1fd8a4, #3b82f6, #8b5cf6);
   transition: width .35s cubic-bezier(.4,0,.2,1); }
+.job-cot-barra.progresso-real i { width: 100%; transform: scaleX(0); transform-origin: left center;
+  transition: transform 180ms cubic-bezier(.23,1,.32,1); }
 
 /* ── Resultado ── */
 .job-cot-logo-topo { display: block; height: 42px; max-width: 60%; object-fit: contain;

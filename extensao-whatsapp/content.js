@@ -7455,8 +7455,28 @@
   // problema do JOB.
   try {
     _escutarChrome(chrome.runtime.onMessage, (msg) => {
-      if (!msg || msg.type !== 'fila_andamento') return;
+      if (!msg) return;
+      if (msg.type === 'cotacao_andamento') {
+        const feito = Math.max(0, Number(msg.feito) || 0);
+        const total = Math.max(1, Number(msg.total) || 1);
+        const barra = document.querySelector('#job-cot-progresso i');
+        const conta = document.getElementById('job-cot-progresso-conta');
+        const etapa = document.getElementById('job-cot-progresso-etapa');
+        if (barra) barra.style.transform = 'scaleX(' + Math.min(1, feito / total) + ')';
+        if (conta) conta.textContent = feito + '/' + total;
+        if (etapa) etapa.textContent = feito
+          ? 'Conferindo preços — ' + feito + ' de ' + total + ' concluídos'
+          : 'Preparando as consultas…';
+        return;
+      }
+      if (msg.type !== 'fila_andamento') return;
       _cotFilaSinal = Date.now();
+      const barraPreco = document.querySelector('#job-cot-progresso i');
+      const etapaPreco = document.getElementById('job-cot-progresso-etapa');
+      if (barraPreco && msg.fracao > 0) {
+        barraPreco.style.transform = 'scaleX(' + Math.min(1, msg.fracao) + ')';
+        if (etapaPreco && msg.etapa) etapaPreco.textContent = String(msg.etapa);
+      }
       const cx = document.getElementById('job-cot-fila');
       if (!cx) return;
       const n = msg.posicao || 0;
@@ -8059,7 +8079,8 @@
     bt.addEventListener('click', () => _cotPrecosSacola());
   }
 
-  // COTA A SACOLA INTEIRA, uma operadora de cada vez.
+  // COTA A SACOLA INTEIRA. As tabelas do JOB usam o motor local; os planos do
+  // Painel entram numa unica rodada e sao repartidos entre as frentes.
   //
   // Antes o botao cotava so o que estava marcado NA TELA — montar tres
   // operadoras exigia cotar, voltar, cotar de novo, e ele so via a proposta
@@ -8075,13 +8096,24 @@
                 grupos.push(g); }
       g.planos.push(x.plano);
     });
-    for (let i = 0; i < grupos.length; i++) {
-      const g = grupos[i];
+    const doJob = grupos.filter((g) => g.fonte === 'job');
+    const doPainel = grupos.filter((g) => g.fonte !== 'job');
+    for (let i = 0; i < doJob.length; i++) {
+      const g = doJob[i];
       _cot.operadoraAtual = { id: g.id, nome: g.nome, fonte: g.fonte };
       const g0 = _cotGer;
-      if (g.fonte === 'job') await _cotPrecosJob(g.planos, grupos.length > 1);
-      else await _cotPrecos(g.planos, grupos.length > 1);
+      await _cotPrecosJob(g.planos, grupos.length > 1);
       if (g0 !== _cotGer) return;      // ele saiu no meio
+    }
+    if (doPainel.length) {
+      const todos = [];
+      doPainel.forEach((g) => g.planos.forEach((p) => todos.push(Object.assign({}, p, {
+        _jobOperadoraId: g.id, _jobOperadoraNome: g.nome
+      }))));
+      _cot.operadoraAtual = doPainel.length === 1
+        ? { id: doPainel[0].id, nome: doPainel[0].nome, fonte: doPainel[0].fonte }
+        : { id: 'varias', nome: doPainel.length + ' operadoras', fonte: 'painel' };
+      await _cotPrecos(todos, grupos.length > 1);
     }
     _cotPintarResultado();
   }
@@ -8095,53 +8127,46 @@
   // comparativo e o laco, no fim — senao a tela pisca uma vez por operadora.
   async function _cotPrecos(alvo, emLote) {
     const fila = _cotEmbaralhar(alvo);
-    const feitos = [];
-    // Sair no meio da busca PARA a busca. Sem a guarda, a seta so trocava a
-    // tela e o laco seguia batendo no Painel por tras — rastro de maquina
-    // pedindo preco de uma cotacao que ninguem esta mais olhando.
     const g = _cotGer;
-    for (let i = 0; i < fila.length; i++) {
-      setCorpoSecao(_cotTopo(_cotPintarPlanos, 'Planos') +
-        _secHead('Buscando preços',
-        esc(_cot.operadoraAtual.nome), (i + 1) + '/' + fila.length) +
-        '<div class="job-cot-wrap">' +
-        '<div class="job-cot-barra"><i style="width:' + Math.round((i / fila.length) * 100) + '%"></i></div>' +
-        (feitos.length ? _cotCartoes(feitos) : '') +
-        '<div class="job-cot-dica">Um plano por vez, com pausa entre eles — é assim que o Painel é usado à mão.</div>' +
+    setCorpoSecao(_cotTopo(_cotPintarPlanos, 'Planos') +
+      _secHead('Conferindo ao vivo', esc(_cot.operadoraAtual.nome),
+               '<span id="job-cot-progresso-conta">0/' + fila.length + '</span>') +
+      '<div class="job-cot-wrap">' +
+        '<div class="job-cot-barra progresso-real" id="job-cot-progresso"><i></i></div>' +
+        '<div class="job-cot-dica" id="job-cot-progresso-etapa">Preparando até três consultas em paralelo…</div>' +
       '</div>');
-      _cotTopoLigar(() => { _cotGer++; _cotPintarPlanos(); });
-      const r = await _cotPasso(Object.assign({ acao: 'preco', cotacaoId: _cot.cotacaoId,
-                                               plano: fila[i] }, _cotBase()));
-      if (g !== _cotGer) return;
-      const cartao = (r.ok && r.dados && r.dados.cartao) || null;
-      // Sem valor NÃO inventa e não some: entra marcado como não cotado. Preço
-      // errado numa proposta é pior que preço faltando.
-      feitos.push(Object.assign({}, fila[i], cartao
+    _cotTopoLigar(() => { _cotGer++; _cotPintarPlanos(); });
+    let r = null;
+    try {
+      r = await _safeSendMessage({ type: 'cotador_precos_paralelos',
+        pedido: Object.assign({ planos: fila }, _cotBase()) });
+    } catch (e) { r = null; }
+    if (g !== _cotGer) return;
+    const recebidos = (r && r.ok && r.dados && Array.isArray(r.dados.planos))
+      ? r.dados.planos : [];
+    const porChave = {};
+    recebidos.forEach((x) => { porChave[String(x.chave || '')] = x; });
+    const feitos = fila.map((p) => {
+      const x = porChave[String(p.key || p.chave || '')];
+      const cartao = x && x.cartao;
+      return Object.assign({}, p, cartao
         ? { total: cartao.total, faixas: cartao.faixas, conferido: cartao.conferido }
-        : { total: null, motivo: r.motivo || 'sem_valor_na_resposta' }));
-      // CAMINHO MORTO NAO SE TENTA SEIS VEZES.
-      //
-      // "Sem preco pra este plano" e resposta: o Painel respondeu e aquele
-      // plano nao tem valor. Ja "nao respondeu ninguem" nao e sobre o plano —
-      // e o caminho inteiro que caiu, e ele vai cair igual nos proximos. Com
-      // seis planos e 45s cada, insistir custava quatro minutos e meio de tela
-      // parada pra chegar no mesmo lugar. Os que sobram entram marcados, nao
-      // somem: continua sem preco inventado.
-      if (!cartao && _COT_CAMINHO_MORTO[r.motivo]) {
-        for (let j = i + 1; j < fila.length; j++) {
-          feitos.push(Object.assign({}, fila[j], { total: null, motivo: r.motivo }));
-        }
-        break;
-      }
-      if (i + 1 < fila.length) { await _cotRespira(240, 780); if (g !== _cotGer) return; }
-    }
+        : { total: null, motivo: (x && x.motivo) || (r && r.motivo) || 'sem_valor_na_resposta' });
+    });
     feitos.sort((a, b) => (a.total == null) - (b.total == null) || (a.total - b.total));
     _cot.resultado = feitos;
-    // Acumula por operadora. Cotar a segunda apagava a primeira da tela — e
-    // comparar duas operadoras é o motivo de existir um multicálculo.
-    _cotFeitas = _cotFeitas.filter((f) => String(f.operadoraId) !== String(_cot.operadoraAtual.id));
-    _cotFeitas.push({ operadoraId: _cot.operadoraAtual.id,
-                      nome: _cot.operadoraAtual.nome, planos: feitos });
+    const gruposFeitos = [];
+    feitos.forEach((p) => {
+      const id = p._jobOperadoraId != null ? p._jobOperadoraId : _cot.operadoraAtual.id;
+      const nome = p._jobOperadoraNome || _cot.operadoraAtual.nome;
+      let grupo = gruposFeitos.filter((x) => String(x.id) === String(id))[0];
+      if (!grupo) { grupo = { id: id, nome: nome, planos: [] }; gruposFeitos.push(grupo); }
+      grupo.planos.push(p);
+    });
+    gruposFeitos.forEach((grupo) => {
+      _cotFeitas = _cotFeitas.filter((f) => String(f.operadoraId) !== String(grupo.id));
+      _cotFeitas.push({ operadoraId: grupo.id, nome: grupo.nome, planos: grupo.planos });
+    });
     // ADIANTA A REDE E A DECODIFICACAO, antes de ele clicar em "Ver imagem".
     _cotPreAquecer();
     if (!emLote) _cotPintarResultado();
