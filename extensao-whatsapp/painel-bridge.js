@@ -166,9 +166,11 @@
           window.postMessage({ source: 'JOB_COTADOR_BRIDGE', tipo: 'restaurar',
                                dados: { ...(d || {}), modalidades: mods } }, '*');
         }
-        Object.keys(d || {}).forEach((k) => {
-          if (d[k] && d[k].hash) ultimoPublicado[k] = d[k].hash;
-        });
+        // O aprendizado local completo continua sendo a fonte principal. Ao
+        // reabrir o Painel, republica os identificadores seguros no JOB para
+        // que outra máquina também possa usá-los sem refazer uma cotação só
+        // para ensinar. A árvore de sessão nunca sai deste navegador.
+        publicarNaNuvem(d || {});
         // Depois do local, pergunta à nuvem — e só usa o que falta aqui.
         lerNuvem(false);
       });
