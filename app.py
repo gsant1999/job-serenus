@@ -31624,6 +31624,39 @@ def regra_gestor_aplicar_historico():
     return jsonify({"ok": True, "aplicadas": aplicadas, "recusadas": recusadas})
 
 
+def _retencao_do_pedido(d):
+    """Valida os campos de uma retenção. Devolve (dados, erro).
+
+    Alíquota em branco vira NULL, não zero. É a distinção que sustenta a tela:
+    NULL é 'ninguém decidiu ainda' e trava o financeiro; 0 é uma decisão de que
+    não se retém nada. Colapsar os dois faria a regra parecer pronta e o gestor
+    receber bruto."""
+    tipo = (d.get('tipo') or '').strip()[:40]
+    if not tipo:
+        return None, "Informe o tipo da retenção."
+    base = (d.get('base_calculo') or '').strip()
+    resp = (d.get('responsavel') or '').strip()
+    if base not in _RETENCAO_BASES:
+        return None, "Escolha a base de cálculo."
+    if resp not in _RETENCAO_RESPONSAVEIS:
+        return None, "Escolha quem paga esta retenção."
+    pct = d.get('percentual')
+    if pct is None or str(pct).strip() == '':
+        pct = None
+    else:
+        try:
+            pct = round(float(str(pct).replace(',', '.')), 4)
+        except (TypeError, ValueError):
+            return None, "Alíquota inválida. Use número, com vírgula ou ponto."
+        if pct < 0 or pct > 100:
+            return None, "A alíquota precisa estar entre 0 e 100."
+    return {'tipo': tipo, 'nome': (d.get('nome') or tipo)[:60], 'percentual': pct,
+            'base_calculo': base, 'responsavel': resp,
+            'vigencia_inicio': (d.get('vigencia_inicio') or '')[:10],
+            'vigencia_fim': (d.get('vigencia_fim') or '')[:10],
+            'observacao': (d.get('observacao') or '')[:400]}, None
+
+
 @app.route('/comissoes/regra-gestor/retencao', methods=['POST'])
 @login_required
 @admin_required
@@ -31635,33 +31668,84 @@ def regra_gestor_retencao():
         rid = int(d.get('regra_id') or 0)
     except (TypeError, ValueError):
         rid = 0
-    tipo = (d.get('tipo') or '').strip()[:40]
-    if not rid or not tipo:
-        return jsonify({"ok": False, "erro": "Informe a regra e o tipo da retenção."}), 400
-    base = (d.get('base_calculo') or '').strip()
-    resp = (d.get('responsavel') or '').strip()
-    if base not in _RETENCAO_BASES:
-        return jsonify({"ok": False, "erro": "Escolha a base de cálculo."}), 400
-    if resp not in _RETENCAO_RESPONSAVEIS:
-        return jsonify({"ok": False, "erro": "Escolha quem paga esta retenção."}), 400
-    pct = d.get('percentual')
-    if pct is None or str(pct).strip() == '':
-        pct = None
-    else:
-        try:
-            pct = round(float(str(pct).replace(',', '.')), 4)
-        except (TypeError, ValueError):
-            return jsonify({"ok": False, "erro": "Alíquota inválida."}), 400
+    if not rid:
+        return jsonify({"ok": False, "erro": "Informe a regra."}), 400
+    x, erro = _retencao_do_pedido(d)
+    if erro:
+        return jsonify({"ok": False, "erro": erro}), 400
     conn = db()
     conn.execute("""INSERT INTO gestor_retencao
         (regra_id, tipo, nome, percentual, base_calculo, responsavel,
          vigencia_inicio, vigencia_fim, observacao, ativo, criado_por, criado_em)
         VALUES (?,?,?,?,?,?,?,?,?,1,?,?)""",
-        (rid, tipo, (d.get('nome') or tipo)[:60], pct, base, resp,
-         (d.get('vigencia_inicio') or '')[:10], (d.get('vigencia_fim') or '')[:10],
-         (d.get('observacao') or '')[:400], session.get('nome'), _agora_sp()))
+        (rid, x['tipo'], x['nome'], x['percentual'], x['base_calculo'], x['responsavel'],
+         x['vigencia_inicio'], x['vigencia_fim'], x['observacao'],
+         session.get('nome'), _agora_sp()))
     conn.commit(); close_db(conn)
-    return jsonify({"ok": True, "sem_aliquota": pct is None})
+    return jsonify({"ok": True, "sem_aliquota": x['percentual'] is None})
+
+
+@app.route('/comissoes/regra-gestor/retencao/<int:rid>/editar', methods=['POST'])
+@login_required
+@admin_required
+def regra_gestor_retencao_editar(rid):
+    """Altera uma retenção já cadastrada.
+
+    Antes só dava pra remover e cadastrar de novo, e isso perdia o histórico:
+    a retenção antiga era desativada e a nova nascia sem dizer que era a mesma
+    coisa com outra alíquota.
+
+    Não mexe em venda nenhuma. O que cada venda paga está congelado no snapshot
+    dela — mudar a retenção aqui vale da próxima venda em diante. Alterar o
+    passado é migração individual, na própria proposta, e continua sendo."""
+    d = request.json or {}
+    x, erro = _retencao_do_pedido(d)
+    if erro:
+        return jsonify({"ok": False, "erro": erro}), 400
+    conn = db()
+    atual = conn.execute("SELECT * FROM gestor_retencao WHERE id=?", (rid,)).fetchone()
+    if not atual:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Retenção não encontrada."}), 404
+    a = dict(atual)
+    if not a.get('ativo', 1):
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Esta retenção foi removida. "
+                                             "Cadastre uma nova."}), 409
+
+    # O que mudou, em texto, pra observação guardar a troca de alíquota — que é a
+    # alteração que muda dinheiro e a que alguém vai querer explicar depois.
+    def _fmt(v):
+        return 'em branco' if v is None else ('%g' % v).replace('.', ',') + '%'
+    mudou = []
+    if a.get('percentual') != x['percentual']:
+        mudou.append(f"alíquota {_fmt(a.get('percentual'))} -> {_fmt(x['percentual'])}")
+    if (a.get('base_calculo') or '') != x['base_calculo']:
+        mudou.append(f"base {a.get('base_calculo')} -> {x['base_calculo']}")
+    if (a.get('responsavel') or '') != x['responsavel']:
+        mudou.append(f"responsável {a.get('responsavel')} -> {x['responsavel']}")
+
+    obs = x['observacao']
+    if mudou:
+        marca = f"[{_agora_sp()[:10]} {session.get('nome') or 'admin'}] " + '; '.join(mudou)
+        obs = (marca + (' | ' + obs if obs else ''))[:400]
+
+    conn.execute("""UPDATE gestor_retencao SET tipo=?, nome=?, percentual=?, base_calculo=?,
+                    responsavel=?, vigencia_inicio=?, vigencia_fim=?, observacao=? WHERE id=?""",
+                 (x['tipo'], x['nome'], x['percentual'], x['base_calculo'], x['responsavel'],
+                  x['vigencia_inicio'], x['vigencia_fim'], obs, rid))
+    conn.commit()
+
+    regra = conn.execute("SELECT * FROM gestor_regra WHERE id=?", (a['regra_id'],)).fetchone()
+    ret = [dict(y) for y in conn.execute(
+        "SELECT * FROM gestor_retencao WHERE regra_id=? AND COALESCE(ativo,1)=1",
+        (a['regra_id'],)).fetchall()]
+    falta = _gestor_regra_faltas(dict(regra) if regra else None, ret)
+    close_db(conn)
+    app.logger.info(f"[RETENCAO] #{rid} alterada por {session.get('nome')}: "
+                    f"{'; '.join(mudou) or 'sem mudança de valor'}")
+    return jsonify({"ok": True, "mudou": mudou, "falta": falta,
+                    "sem_aliquota": x['percentual'] is None})
 
 
 @app.route('/comissoes/regra-gestor/retencao/<int:rid>/remover', methods=['POST'])

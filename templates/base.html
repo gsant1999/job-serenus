@@ -31,6 +31,15 @@
     --amarelo:#facc15; --erro:#f43f5e; --info:#3b82f6;
     --grad-frio:linear-gradient(135deg,#1fd8a4 0%,#3b82f6 50%,#8b5cf6 100%);
     --grad-quente:linear-gradient(135deg,#f43f7c 0%,#fb923c 55%,#facc15 100%);
+    /* Curvas do JOB. Estavam espalhadas como cubic-bezier() escrito na mão em
+       cada tela — o mesmo movimento com números levemente diferentes conforme
+       quem copiou de onde. Nomeadas aqui para a tela pedir a intenção, não o
+       número. Não muda nada do que já existe: são exatamente os valores em uso.
+       Nunca ease-in em interface: ele adia o começo bem na hora em que a pessoa
+       está olhando, e faz a tela parecer lenta com o mesmo tempo no relógio. */
+    --ease-saida:cubic-bezier(.23,1,.32,1);    /* entra e sai: começa rápido */
+    --ease-mov:cubic-bezier(.77,0,.175,1);     /* move de um lugar a outro */
+    --ease-folha:cubic-bezier(.32,.72,0,1);    /* folha e gaveta, curva iOS */
     --sidebar-w: 236px;
     --card-bg: #15151e;
     --input-bg: #1b1b27;

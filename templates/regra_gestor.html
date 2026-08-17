@@ -42,6 +42,22 @@
              border-radius:8px; padding:11px 14px; margin:0 0 16px;
              font-size:12.5px; color:var(--cinza); line-height:1.6; }
   .rg-modo b { color:var(--texto); }
+  /* Ação secundária dentro de uma célula: texto, não botão. A célula já tem o
+     botão de adicionar — três caixas iguais lado a lado disputariam o olho. */
+  .rg-link { background:none; border:none; padding:0; font:inherit; font-size:11px;
+             font-weight:600; color:var(--azul); cursor:pointer; }
+  .rg-link-del { color:var(--erro); }
+  @media (hover:hover) and (pointer:fine) { .rg-link:hover { text-decoration:underline; } }
+  .ret-item { display:flex; gap:10px; justify-content:space-between; align-items:flex-start;
+              padding:5px 0; }
+  .ret-item + .ret-item { border-top:1px solid var(--borda); }
+  .ret-acoes { display:flex; gap:9px; white-space:nowrap; padding-top:1px; }
+  .ret-form { border:1px solid var(--borda); border-left:3px solid var(--azul);
+              border-radius:10px; padding:14px 16px; margin:0 0 16px;
+              background:var(--panel-2); }
+  .ret-cab { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+  .ret-cab b { font-family:'Sora',sans-serif; font-size:13px; color:var(--texto); }
+  .ret-aviso { font-size:11.5px; color:var(--cinza); line-height:1.6; margin:0 0 12px; }
   .rg-mini-del { color:var(--erro); border-color:rgba(244,63,94,.3); }
   @media (hover:hover) and (pointer:fine) {
     .rg-mini-del:hover { border-color:var(--erro); background:rgba(244,63,94,.08); }
@@ -183,6 +199,60 @@
        decidir. Vazio no carregamento: cadastro novo não precisa de rótulo. #}
     <div class="rg-modo" id="rgModo" hidden></div>
 
+    {# ── RETENÇÃO ──────────────────────────────────────────────────────────
+       O MESMO formulário adiciona e edita. Antes, adicionar era uma fila de
+       prompt() do navegador — e ali não dá pra explicar que alíquota em branco
+       é diferente de zero, nem pra mostrar o que a base de cálculo significa.
+       Some quando não está em uso: campo que só serve depois não nasce na tela. #}
+    <div class="ret-form" id="retForm" hidden>
+      <div class="ret-cab">
+        <b id="retTitulo">Nova retenção</b>
+        <button type="button" class="rg-link" id="retFechar">Cancelar</button>
+      </div>
+      <p class="ret-aviso" id="retEscopo"></p>
+      <div class="rg-grade">
+        <div class="rg-campo">
+          <label for="retTipo">Tipo</label>
+          <input list="retTipos" id="retTipo" placeholder="imposto, taxa, outro">
+          <datalist id="retTipos">
+            <option value="imposto"><option value="taxa"><option value="outro">
+          </datalist>
+        </div>
+        <div class="rg-campo">
+          <label for="retNome">Nome que aparece na tela</label>
+          <input id="retNome" placeholder="igual ao tipo, se vazio">
+        </div>
+        <div class="rg-campo">
+          <label for="retPct">Alíquota (%)<i class="ajuda-i" title="Deixe EM BRANCO se ainda não souber. Em branco não é zero: em branco trava o financeiro desta operadora até alguém informar, e zero é a decisão de não reter nada. O JOB não inventa alíquota de imposto.">i</i></label>
+          <input id="retPct" inputmode="decimal" placeholder="em branco = ainda não sei">
+        </div>
+        <div class="rg-campo">
+          <label for="retBase">Base de cálculo<i class="ajuda-i" title="Sobre o que a alíquota incide. Bruto do gestor: sobre a parte que é dele naquela fração. Fração recebida: sobre tudo que a operadora pagou naquela fração, antes de repartir.">i</i></label>
+          <select id="retBase">
+            <option value="">Escolha</option>
+            <option value="bruto_gestor">Bruto do gestor</option>
+            <option value="fracao_recebida">Fração recebida</option>
+          </select>
+        </div>
+        <div class="rg-campo">
+          <label for="retResp">Quem paga<i class="ajuda-i" title="De quem sai o dinheiro. Gestor: desconta do líquido dele antes do PIX. Serenus: sai do saldo da empresa e não reduz o que o gestor recebe.">i</i></label>
+          <select id="retResp">
+            <option value="">Escolha</option>
+            <option value="gestor">Gestor</option>
+            <option value="serenus">Serenus</option>
+          </select>
+        </div>
+        <div class="rg-campo">
+          <label for="retObs">Observação</label>
+          <input id="retObs" placeholder="opcional">
+        </div>
+      </div>
+      <div class="rg-acoes">
+        <button type="button" class="btn" id="retSalvar">Salvar retenção</button>
+      </div>
+      <div class="rg-msg" id="retMsg"></div>
+    </div>
+
     <div class="rg-grade">
       <div class="rg-campo">
         <label for="rgOp">Operadora</label>
@@ -279,18 +349,35 @@
           </td>
           <td>
             {% for t in r.retencoes %}
-            <div>
-              {{ t.nome or t.tipo }} —
-              {% if t.percentual is none %}<span class="pill pill-erro">alíquota não informada</span>
-              {% else %}{{ ('%g' % t.percentual)|replace('.', ',') }}%{% endif %}
-              <div style="font-size:10.5px;color:var(--cinza);">
-                base: {{ 'bruto do gestor' if t.base_calculo == 'bruto_gestor' else 'fração recebida' }} ·
-                paga: {{ t.responsavel }}
+            <div class="ret-item">
+              <div>
+                {{ t.nome or t.tipo }} —
+                {% if t.percentual is none %}<span class="pill pill-erro">alíquota não informada</span>
+                {% else %}{{ ('%g' % t.percentual)|replace('.', ',') }}%{% endif %}
+                <div style="font-size:10.5px;color:var(--cinza);">
+                  base: {{ 'bruto do gestor' if t.base_calculo == 'bruto_gestor' else 'fração recebida' }} ·
+                  paga: {{ t.responsavel }}
+                </div>
+              </div>
+              <div class="ret-acoes">
+                <button type="button" class="rg-link" data-ret-edit="{{ t.id }}"
+                        data-regra-id="{{ r.id }}"
+                        data-ret-dados="{{ {'tipo': t.tipo or '', 'nome': t.nome or '',
+                                            'percentual': t.percentual,
+                                            'base_calculo': t.base_calculo or '',
+                                            'responsavel': t.responsavel or '',
+                                            'vigencia_inicio': t.vigencia_inicio or '',
+                                            'vigencia_fim': t.vigencia_fim or '',
+                                            'observacao': t.observacao or ''}|tojson|forceescape }}"
+                        >Editar</button>
+                <button type="button" class="rg-link rg-link-del" data-ret-del="{{ t.id }}"
+                        data-nome="{{ t.nome or t.tipo }}">Remover</button>
               </div>
             </div>
             {% else %}<span style="font-size:11.5px;color:var(--cinza);">nenhuma</span>{% endfor %}
             <button type="button" class="rg-mini" style="margin-top:6px;"
-                    data-ret="{{ r.id }}">Adicionar retenção</button>
+                    data-ret="{{ r.id }}" data-regra-nome="{{ r.display }} · {{ r.plano }}"
+                    >Adicionar retenção</button>
           </td>
           {# O que a regra DA, nao so como ela reparte. Mesma unidade da regua
              (% de mensalidade), calculado pelo motor de verdade. #}
@@ -536,27 +623,121 @@ document.querySelectorAll('[data-del-regra]').forEach(function(b){
   });
 });
 
+// ── RETENÇÃO: um formulário só, que adiciona e edita ───────────────────────
+// Eram quatro prompt() do navegador em fila. Ali não cabe explicar que alíquota
+// em branco NÃO é zero, nem o que "base de cálculo" quer dizer — e é justamente
+// nesses dois que o dinheiro erra. Agora é campo com rótulo e "i".
+var retCtx = {id: 0, regraId: 0};
+function retCampo(id){ return document.getElementById(id); }
+function retAbrir(titulo, escopo){
+  retCampo('retTitulo').textContent = titulo;
+  retCampo('retEscopo').innerHTML = escopo;
+  retCampo('retMsg').textContent = '';
+  retCampo('retMsg').className = 'rg-msg';
+  var f = retCampo('retForm');
+  f.hidden = false;
+  f.scrollIntoView({block: 'center', behavior: 'smooth'});
+  retCampo('retTipo').focus();
+}
+function retLimpar(){
+  ['retTipo','retNome','retPct','retObs'].forEach(function(id){ retCampo(id).value = ''; });
+  retCampo('retBase').value = ''; retCampo('retResp').value = '';
+}
+retCampo('retFechar').addEventListener('click', function(){
+  retCampo('retForm').hidden = true; retCtx = {id: 0, regraId: 0};
+});
+
 document.querySelectorAll('[data-ret]').forEach(function(b){
   b.addEventListener('click', function(){
-    var tipo = prompt('Tipo da retenção (imposto, taxa, outro):');
-    if (tipo === null || !tipo.trim()) return;
-    var pct = prompt('Alíquota em porcento.\n\nDeixe EM BRANCO se ainda não souber — em branco trava o ' +
-                     'financeiro até alguém informar, e é melhor que um número inventado.');
-    if (pct === null) return;
-    var base = prompt('Base de cálculo: escreva "bruto_gestor" ou "fracao_recebida"');
-    if (base === null) return;
-    var resp = prompt('Quem paga esta retenção: escreva "gestor" ou "serenus"');
-    if (resp === null) return;
-    var obs = prompt('Observação (opcional):') || '';
-    fetch('/comissoes/regra-gestor/retencao', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({regra_id: b.dataset.ret, tipo: tipo.trim(), nome: tipo.trim(),
-                            percentual: pct, base_calculo: base.trim(),
-                            responsavel: resp.trim(), observacao: obs})
-    }).then(function(r){ return r.json(); }).then(function(d){
-      if (!d.ok) { alert(d.erro || 'Não consegui salvar a retenção.'); return; }
-      location.reload();
+    retCtx = {id: 0, regraId: b.dataset.ret};
+    retLimpar();
+    retAbrir('Nova retenção em ' + esc(b.dataset.regraNome || 'esta regra'),
+      'Vale para as <b>próximas vendas</b> desta operadora e plano. Vendas já cadastradas ' +
+      'seguem a retenção congelada nelas.');
+  });
+});
+
+document.querySelectorAll('[data-ret-edit]').forEach(function(b){
+  b.addEventListener('click', function(){
+    var t;
+    try { t = JSON.parse(b.dataset.retDados); } catch(e) { return; }
+    retCtx = {id: b.dataset.retEdit, regraId: b.dataset.regraId};
+    retCampo('retTipo').value = t.tipo || '';
+    retCampo('retNome').value = t.nome || '';
+    retCampo('retPct').value = (t.percentual === null || t.percentual === undefined)
+                               ? '' : String(t.percentual).replace('.', ',');
+    retCampo('retBase').value = t.base_calculo || '';
+    retCampo('retResp').value = t.responsavel || '';
+    retCampo('retObs').value = t.observacao || '';
+    retAbrir('Editando a retenção "' + esc(t.nome || t.tipo) + '"',
+      'A alteração vale <b>daqui pra frente</b>. O que cada venda já paga está congelado ' +
+      'nela e não muda por aqui — para corrigir uma venda antiga, abra a proposta.');
+  });
+});
+
+retCampo('retSalvar').addEventListener('click', function(){
+  var btn = this, msg = retCampo('retMsg');
+  var corpoReq = {
+    regra_id: retCtx.regraId,
+    tipo: retCampo('retTipo').value.trim(),
+    nome: retCampo('retNome').value.trim() || retCampo('retTipo').value.trim(),
+    percentual: retCampo('retPct').value.trim(),
+    base_calculo: retCampo('retBase').value,
+    responsavel: retCampo('retResp').value,
+    observacao: retCampo('retObs').value.trim()
+  };
+  var url = retCtx.id ? '/comissoes/regra-gestor/retencao/' + retCtx.id + '/editar'
+                      : '/comissoes/regra-gestor/retencao';
+  btn.disabled = true; btn.textContent = 'Salvando...';
+  msg.className = 'rg-msg'; msg.textContent = '';
+  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify(corpoReq)})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) {
+        btn.disabled = false; btn.textContent = 'Salvar retenção';
+        msg.textContent = d.erro || 'Não consegui salvar a retenção.';
+        msg.className = 'rg-msg erro';
+        return;
+      }
+      msg.className = d.sem_aliquota ? 'rg-msg erro' : 'rg-msg ok';
+      msg.textContent = (d.mudou && d.mudou.length ? 'Alterado: ' + d.mudou.join('; ') + '. '
+                                                   : 'Retenção salva. ')
+        + (d.sem_aliquota ? 'Sem alíquota informada: o financeiro desta operadora segue travado.'
+                          : 'Recarregando...');
+      setTimeout(function(){ location.reload(); }, d.sem_aliquota ? 2600 : 1200);
+    })
+    .catch(function(){
+      btn.disabled = false; btn.textContent = 'Salvar retenção';
+      msg.textContent = 'Erro de conexão. Nada foi salvo.'; msg.className = 'rg-msg erro';
     });
+});
+
+document.querySelectorAll('[data-ret-del]').forEach(function(b){
+  b.addEventListener('click', function(){
+    // Remover desativa, não apaga: o snapshot das vendas antigas continua explicável.
+    retCtx = {id: 0, regraId: 0};
+    retCampo('retForm').hidden = true;
+    var alvo = b;
+    if (alvo.dataset.armado !== '1') {
+      alvo.dataset.armado = '1';
+      alvo.dataset.rotulo = alvo.textContent;
+      alvo.textContent = 'Confirmar remoção';
+      setTimeout(function(){
+        if (alvo.dataset.armado === '1') {
+          alvo.dataset.armado = '0'; alvo.textContent = alvo.dataset.rotulo;
+        }
+      }, 4000);
+      return;
+    }
+    alvo.disabled = true; alvo.textContent = 'Removendo...';
+    fetch('/comissoes/regra-gestor/retencao/' + alvo.dataset.retDel + '/remover', {method:'POST'})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (d.ok) location.reload();
+        else { alvo.disabled = false; alvo.textContent = alvo.dataset.rotulo; }
+      })
+      .catch(function(){ alvo.disabled = false; alvo.textContent = alvo.dataset.rotulo; });
   });
 });
 corpo.appendChild(linhaFracao(1, '', '', ''));
