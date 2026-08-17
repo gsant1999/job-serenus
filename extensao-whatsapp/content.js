@@ -13037,8 +13037,8 @@
         '<div class="job-aviso-versao-nota">' +
           'A sua versão <b>continua funcionando</b> — atualizar é ganho, não obrigação.' +
         '</div>' +
-        '<a class="job-aviso-versao-bt" href="' + esc(_SITE_BASE_URL_EXT + '/extensao') + '" ' +
-          'target="_blank" rel="noopener">Atualizar agora (leva um minuto)</a>' +
+        '<a class="job-aviso-versao-bt" href="' + esc(_SITE_BASE_URL_EXT + '/extensao/instalar') + '" ' +
+          'target="_blank" rel="noopener">Atualizar extensão agora (leva um minuto)</a>' +
       '</div>';
     document.body.appendChild(box);
     box.querySelector('.job-aviso-versao-x').addEventListener('click', () => box.remove());
