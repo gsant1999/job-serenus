@@ -7777,6 +7777,22 @@
     };
   }
 
+  function _cotRegistrarDiagnostico(codigo, planos) {
+    const detalhes = (planos || []).map((p) => ({
+      plano_id: p._planoId || (p.plano && p.plano.id) || null,
+      plano: _cotNomePlano(p),
+      motivo: p.motivo || '',
+    }));
+    _reportarErro('cotacao:' + codigo + ' ' + JSON.stringify({
+      cotacao_id: _cot.cotacaoId || null,
+      cidade: _cot.cidade || '',
+      modalidade: _cotRotulo(_cot.modalidade),
+      idades: String(_cot.idades || ''),
+      operadora: (_cot.operadoraAtual && _cot.operadoraAtual.nome) || '',
+      planos: detalhes,
+    }));
+  }
+
   async function _cotCarregarOpsJob() {
     let r = null;
     try { r = await _safeSendMessage({ type: 'cotacao_tabelas', somenteOperadoras: true }); }
@@ -7869,6 +7885,8 @@
             faixas: (x.linhas || []).map((l) => Object.assign({ unitario: l.preco }, l)) }
         : { total: null, motivo: motivo[String(p._planoId)] || 'sem_valor_na_resposta' });
     });
+    const falhos = feitos.filter((p) => p.total == null);
+    if (falhos.length) _cotRegistrarDiagnostico('tabela_sem_preco', falhos);
     feitos.sort((a, b) => (a.total == null) - (b.total == null) || (a.total - b.total));
     _cot.resultado = feitos;
     _cotFeitas = _cotFeitas.filter((f) => String(f.operadoraId) !== String(_cot.operadoraAtual.id));
@@ -8031,11 +8049,14 @@
               const bloqueado = naoServeMei || naoServeVidas || semFaixa;
               const porque = naoServeMei ? 'Não aceita MEI'
                 : (naoServeVidas ? 'Disponível para ' + (vmin || 1) + (vmax ? ' a ' + vmax : '+') + ' vidas'
-                  : (semFaixa ? 'Sem preço para ' + faltantes.join(', ') : ''));
+                  : (semFaixa ? 'Indisponível para estas vidas' : ''));
+              if (semFaixa) {
+                pls[i].motivo = 'faixas_ausentes:' + faltantes.join(',');
+              }
               // A marcacao sobrevive a troca de operadora: quem ja esta na
               // sacola volta marcado quando ele volta pra ca.
               return '<label class="job-cot-plano' + (bloqueado ? ' bloq' : '') + '"' +
-                (bloqueado ? ' data-bloqueado="1" title="' + esc(porque) + '"' : '') + '>' +
+                (bloqueado ? ' data-bloqueado="1" title="Indisponível para os dados informados"' : '') + '>' +
                 '<input type="checkbox" data-i="' + i + '"' +
                 ' data-chave="' + esc(ch) + '"' + (bloqueado ? ' disabled' : '') +
                 (_cotNaSacola(ch) && !bloqueado ? ' checked' : '') + '>' +
@@ -8089,6 +8110,8 @@
       atualizar();
     }));
     atualizar();
+    const incompletos = pls.filter((p) => p._job && p.motivo && String(p.motivo).indexOf('faixas_ausentes:') === 0);
+    if (incompletos.length) _cotRegistrarDiagnostico('plano_bloqueado', incompletos);
     _cotTopoLigar(_cotPintarOperadoras);
     document.getElementById('job-cot-volta-ops').addEventListener('click', _cotPintarOperadoras);
     bt.addEventListener('click', () => _cotPrecosSacola());
@@ -8208,8 +8231,8 @@
           (dif.length ? '<span class="job-cot-res-dif">' + dif.map((e) =>
             '<span class="job-cot-tag' + (e.c ? ' ' + e.c : '') + '">' +
             esc(e.t) + '</span>').join('') + '</span>' : '') +
-          (p.total == null && p.motivo
-            ? '<span class="job-cot-porque">' + esc(p.motivo) + '</span>' : '') +
+          (p.total == null
+            ? '<span class="job-cot-porque">Não foi possível calcular este plano.</span>' : '') +
         '</div>' +
         '<div class="job-cot-res-v">' +
           (p.total == null ? 'Indisponível' : _cotMoeda(p.total)) +
@@ -8221,8 +8244,6 @@
   function _cotPintarResultado() {
     const todos = _cotFeitas.reduce((a, f) => a.concat(f.planos), []);
     const comPreco = todos.filter((p) => p.total != null);
-    const motivosSemPreco = Array.from(new Set(todos.filter((p) => p.total == null && p.motivo)
-      .map((p) => String(p.motivo))));
     const temTabelaJob = _cotFeitas.some((f) => f.fonte === 'job');
     // GAVETA POR OPERADORA, como o Painel faz.
     //
@@ -8276,11 +8297,9 @@
               'Cotar outra operadora</button>' +
           '</div>'
         : '<div class="job-ia-alerta">' +
-            (motivosSemPreco.length
-              ? esc(motivosSemPreco.join(' '))
-              : (temTabelaJob
-                  ? 'As tabelas selecionadas não têm valor para estas vidas.'
-                  : 'A consulta não devolveu valores. Tente novamente.')) +
+            (temTabelaJob
+              ? 'Não foi possível calcular os planos selecionados. Revise as opções disponíveis.'
+              : 'Não foi possível concluir a consulta. Tente novamente.') +
           '</div>' +
           '<button class="job-cot-bt-mandar" id="job-cot-revisar" style="width:100%;margin-top:12px" type="button">Revisar planos</button>' +
           '<div class="job-cot-rodape"><button type="button" id="job-cot-mais">Cotar outra operadora</button></div>') +
