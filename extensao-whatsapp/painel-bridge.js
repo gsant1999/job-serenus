@@ -38,13 +38,16 @@
   // faltar, a cotação simplesmente não acontece e ninguém sabe por quê.
   // `cotador-painel.js` tem trava própria (__JOB_COTADOR), então injetar de
   // novo é barato e não duplica nada.
+  let _resolverCotador;
+  const _cotadorPronto = new Promise((ok) => { _resolverCotador = ok; });
   (function _injetarCotador() {
     try {
       const s = document.createElement('script');
       s.src = chrome.runtime.getURL('cotador-painel.js');
-      s.onload = () => s.remove();
+      s.onload = () => { s.remove(); _resolverCotador(); };
+      s.onerror = () => _resolverCotador();
       (document.head || document.documentElement).appendChild(s);
-    } catch (e) { /* extensão recarregada no meio */ }
+    } catch (e) { _resolverCotador(); }
   })();
   window.__JOB_PAINEL_PONTE_VIVO = function () {
     try { return !!(chrome && chrome.runtime && chrome.runtime.id); }
@@ -158,15 +161,17 @@
     chrome.storage.local.get([CHAVE, CHAVE_MOD], (r) => {
       const d = (r && r[CHAVE]) || null;
       const mods = (r && r[CHAVE_MOD]) || [];
-      if (d || mods.length) {
-        window.postMessage({ source: 'JOB_COTADOR_BRIDGE', tipo: 'restaurar',
-                             dados: { ...(d || {}), modalidades: mods } }, '*');
-      }
-      Object.keys(d || {}).forEach((k) => {
-        if (d[k] && d[k].hash) ultimoPublicado[k] = d[k].hash;
+      _cotadorPronto.then(() => {
+        if (d || mods.length) {
+          window.postMessage({ source: 'JOB_COTADOR_BRIDGE', tipo: 'restaurar',
+                               dados: { ...(d || {}), modalidades: mods } }, '*');
+        }
+        Object.keys(d || {}).forEach((k) => {
+          if (d[k] && d[k].hash) ultimoPublicado[k] = d[k].hash;
+        });
+        // Depois do local, pergunta à nuvem — e só usa o que falta aqui.
+        lerNuvem(false);
       });
-      // Depois do local, pergunta à nuvem — e só usa o que falta aqui.
-      lerNuvem(false);
     });
   } catch (e) { /* sem armazenamento a extensão aprende de novo, só isso */ }
 
