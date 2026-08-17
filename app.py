@@ -28201,6 +28201,10 @@ def api_wa_cotacao_fila():
     return _wa_cors(jsonify({"ok": True, "id": novo_id, "posicao": pos}))
 
 
+_FILA_ESCUTAS_ATIVAS = set()
+_FILA_ESCUTAS_LOCK = threading.Lock()
+
+
 @app.route('/api/whatsapp/cotacao/fila/proximo', methods=['GET', 'OPTIONS'])
 @chave_ou_login_ou_extensao('cotacao:ler')
 def api_wa_cotacao_fila_proximo():
@@ -28245,17 +28249,30 @@ def api_wa_cotacao_fila_proximo():
         esperar = max(0, min(20, int(request.args.get('esperar') or 0)))
     except (TypeError, ValueError):
         esperar = 0
+    registrou_escuta = False
+    if esperar:
+        with _FILA_ESCUTAS_LOCK:
+            if sid in _FILA_ESCUTAS_ATIVAS:
+                esperar = 0
+            else:
+                _FILA_ESCUTAS_ATIVAS.add(sid)
+                registrou_escuta = True
     fim_espera = time.monotonic() + esperar
     candidato = None
-    while True:
-        candidato = conn.execute("""
-            SELECT id, pedido_json FROM cotacao_fila
-            WHERE estado='esperando'
-            ORDER BY criado_em ASC LIMIT 1
-        """).fetchone()
-        if candidato or time.monotonic() >= fim_espera:
-            break
-        time.sleep(0.35)
+    try:
+        while True:
+            candidato = conn.execute("""
+                SELECT id, pedido_json FROM cotacao_fila
+                WHERE estado='esperando'
+                ORDER BY criado_em ASC LIMIT 1
+            """).fetchone()
+            if candidato or time.monotonic() >= fim_espera:
+                break
+            time.sleep(0.35)
+    finally:
+        if registrou_escuta:
+            with _FILA_ESCUTAS_LOCK:
+                _FILA_ESCUTAS_ATIVAS.discard(sid)
     
     if not candidato:
         close_db(conn)

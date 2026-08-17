@@ -176,7 +176,7 @@ function _trabalhadorTick() {
     _trabConsultando = false;
     // Renova a escuta enquanto este for o aparelho responsável. O pequeno
     // intervalo só cede o event loop; não é o relógio que determina a busca.
-    if (_souTrabalhador && !_trabOcupado) setTimeout(_trabalhadorTick, 50);
+    if (_souTrabalhador && !_trabOcupado) setTimeout(_trabalhadorTick, 500);
   });
 }
 
