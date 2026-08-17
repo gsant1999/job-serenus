@@ -7052,7 +7052,7 @@
         let achados = [];
         try {
           const rr = await _safeSendMessage({ type: 'cotador_cidades', termo: puro });
-          achados = (rr && rr.ok && Array.isArray(rr.cidades)) ? rr.cidades : [];
+          achados = (rr && rr.ok && Array.isArray(rr.dados)) ? rr.dados : [];
         } catch (e) { achados = []; }
         bc.disabled = false;
         if (!achados.length) {
