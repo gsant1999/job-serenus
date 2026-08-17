@@ -967,6 +967,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.somenteOperadoras) q.set('operadoras', '1');
     if (msg.operadora) q.set('operadora', msg.operadora);
     if (msg.modalidade) q.set('modalidade', msg.modalidade);
+    if (msg.cidade) q.set('cidade', msg.cidade);
     chamarJob('/api/v1/cotacao/planos?' + q.toString(), 'GET', null, 20000).then(sendResponse);
     return true;
   }

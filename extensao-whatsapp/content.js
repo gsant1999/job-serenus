@@ -7773,6 +7773,7 @@
                 qtdVidaMin: x.vidas_min || 0, qtdVidaMax: x.vidas_max || 0 },
       operadora: { nome: x.operadora || '' },
       vigencia: x.vigencia || '',
+      faixasDisponiveis: x.faixas || {},
     };
   }
 
@@ -7824,7 +7825,7 @@
     let r = null;
     try {
       r = await _safeSendMessage({ type: 'cotacao_tabelas', operadora: nome,
-                                   modalidade: _cotRotulo(_cot.modalidade) });
+                                   modalidade: _cotRotulo(_cot.modalidade), cidade: _cot.cidade });
     } catch (e) { r = null; }
     if (g !== _cotGer) return;
     const lista = (r && r.ok && Array.isArray(r.planos)) ? r.planos : null;
@@ -7872,7 +7873,7 @@
     _cot.resultado = feitos;
     _cotFeitas = _cotFeitas.filter((f) => String(f.operadoraId) !== String(_cot.operadoraAtual.id));
     _cotFeitas.push({ operadoraId: _cot.operadoraAtual.id,
-                      nome: _cot.operadoraAtual.nome, planos: feitos });
+                      nome: _cot.operadoraAtual.nome, fonte: 'job', planos: feitos });
     // ADIANTA A REDE E A DECODIFICACAO, antes de ele clicar em "Ver imagem".
     _cotPreAquecer();
     if (!emLote) _cotPintarResultado();
@@ -8017,20 +8018,34 @@
               const _meiTab = (pls[i].tabela || {}).mei;
               const naoServeMei = !!(_cot.clienteMei && _meiTab === false);
               const meiDuvida = !!(_cot.clienteMei && (_meiTab === null || _meiTab === undefined));
+              const vidas = String(_cot.idades || '').split(/[^0-9]+/)
+                .filter((x) => x !== '' && !isNaN(parseInt(x, 10))).length;
+              const vmin = Number((pls[i].tabela || {}).qtdVidaMin || 0);
+              const vmax = Number((pls[i].tabela || {}).qtdVidaMax || 0);
+              const naoServeVidas = !!(vidas && ((vmin && vidas < vmin) || (vmax && vidas > vmax)));
+              const faixasPedidas = _cotVidasDeTexto(_cot.idades).vidas.map((v) =>
+                v.faixa === '59-199' ? '59+' : v.faixa);
+              const faltantes = faixasPedidas.filter((f) =>
+                Number((pls[i].faixasDisponiveis || {})[f] || 0) <= 0);
+              const semFaixa = !!(pls[i]._job && faltantes.length);
+              const bloqueado = naoServeMei || naoServeVidas || semFaixa;
+              const porque = naoServeMei ? 'Não aceita MEI'
+                : (naoServeVidas ? 'Disponível para ' + (vmin || 1) + (vmax ? ' a ' + vmax : '+') + ' vidas'
+                  : (semFaixa ? 'Sem preço para ' + faltantes.join(', ') : ''));
               // A marcacao sobrevive a troca de operadora: quem ja esta na
               // sacola volta marcado quando ele volta pra ca.
-              return '<label class="job-cot-plano' + (naoServeMei ? ' bloq' : '') + '"' +
-                (naoServeMei ? ' title="Esta tabela não aceita MEI"' : '') + '>' +
+              return '<label class="job-cot-plano' + (bloqueado ? ' bloq' : '') + '"' +
+                (bloqueado ? ' data-bloqueado="1" title="' + esc(porque) + '"' : '') + '>' +
                 '<input type="checkbox" data-i="' + i + '"' +
-                ' data-chave="' + esc(ch) + '"' + (naoServeMei ? ' disabled' : '') +
-                (_cotNaSacola(ch) && !naoServeMei ? ' checked' : '') + '>' +
+                ' data-chave="' + esc(ch) + '"' + (bloqueado ? ' disabled' : '') +
+                (_cotNaSacola(ch) && !bloqueado ? ' checked' : '') + '>' +
                 '<span><b>' + esc(_cotNomePlano(pls[i])) + '</b>' +
                 (proprias.length
                   ? '<span class="job-cot-tags">' + proprias.map((e) =>
                       '<span class="job-cot-tag' + (e.c ? ' ' + e.c : '') + '">' + esc(e.t) + '</span>').join('') +
                     '</span>'
                   : '') +
-                (naoServeMei ? '<span class="job-cot-porque">Não aceita MEI</span>' : '') +
+                (porque ? '<span class="job-cot-porque">' + esc(porque) + '</span>' : '') +
                 (meiDuvida ? '<span class="job-cot-porque aviso">Confirme se aceita MEI</span>' : '') +
                 '</span></label>';
             };
@@ -8052,7 +8067,7 @@
       document.querySelectorAll('.job-cot-plano input').forEach((o) => {
         // `.bloq` posto na pintura (MEI) manda mais que o teto: reabilitar
         // aqui devolveria o clique num plano que a empresa nao pode contratar.
-        if (o.parentElement.hasAttribute('title')) return;
+        if (o.parentElement.hasAttribute('data-bloqueado')) return;
         o.disabled = (n >= _COT_MAX && !o.checked);
         o.parentElement.classList.toggle('bloq', o.disabled);
       });
@@ -8193,9 +8208,11 @@
           (dif.length ? '<span class="job-cot-res-dif">' + dif.map((e) =>
             '<span class="job-cot-tag' + (e.c ? ' ' + e.c : '') + '">' +
             esc(e.t) + '</span>').join('') + '</span>' : '') +
+          (p.total == null && p.motivo
+            ? '<span class="job-cot-porque">' + esc(p.motivo) + '</span>' : '') +
         '</div>' +
         '<div class="job-cot-res-v">' +
-          (p.total == null ? 'sem preço' : _cotMoeda(p.total)) +
+          (p.total == null ? 'Indisponível' : _cotMoeda(p.total)) +
         '</div>' +
       '</div>';
     }).join('');
@@ -8204,6 +8221,9 @@
   function _cotPintarResultado() {
     const todos = _cotFeitas.reduce((a, f) => a.concat(f.planos), []);
     const comPreco = todos.filter((p) => p.total != null);
+    const motivosSemPreco = Array.from(new Set(todos.filter((p) => p.total == null && p.motivo)
+      .map((p) => String(p.motivo))));
+    const temTabelaJob = _cotFeitas.some((f) => f.fonte === 'job');
     // GAVETA POR OPERADORA, como o Painel faz.
     //
     // Empilhado, cotar três operadoras vira uma lista de vinte linhas e o
@@ -8255,7 +8275,14 @@
             '<button type="button" id="job-cot-mais" title="Volta à lista de operadoras e soma ao comparativo">' +
               'Cotar outra operadora</button>' +
           '</div>'
-        : '<div class="job-ia-alerta">Nenhum preço voltou. Isso não quer dizer que não exista — o Painel não respondeu o valor.</div>' +
+        : '<div class="job-ia-alerta">' +
+            (motivosSemPreco.length
+              ? esc(motivosSemPreco.join(' '))
+              : (temTabelaJob
+                  ? 'As tabelas selecionadas não têm valor para estas vidas.'
+                  : 'A consulta não devolveu valores. Tente novamente.')) +
+          '</div>' +
+          '<button class="job-cot-bt-mandar" id="job-cot-revisar" style="width:100%;margin-top:12px" type="button">Revisar planos</button>' +
           '<div class="job-cot-rodape"><button type="button" id="job-cot-mais">Cotar outra operadora</button></div>') +
     '</div>');
 
@@ -8268,6 +8295,8 @@
     if (bm) bm.addEventListener('click', () => _cotMandarTexto(bm, comPreco));
     const bs = document.getElementById('job-cot-salvar');
     if (bs) bs.addEventListener('click', () => _cotSalvarNoJob(bs, comPreco));
+    const br = document.getElementById('job-cot-revisar');
+    if (br) br.addEventListener('click', _cotPintarPlanos);
   }
 
   // ── A COTACAO DESENHADA NO CANVAS, A MAO ───────────────────────────────
