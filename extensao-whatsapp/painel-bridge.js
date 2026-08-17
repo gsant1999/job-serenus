@@ -325,7 +325,7 @@
       chrome.runtime.sendMessage({ type: 'painel_fila_tick' },
         () => { void chrome.runtime.lastError; });
     } catch (e) { /* extensao recarregando: a reinjecao retoma */ }
-    const atraso = 3500 + Math.floor(Math.random() * 1500);
+    const atraso = 1600 + Math.floor(Math.random() * 700);
     setTimeout(_acordarFila, atraso);
   }
   setTimeout(_acordarFila, 1200);

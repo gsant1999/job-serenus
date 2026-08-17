@@ -156,10 +156,11 @@ let _trabOcupado = false;
 let _trabConsultando = false;
 let _trabUltimaConsulta = 0;
 let _paraleloAtual = null;
+let _souTrabalhador = false;
 
 function _trabalhadorTick() {
   const agora = Date.now();
-  if (_trabOcupado || _trabConsultando || agora - _trabUltimaConsulta < 3000) return;
+  if (_trabOcupado || _trabConsultando || agora - _trabUltimaConsulta < 1500) return;
   _trabConsultando = true;
   _trabUltimaConsulta = agora;
   chamarJob('/api/whatsapp/cotacao/fila/proximo', 'GET', null, 12000).then((r) => {
@@ -307,8 +308,13 @@ function _trabalhadorVivo() {
     const bater = (painelPronto) => {
       chamarJob('/api/whatsapp/trabalhador/vivo', 'POST',
                 { painel_logado: painelPronto }, 10000, null, { repetivel: true })
-        .then((r) => { _anotarBatida(painelPronto, r); resolve(!!(r && r.ok)); })
+        .then((r) => {
+          _souTrabalhador = !!(r && r.ok);
+          _anotarBatida(painelPronto, r);
+          resolve(_souTrabalhador);
+        })
         .catch((e) => {
+          _souTrabalhador = false;
           _anotarBatida(painelPronto, { erro: String(e && e.message || e) });
           resolve(false);
         });
@@ -1380,6 +1386,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chrome.tabs.query({}, (todas) => {
       const lista = (todas || []).filter(
         (a) => a.url && a.url.indexOf('paineldocorretor.com.br') >= 0);
+      const pedirAoTrabalhador = () => _filaPedir(oQuePedir, (r) => {
+        if (r) { sendResponse(r); return; }
+        sendResponse({ ok: false, motivo: 'painel_fechado',
+                       abasExaminadas: (todas || []).length });
+      });
+
+      // SOMENTE O APARELHO MARCADO USA A PROPRIA SESSAO DO PAINEL.
+      // Uma aba esquecida no computador de outro consultor nao pode desviar a
+      // cotacao para um acesso que sera cancelado. Todos os demais aparelhos
+      // enviam o pedido ao trabalhador central, mesmo que ainda tenham uma
+      // sessao antiga aberta localmente.
+      if (!_souTrabalhador) { pedirAoTrabalhador(); return; }
       if (msg.type === 'cotador_precos_paralelos' && lista.length) {
         _precosParalelosExecutar(msg.pedido || {}, (feito, total) => {
           if (_abaQuePediuCotacao == null) return;
@@ -1413,14 +1431,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // ordem importa: local PRIMEIRO. Quem tem o Painel aberto continua
         // cotando pela propria sessao, sem rede no meio e sem fila — nada do
         // que funciona hoje passa a depender do Dell estar ligado.
-        _filaPedir(oQuePedir, (r) => {
-          if (r) { sendResponse(r); return; }
-          // Diz quantas abas foram examinadas: sem isso, "Painel fechado" é
-          // palpite, e quem está do outro lado não tem como saber se o problema
-          // é a aba ou a extensão.
-          sendResponse({ ok: false, motivo: 'painel_fechado',
-                         abasExaminadas: (todas || []).length });
-        });
+        pedirAoTrabalhador();
         return;
       }
       chrome.tabs.sendMessage(aba.id, oQuePedir, (r) => {
