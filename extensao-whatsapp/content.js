@@ -290,6 +290,11 @@
   const _TETO_TR = 100;
   const _TETO_SETS = 200;
 
+  // A leitura da IA virtualiza muitas linhas de uma vez. Nesse intervalo os
+  // controles de áudio/documento são retomados em uma passada única no fim.
+  let _analisePesada = 0;
+  let _trRevisarDepoisAnalise = false;
+
   // ── SHADOW DOM NAS BOLHAS DA CONVERSA ─────────────────────────────────────
   //
   // Os blocos que injetamos DENTRO das bolhas (.job-doc-slot e .job-tr-slot)
@@ -683,14 +688,16 @@
     const ch = Math.max(1, Math.round(bmp.height * escala));
     const cv = document.createElement('canvas');
     cv.width = cw; cv.height = ch;
-    cv.getContext('2d').drawImage(bmp, 0, 0, cw, ch);
-    try { bmp.close(); } catch (e) {}
-    // 0.92 (não 0.85): documento fotografado (RG/CNH/carteirinha) já vem
-    // comprimido pelo WhatsApp; re-encodar em JPEG baixo por cima destruía o
-    // texto fino e a IA não conseguia ler. 0.92 preserva legibilidade e continua
-    // bem abaixo do teto de 7,5MB do servidor (foto a 1600px ~ 1MB base64).
-    const dataUrl = cv.toDataURL('image/jpeg', 0.92);
-    return dataUrl.split(',')[1] || '';
+    try {
+      cv.getContext('2d').drawImage(bmp, 0, 0, cw, ch);
+      // 0.92 preserva texto fino de RG/CNH/carteirinha.
+      const dataUrl = cv.toDataURL('image/jpeg', 0.92);
+      return dataUrl.split(',')[1] || '';
+    } finally {
+      try { bmp.close(); } catch (e) {}
+      // Libera imediatamente o buffer RGBA, que é maior que o JPEG/base64.
+      cv.width = 1; cv.height = 1;
+    }
   }
 
   function horaProximaDaImagem(im) {
@@ -737,12 +744,17 @@
     const selecionados = [...leadRecentes, ...consultorRecentes].sort((a, b) => a.horaMs - b.horaMs);
 
     const out = [];
+    const ORCAMENTO_IMAGENS_B64 = 8 * 1024 * 1024;
+    let bytesB64 = 0;
     for (const c of selecionados) {
       try {
         if (atualizarStatus) atualizarStatus('Lendo imagens… (' + (out.length + 1) + ')');
         const b64 = await imagemParaBase64(c.el);
         if (!b64) continue;
+        if (bytesB64 + b64.length > ORCAMENTO_IMAGENS_B64) break;
+        bytesB64 += b64.length;
         out.push({ de: c.de, base64: b64, mime: 'image/jpeg', hora: c.hora });
+        await sleep(0);
       } catch (e) { /* imagem que falhar é ignorada, nunca derruba a análise */ }
     }
     // encontrados = TOTAL de imagens únicas visíveis na conversa (antes do teto),
@@ -999,9 +1011,13 @@
     if (!ini || !ini.ok) return ini || { ok: false, erro: 'Falha ao iniciar a análise.' };
     const LOTE = 4; // poucos itens por mensagem = o SW nunca segura um bloco grande
     async function enviarTipo(tipo, arr) {
-      for (let i = 0; i < (arr || []).length; i += LOTE) {
-        const r = await chrome.runtime.sendMessage({ type: 'analisar_parte', reqId, tipo, itens: arr.slice(i, i + LOTE) });
+      while (arr && arr.length) {
+        const itens = arr.splice(0, LOTE);
+        const r = await chrome.runtime.sendMessage({ type: 'analisar_parte', reqId, tipo, itens });
         if (!r || !r.ok) throw new Error((r && r.erro) || 'Falha ao enviar mídia.');
+        // O structured clone já chegou ao worker; solta a cópia da aba antes
+        // do próximo lote para não manter as duas árvores base64 vivas.
+        for (const item of itens) if (item && item.base64) item.base64 = '';
       }
     }
     await enviarTipo('audios', audios);
@@ -4291,6 +4307,11 @@
       // rolagem, que e quando ha milhares deles.
       const _MEU = '.job-doc-slot, .job-tr-slot, .job-barra-conv, .job-painel, .job-modal';
       const obs = _observar(new MutationObserver((regs) => {
+        if (_analisePesada > 0) {
+          TR.perf.regs += regs.length;
+          _trRevisarDepoisAnalise = true;
+          return;
+        }
         // Set, nao array: rolar a conversa gera milhares de registros que
         // apontam pra mesma meia duzia de linhas. Sem isto, a mesma linha era
         // varrida centenas de vezes na mesma passada.
@@ -6674,7 +6695,8 @@
   const _COT_CAMINHO_MORTO = {
     sem_resposta_a_tempo: 1, extensao_indisponivel: 1, sem_resposta: 1,
     painel_fechado: 1, painel_precisa_recarregar: 1,
-    painel_fechado_no_trabalhador: 1, fila_demorou: 1, sem_trabalhador: 1,
+    painel_fechado_no_trabalhador: 1, painel_precisa_recarregar_no_trabalhador: 1,
+    sem_resposta_a_tempo_no_trabalhador: 1, fila_demorou: 1, sem_trabalhador: 1,
   };
 
   const _COT_EXPLICA = {
@@ -6691,11 +6713,22 @@
       'Enquanto a aba fica aberta aqui, o JOB segura a sessão viva sozinho.',
     painel_precisa_recarregar: 'A aba do Painel do Corretor está aberta neste computador, ' +
       'mas precisa de <b>F5</b> depois da atualização da extensão.',
+    painel_fechado_no_trabalhador: 'O computador que busca preços para a equipe está ligado, ' +
+      'mas o Painel do Corretor foi fechado nele. Avise um administrador e tente novamente depois que a aba for aberta.',
+    painel_precisa_recarregar_no_trabalhador: 'O computador que busca preços para a equipe está com uma versão antiga ' +
+      'na aba do Painel do Corretor. Avise um administrador para atualizar essa aba com <b>F5</b>.',
     precisa_aprender: 'Vá na aba do <b>Painel do Corretor</b> e faça uma cotação na mão até <b>ver o preço na tela</b>. ' +
       'A extensão aprende vendo você usar, e destrava sozinha — não precisa terminar nem salvar a cotação lá.',
     hash_expirado: 'O Painel do Corretor publicou uma versão nova e um atalho venceu. ' +
       'Faça uma cotação na mão lá até <b>ver o preço</b> — a extensão reaprende sozinha.',
     sem_resposta_a_tempo: 'O Painel demorou demais pra responder. Confira se a aba dele está aberta e tente de novo.',
+    sem_resposta_a_tempo_no_trabalhador: 'O computador que busca preços para a equipe não respondeu a tempo. ' +
+      'Tente novamente; se acontecer de novo, avise um administrador.',
+    fila_demorou: 'A busca de preços para a equipe demorou mais de dois minutos e foi cancelada. ' +
+      'Tente novamente; se acontecer de novo, avise um administrador.',
+    sem_trabalhador: 'O computador que busca preços para a equipe não está disponível agora. ' +
+      'Avise um administrador ou abra o Painel do Corretor neste computador.',
+    sem_resposta: 'O Painel terminou a busca sem devolver os preços. Tente novamente.',
     // As tabelas do JOB nao passam pelo Painel — o erro delas e outro, e a
     // saida tambem. Cair na frase do Painel mandaria ele abrir a aba errada.
     tabelas_do_job: 'Não consegui ler as tabelas do JOB agora. ' +
@@ -12592,6 +12625,13 @@
       iniciadoEm: Date.now(), statusTexto: 'Lendo a conversa…',
     };
     _analises.set(reqId, entrada);
+    _analisePesada++;
+    const etapasMs = {};
+    let inicioEtapa = performance.now();
+    const fecharEtapa = (nome) => {
+      etapasMs[nome] = Math.max(0, Math.round(performance.now() - inicioEtapa));
+      inicioEtapa = performance.now();
+    };
     // ESTE É O MAIOR DOS TRÊS: cada entrada guarda o resultado COMPLETO da
     // análise (leitura de IA em imagens e PDFs, docs_extraidos, transcrições)
     // e, até agora, o caminho de sucesso nunca removia — só o de erro.
@@ -12647,6 +12687,7 @@
       }
 
       await carregarHistorico(painelRolavel, status, watermark);
+      fecharEtapa('historico');
       if (_cancelados.has(reqId)) return;
       status('Organizando as mensagens…');
       const nome = nomeDoContato() || nomeInicial;
@@ -12665,6 +12706,7 @@
       try { msgsBrutas = await pedirMensagensWpp(500); } catch (e) { msgsBrutas = []; }
       if (!msgsBrutas.length) msgsBrutas = rasparMensagensVisiveis();
       const mensagens = dedup(msgsBrutas);
+      fecharEtapa('mensagens');
 
       // Áudio/PDF/imagem NÃO usam a marca d'água do modo incremental —
       // já tentamos (pra economizar retranscrição) e era arriscado demais:
@@ -12680,6 +12722,7 @@
         imagens = ri.imagens || [];
         imagensEncontradas = ri.encontrados || imagens.length;
       } catch (e) { imagens = []; }
+      fecharEtapa('imagens');
 
       status('Baixando e transcrevendo áudios…');
       let audios = [];
@@ -12765,6 +12808,7 @@
         // o resultado avisar quantos ficaram de fora em vez de fingir sucesso.
         audios = todos.map((a) => ({ msg_id: a.msg_id, de: a.de, hora: a.hora }));
       } catch (e) { audios = []; }
+      fecharEtapa('audios');
 
       status('Baixando documentos PDF…');
       let documentos = [];
@@ -12776,6 +12820,7 @@
         documentosEncontrados = rd.encontrados || documentos.length;
         pdfsPulados = rd.pulados || [];
       } catch (e) { documentos = []; }
+      fecharEtapa('documentos');
 
       let links = [];
       try { links = rasparLinks(); } catch (e) { links = []; }
@@ -12843,6 +12888,7 @@
         usuario_id: usuarioId || null, whatsapp_consultor: meuNumero || null,
         documentos_encontrados: documentosEncontrados,
         audios_encontrados: audiosEncontrados, imagens_encontrados: imagensEncontradas,
+        cliente_etapas_ms: etapasMs,
       };
       const resp = await enviarAnaliseEmLotes(reqId, _baseAnalise, audios, imagens, documentos);
 
@@ -12874,10 +12920,17 @@
       if (_ehContextoInvalidado(e)) { _analises.delete(reqId); atualizarPilula(); _marcarContextoMorto(); return; }
       if (entrada.status === 'rodando') {
         entrada.status = 'erro';
-        entrada.erro = 'Erro inesperado: ' + e.message;
+        console.error('[JOB] Falha na análise', e);
+        entrada.erro = 'Não foi possível concluir a análise. Tente novamente; se continuar, atualize o WhatsApp Web.';
         atualizarPilula();
         notificarConclusao(entrada);
         sincronizarPainelComConversa();
+      }
+    } finally {
+      _analisePesada = Math.max(0, _analisePesada - 1);
+      if (_analisePesada === 0 && _trRevisarDepoisAnalise) {
+        _trRevisarDepoisAnalise = false;
+        trAgendarInjecao();
       }
     }
   }
@@ -13006,6 +13059,7 @@
     // extensao continuava medindo layout a cada 1,5s numa aba que ninguem esta
     // vendo, e o navegador inteiro pagava por isso.
     if (document.hidden) return;
+    if (_analisePesada > 0) return;
     // Eu dizia no comentario que remedir "e barato". Nao e: _medirVizinhos roda
     // getComputedStyle + getBoundingClientRect em cada filho do body, e isso
     // forca o navegador a recalcular layout. A cada 1,5s, pra sempre, em cima

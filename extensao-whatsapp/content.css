@@ -150,7 +150,7 @@ body[data-job-tema="claro"] {
    ocupa no NOSSO lado. Medido em JS (_medirVizinhos) e escrito aqui. Assim o
    JOB se encaixa DEPOIS do vizinho em vez de sentar em cima dele, e a margem
    da página soma os dois. Sem vizinho, vale 0 e nada muda. */
-html.job-push-trilho { transition: margin .18s ease; }
+html.job-push-trilho { transition: none; }
 html.job-push-trilho:not(.job-push-esquerda) { margin-right: calc(var(--job-viz, 0px) + 72px) !important; }
 html.job-push-painel:not(.job-push-esquerda) { margin-right: calc(var(--job-viz, 0px) + 472px) !important; }
 html.job-push-esquerda.job-push-trilho { margin-left: calc(var(--job-viz, 0px) + 72px) !important; }

@@ -89,14 +89,19 @@ function _resumoTempos() {
 // segunda maquina estar ligada. So cai na fila quem hoje receberia
 // "Painel fechado" e ficaria sem cotar.
 
-const _FILA_ESPERA_MS = 300;      // de quanto em quanto o pedinte pergunta
+const _FILA_ESPERA_MS = 1000;     // evita martelar o servidor enquanto espera
 const _FILA_LIMITE_MS = 120000;   // 2 min: uma cotacao inteira cabe folgada
 
 // Manda um passo pra fila e espera a resposta. `cb(null)` quando nao ha
 // trabalhador — ai quem chamou devolve o "Painel fechado" de sempre, que
 // continua sendo a verdade naquele caso.
 function _filaPedir(pedido, cb) {
-  chamarJob('/api/whatsapp/cotacao/fila', 'POST', { pedido: pedido }, 15000)
+  const chave = 'cot-' + Date.now().toString(36) + '-' +
+    (globalThis.crypto && crypto.randomUUID
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2));
+  chamarJob('/api/whatsapp/cotacao/fila', 'POST',
+            { pedido: pedido, chave_pedido: chave }, 15000, null, { repetivel: true })
     .then((r) => {
       if (!r || !r.ok || !r.id) { cb(null); return; }
       const id = r.id;
@@ -153,7 +158,7 @@ function _trabalhadorTick() {
   if (_trabOcupado) return;
   chamarJob('/api/whatsapp/cotacao/fila/proximo', 'GET', null, 12000).then((r) => {
     if (!r) return;
-    if (r.motivo === 'nao_e_trabalhador') return;
+    if (r.motivo === 'nao_e_trabalhador' || r.motivo === 'trabalhador_indisponivel') return;
     if (!r.ok || !r.id) return;
     _trabOcupado = true;
     _trabalhadorExecutar(r.id, r.pedido);
@@ -167,29 +172,41 @@ function _trabalhadorTick() {
 // quem esta esperando precisa saber disso em vez de esperar pra sempre.
 function _trabalhadorExecutar(id, pedido) {
   const terminar = (corpo) => {
-    chamarJob('/api/whatsapp/cotacao/fila/' + id + '/pronto', 'POST', corpo, 20000)
+    // A transição no servidor é condicional e, por isso, repetir é seguro. Se
+    // a resposta HTTP se perder depois do UPDATE, a segunda tentativa recebe
+    // conflito sem ressuscitar nem duplicar o pedido.
+    chamarJob('/api/whatsapp/cotacao/fila/' + id + '/pronto', 'POST', corpo,
+              20000, null, { repetivel: true })
       .catch(() => {})
       .then(() => { _trabOcupado = false; });
   };
   chrome.tabs.query({}, (todas) => {
     const lista = (todas || []).filter(
       (a) => a.url && a.url.indexOf('paineldocorretor.com.br') >= 0);
-    const aba = lista.filter((a) => a.active)[0] || lista[0];
-    if (!aba) { terminar({ erro: 'painel_fechado_no_trabalhador' }); return; }
+    const ativa = lista.filter((a) => a.active)[0];
+    const candidatas = ativa ? [ativa].concat(lista.filter((a) => a.id !== ativa.id)) : lista;
+    if (!candidatas.length) { terminar({ erro: 'painel_fechado_no_trabalhador' }); return; }
     let respondeu = false;
     const relogio = setTimeout(() => {
-      if (!respondeu) { respondeu = true; terminar({ erro: 'sem_resposta_a_tempo' }); }
+      if (!respondeu) { respondeu = true; terminar({ erro: 'sem_resposta_a_tempo_no_trabalhador' }); }
     }, 90000);
-    try {
-      chrome.tabs.sendMessage(aba.id, pedido, (r) => {
-        if (respondeu) return;
+    const tentar = (indice) => {
+      if (respondeu) return;
+      if (indice >= candidatas.length) {
         respondeu = true; clearTimeout(relogio);
-        if (chrome.runtime.lastError) { terminar({ erro: 'painel_precisa_recarregar' }); return; }
-        terminar({ resultado: r || { ok: false, motivo: 'sem_resposta' } });
-      });
-    } catch (e) {
-      if (!respondeu) { respondeu = true; clearTimeout(relogio); terminar({ erro: String(e && e.message || e) }); }
-    }
+        terminar({ erro: 'painel_precisa_recarregar_no_trabalhador' });
+        return;
+      }
+      try {
+        chrome.tabs.sendMessage(candidatas[indice].id, pedido, (r) => {
+          if (respondeu) return;
+          if (chrome.runtime.lastError) { tentar(indice + 1); return; }
+          respondeu = true; clearTimeout(relogio);
+          terminar({ resultado: r || { ok: false, motivo: 'sem_resposta' } });
+        });
+      } catch (e) { tentar(indice + 1); }
+    };
+    tentar(0);
   });
 }
 
@@ -198,14 +215,30 @@ function _trabalhadorExecutar(id, pedido) {
 // Painel morto e o navegador ativo pareceria vivo, e e justamente o caso que
 // este sinal existe pra pegar.
 function _trabalhadorVivo() {
-  chrome.tabs.query({}, (todas) => {
-    const temPainel = (todas || []).some(
+  return new Promise((resolve) => chrome.tabs.query({}, (todas) => {
+    const lista = (todas || []).filter(
       (a) => a.url && a.url.indexOf('paineldocorretor.com.br') >= 0);
-    chamarJob('/api/whatsapp/trabalhador/vivo', 'POST',
-              { painel_logado: temPainel }, 10000)
-      .then((r) => _anotarBatida(temPainel, r))
-      .catch((e) => _anotarBatida(temPainel, { erro: String(e && e.message || e) }));
-  });
+    const aba = lista.find((a) => a.active) || lista[0];
+    const bater = (painelPronto) => {
+      chamarJob('/api/whatsapp/trabalhador/vivo', 'POST',
+                { painel_logado: painelPronto }, 10000, null, { repetivel: true })
+        .then((r) => { _anotarBatida(painelPronto, r); resolve(!!(r && r.ok)); })
+        .catch((e) => {
+          _anotarBatida(painelPronto, { erro: String(e && e.message || e) });
+          resolve(false);
+        });
+    };
+    if (!aba) { bater(false); return; }
+    // Aba aberta não basta: depois de atualizar a extensão, ela pode estar sem
+    // a ponte que executa a cotação. Só anunciamos disponibilidade quando a
+    // ponte responde de fato; o conteúdo da resposta não precisa estar pronto.
+    try {
+      chrome.tabs.sendMessage(aba.id, { type: 'cotador_estado' }, () => {
+        const respondeu = !chrome.runtime.lastError;
+        bater(respondeu);
+      });
+    } catch (e) { bater(false); }
+  }));
 }
 
 // O QUE ACONTECEU NA ULTIMA BATIDA — GRAVADO, NAO SO TENTADO.
@@ -265,8 +298,14 @@ async function _extensaoLigada() {
 
 async function _rodadaDeFundo() {
   if (!await _extensaoLigada()) return;
-  try { _trabalhadorVivo(); } catch (e) {}
-  try { _trabalhadorTick(); } catch (e) {}
+  // Primeiro comprova que esta maquina continua marcada E tem Painel aberto.
+  // Só depois tenta tomar trabalho. Em paralelo, o tick podia vencer a batida
+  // e usar um sinal antigo justo quando o Painel havia sido fechado.
+  let podeTrabalhar = false;
+  try { podeTrabalhar = await _trabalhadorVivo(); } catch (e) {}
+  if (podeTrabalhar) {
+    try { _trabalhadorTick(); } catch (e) {}
+  }
 }
 
 // NADA DISTO PODE DERRUBAR O WORKER INTEIRO.

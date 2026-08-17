@@ -846,6 +846,10 @@
     });
     const alvos = selecionarPorLead(docsFiltrados, Math.max(1, limite || 5));
     const out = [];
+    // O pedido inteiro aceita 22 MB. Parar PDFs em 12 MB evita baixar tudo e
+    // só então descobrir que não cabe, deixando espaço para imagens e texto.
+    const ORCAMENTO_PDF_B64 = 12 * 1024 * 1024;
+    let bytesB64 = 0;
     for (const m of alvos) {
       try {
         // Retry 1x: o download da mídia falha esporadicamente (mídia ainda não
@@ -864,6 +868,8 @@
           b64 = s.indexOf(',') >= 0 ? s.split(',')[1] : s;
         }
         if (b64) {
+          if (bytesB64 + b64.length > ORCAMENTO_PDF_B64) break;
+          bytesB64 += b64.length;
           // msg_id (igual áudio) — deixa o servidor reconhecer "esse PDF já foi
           // salvo antes" numa reanálise, em vez de gravar o mesmo arquivo de novo
           // a cada rodada (a extensão manda de novo tudo que ainda está na tela).

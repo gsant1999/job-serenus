@@ -2,7 +2,7 @@
 import os, sqlite3, json, hashlib, hmac, secrets, re, threading, time, mimetypes, calendar, math
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort, Response, g, render_template_string
 from datetime import datetime, timedelta, date
-from functools import wraps
+from functools import wraps, lru_cache
 from dateutil.relativedelta import relativedelta
 import pytz
 
@@ -1226,7 +1226,8 @@ def init_db():
                 criado_em TIMESTAMP NOT NULL,
                 pegado_em TIMESTAMP,
                 terminado_em TIMESTAMP,
-                trabalhador_sessao INTEGER
+                trabalhador_sessao INTEGER,
+                chave_pedido TEXT
             )""",
             """CREATE INDEX IF NOT EXISTS ix_cotacao_fila_estado ON cotacao_fila(estado, id)""",
             """CREATE TABLE IF NOT EXISTS whatsapp_extensao_fila (
@@ -2479,7 +2480,8 @@ def init_db():
             criado_em TIMESTAMP NOT NULL,
             pegado_em TIMESTAMP,
             terminado_em TIMESTAMP,
-            trabalhador_sessao INTEGER
+            trabalhador_sessao INTEGER,
+            chave_pedido TEXT
         );
         CREATE INDEX IF NOT EXISTS ix_cotacao_fila_estado ON cotacao_fila(estado, id);
         CREATE TABLE IF NOT EXISTS whatsapp_extensao_fila (
@@ -3097,6 +3099,15 @@ def init_db():
     add_col('extensao_sessao', 'trabalhador_cotacao', 'INTEGER DEFAULT 0')
     add_col('extensao_sessao', 'trabalhador_sinal', 'TIMESTAMP')
     add_col('cotacao_fila', 'fracao', 'REAL DEFAULT 0.0')
+    add_col('cotacao_fila', 'chave_pedido', 'TEXT')
+    try:
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_cotacao_fila_usuario_chave
+            ON cotacao_fila(usuario_id, chave_pedido)
+        """)
+        conn.commit()
+    except Exception:
+        conn.rollback()
     add_col('cotacao_salva', 'modalidades', 'TEXT')
     add_col('crm_leads', 'auditado_em', 'TIMESTAMP')
     add_col('cotacao_tabela', 'administradora', 'TEXT')
@@ -3713,6 +3724,9 @@ def init_db():
         # servidor: transcrição + Claude). Consultor pediu pra enxergar isso,
         # oscilava muito e sem visibilidade não dava pra saber se era normal.
         ("whatsapp_analises", "duracao_segundos", "REAL"),
+        # Tempos do navegador por etapa (histórico, mensagens e mídias). Sem
+        # isso a duração do servidor não explica quando a lentidão está na aba.
+        ("whatsapp_analises", "etapas_ms", "TEXT"),
         # Biblioteca de modelos de mensagem de WhatsApp (base pra funil, fase
         # futura) — texto sempre; mídia é opcional e mutuamente exclusiva
         # (áudio OU imagem, nunca as duas), validado na rota, não no schema.
@@ -7037,7 +7051,11 @@ def api_admin_extensao_sessoes():
 @admin_required
 def admin_extensao_sessoes_revogar(uid, sid):
     conn = db()
-    conn.execute("UPDATE extensao_sessao SET revogado_em=? WHERE id=? AND usuario_id=? AND revogado_em IS NULL", (_agora_sp(), sid, uid))
+    conn.execute("""
+        UPDATE extensao_sessao
+        SET revogado_em=?, trabalhador_cotacao=0, trabalhador_sinal=NULL
+        WHERE id=? AND usuario_id=? AND revogado_em IS NULL
+    """, (_agora_sp(), sid, uid))
     conn.commit()
     close_db(conn)
     flash('Sessão revogada com sucesso.', 'success')
@@ -19949,6 +19967,7 @@ _CLAUDE_SYSTEM_ANALISE_BASE = (
     "só porque a conversa tem áudios longos ou está desorganizada.\n\n"
 )
 
+@lru_cache(maxsize=1)
 def _get_claude_system_prompt():
     """Constrói o prompt injetando as regras e o Vault (motor-ia)."""
     base = _CLAUDE_SYSTEM_ANALISE_BASE
@@ -22383,7 +22402,11 @@ def api_whatsapp_logout():
         if len(partes) == 2 and partes[0].isdigit():
             sess_id = int(partes[0])
             conn = db()
-            conn.execute("UPDATE extensao_sessao SET revogado_em=? WHERE id=? AND usuario_id=? AND revogado_em IS NULL", (_agora_sp(), sess_id, g.usuario_id))
+            conn.execute("""
+                UPDATE extensao_sessao
+                SET revogado_em=?, trabalhador_cotacao=0, trabalhador_sinal=NULL
+                WHERE id=? AND usuario_id=? AND revogado_em IS NULL
+            """, (_agora_sp(), sess_id, g.usuario_id))
             conn.commit()
             close_db(conn)
             
@@ -28097,13 +28120,23 @@ def api_wa_cotacao_fila():
         
     req = request.get_json(silent=True) or {}
     pedido_json = req.get('pedido')
-    if not pedido_json:
+    chave_pedido = str(req.get('chave_pedido') or '').strip()
+    if not isinstance(pedido_json, dict) or pedido_json.get('type') not in {
+        'cotar_aqui', 'cotador_cidades', 'cotador_catalogo',
+        'cotador_modalidades', 'cotador_passo', 'cotador_estado'
+    }:
         close_db(conn)
-        return _wa_cors(jsonify({"ok": False, "erro": "sem_pedido"}))
+        return _wa_cors(jsonify({"ok": False, "erro": "pedido_invalido"})), 400
+    if chave_pedido and (len(chave_pedido) > 100 or not re.match(r'^[A-Za-z0-9._:-]+$', chave_pedido)):
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "chave_pedido_invalida"})), 400
         
     import json
     if not isinstance(pedido_json, str):
-        pedido_json = json.dumps(pedido_json)
+        pedido_json = json.dumps(pedido_json, ensure_ascii=False)
+    if len(pedido_json.encode('utf-8')) > 250_000:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "pedido_grande_demais"})), 413
         
     uid = getattr(g, 'usuario_id', 0)
     if not uid:
@@ -28112,12 +28145,48 @@ def api_wa_cotacao_fila():
         
     sid = getattr(g, 'sessao_id', 0)
     
+    # A criação pode ser repetida quando a resposta HTTP se perde. A chave é
+    # gerada pelo aparelho e impede que a repetição deixe dois trabalhos na fila.
+    if chave_pedido:
+        existente = conn.execute(
+            "SELECT id FROM cotacao_fila WHERE chave_pedido=? AND usuario_id=?",
+            (chave_pedido, uid),
+        ).fetchone()
+        if existente:
+            novo_id = existente['id']
+            pos = conn.execute("""
+                SELECT COUNT(*) AS c FROM cotacao_fila
+                WHERE estado IN ('esperando', 'rodando') AND id < ?
+            """, (novo_id,)).fetchone()['c']
+            close_db(conn)
+            return _wa_cors(jsonify({"ok": True, "id": novo_id, "posicao": pos}))
+
     # Insere
     cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO cotacao_fila (usuario_id, sessao_id, pedido_json, estado, criado_em)
-        VALUES (?, ?, ?, 'esperando', ?)
-    """, (uid, sid, pedido_json, agora_txt))
+    try:
+        cur.execute("""
+            INSERT INTO cotacao_fila
+                (usuario_id, sessao_id, pedido_json, estado, criado_em, chave_pedido)
+            VALUES (?, ?, ?, 'esperando', ?, ?)
+        """, (uid, sid, pedido_json, agora_txt, chave_pedido or None))
+    except Exception:
+        # Duas tentativas da mesma requisição podem cruzar entre o SELECT e o
+        # INSERT. O índice único decide; a perdedora lê o registro vencedor.
+        conn.rollback()
+        existente = conn.execute(
+            "SELECT id FROM cotacao_fila WHERE chave_pedido=? AND usuario_id=?",
+            (chave_pedido, uid),
+        ).fetchone() if chave_pedido else None
+        if not existente:
+            close_db(conn)
+            raise
+        novo_id = existente['id']
+        pos = conn.execute("""
+            SELECT COUNT(*) AS c FROM cotacao_fila
+            WHERE estado IN ('esperando', 'rodando') AND id < ?
+        """, (novo_id,)).fetchone()['c']
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": True, "id": novo_id, "posicao": pos}))
     novo_id = _last_insert_id(cur)
     
     # Calcula posicao: quantos estão esperando ou rodando ANTES dele (id menor)
@@ -28141,10 +28210,14 @@ def api_wa_cotacao_fila_proximo():
     conn = db()
     
     # Verifica se a sessao atual eh trabalhadora
-    sessao = conn.execute("SELECT trabalhador_cotacao FROM extensao_sessao WHERE id=?", (sid,)).fetchone()
+    cutoff_vivo = (datetime.now(TZ_SP) - timedelta(minutes=3)).strftime('%Y-%m-%d %H:%M:%S')
+    sessao = conn.execute("""
+        SELECT trabalhador_cotacao FROM extensao_sessao
+        WHERE id=? AND revogado_em IS NULL AND trabalhador_sinal >= ?
+    """, (sid, cutoff_vivo)).fetchone()
     if not sessao or not sessao['trabalhador_cotacao']:
         close_db(conn)
-        return _wa_cors(jsonify({"ok": False, "motivo": "nao_e_trabalhador"}))
+        return _wa_cors(jsonify({"ok": False, "motivo": "trabalhador_indisponivel"}))
         
     agora = datetime.now(TZ_SP)
     agora_txt = agora.strftime('%Y-%m-%d %H:%M:%S')
@@ -28207,18 +28280,19 @@ def api_wa_cotacao_fila_etapa(cid):
     
     sid = getattr(g, 'sessao_id', 0)
     conn = db()
-    sessao = conn.execute("SELECT trabalhador_cotacao FROM extensao_sessao WHERE id=?", (sid,)).fetchone()
-    if not sessao or not sessao['trabalhador_cotacao']:
-        close_db(conn)
-        return _wa_cors(jsonify({"ok": False, "motivo": "nao_e_trabalhador"}))
-        
     req = request.get_json(silent=True) or {}
-    etapa = req.get('etapa', '')
-    fracao = req.get('fracao', 0.0)
-    
-    conn.execute("UPDATE cotacao_fila SET etapa=?, fracao=? WHERE id=?", (etapa, fracao, cid))
+    etapa = str(req.get('etapa') or '')[:160]
+    try: fracao = max(0.0, min(1.0, float(req.get('fracao') or 0.0)))
+    except (TypeError, ValueError): fracao = 0.0
+
+    alterado = conn.execute("""
+        UPDATE cotacao_fila SET etapa=?, fracao=?
+        WHERE id=? AND estado='rodando' AND trabalhador_sessao=?
+    """, (etapa, fracao, cid, sid))
     conn.commit()
     close_db(conn)
+    if getattr(alterado, 'rowcount', 0) != 1:
+        return _wa_cors(jsonify({"ok": False, "motivo": "pedido_nao_pertence_ao_aparelho"})), 409
     return _wa_cors(jsonify({"ok": True}))
 
 
@@ -28230,28 +28304,33 @@ def api_wa_cotacao_fila_pronto(cid):
         
     sid = getattr(g, 'sessao_id', 0)
     conn = db()
-    sessao = conn.execute("SELECT trabalhador_cotacao FROM extensao_sessao WHERE id=?", (sid,)).fetchone()
-    if not sessao or not sessao['trabalhador_cotacao']:
-        close_db(conn)
-        return _wa_cors(jsonify({"ok": False, "motivo": "nao_e_trabalhador"}))
-        
     req = request.get_json(silent=True) or {}
     
     agora_txt = datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S')
     
     import json
     if 'erro' in req:
-        conn.execute("UPDATE cotacao_fila SET estado='erro', erro=?, terminado_em=? WHERE id=?", 
-            (req['erro'], agora_txt, cid))
+        erro = str(req.get('erro') or 'fila_erro')[:160]
+        alterado = conn.execute("""
+            UPDATE cotacao_fila SET estado='erro', erro=?, terminado_em=?
+            WHERE id=? AND estado='rodando' AND trabalhador_sessao=?
+        """, (erro, agora_txt, cid, sid))
     else:
         resultado = req.get('resultado')
         if not isinstance(resultado, str):
-            resultado = json.dumps(resultado)
-        conn.execute("UPDATE cotacao_fila SET estado='pronto', resultado_json=?, terminado_em=? WHERE id=?", 
-            (resultado, agora_txt, cid))
+            resultado = json.dumps(resultado, ensure_ascii=False)
+        if len(resultado.encode('utf-8')) > 2_000_000:
+            close_db(conn)
+            return _wa_cors(jsonify({"ok": False, "erro": "resultado_grande_demais"})), 413
+        alterado = conn.execute("""
+            UPDATE cotacao_fila SET estado='pronto', resultado_json=?, terminado_em=?
+            WHERE id=? AND estado='rodando' AND trabalhador_sessao=?
+        """, (resultado, agora_txt, cid, sid))
             
     conn.commit()
     close_db(conn)
+    if getattr(alterado, 'rowcount', 0) != 1:
+        return _wa_cors(jsonify({"ok": False, "motivo": "pedido_ja_encerrado_ou_repassado"})), 409
     return _wa_cors(jsonify({"ok": True}))
 
 
@@ -28279,7 +28358,7 @@ def api_wa_cotacao_fila_status(cid):
         return _wa_cors(jsonify({"ok": False, "erro": "nao_encontrado"}))
         
     uid = getattr(g, 'usuario_id', 0)
-    is_admin = getattr(g, 'admin', False)
+    is_admin = bool(getattr(g, 'usuario', None) and g.usuario['perfil'] == 'admin')
     
     # Soh quem pediu ou admin pode ver o resultado final, por causa de PII
     pode_ver_resultado = (item['usuario_id'] == uid or is_admin)
@@ -28310,7 +28389,7 @@ def api_wa_cotacao_fila_status(cid):
         "etapa": etapa_nome,
         "fracao": fracao,
         "resultado": resultado_obj,
-        "erro": item['erro'] if item['estado'] == 'erro' else None
+        "erro": item['erro'] if item['estado'] == 'erro' and pode_ver_resultado else None
     }))
 
 
@@ -28329,7 +28408,10 @@ def api_wa_cotacao_fila_cancelar(cid):
         return _wa_cors(jsonify({"ok": False}))
         
     agora_txt = datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S')
-    conn.execute("UPDATE cotacao_fila SET estado='cancelado', terminado_em=? WHERE id=?", (agora_txt, cid))
+    conn.execute("""
+        UPDATE cotacao_fila SET estado='cancelado', terminado_em=?
+        WHERE id=? AND estado IN ('esperando', 'rodando')
+    """, (agora_txt, cid))
     conn.commit()
     close_db(conn)
     return _wa_cors(jsonify({"ok": True}))
@@ -28343,7 +28425,7 @@ def api_wa_trabalhador_vivo():
     
     sid = getattr(g, 'sessao_id', 0)
     req = request.get_json(silent=True) or {}
-    painel_logado = bool(req.get('painel_logado'))
+    painel_logado = req.get('painel_logado') is True
     
     conn = db()
     # DUAS RECUSAS DIFERENTES, COM NOMES DIFERENTES.
@@ -28361,6 +28443,11 @@ def api_wa_trabalhador_vivo():
     if not sess['trabalhador_cotacao']:
         close_db(conn)
         return _wa_cors(jsonify({"ok": False, "motivo": "nao_marcada"}))
+    if not painel_logado:
+        conn.execute("UPDATE extensao_sessao SET trabalhador_sinal=NULL WHERE id=?", (sid,))
+        conn.commit()
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "motivo": "painel_fechado"}))
         
     agora_txt = datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S')
     conn.execute("UPDATE extensao_sessao SET trabalhador_sinal=? WHERE id=?", (agora_txt, sid))
@@ -28378,8 +28465,8 @@ def api_wa_trabalhador_estado():
         
     conn = db()
     sess = conn.execute("""
-        SELECT trabalhador_sinal FROM extensao_sessao 
-        WHERE trabalhador_cotacao=1
+        SELECT trabalhador_sinal FROM extensao_sessao
+        WHERE trabalhador_cotacao=1 AND revogado_em IS NULL
         ORDER BY trabalhador_sinal DESC LIMIT 1
     """).fetchone()
     
@@ -28410,9 +28497,20 @@ def admin_set_trabalhador(sid):
     
     conn = db()
     # Atômico: desmarca todas, depois marca a selecionada se ligado=True
-    conn.execute("UPDATE extensao_sessao SET trabalhador_cotacao=0")
+    alvo = conn.execute(
+        "SELECT id FROM extensao_sessao WHERE id=? AND revogado_em IS NULL",
+        (sid,),
+    ).fetchone()
+    if ligado and not alvo:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Aparelho não encontrado ou desconectado."}), 404
+    conn.execute("UPDATE extensao_sessao SET trabalhador_cotacao=0, trabalhador_sinal=NULL")
     if ligado:
-        conn.execute("UPDATE extensao_sessao SET trabalhador_cotacao=1 WHERE id=?", (sid,))
+        conn.execute("""
+            UPDATE extensao_sessao
+            SET trabalhador_cotacao=1, trabalhador_sinal=NULL
+            WHERE id=? AND revogado_em IS NULL
+        """, (sid,))
     conn.commit()
     close_db(conn)
     
@@ -29626,6 +29724,16 @@ def api_whatsapp_analisar():
     tokens_entrada = ia_info.get('tokens_entrada') or 0
     tokens_saida = ia_info.get('tokens_saida') or 0
     duracao_segundos = round(time.monotonic() - t_inicio, 2)
+    _etapas_cliente = d.get('cliente_etapas_ms')
+    if not isinstance(_etapas_cliente, dict):
+        _etapas_cliente = {}
+    _etapas_cliente = {
+        str(k)[:30]: max(0, min(int(v), 3600000))
+        for k, v in _etapas_cliente.items()
+        if isinstance(v, (int, float)) and not isinstance(v, bool)
+    }
+    _etapas_cliente['servidor_total'] = int(duracao_segundos * 1000)
+    etapas_ms_json = json.dumps(_etapas_cliente, ensure_ascii=False)
 
     # DE ONDE VEIO, e por quem. Sem isto o custo aparecia sem procedencia: nao
     # dava pra separar a leitura que o consultor pediu na conversa de uma
@@ -29640,13 +29748,13 @@ def api_whatsapp_analisar():
         (lead_id, telefone, telefone_norm, nome_contato, total_mensagens, conversa_json,
          score, score_faixa, sugestoes_json, resumo, criado_por, criado_em,
          custo_claude_usd, custo_transcricao_usd, tokens_entrada, tokens_saida, audio_segundos,
-         duracao_segundos, origem, lote_id, chat_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+         duracao_segundos, origem, lote_id, chat_id, etapas_ms)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (lead_id, telefone, tel_norm, nome, len(limpa), json.dumps(limpa, ensure_ascii=False),
          score, faixa, json.dumps(diagnostico, ensure_ascii=False), an['descricao'],
          d.get('usuario_id'), _agora_sp(),
          custo_claude_usd, custo_transcricao_usd, tokens_entrada, tokens_saida, audio_segundos_total,
-         duracao_segundos, _origem, _lote, str(d.get('chat_id') or '')[:120]))
+         duracao_segundos, _origem, _lote, str(d.get('chat_id') or '')[:120], etapas_ms_json))
     analise_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
                   else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
 
@@ -29734,6 +29842,7 @@ def api_whatsapp_analisar():
         "lead_e_do_consultor": bool(lead_id and responsavel_extensao and lead_resp_id == responsavel_extensao),
         "custo_usd": round(custo_claude_usd + custo_transcricao_usd, 6),
         "duracao_segundos": duracao_segundos,
+        "etapas_ms": _etapas_cliente,
     }))
 
 

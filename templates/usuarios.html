@@ -122,6 +122,19 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="modal-ap-confirmar" role="dialog" aria-modal="true"
+     aria-labelledby="ap-conf-titulo">
+  <div class="modal ap-confirmar-modal">
+    <h3 id="ap-conf-titulo"></h3>
+    <p id="ap-conf-texto" class="ap-conf-texto"></p>
+    <div id="ap-conf-erro" class="ap-conf-erro" hidden></div>
+    <div class="modal-acoes ap-conf-acoes">
+      <button type="button" class="btn-ghost" id="ap-conf-cancelar">Voltar</button>
+      <button type="button" class="btn" id="ap-conf-executar"></button>
+    </div>
+  </div>
+</div>
+
 <style>
   /* ── PERFIL: etiqueta de contorno, sem cor de alarme ──
      Contorno em vez de tinta cheia porque perfil se lê quando você procura,
@@ -165,8 +178,8 @@
      encha uma faixa de ponta a ponta — sobra vazio no meio e a janela fica
      maior que o assunto dela.
      No celular volta a ser gaveta, porque ali tela cheia é o certo. */
-  #modal-aparelhos, #modal-novo, #modal-editar { align-items:center; padding:24px; }
-  #modal-aparelhos .modal, #modal-novo .modal, #modal-editar .modal {
+  #modal-aparelhos, #modal-ap-confirmar, #modal-novo, #modal-editar { align-items:center; padding:24px; }
+  #modal-aparelhos .modal, #modal-ap-confirmar .modal, #modal-novo .modal, #modal-editar .modal {
     border-radius:16px;
     padding:26px 28px 24px;
     box-shadow:0 24px 60px rgba(0,0,0,.45);
@@ -174,6 +187,14 @@
   /* Aparelhos é uma lista curta; os formulários têm duas colunas e precisam
      de mais respiro sem virar uma faixa. */
   #modal-aparelhos .modal { max-width:520px; }
+  #modal-ap-confirmar .modal { max-width:440px; }
+  .ap-conf-texto { color:var(--cinza); font-size:13px; line-height:1.55;
+    white-space:pre-line; margin:8px 0 0; }
+  .ap-conf-acoes { display:flex; justify-content:flex-end; gap:10px;
+    margin-top:22px; padding-top:18px; border-top:1px solid var(--borda); }
+  .ap-conf-erro { margin-top:14px; padding:10px 12px; border-radius:8px;
+    color:var(--erro); background:rgba(244,63,124,.08); font-size:12.5px; }
+  #ap-conf-executar.ap-risco { background:var(--erro); }
   #modal-novo .modal, #modal-editar .modal { max-width:680px; }
 
   /* O botão principal ocupava a largura inteira e o Cancelar ficava espremido
@@ -185,8 +206,8 @@
   }
 
   @media (max-width: 720px) {
-    #modal-aparelhos, #modal-novo, #modal-editar { align-items:flex-end; padding:0; }
-    #modal-aparelhos .modal, #modal-novo .modal, #modal-editar .modal {
+    #modal-aparelhos, #modal-ap-confirmar, #modal-novo, #modal-editar { align-items:flex-end; padding:0; }
+    #modal-aparelhos .modal, #modal-ap-confirmar .modal, #modal-novo .modal, #modal-editar .modal {
       max-width:none; border-radius:20px 20px 0 0;
     }
     #modal-novo .modal-botoes, #modal-editar .modal-botoes { flex-direction:column-reverse; }
@@ -234,6 +255,35 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
     });
   }
+
+  var apConfirmarAcao = null;
+  function fecharConfirmacao() {
+    if (document.getElementById('ap-conf-executar').disabled) return;
+    document.getElementById('modal-ap-confirmar').classList.remove('open');
+    apConfirmarAcao = null;
+  }
+  function abrirConfirmacao(titulo, texto, rotulo, risco, acao) {
+    document.getElementById('ap-conf-titulo').textContent = titulo;
+    document.getElementById('ap-conf-texto').textContent = texto;
+    var erro = document.getElementById('ap-conf-erro');
+    erro.hidden = true; erro.textContent = '';
+    var executar = document.getElementById('ap-conf-executar');
+    executar.textContent = rotulo;
+    executar.disabled = false;
+    executar.classList.toggle('ap-risco', !!risco);
+    apConfirmarAcao = acao;
+    document.getElementById('modal-ap-confirmar').classList.add('open');
+    executar.focus();
+  }
+  function falhaConfirmacao(mensagem) {
+    var erro = document.getElementById('ap-conf-erro');
+    erro.textContent = mensagem;
+    erro.hidden = false;
+  }
+  document.getElementById('ap-conf-cancelar').addEventListener('click', fecharConfirmacao);
+  document.getElementById('ap-conf-executar').addEventListener('click', function () {
+    if (apConfirmarAcao) apConfirmarAcao(this);
+  });
 
   window.abrirAparelhos = function (id, nome) {
     apUsuario = id;
@@ -317,16 +367,27 @@
     // Trocar de máquina é UM clique, e o servidor desmarca todas antes de
     // marcar a nova — nunca existem duas. Duas máquinas cotando na mesma conta
     // do Painel é exatamente o que este desenho existe pra evitar.
-    if (ligado && !confirm('Marcar este aparelho como o computador que cota?\n\n' +
-        'Ele precisa ficar LIGADO e com o Painel do Corretor aberto. Quem não tiver ' +
-        'o Painel aberto passa a cotar por ele.\n\nSó um computador por vez — ' +
-        'marcar este desmarca o anterior.')) return;
-    fetch('/admin/extensao/sessao/' + id + '/trabalhador', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ligado: !!ligado }),
-    }).then(function (r) { return r.json(); })
-      .then(function () { carregar(); })
-      .catch(function () { carregar(); });
+    var titulo = ligado ? 'Usar este computador para buscar preços?' : 'Parar de buscar preços neste computador?';
+    var texto = ligado
+      ? 'Ele precisa permanecer ligado, com a extensão atualizada e o Painel do Corretor aberto.\n\nQuem não tiver o Painel aberto passa a depender dele. Marcar este aparelho desmarca o anterior.'
+      : 'Quem não estiver com o Painel do Corretor aberto deixa de conseguir cotar até outro computador ser marcado.';
+    abrirConfirmacao(titulo, texto, ligado ? 'Usar este computador' : 'Parar de buscar preços',
+      !ligado, function (botao) {
+        botao.disabled = true; botao.textContent = 'Salvando…';
+        fetch('/admin/extensao/sessao/' + id + '/trabalhador', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ligado: !!ligado }),
+        }).then(function (r) {
+          return r.json().then(function (d) { return { ok: r.ok, dados: d }; });
+        }).then(function (r) {
+          if (!r.ok || !r.dados.ok) throw new Error(r.dados.erro || 'Não consegui salvar esta escolha.');
+          botao.disabled = false; fecharConfirmacao(); carregar();
+        }).catch(function (e) {
+          botao.disabled = false;
+          botao.textContent = ligado ? 'Usar este computador' : 'Parar de buscar preços';
+          falhaConfirmacao(e.message || 'Não consegui salvar esta escolha. Tente novamente.');
+        });
+      });
   };
 
   window.desconectar = function (id, apelido, cota) {
@@ -338,14 +399,6 @@
     // outra. Isso aconteceu de verdade em 10/08, e custou uma noite.
     //
     // O aviso vem antes do outro e diz a consequencia, nao "tem certeza".
-    if (cota && !confirm('Este é o computador que COTA PELOS OUTROS.\n\n' +
-        'Desconectando ele, quem não estiver com o Painel do Corretor aberto ' +
-        'para de conseguir cotar — e a tela não vai explicar por quê.\n\n' +
-        'Só continue se você for marcar outro computador em seguida.')) return;
-    // Desconectar derruba alguém que pode estar no meio de um atendimento.
-    // A confirmação diz O QUE acontece, não só "tem certeza?".
-    if (!confirm('Desconectar "' + apelido + '"?\n\nA extensão para de funcionar naquele computador ' +
-                 'até a pessoa entrar de novo. Os outros aparelhos dela continuam funcionando.')) return;
     // O endereco leva o DONO junto (uid/sid). E o desenho do Antigravity e e
     // melhor que o meu: amarra a sessao ao usuario na propria URL, entao nao
     // da pra revogar a sessao de outra pessoa nem por engano de digitacao.
@@ -356,9 +409,21 @@
     // sucesso, que o aviso instantaneo ficou preso. `carregar()` sempre
     // funcionou porque tambem estava no catch; o aviso, nao. `.finally`
     // garante que os dois rodem sempre, sucesso ou "erro" de parsing.
-    fetch('/admin/extensao/sessoes/' + apUsuario + '/' + id + '/revogar', { method: 'POST' })
-      .catch(function () {})
-      .finally(function () { avisarExtensaoDesteNavegador(); carregar(); });
+    var texto = 'A extensão para de funcionar em "' + apelido + '" até a pessoa entrar de novo. Os outros aparelhos continuam funcionando.' +
+      (cota ? '\n\nEste computador busca preços para a equipe. Depois de desconectá-lo, marque outro aparelho para quem não tem o Painel aberto continuar cotando.' : '');
+    abrirConfirmacao('Desconectar este aparelho?', texto, 'Desconectar aparelho', true,
+      function (botao) {
+        botao.disabled = true; botao.textContent = 'Desconectando…';
+        fetch('/admin/extensao/sessoes/' + apUsuario + '/' + id + '/revogar', { method: 'POST' })
+          .then(function (r) { if (!r.ok) throw new Error('Não consegui desconectar este aparelho.'); })
+          .then(function () {
+            botao.disabled = false; fecharConfirmacao();
+            avisarExtensaoDesteNavegador(); carregar();
+          }).catch(function (e) {
+            botao.disabled = false; botao.textContent = 'Desconectar aparelho';
+            falhaConfirmacao(e.message || 'Não consegui desconectar este aparelho. Tente novamente.');
+          });
+      });
   };
 
   // SE FOR O PROPRIO NAVEGADOR, NAO PRECISA ESPERAR RELOGIO NENHUM.
