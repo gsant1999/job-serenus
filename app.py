@@ -24122,9 +24122,12 @@ async function instalarAutomatico(){
     const m = await r.json();
     if (!m.ok){ linha('Não consegui: ' + (m.erro || 'erro no servidor'), 'erro'); btn.disabled = false; btn.textContent = 'Instalar automaticamente (sem baixar .zip)'; return; }
     let feitos = 0;
-    for (const nome of m.arquivos){
-      const li = linha('Copiando ' + nome + '…');
-      try {
+    let proximo = 0;
+    async function copiarProximo(){
+      while (proximo < m.arquivos.length) {
+        const nome = m.arquivos[proximo++];
+        const li = linha('Copiando ' + nome + '…');
+        try {
         // Codifica CADA PEDAÇO, não o caminho inteiro: encodeURIComponent
         // transforma a barra em %2F e o servidor deixa de reconhecer a rota.
         const partes = nome.split('/');
@@ -24146,11 +24149,15 @@ async function instalarAutomatico(){
         await writable.write(bytes);
         await writable.close();
         li.textContent = nome; li.className = 'linha ok';
-        feitos++;
-      } catch (e) {
-        li.textContent = nome + ' — falhou: ' + (e && e.message || e); li.className = 'linha erro';
+          feitos++;
+        } catch (e) {
+          li.textContent = nome + ' — falhou: ' + (e && e.message || e); li.className = 'linha erro';
+        }
       }
     }
+    // Três frentes reduzem o tempo total sem ocupar as quatro threads do JOB:
+    // uma continua livre para quem estiver trabalhando no sistema.
+    await Promise.all([copiarProximo(), copiarProximo(), copiarProximo()]);
     if (feitos === m.arquivos.length){
       linha('Pronto — ' + feitos + ' arquivo(s) na pasta "' + raiz.name + '".', 'ok');
       linha('Agora: chrome://extensions → Carregar sem compactação → escolha essa mesma pasta.', 'ok');
