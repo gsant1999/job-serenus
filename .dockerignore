@@ -1,0 +1,8 @@
+**
+!mcp_cotacoes/
+!mcp_cotacoes/__init__.py
+!mcp_cotacoes/auth.py
+!mcp_cotacoes/client.py
+!mcp_cotacoes/models.py
+!mcp_cotacoes/server.py
+!mcp_cotacoes/requirements.txt

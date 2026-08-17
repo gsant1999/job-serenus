@@ -1,5 +1,5 @@
 # HOTFIX 20.06.2026 20:59 — Force rebuild (indentação OK, sintaxe verificada)
-import os, sqlite3, json, hashlib, hmac, secrets, re, threading, time, mimetypes, calendar
+import os, sqlite3, json, hashlib, hmac, secrets, re, threading, time, mimetypes, calendar, math
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort, Response, g, render_template_string
 from datetime import datetime, timedelta, date
 from functools import wraps
@@ -24810,6 +24810,28 @@ def api_v1_cotacao_planos():
         v = (request.args.get(campo) or '').strip()
         if v:
             q += f" AND LOWER({campo})=LOWER(?)"; p.append(v)
+
+    cidade = (request.args.get('cidade') or '').strip()
+    if cidade:
+        q += " AND (COALESCE(cidade,'')='' OR LOWER(cidade)=LOWER(?))"
+        p.append(cidade)
+
+    mei = (request.args.get('mei') or '').strip().lower()
+    if mei in ('1', 'true', 'sim'):
+        q += " AND COALESCE(mei,0)=1"
+    elif mei in ('0', 'false', 'nao', 'não'):
+        q += " AND COALESCE(mei,0)=0"
+
+    ids_str = (request.args.get('ids') or '').strip()
+    if ids_str:
+        ids_filtro = []
+        for x in ids_str.split(','):
+            try: ids_filtro.append(int(x.strip()))
+            except (TypeError, ValueError): pass
+        if ids_filtro:
+            marc_ids = ','.join(['?'] * len(ids_filtro))
+            q += f" AND id IN ({marc_ids})"
+            p.extend(ids_filtro)
             
     # Filtro de múltiplas operadoras (por ID da tabela operadoras)
     op_str = (request.args.get('operadoras') or '').strip()
@@ -24848,6 +24870,11 @@ def api_v1_cotacao_planos():
                                 'modalidade': t['modalidade'], 'acomodacao': t['acomodacao'],
                                 'coparticipacao': t['coparticipacao'], 'abrangencia': t['abrangencia'],
                                 'vigencia': t['vigencia'], 'ativo': bool(t['ativo']),
+                                'cidade': dict(t).get('cidade') or '',
+                                'entidade': dict(t).get('entidade') or '',
+                                'administradora': dict(t).get('administradora') or '',
+                                'linha': dict(t).get('linha') or '',
+                                'tipo_cnpj': dict(t).get('tipo_cnpj') or '',
                                 'vidas_min': _n(t, 'vidas_min'), 'vidas_max': _n(t, 'vidas_max'),
                                 # `mei` nunca saia daqui, e sem ele a extensao
                                 # tratava TODA tabela do JOB como "nao aceita
@@ -24925,6 +24952,9 @@ def api_v1_cotacao_ler(cid):
     c = conn.execute("SELECT * FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
     if not c:
         close_db(conn); return _api_erro('nao_encontrada', 'Cotação não encontrada', 404)
+    usuario = _api_usuario_ativo(conn)
+    if not usuario or (usuario['perfil'] != 'admin' and c['corretor_id'] != usuario['id']):
+        close_db(conn); return _api_erro('sem_permissao', 'Você não pode consultar esta cotação', 403)
     out = _cotacao_completa(conn, c)
     close_db(conn)
     return jsonify({'ok': True, 'cotacao': out})
@@ -24936,6 +24966,11 @@ def api_v1_cotacao_salvas():
     """O mesmo histórico da tela /cotacao/salvas, extraível por inteiro."""
     conn = db()
     q, p = "SELECT * FROM cotacao_salva WHERE 1=1", []
+    usuario = _api_usuario_ativo(conn)
+    if not usuario:
+        close_db(conn); return _api_erro('nao_autenticado', 'Usuário da chave inválido ou inativo', 401)
+    if usuario['perfil'] != 'admin':
+        q += " AND corretor_id=?"; p.append(usuario['id'])
     if request.args.get('lead_id', type=int):
         q += " AND lead_id=?"; p.append(request.args.get('lead_id', type=int))
     tel = (request.args.get('telefone') or '').strip()
@@ -24968,10 +25003,14 @@ def api_v1_cotacao_imagem(cid):
     """PNG da cotação. A imagem é renderizada no NAVEGADOR (html2canvas) e
     persistida quando alguém abre o documento — o servidor não tem navegador."""
     conn = db()
-    c = conn.execute("SELECT imagem_arquivo FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
-    close_db(conn)
+    c = conn.execute("SELECT imagem_arquivo, corretor_id FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
     if not c:
+        close_db(conn)
         return _api_erro('nao_encontrada', 'Cotação não encontrada', 404)
+    usuario = _api_usuario_ativo(conn)
+    if not usuario or (usuario['perfil'] != 'admin' and c['corretor_id'] != usuario['id']):
+        close_db(conn); return _api_erro('sem_permissao', 'Você não pode consultar esta imagem', 403)
+    close_db(conn)
     if not c['imagem_arquivo']:
         return _api_erro('imagem_ausente',
                          f'Imagem ainda não gerada. Abrir /cotacao/documento/{cid} uma vez a cria.',
@@ -38956,6 +38995,780 @@ def cotacao_legendas_api():
     modelos = [dict(r) for r in conn.execute("SELECT id, nome, corpo FROM cotacao_legenda_modelo ORDER BY id").fetchall()]
     close_db(conn)
     return jsonify(modelos)
+
+
+# ── API v1 para integrações de cotação ─────────────────────────────────────
+
+def _api_usuario_ativo(conn):
+    """Usuário em nome de quem a chave de integração está agindo."""
+    uid = getattr(g, 'usuario_id', None)
+    if not uid:
+        return None
+    return conn.execute("SELECT id, nome, email, perfil, ativo FROM usuarios WHERE id=? AND ativo=1",
+                        (uid,)).fetchone()
+
+
+def _api_usuario_eh_admin(usuario):
+    return bool(usuario and usuario['perfil'] == 'admin')
+
+
+def _api_pode_usar_lead(usuario, lead):
+    if not usuario or not lead:
+        return False
+    return _api_usuario_eh_admin(usuario) or lead['responsavel_id'] in (None, usuario['id'])
+
+
+def _api_pode_usar_cotacao(usuario, cotacao):
+    if not usuario or not cotacao:
+        return False
+    return _api_usuario_eh_admin(usuario) or cotacao['corretor_id'] == usuario['id']
+
+
+def _api_parse_idades(valor):
+    if not isinstance(valor, list) or not valor:
+        return None, 'Envie "idades" como uma lista não vazia.'
+    idades = []
+    for bruto in valor[:60]:
+        try:
+            idade = int(bruto)
+        except (TypeError, ValueError):
+            return None, f'Idade inválida: {bruto!r}'
+        if idade < 0 or idade > 120:
+            return None, f'Idade fora de 0 a 120: {idade}'
+        idades.append(idade)
+    return idades, None
+
+
+def _api_parse_planos(valor):
+    if not isinstance(valor, list) or not valor:
+        return None, 'Envie "planos" como uma lista não vazia de IDs.'
+    ids = []
+    for bruto in valor[:30]:
+        v = bruto.get('plano_id') if isinstance(bruto, dict) else bruto
+        try:
+            pid = int(v)
+        except (TypeError, ValueError):
+            return None, f'ID de plano inválido: {v!r}'
+        if pid not in ids:
+            ids.append(pid)
+    return ids, None
+
+
+def _api_recomendacoes(valor):
+    if not isinstance(valor, dict):
+        return {}
+    permitidas = ('1a', '2a', '3a')
+    out = {}
+    for chave, recomendacao in valor.items():
+        try: pid = int(chave)
+        except (TypeError, ValueError): continue
+        rec = str(recomendacao or '').strip()
+        if rec in permitidas:
+            out[pid] = rec
+    return out
+
+
+def _api_criar_cotacao_local(conn, usuario, lead, d, idades, tabela_ids):
+    recomendacoes = _api_recomendacoes(d.get('recomendacoes'))
+    planos, total_geral, cont_faixa, avisos = calcular_cotacao(
+        conn, idades, tabela_ids, recomendacoes=recomendacoes)
+    if not planos:
+        raise ValueError('Nenhum plano válido foi encontrado para salvar.')
+    if not any(p.get('elegivel') and float(p.get('total') or 0) > 0 for p in planos):
+        raise ValueError('Nenhum plano elegível com preço completo foi encontrado.')
+
+    token = secrets.token_urlsafe(9)
+    orientacao = str(d.get('orientacao') or 'horizontal').strip().lower()
+    if orientacao not in ('horizontal', 'vertical'):
+        orientacao = 'horizontal'
+    mods = sorted(set(p.get('modalidade') for p in planos if p.get('modalidade')))
+    cliente_nome = str(d.get('cliente_nome') or lead['nome'] or '').strip()[:200]
+    cliente_email = str(d.get('cliente_email') or lead['email'] or '').strip()[:200]
+    cliente_telefone = str(d.get('cliente_telefone') or lead['telefone'] or '').strip()[:40]
+    titulo = str(d.get('titulo') or 'Cotação').strip()[:200] or 'Cotação'
+
+    cur = conn.execute("""INSERT INTO cotacao_salva
+        (token, orientacao, lead_id, corretor_id, corretor_nome, corretor_email,
+         corretor_telefone, cliente_nome, cliente_email, cliente_telefone, titulo,
+         vidas_json, planos_json, total, tabela_ids_json, cidade, modalidades)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (token, orientacao, lead['id'], usuario['id'], usuario['nome'] or '', usuario['email'] or '',
+         str(d.get('corretor_telefone') or '').strip()[:40], cliente_nome, cliente_email,
+         cliente_telefone, titulo, json.dumps(cont_faixa, ensure_ascii=False),
+         json.dumps(planos, ensure_ascii=False), round(total_geral, 2),
+         json.dumps(tabela_ids), str(d.get('cidade') or '').strip()[:120],
+         json.dumps(mods, ensure_ascii=False)))
+    cid = _last_insert_id(cur)
+    if not cid:
+        cid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
+               else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    registrar_cotacao_no_lead(conn, lead['id'], cid, planos, total_geral, idades, titulo)
+    return cid, avisos
+
+
+@app.route('/api/v1/crm/leads/buscar', methods=['GET', 'OPTIONS'])
+@requer('crm:ler')
+def api_v1_crm_leads_buscar():
+    termo = (request.args.get('q') or request.args.get('telefone') or '').strip()
+    if len(termo) < 2:
+        return jsonify({'ok': True, 'leads': []})
+    conn = db()
+    usuario = _api_usuario_ativo(conn)
+    if not usuario:
+        close_db(conn); return _api_erro('nao_autenticado', 'Usuário da chave inválido ou inativo', 401)
+    digitos = re.sub(r'\D', '', termo)
+    like = '%' + termo.lower() + '%'
+    q = """SELECT id, nome, telefone, telefone_norm, email, empresa, origem, etapa, responsavel_id
+             FROM crm_leads
+            WHERE (LOWER(COALESCE(nome,'')) LIKE ? OR COALESCE(telefone,'') LIKE ?
+                   OR COALESCE(telefone_norm,'') LIKE ? OR LOWER(COALESCE(email,'')) LIKE ?)"""
+    params = [like, '%' + (digitos or termo) + '%', '%' + (digitos or termo) + '%', like]
+    if not _api_usuario_eh_admin(usuario):
+        q += " AND responsavel_id=?"; params.append(usuario['id'])
+    q += " ORDER BY atualizado_em DESC, id DESC LIMIT 20"
+    leads = [dict(r) for r in conn.execute(q, params).fetchall()]
+    close_db(conn)
+    return jsonify({'ok': True, 'leads': leads, 'total': len(leads)})
+
+
+@app.route('/api/v1/crm/leads', methods=['POST', 'OPTIONS'])
+@requer('crm:escrever')
+def api_v1_crm_lead_criar():
+    d = request.get_json(silent=True) or {}
+    nome = str(d.get('nome') or '').strip()[:200]
+    tel_original = str(d.get('telefone') or '').strip()[:40]
+    tel_norm = _normalizar_telefone(tel_original)
+    origem = str(d.get('origem') or '').strip()
+    if not nome:
+        return _api_erro('nome_obrigatorio', 'Informe o nome do lead')
+    if len(tel_norm) not in (10, 11):
+        return _api_erro('telefone_invalido', 'Informe telefone com DDD, contendo 10 ou 11 dígitos')
+    if origem not in _WA_ORIGENS_LEAD:
+        return _api_erro('origem_invalida', 'Origem inválida', 400,
+                         {'origens_permitidas': _WA_ORIGENS_LEAD})
+    conn = db()
+    usuario = _api_usuario_ativo(conn)
+    if not usuario:
+        close_db(conn); return _api_erro('nao_autenticado', 'Usuário da chave inválido ou inativo', 401)
+    existente = _buscar_lead_por_telefone(conn, tel_norm)
+    if existente:
+        out = dict(existente)
+        close_db(conn)
+        return jsonify({'ok': True, 'ja_existia': True, 'lead': out})
+    agora = _agora_sp()
+    cur = conn.execute("""INSERT INTO crm_leads
+        (nome, telefone, telefone_norm, email, empresa, origem, etapa, responsavel_id,
+         observacoes, criado_em, atualizado_em)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (nome, _formatar_telefone(tel_norm), tel_norm,
+         str(d.get('email') or '').strip()[:200] or None,
+         str(d.get('empresa') or '').strip()[:200] or None,
+         origem, 'lead_novo', usuario['id'], str(d.get('observacoes') or '').strip()[:2000] or None,
+         agora, agora))
+    lid = _last_insert_id(cur)
+    if not lid:
+        lid = conn.execute("SELECT id FROM crm_leads WHERE telefone_norm=? ORDER BY id DESC LIMIT 1",
+                           (tel_norm,)).fetchone()['id']
+    conn.execute("""INSERT INTO crm_atividades
+        (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)""",
+        (lid, usuario['nome'] or 'Integração', 'criacao',
+         f'Lead cadastrado pela API (origem: {origem})', agora))
+    conn.commit()
+    lead = dict(conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone())
+    close_db(conn)
+    return jsonify({'ok': True, 'ja_existia': False, 'lead': lead}), 201
+
+
+@app.route('/api/v1/cotacao', methods=['POST', 'OPTIONS'])
+@requer('cotacao:escrever')
+def api_v1_cotacao_criar():
+    d = request.get_json(silent=True) or {}
+    idades, erro = _api_parse_idades(d.get('idades'))
+    if erro: return _api_erro('idades_invalidas', erro)
+    tabela_ids, erro = _api_parse_planos(d.get('planos'))
+    if erro: return _api_erro('planos_invalidos', erro)
+    try: lead_id = int(d.get('lead_id') or 0)
+    except (TypeError, ValueError): lead_id = 0
+    if not lead_id:
+        return _api_erro('lead_obrigatorio', 'Vincule a cotação a um lead do CRM')
+
+    conn = db()
+    usuario = _api_usuario_ativo(conn)
+    lead = conn.execute("SELECT id, nome, telefone, email, responsavel_id FROM crm_leads WHERE id=?",
+                        (lead_id,)).fetchone()
+    if not usuario:
+        close_db(conn); return _api_erro('nao_autenticado', 'Usuário da chave inválido ou inativo', 401)
+    if not lead:
+        close_db(conn); return _api_erro('lead_nao_encontrado', 'Lead não encontrado', 404)
+    if not _api_pode_usar_lead(usuario, lead):
+        close_db(conn); return _api_erro('sem_permissao', 'Você não pode cotar para este lead', 403)
+    try:
+        cid, avisos = _api_criar_cotacao_local(conn, usuario, lead, d, idades, tabela_ids)
+        conn.commit()
+        cot = conn.execute("SELECT * FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
+        out = _cotacao_completa(conn, cot)
+    except ValueError as e:
+        conn.rollback(); close_db(conn)
+        return _api_erro('cotacao_invalida', str(e))
+    except Exception as e:
+        conn.rollback(); close_db(conn)
+        app.logger.error('[API_V1_COTACAO] criar: %s', e)
+        return _api_erro('falha_ao_salvar', 'Não foi possível salvar a cotação', 500)
+    close_db(conn)
+    return jsonify({'ok': True, 'cotacao': out, 'avisos': avisos}), 201
+
+
+@app.route('/api/v1/cotacao/ao-vivo/salvar', methods=['POST', 'OPTIONS'])
+@requer('cotacao:escrever')
+def api_v1_cotacao_ao_vivo_salvar():
+    corpo = request.get_json(silent=True) or {}
+    resultado = corpo.get('resultado') if isinstance(corpo.get('resultado'), dict) else corpo
+    if isinstance(resultado.get('resultado'), dict):
+        resultado = resultado['resultado']
+    if isinstance(resultado.get('dados'), dict):
+        resultado = resultado['dados']
+    d = dict(resultado)
+    for campo in ('lead_id', 'cliente_nome', 'cliente_email', 'cliente_telefone', 'titulo'):
+        if corpo.get(campo) is not None:
+            d[campo] = corpo.get(campo)
+    try: lead_id = int(d.get('lead_id') or 0)
+    except (TypeError, ValueError): lead_id = 0
+    if not lead_id:
+        return _api_erro('lead_obrigatorio', 'Vincule a cotação a um lead do CRM')
+
+    conn = db()
+    usuario = _api_usuario_ativo(conn)
+    lead = conn.execute("SELECT id, nome, telefone, email, responsavel_id FROM crm_leads WHERE id=?",
+                        (lead_id,)).fetchone()
+    if not usuario:
+        close_db(conn); return _api_erro('nao_autenticado', 'Usuário da chave inválido ou inativo', 401)
+    if not lead:
+        close_db(conn); return _api_erro('lead_nao_encontrado', 'Lead não encontrado', 404)
+    if not _api_pode_usar_lead(usuario, lead):
+        close_db(conn); return _api_erro('sem_permissao', 'Você não pode cotar para este lead', 403)
+    d['lead_id'] = lead_id
+    d['cliente_nome'] = str(d.get('cliente_nome') or lead['nome'] or '').strip()
+    d['cliente_email'] = str(d.get('cliente_email') or lead['email'] or '').strip()
+    d['cliente_telefone'] = str(d.get('cliente_telefone') or lead['telefone'] or '').strip()
+    try:
+        vid = _cotacao_viva_gravar(conn, d, usuario['id'], 'mcp')
+        planos, total_geral, cont_faixa = _viva_para_apresentacao(d)
+        if not planos:
+            conn.commit(); close_db(conn)
+            return jsonify({'ok': True, 'historico_id': vid,
+                            'aviso': 'Nenhum plano com preço foi recebido para a apresentação'})
+        token = secrets.token_urlsafe(9)
+        mods = sorted(set(p.get('modalidade') for p in planos if p.get('modalidade')))
+        cur = conn.execute("""INSERT INTO cotacao_salva
+            (token, orientacao, lead_id, corretor_id, corretor_nome, corretor_email,
+             corretor_telefone, cliente_nome, cliente_email, cliente_telefone, titulo,
+             vidas_json, planos_json, total, tabela_ids_json, cidade, modalidades)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (token, 'horizontal', lead_id, usuario['id'], usuario['nome'] or '', usuario['email'] or '', '',
+             d['cliente_nome'][:200], d['cliente_email'][:200], d['cliente_telefone'][:40],
+             str(d.get('titulo') or 'Cotação').strip()[:200], json.dumps(cont_faixa),
+             json.dumps(planos, ensure_ascii=False), total_geral, '[]',
+             str(d.get('cidade') or '').strip()[:120], json.dumps(mods, ensure_ascii=False)))
+        cid = _last_insert_id(cur)
+        if not cid:
+            cid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
+                   else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+        registrar_cotacao_no_lead(conn, lead_id, cid, planos, total_geral, [],
+                                  str(d.get('titulo') or '').strip())
+        conn.commit()
+        cot = conn.execute("SELECT * FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
+        out = _cotacao_completa(conn, cot)
+    except ValueError as e:
+        conn.rollback(); close_db(conn)
+        return _api_erro('resultado_invalido', str(e))
+    except Exception as e:
+        conn.rollback(); close_db(conn)
+        app.logger.error('[API_V1_COTACAO] salvar ao vivo: %s', e)
+        return _api_erro('falha_ao_salvar', 'Não foi possível salvar a cotação ao vivo', 500)
+    close_db(conn)
+    return jsonify({'ok': True, 'historico_id': vid, 'cotacao': out}), 201
+
+
+@app.route('/api/v1/cotacao/<int:cid>/nova-versao', methods=['POST', 'OPTIONS'])
+@requer('cotacao:escrever')
+def api_v1_cotacao_nova_versao(cid):
+    d = request.get_json(silent=True) or {}
+    conn = db()
+    usuario = _api_usuario_ativo(conn)
+    original = conn.execute("SELECT * FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
+    if not original:
+        close_db(conn); return _api_erro('nao_encontrada', 'Cotação não encontrada', 404)
+    if not _api_pode_usar_cotacao(usuario, original):
+        close_db(conn); return _api_erro('sem_permissao', 'Você não pode versionar esta cotação', 403)
+
+    if d.get('idades') is not None or d.get('planos') is not None:
+        try:
+            cont = json.loads(original['vidas_json'] or '{}')
+        except Exception:
+            cont = {}
+        representantes = {'00-18': 5, '19-23': 20, '24-28': 25, '29-33': 30, '34-38': 35,
+                           '39-43': 40, '44-48': 45, '49-53': 50, '54-58': 55, '59+': 60}
+        idades_padrao = []
+        for fx, qtd in cont.items():
+            if fx in representantes:
+                try: idades_padrao.extend([representantes[fx]] * int(qtd or 0))
+                except (TypeError, ValueError): pass
+        try: planos_padrao = json.loads(dict(original).get('tabela_ids_json') or '[]')
+        except Exception: planos_padrao = []
+        idades, erro = _api_parse_idades(d.get('idades') if d.get('idades') is not None else idades_padrao)
+        if erro:
+            close_db(conn); return _api_erro('idades_invalidas', erro)
+        tabela_ids, erro = _api_parse_planos(d.get('planos') if d.get('planos') is not None else planos_padrao)
+        if erro:
+            close_db(conn); return _api_erro('planos_invalidos', erro)
+        lead = conn.execute("SELECT id, nome, telefone, email, responsavel_id FROM crm_leads WHERE id=?",
+                            (original['lead_id'],)).fetchone()
+        if not lead:
+            close_db(conn); return _api_erro('lead_nao_encontrado', 'A cotação original não tem lead válido', 409)
+        dados = dict(d)
+        for campo in ('cliente_nome', 'cliente_email', 'cliente_telefone', 'titulo', 'orientacao', 'cidade'):
+            if dados.get(campo) is None:
+                dados[campo] = dict(original).get(campo)
+        try:
+            novo_id, avisos = _api_criar_cotacao_local(conn, usuario, lead, dados, idades, tabela_ids)
+        except ValueError as e:
+            conn.rollback(); close_db(conn); return _api_erro('cotacao_invalida', str(e))
+    else:
+        od = dict(original)
+        token = secrets.token_urlsafe(9)
+        cur = conn.execute("""INSERT INTO cotacao_salva
+            (token, orientacao, lead_id, corretor_id, corretor_nome, corretor_email,
+             corretor_telefone, cliente_nome, cliente_email, cliente_telefone, titulo,
+             vidas_json, planos_json, total, tabela_ids_json, cidade, modalidades)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (token, str(d.get('orientacao') or od.get('orientacao') or 'horizontal'), od.get('lead_id'),
+             usuario['id'], usuario['nome'] or '', usuario['email'] or '',
+             str(d.get('corretor_telefone') or od.get('corretor_telefone') or '')[:40],
+             str(d.get('cliente_nome') or od.get('cliente_nome') or '')[:200],
+             str(d.get('cliente_email') or od.get('cliente_email') or '')[:200],
+             str(d.get('cliente_telefone') or od.get('cliente_telefone') or '')[:40],
+             str(d.get('titulo') or od.get('titulo') or 'Cotação')[:200], od.get('vidas_json') or '{}',
+             od.get('planos_json') or '[]', float(od.get('total') or 0),
+             od.get('tabela_ids_json') or '[]', str(d.get('cidade') or od.get('cidade') or '')[:120],
+             od.get('modalidades') or '[]'))
+        novo_id = _last_insert_id(cur)
+        if not novo_id:
+            novo_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
+                       else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+        avisos = []
+    conn.commit()
+    novo = conn.execute("SELECT * FROM cotacao_salva WHERE id=?", (novo_id,)).fetchone()
+    out = _cotacao_completa(conn, novo)
+    close_db(conn)
+    return jsonify({'ok': True, 'cotacao_original_id': cid, 'cotacao': out, 'avisos': avisos}), 201
+
+
+def _api_aplicar_agravo(conn, cotacao, ajustes, versao_vista):
+    cd = dict(cotacao)
+    versao_atual = int(cd.get('versao') or 0)
+    if versao_vista is None or int(versao_vista) != versao_atual:
+        raise RuntimeError('versao_desatualizada')
+    try: planos = json.loads(cd.get('planos_json') or '[]')
+    except Exception: planos = []
+    if not isinstance(ajustes, dict) or not ajustes:
+        raise ValueError('Envie ao menos um ajuste por plano e faixa etária.')
+    total_geral = 0.0
+    alterados = 0
+    for i, plano in enumerate(planos):
+        por_faixa = ajustes.get(str(i)) or {}
+        total_plano = 0.0
+        for linha in plano.get('linhas', []):
+            fx = linha.get('faixa')
+            if fx in por_faixa:
+                try:
+                    novo = round(float(por_faixa[fx]), 2)
+                    if not math.isfinite(novo) or novo <= 0: raise ValueError
+                except (TypeError, ValueError):
+                    raise ValueError(f'Preço inválido no plano {i}, faixa {fx}')
+                qtd = int(linha.get('qtd') or 1)
+                linha['preco'] = novo
+                linha['subtotal'] = round(novo * qtd, 2)
+                alterados += 1
+            total_plano += float(linha.get('subtotal') or 0)
+        plano['total'] = round(total_plano, 2)
+        total_geral += total_plano
+    if not alterados:
+        raise ValueError('Nenhuma faixa informada existe nos planos da cotação.')
+    cur = conn.execute("""UPDATE cotacao_salva SET planos_json=?, total=?, versao=?
+                           WHERE id=? AND versao=?""",
+                       (json.dumps(planos, ensure_ascii=False), round(total_geral, 2),
+                        versao_atual + 1, cd['id'], versao_atual))
+    if getattr(cur, 'rowcount', 1) == 0:
+        raise RuntimeError('versao_desatualizada')
+    return versao_atual + 1, round(total_geral, 2), alterados
+
+
+@app.route('/api/v1/cotacao/<int:cid>/agravo', methods=['POST', 'OPTIONS'])
+@requer('cotacao:escrever')
+def api_v1_cotacao_agravo(cid):
+    d = request.get_json(silent=True) or {}
+    conn = db()
+    usuario = _api_usuario_ativo(conn)
+    cot = conn.execute("SELECT * FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
+    if not cot:
+        close_db(conn); return _api_erro('nao_encontrada', 'Cotação não encontrada', 404)
+    if not _api_pode_usar_cotacao(usuario, cot):
+        close_db(conn); return _api_erro('sem_permissao', 'Você não pode ajustar esta cotação', 403)
+    try:
+        versao, total, alterados = _api_aplicar_agravo(conn, cot, d.get('ajustes'), d.get('versao'))
+        conn.commit()
+    except RuntimeError:
+        conn.rollback(); close_db(conn)
+        return _api_erro('versao_desatualizada',
+                         'A cotação mudou. Consulte novamente antes de aplicar o agravo.', 409)
+    except (TypeError, ValueError) as e:
+        conn.rollback(); close_db(conn); return _api_erro('agravo_invalido', str(e))
+    close_db(conn)
+    app.logger.info('[AUDITORIA_MCP] usuario=%s acao=aplicar_agravo alvo=%s versao=%s faixas=%s',
+                    getattr(g, 'usuario_id', None), cid, versao, alterados)
+    return jsonify({'ok': True, 'id': cid, 'versao': versao, 'total': total,
+                    'faixas_alteradas': alterados})
+
+
+def _api_corpo_email_cotacao(cot, link, base):
+    import html as _html
+    logo = _html.escape(base + (BRAND.get('logo_cliente') or BRAND.get('logo') or
+                               '/static/logo_arcos.png'), quote=True)
+    link = _html.escape(link, quote=True)
+    nome = _html.escape(str(cot.get('cliente_nome') or ''))
+    corretor = _html.escape(str(cot.get('corretor_nome') or BRAND.get('corretora') or 'Corretora'))
+    tel_corretor = _html.escape(str(cot.get('corretor_telefone') or ''))
+    return (
+        "<div style='font-family:Arial,Helvetica,sans-serif;background:#f4f5f7;padding:26px 12px;'>"
+        "<div style='max-width:560px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;border:1px solid #e7e9ee;'>"
+        "<div style='padding:24px 30px;border-bottom:1px solid #eef0f3;'>"
+        "<img src='" + logo + "' alt='Corretora' style='display:block;max-width:180px;max-height:52px;'></div>"
+        "<div style='padding:30px;'><p style='font-size:15px;color:#2b2b33;'>Olá " + nome + ",</p>"
+        "<p style='font-size:15px;color:#2b2b33;line-height:1.65;'>Preparei uma cotação de plano de saúde personalizada para você.</p>"
+        "<div style='text-align:center;margin:28px 0;'><a href='" + link + "' "
+        "style='background:#3b82f6;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:700;'>"
+        "Ver minha cotação</a></div><p style='font-size:13px;'><a href='" + link +
+        "' style='color:#3b82f6;word-break:break-all;'>" + link + "</a></p>"
+        "<p style='font-size:14px;color:#2b2b33;line-height:1.6;'>Atenciosamente,<br><b>" + corretor +
+        "</b>" + (("<br>" + tel_corretor) if tel_corretor else "") + "</p></div>"
+        "<div style='padding:16px 30px;background:#fafbfc;border-top:1px solid #eef0f3;font-size:11px;color:#9aa0b0;'>"
+        "Valores e condições são determinados pelas operadoras e podem ser alterados. Esta mensagem não constitui contrato."
+        "</div></div></div>")
+
+
+@app.route('/api/v1/cotacao/<int:cid>/enviar-email', methods=['POST', 'OPTIONS'])
+@requer('cotacao:escrever')
+def api_v1_cotacao_enviar_email(cid):
+    d = request.get_json(silent=True) or {}
+    conn = db()
+    usuario = _api_usuario_ativo(conn)
+    c = conn.execute("SELECT * FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
+    if not c:
+        close_db(conn); return _api_erro('nao_encontrada', 'Cotação não encontrada', 404)
+    if not _api_pode_usar_cotacao(usuario, c):
+        close_db(conn); return _api_erro('sem_permissao', 'Você não pode enviar esta cotação', 403)
+    cot = dict(c)
+    destino = str(d.get('email') or cot.get('cliente_email') or '').strip()
+    if not destino:
+        close_db(conn); return _api_erro('email_obrigatorio', 'Informe o e-mail do cliente')
+    token = cot.get('token')
+    if not token:
+        token = secrets.token_urlsafe(9)
+        conn.execute("UPDATE cotacao_salva SET token=? WHERE id=?", (token, cid)); conn.commit()
+    close_db(conn)
+    base = _SITE_BASE_URL.rstrip('/')
+    link = base + '/c/' + token
+    corpo = _api_corpo_email_cotacao(cot, link, base)
+    try: _enviar_email.ultimo_erro = None
+    except Exception: pass
+    try:
+        _enviar_email(destino, 'Sua cotação - ' + (cot.get('titulo') or BRAND.get('nome_curto') or 'Cotação'),
+                       corpo, remetente_nome='Cotação de Plano de Saúde')
+    except Exception as e:
+        return _api_erro('falha_ao_enviar', str(e)[:200], 502)
+    erro = getattr(_enviar_email, 'ultimo_erro', None)
+    if erro:
+        return _api_erro('falha_ao_enviar', str(erro)[:200], 502)
+    app.logger.info('[AUDITORIA_MCP] usuario=%s acao=enviar_email_cotacao alvo=%s',
+                    getattr(g, 'usuario_id', None), cid)
+    return jsonify({'ok': True, 'email': destino, 'url_publica': link})
+
+
+@app.route('/api/v1/cotacao/<int:cid>/excluir', methods=['POST', 'OPTIONS'])
+@requer('cotacao:escrever')
+def api_v1_cotacao_excluir(cid):
+    d = request.get_json(silent=True) or {}
+    if d.get('confirmacao') != f'EXCLUIR COTACAO {cid}':
+        return _api_erro('confirmacao_invalida',
+                         f'Envie confirmacao exatamente como "EXCLUIR COTACAO {cid}"')
+    conn = db()
+    usuario = _api_usuario_ativo(conn)
+    c = conn.execute("SELECT id, corretor_id FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
+    if not c:
+        close_db(conn); return _api_erro('nao_encontrada', 'Cotação não encontrada', 404)
+    if not _api_pode_usar_cotacao(usuario, c):
+        close_db(conn); return _api_erro('sem_permissao', 'Você não pode excluir esta cotação', 403)
+    conn.execute("DELETE FROM cotacao_salva WHERE id=?", (cid,))
+    conn.commit(); close_db(conn)
+    app.logger.info('[AUDITORIA_MCP] usuario=%s acao=excluir_cotacao alvo=%s',
+                    getattr(g, 'usuario_id', None), cid)
+    return jsonify({'ok': True, 'excluida': cid})
+
+
+def _api_tabela_payload(d, operadora_padrao=''):
+    if not isinstance(d, dict):
+        raise ValueError('Tabela inválida.')
+    operadora = str(d.get('operadora') or operadora_padrao or '').strip()[:120]
+    plano = str(d.get('plano') or '').strip()[:160]
+    precos = d.get('precos') if isinstance(d.get('precos'), dict) else d.get('faixas')
+    if not operadora:
+        raise ValueError('Informe a operadora.')
+    if not plano:
+        raise ValueError('Informe o plano.')
+    if not isinstance(precos, dict) or not precos:
+        raise ValueError('Informe os preços por faixa etária.')
+    precos_ok = {}
+    for faixa, bruto in precos.items():
+        faixa = str(faixa).strip()
+        if faixa not in FAIXAS_ETARIAS:
+            continue
+        try: valor = round(float(bruto), 2)
+        except (TypeError, ValueError):
+            raise ValueError(f'Preço inválido na faixa {faixa}.')
+        if not math.isfinite(valor) or valor < 0:
+            raise ValueError(f'Preço inválido na faixa {faixa}.')
+        precos_ok[faixa] = valor
+    if not precos_ok:
+        raise ValueError('Nenhuma faixa etária reconhecida foi informada.')
+
+    def inteiro(nome, padrao=None):
+        valor = d.get(nome)
+        if valor in (None, ''): return padrao
+        try: return int(valor)
+        except (TypeError, ValueError): raise ValueError(f'{nome} deve ser inteiro.')
+
+    return {
+        'operadora': operadora,
+        'plano': plano,
+        'modalidade': str(d.get('modalidade') or 'PME').strip()[:40],
+        'acomodacao': str(d.get('acomodacao') or 'Enfermaria').strip()[:40],
+        'coparticipacao': str(d.get('coparticipacao') or 'Sem').strip()[:40],
+        'linha': str(d.get('linha') or '').strip()[:160],
+        'tipo_cnpj': str(d.get('tipo_cnpj') or '').strip()[:80],
+        'abrangencia': str(d.get('abrangencia') or '').strip()[:120],
+        'administradora': str(d.get('administradora') or '').strip()[:120],
+        'cidade': str(d.get('cidade') or '').strip()[:120],
+        'entidade': str(d.get('entidade') or '').strip()[:120],
+        'vigencia': str(d.get('vigencia') or '').strip()[:40],
+        'vidas_min': inteiro('vidas_min'),
+        'vidas_max': inteiro('vidas_max'),
+        'mei': 1 if d.get('mei') is True or str(d.get('mei') or '').lower() in ('1', 'true', 'sim') else 0,
+        'codigo': str(d.get('codigo') or '').strip()[:60],
+        'fonte': str(d.get('fonte') or 'mcp').strip()[:20],
+        'vigencia_pdf': str(d.get('vigencia_pdf') or '').strip()[:40],
+        'ativo': 0 if d.get('ativo') is False else 1,
+        'precos': precos_ok,
+    }
+
+
+def _api_tabela_salvar(conn, dados, tid=None):
+    agora = _agora_sp()
+    params = (dados['operadora'], dados['plano'], dados['modalidade'], dados['acomodacao'],
+              dados['coparticipacao'], dados['linha'], dados['tipo_cnpj'], dados['abrangencia'],
+              dados['administradora'], dados['cidade'], dados['entidade'], dados['vigencia'],
+              dados['ativo'], dados['vidas_min'], dados['vidas_max'], dados['mei'], dados['codigo'],
+              dados['fonte'], dados['vigencia_pdf'], agora)
+    if tid is None:
+        cur = conn.execute("""INSERT INTO cotacao_tabela
+            (operadora, plano, modalidade, acomodacao, coparticipacao, linha, tipo_cnpj,
+             abrangencia, administradora, cidade, entidade, vigencia, ativo, vidas_min,
+             vidas_max, mei, codigo, fonte, vigencia_pdf, atualizado_em)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", params)
+        tid = _last_insert_id(cur)
+        if not tid:
+            tid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
+                   else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    else:
+        existe = conn.execute("SELECT id FROM cotacao_tabela WHERE id=?", (tid,)).fetchone()
+        if not existe:
+            raise LookupError('Tabela não encontrada.')
+        conn.execute("""UPDATE cotacao_tabela SET
+            operadora=?, plano=?, modalidade=?, acomodacao=?, coparticipacao=?, linha=?,
+            tipo_cnpj=?, abrangencia=?, administradora=?, cidade=?, entidade=?, vigencia=?,
+            ativo=?, vidas_min=?, vidas_max=?, mei=?, codigo=?, fonte=?, vigencia_pdf=?, atualizado_em=?
+            WHERE id=?""", params + (tid,))
+    for faixa, preco in dados['precos'].items():
+        atual = conn.execute("SELECT id FROM cotacao_preco WHERE tabela_id=? AND faixa=?",
+                             (tid, faixa)).fetchone()
+        if atual:
+            conn.execute("UPDATE cotacao_preco SET preco=? WHERE id=?", (preco, atual['id']))
+        else:
+            conn.execute("INSERT INTO cotacao_preco (tabela_id, faixa, preco) VALUES (?,?,?)",
+                         (tid, faixa, preco))
+    return tid
+
+
+def _api_tabela_completa(conn, tid):
+    linha = conn.execute("SELECT * FROM cotacao_tabela WHERE id=?", (tid,)).fetchone()
+    if not linha:
+        return None
+    out = dict(linha)
+    out['precos'] = {r['faixa']: float(r['preco'] or 0) for r in conn.execute(
+        "SELECT faixa, preco FROM cotacao_preco WHERE tabela_id=? ORDER BY id", (tid,)).fetchall()}
+    out['rede'] = [dict(r) for r in conn.execute(
+        "SELECT id, nome, cidade, cobertura FROM cotacao_rede WHERE tabela_id=? ORDER BY nome",
+        (tid,)).fetchall()]
+    return out
+
+
+def _api_exigir_admin(conn):
+    usuario = _api_usuario_ativo(conn)
+    return usuario if _api_usuario_eh_admin(usuario) else None
+
+
+@app.route('/api/v1/cotacao/tabelas/<int:tid>', methods=['GET', 'OPTIONS'])
+@requer('cotacao:ler')
+def api_v1_cotacao_tabela_ler(tid):
+    conn = db()
+    if not _api_usuario_ativo(conn):
+        close_db(conn); return _api_erro('nao_autenticado', 'Usuário da chave inválido ou inativo', 401)
+    tabela = _api_tabela_completa(conn, tid)
+    close_db(conn)
+    if not tabela:
+        return _api_erro('nao_encontrada', 'Tabela não encontrada', 404)
+    return jsonify({'ok': True, 'tabela': tabela})
+
+
+@app.route('/api/v1/cotacao/tabelas', methods=['POST', 'OPTIONS'])
+@requer('cotacao:escrever')
+def api_v1_cotacao_tabela_criar():
+    conn = db()
+    usuario = _api_exigir_admin(conn)
+    if not usuario:
+        close_db(conn); return _api_erro('sem_permissao', 'Esta ação exige usuário administrador', 403)
+    try:
+        dados = _api_tabela_payload(request.get_json(silent=True) or {})
+        tid = _api_tabela_salvar(conn, dados)
+        conn.commit()
+        tabela = _api_tabela_completa(conn, tid)
+    except ValueError as e:
+        conn.rollback(); close_db(conn); return _api_erro('tabela_invalida', str(e))
+    except Exception as e:
+        conn.rollback(); close_db(conn)
+        app.logger.error('[API_V1_TABELA] criar: %s', e)
+        return _api_erro('falha_ao_salvar', 'Não foi possível criar a tabela', 500)
+    close_db(conn)
+    app.logger.info('[AUDITORIA_MCP] usuario=%s acao=criar_tabela alvo=%s', usuario['id'], tid)
+    return jsonify({'ok': True, 'tabela': tabela}), 201
+
+
+@app.route('/api/v1/cotacao/tabelas/<int:tid>', methods=['PUT'])
+@requer('cotacao:escrever')
+def api_v1_cotacao_tabela_atualizar(tid):
+    conn = db()
+    usuario = _api_exigir_admin(conn)
+    if not usuario:
+        close_db(conn); return _api_erro('sem_permissao', 'Esta ação exige usuário administrador', 403)
+    atual = _api_tabela_completa(conn, tid)
+    if not atual:
+        close_db(conn); return _api_erro('nao_encontrada', 'Tabela não encontrada', 404)
+    entrada = dict(atual)
+    entrada.update(request.get_json(silent=True) or {})
+    if 'precos' not in entrada:
+        entrada['precos'] = atual['precos']
+    try:
+        dados = _api_tabela_payload(entrada)
+        _api_tabela_salvar(conn, dados, tid)
+        conn.commit()
+        tabela = _api_tabela_completa(conn, tid)
+    except ValueError as e:
+        conn.rollback(); close_db(conn); return _api_erro('tabela_invalida', str(e))
+    except Exception as e:
+        conn.rollback(); close_db(conn)
+        app.logger.error('[API_V1_TABELA] atualizar %s: %s', tid, e)
+        return _api_erro('falha_ao_salvar', 'Não foi possível atualizar a tabela', 500)
+    close_db(conn)
+    app.logger.info('[AUDITORIA_MCP] usuario=%s acao=atualizar_tabela alvo=%s', usuario['id'], tid)
+    return jsonify({'ok': True, 'tabela': tabela})
+
+
+@app.route('/api/v1/cotacao/tabelas/importar', methods=['POST', 'OPTIONS'])
+@requer('cotacao:escrever')
+def api_v1_cotacao_tabelas_importar():
+    payload = request.get_json(silent=True) or {}
+    operadora = str(payload.get('operadora') or '').strip()[:120]
+    lote = payload.get('tabelas')
+    if not operadora or not isinstance(lote, list) or not lote:
+        return _api_erro('lote_invalido', 'Informe operadora e uma lista não vazia de tabelas')
+    conn = db()
+    usuario = _api_exigir_admin(conn)
+    if not usuario:
+        close_db(conn); return _api_erro('sem_permissao', 'Esta ação exige usuário administrador', 403)
+    criadas = atualizadas = recusadas = 0
+    ids = []
+    try:
+        for item in lote[:500]:
+            entrada = dict(item) if isinstance(item, dict) else {}
+            entrada['operadora'] = operadora
+            entrada.setdefault('fonte', payload.get('fonte') or 'mcp')
+            entrada.setdefault('vigencia_pdf', payload.get('vigencia_pdf') or '')
+            try:
+                dados = _api_tabela_payload(entrada, operadora)
+            except ValueError:
+                recusadas += 1
+                continue
+            if dados['codigo']:
+                existente = conn.execute(
+                    "SELECT id FROM cotacao_tabela WHERE operadora=? AND codigo=?",
+                    (dados['operadora'], dados['codigo'])).fetchone()
+            else:
+                existente = conn.execute("""SELECT id FROM cotacao_tabela
+                    WHERE operadora=? AND plano=? AND modalidade=? AND acomodacao=?
+                      AND coparticipacao=? AND COALESCE(cidade,'')=? AND COALESCE(abrangencia,'')=?
+                      AND COALESCE(administradora,'')=? AND COALESCE(entidade,'')=?
+                      AND COALESCE(tipo_cnpj,'')=? AND COALESCE(linha,'')=?
+                      AND COALESCE(vidas_min,0)=COALESCE(?,0)
+                      AND COALESCE(vidas_max,0)=COALESCE(?,0) AND COALESCE(mei,0)=?""",
+                    (dados['operadora'], dados['plano'], dados['modalidade'], dados['acomodacao'],
+                     dados['coparticipacao'], dados['cidade'], dados['abrangencia'],
+                     dados['administradora'], dados['entidade'], dados['tipo_cnpj'], dados['linha'],
+                     dados['vidas_min'], dados['vidas_max'], dados['mei'])).fetchone()
+            if existente:
+                tid = _api_tabela_salvar(conn, dados, existente['id']); atualizadas += 1
+            else:
+                tid = _api_tabela_salvar(conn, dados); criadas += 1
+            ids.append(tid)
+        conn.commit()
+    except Exception as e:
+        conn.rollback(); close_db(conn)
+        app.logger.error('[API_V1_TABELA] importar: %s', e)
+        return _api_erro('falha_ao_importar', 'Não foi possível importar o lote', 500)
+    close_db(conn)
+    app.logger.info('[AUDITORIA_MCP] usuario=%s acao=importar_tabelas criadas=%s atualizadas=%s recusadas=%s',
+                    usuario['id'], criadas, atualizadas, recusadas)
+    return jsonify({'ok': True, 'criadas': criadas, 'atualizadas': atualizadas,
+                    'recusadas': recusadas, 'ids': ids})
+
+
+@app.route('/api/v1/cotacao/tabelas/<int:tid>/excluir', methods=['POST', 'OPTIONS'])
+@requer('cotacao:escrever')
+def api_v1_cotacao_tabela_excluir(tid):
+    d = request.get_json(silent=True) or {}
+    if d.get('confirmacao') != f'EXCLUIR TABELA {tid}':
+        return _api_erro('confirmacao_invalida',
+                         f'Envie confirmacao exatamente como "EXCLUIR TABELA {tid}"')
+    conn = db()
+    usuario = _api_exigir_admin(conn)
+    if not usuario:
+        close_db(conn); return _api_erro('sem_permissao', 'Esta ação exige usuário administrador', 403)
+    if not conn.execute("SELECT id FROM cotacao_tabela WHERE id=?", (tid,)).fetchone():
+        close_db(conn); return _api_erro('nao_encontrada', 'Tabela não encontrada', 404)
+    conn.execute("DELETE FROM cotacao_preco WHERE tabela_id=?", (tid,))
+    conn.execute("DELETE FROM cotacao_rede WHERE tabela_id=?", (tid,))
+    conn.execute("DELETE FROM cotacao_tabela WHERE id=?", (tid,))
+    conn.commit(); close_db(conn)
+    app.logger.info('[AUDITORIA_MCP] usuario=%s acao=excluir_tabela alvo=%s', usuario['id'], tid)
+    return jsonify({'ok': True, 'excluida': tid})
 
 
 # ── NOTIFICAÇÕES (sininho) ──────────────────────────────────────────────────

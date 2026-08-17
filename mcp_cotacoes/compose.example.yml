@@ -1,0 +1,34 @@
+services:
+  job-cotacoes-mcp:
+    build:
+      context: ..
+      dockerfile: mcp_cotacoes/Dockerfile
+    image: job-cotacoes-mcp:1.0.0
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      PORT: "8000"
+      MCP_PUBLIC_URL: "https://${MCP_HOSTNAME}"
+      MCP_API_KEY: "${MCP_API_KEY}"
+      MCP_ADMIN_API_KEY: "${MCP_ADMIN_API_KEY}"
+      JOB_BASE_URL: "${JOB_BASE_URL}"
+      JOB_API_KEY: "${JOB_API_KEY}"
+      JOB_ADMIN_API_KEY: "${JOB_ADMIN_API_KEY}"
+      JOB_API_TIMEOUT: "30"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.job-cotacoes-mcp.rule=Host(`${MCP_HOSTNAME}`)
+      - traefik.http.routers.job-cotacoes-mcp.entrypoints=websecure
+      - traefik.http.routers.job-cotacoes-mcp.tls=true
+      - traefik.http.routers.job-cotacoes-mcp.tls.certresolver=letsencrypt
+      - traefik.http.services.job-cotacoes-mcp.loadbalancer.server.port=8000
+    networks:
+      - traefik-public
+
+networks:
+  traefik-public:
+    external: true
