@@ -36294,11 +36294,23 @@ def _viva_para_apresentacao(d):
         total = float(p.get('total') or 0)
         if elegivel:
             total_geral += total
+        pl = p.get('plano') or {}
+        acomodacao_bruta = pl.get('acomodacaoTxt')
+        if acomodacao_bruta in (None, ''):
+            acomodacao_bruta = pl.get('acomodacao')
+        if isinstance(acomodacao_bruta, str):
+            acomodacao = acomodacao_bruta.strip()
+        elif acomodacao_bruta is True:
+            acomodacao = 'Apartamento'
+        elif acomodacao_bruta is False:
+            acomodacao = 'Enfermaria'
+        else:
+            acomodacao = ''
         planos.append({
             'operadora': (p.get('operadora') or {}).get('nome') or '',
             'plano': (p.get('plano') or {}).get('nome') or '',
             'modalidade': p.get('_tipo') or '',
-            'acomodacao': 'Apartamento' if (p.get('plano') or {}).get('acomodacao') else 'Enfermaria',
+            'acomodacao': acomodacao,
             'coparticipacao': _copart_texto(tb),
             'abrangencia': (p.get('produto') or {}).get('nome') or '',
             'vigencia': '',

@@ -7856,27 +7856,38 @@
   // as idades cruas. E por isso que 59 anos funciona aqui sem faixa — o motor
   // do JOB faz a conta da faixa sozinho, do mesmo jeito que o site faz.
   async function _cotPrecosJob(alvo, emLote) {
-    _cotEsperando('Calculando ' + alvo.length + (alvo.length === 1 ? ' plano…' : ' planos…'),
+    _cotEsperando('Conferindo ao vivo ' + alvo.length + (alvo.length === 1 ? ' plano…' : ' planos…'),
                   '', _cotPintarPlanos, 'Planos');
     const g = _cotGer;
     const idades = String(_cot.idades || '').split(/[^0-9]+/)
       .map((s) => parseInt(s, 10)).filter((n) => !isNaN(n) && n >= 0 && n <= 120);
     if (!idades.length) { _cotErro('sem_idades_para_calcular', _cotPintarPlanos); return; }
-    let r = null;
-    try {
-      r = await _safeSendMessage({ type: 'cotacao_tabelas_calcular', idades: idades,
-                                   planos: alvo.map((p) => p._planoId) });
-    } catch (e) { r = null; }
+    // REGRA DA FONTE: primeiro o Painel, sempre. A tabela do JOB só entra
+    // como contingência para o plano que não voltou ao vivo. Assim um valor
+    // salvo nunca ganha de um valor disponível agora.
+    const vivos = await _cotFallbackAoVivo(_cot.operadoraAtual.nome, alvo);
     if (g !== _cotGer) return;
-    if (!r || !r.ok) { _cotErro((r && r.erro) || 'tabelas_do_job', _cotPintarPlanos); return; }
+    const vivoPorId = {};
+    vivos.filter((p) => p.total != null).forEach((p) => { vivoPorId[String(p._planoId)] = p; });
+    const semVivo = alvo.filter((p) => !vivoPorId[String(p._planoId)]);
+    if (semVivo.length) _cotRegistrarDiagnostico('ao_vivo_indisponivel_usando_banco', semVivo);
+    let r = { ok: true, resultados: [], avisos: [] };
+    if (semVivo.length) {
+      try {
+        r = await _safeSendMessage({ type: 'cotacao_tabelas_calcular', idades: idades,
+                                     planos: semVivo.map((p) => p._planoId) });
+      } catch (e) { r = null; }
+    }
+    if (g !== _cotGer) return;
     const porId = {};
-    (r.resultados || []).forEach((x) => { porId[String(x.plano_id)] = x; });
+    ((r && r.resultados) || []).forEach((x) => { porId[String(x.plano_id)] = x; });
     // AVISO DO MOTOR VIRA MOTIVO NA LINHA. Plano fora da faixa de vidas ou com
     // preco faltando em uma faixa some do calculo — sem isto ele sumiria da
     // tela sem explicacao, e o consultor acharia que a extensao engoliu.
     const motivo = {};
-    (r.avisos || []).forEach((a) => { motivo[String(a.plano_id)] = a.mensagem || a.codigo; });
+    ((r && r.avisos) || []).forEach((a) => { motivo[String(a.plano_id)] = a.mensagem || a.codigo; });
     const feitos = alvo.map((p) => {
+      if (vivoPorId[String(p._planoId)]) return vivoPorId[String(p._planoId)];
       const x = porId[String(p._planoId)];
       return Object.assign({}, p, (x && x.elegivel)
         // `unitario` e o nome que o servidor le ao salvar (ele escreve
@@ -7884,30 +7895,11 @@
         // cotacao salva sai com as faixas zeradas no documento do cliente.
         ? { total: x.total, conferido: true,
             faixas: (x.linhas || []).map((l) => Object.assign({ unitario: l.preco }, l)) }
-        : { total: null, motivo: motivo[String(p._planoId)] || 'sem_valor_na_resposta' });
+        : { total: null, motivo: motivo[String(p._planoId)] ||
+            ((!r || !r.ok) ? ((r && r.erro) || 'banco_indisponivel') : 'sem_valor_na_resposta') });
     });
-    const limiteCache = Date.now() - (7 * 24 * 60 * 60 * 1000);
-    const precisaAoVivo = feitos.filter((p) => {
-      const atualizado = Date.parse(p.atualizadoEm || '');
-      return p.total == null || !atualizado || atualizado < limiteCache;
-    });
-    if (precisaAoVivo.length) {
-      precisaAoVivo.forEach((p) => {
-        const atualizado = Date.parse(p.atualizadoEm || '');
-        if (p.total != null && (!atualizado || atualizado < limiteCache)) {
-          p.total = null;
-          p.motivo = 'cache_desatualizado';
-        }
-      });
-      _cotRegistrarDiagnostico('fallback_ao_vivo', precisaAoVivo);
-      const vivos = await _cotFallbackAoVivo(_cot.operadoraAtual.nome, precisaAoVivo);
-      vivos.forEach((v) => {
-        const i = feitos.findIndex((p) => String(p._planoId) === String(v._planoId));
-        if (i >= 0 && v.total != null) feitos[i] = v;
-      });
-    }
     const falhos = feitos.filter((p) => p.total == null);
-    if (falhos.length) _cotRegistrarDiagnostico('sem_preco_apos_fallback', falhos);
+    if (falhos.length) _cotRegistrarDiagnostico('sem_preco_ao_vivo_nem_banco', falhos);
     feitos.sort((a, b) => (a.total == null) - (b.total == null) || (a.total - b.total));
     _cot.resultado = feitos;
     _cotFeitas = _cotFeitas.filter((f) => String(f.operadoraId) !== String(_cot.operadoraAtual.id));
