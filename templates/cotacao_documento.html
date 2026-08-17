@@ -8,6 +8,34 @@
   * { margin:0; padding:0; box-sizing:border-box; }
   body { background:#5b5b66; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; color:#2b2b33; padding:22px 16px 60px; }
 
+  /* O link do cliente é uma página, não uma prévia de impressão. A folha
+     anterior crescia por `max-content`: um nome empresarial longo alargava o
+     documento inteiro e escondia planos fora da tela até em monitor grande. */
+  body.publico { background:#f1efe9; }
+  body.publico .scroll { max-width:1080px; overflow:visible; }
+  body.publico .folha { width:100%; min-width:0; border-radius:18px; padding:36px 40px;
+                        box-shadow:0 18px 60px rgba(29,35,32,.14); overflow:hidden; }
+  body.publico .titulo { max-width:760px; font-size:24px; line-height:1.12;
+                         letter-spacing:-.02em; overflow-wrap:anywhere; }
+  body.publico table.doc { width:100%; }
+  .publico-mobile { display:none; }
+  .publico-plano { border:1px solid #e3e5e8; border-radius:14px; overflow:hidden; margin-bottom:14px; }
+  .publico-plano-head { display:grid; grid-template-columns:auto 1fr; gap:10px 14px;
+                        align-items:center; padding:15px; background:#f7f8f8; }
+  .publico-plano-head img { width:auto; height:28px; max-width:110px; }
+  .publico-plano-nome { font-size:15px; font-weight:750; color:#1c1c24; }
+  .publico-plano-op { font-size:11px; color:#7a7a86; margin-top:2px; }
+  .publico-plano-total { grid-column:1 / -1; font-size:22px; font-weight:800; color:#17211d; }
+  .publico-plano-total span { font-size:11px; font-weight:600; color:#7a7a86; }
+  .publico-plano-meta { display:grid; grid-template-columns:1fr auto; gap:0; }
+  .publico-plano-meta div { padding:9px 14px; border-top:1px solid #edf0ef; font-size:12.5px; }
+  .publico-plano-meta .valor { text-align:right; color:#1c1c24; font-variant-numeric:tabular-nums; }
+  .publico-feedback-acoes { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+  .publico-feedback-acoes button { min-height:44px; border-radius:10px; padding:11px 20px;
+                                   font-size:14px; font-weight:700; cursor:pointer; }
+  .publico-feedback-pri { background:#168f6d; color:#fff; border:1px solid #168f6d; }
+  .publico-feedback-sec { background:transparent; color:#2f67c8; border:1px solid #7ca6ed; }
+
   .toolbar { max-width:1180px; margin:0 auto 16px; display:flex; gap:10px; justify-content:flex-end; }
   .toolbar a, .toolbar button { font-size:13px; font-weight:600; border-radius:8px; padding:10px 18px; cursor:pointer; border:1px solid rgba(255,255,255,.3); }
   .toolbar .btn-pdf { background:#3b82f6; color:#fff; border:none; }
@@ -110,10 +138,26 @@
 
   /* Modo edição (agravo) */
   #documento.editando .preco-cell { background:#fff7e6; outline:1px dashed #fb923c; cursor:text; border-radius:4px; }
+
+  @media (max-width:760px) {
+    body.publico { padding:0 0 36px; background:#fff; }
+    body.publico .scroll { width:100%; overflow-x:auto; }
+    body.publico .folha { width:100%; min-width:0; padding:24px 20px;
+                          border-radius:0; box-shadow:none; }
+    body.publico .cab { flex-direction:column; gap:18px; margin-bottom:20px; }
+    body.publico .titulo { font-size:20px; max-width:520px; }
+    body.publico .corretor .linha { align-items:flex-start; }
+    body.publico .corretor .v { flex:1; min-width:0; overflow-wrap:anywhere; }
+    body.publico table.doc { display:none; }
+    body.publico .publico-mobile { display:block; }
+    body.publico #fb-cotacao { margin-top:18px; }
+    body.publico .publico-feedback-acoes { flex-direction:column; }
+    body.publico .publico-feedback-acoes button { width:100%; }
+  }
 </style>
 {% if cot.orientacao == 'vertical' %}<style>@media print { .scroll .folha { min-width:0; } @page { size:A4 portrait; margin:10mm; } }</style>{% endif %}
 </head>
-<body>
+<body{% if publico %} class="publico"{% endif %}>
 
 {% if not publico %}
 <div class="toolbar">
@@ -239,6 +283,27 @@
       {% for p in cot.planos %}<td class="val total-cell" data-p="{{ loop.index0 }}" style="--c:{{ p.cor }}">{{ p.total|moeda_doc }}</td>{% endfor %}
     </tr>
   </table>
+  {% if publico %}
+  <div class="publico-mobile">
+    {% for p in cot.planos %}
+    <section class="publico-plano">
+      <div class="publico-plano-head">
+        {% if p.logo %}<img src="{{ p.logo }}" alt="{{ p.operadora }}">{% endif %}
+        <div><div class="publico-plano-nome">{{ p.plano }}</div><div class="publico-plano-op">{{ p.operadora }}</div></div>
+        <div class="publico-plano-total">{{ p.total|moeda_doc }} <span>por mês</span></div>
+      </div>
+      <div class="publico-plano-meta">
+        <div>Modalidade</div><div class="valor">{{ p.modalidade }}</div>
+        <div>Acomodação</div><div class="valor">{{ p.acomodacao }}</div>
+        <div>Coparticipação</div><div class="valor">{{ p.coparticipacao }}</div>
+        {% for f in cot.faixas_usadas %}
+        <div>{{ f.label }} · {{ f.qtd }}x</div><div class="valor">{{ p.precos_unit[f.faixa]|moeda_doc }}</div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endfor %}
+  </div>
+  {% endif %}
   {% endif %}
 
   <div class="rodape">
@@ -248,9 +313,9 @@
 
 {% if publico %}
 <div id="fb-cotacao" style="max-width:900px;margin:22px auto 0;padding:0 16px;text-align:center;">
-  <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
-    <button onclick="enviarFeedbackCotacao('gostei', this)" style="background:#22c55e;color:#fff;border:none;border-radius:9px;padding:12px 22px;font-size:14px;font-weight:600;cursor:pointer;">Gostei dessa proposta</button>
-    <button onclick="enviarFeedbackCotacao('explicar', this)" style="background:#3b82f6;color:#fff;border:none;border-radius:9px;padding:12px 22px;font-size:14px;font-weight:600;cursor:pointer;">Me explique mais essa opção</button>
+  <div class="publico-feedback-acoes">
+    <button class="publico-feedback-pri" onclick="enviarFeedbackCotacao('gostei', this)">Gostei dessa proposta</button>
+    <button class="publico-feedback-sec" onclick="enviarFeedbackCotacao('explicar', this)">Quero entender melhor</button>
   </div>
   <div style="font-size:11.5px;color:#8a8a96;margin-top:10px;">Isso não é a contratação do plano — é só pra avisar seu corretor sobre o que você achou.</div>
   <div id="fb-cotacao-ok" style="display:none;font-size:13px;color:#22c55e;font-weight:600;margin-top:12px;">Obrigado! Seu corretor já foi avisado.</div>

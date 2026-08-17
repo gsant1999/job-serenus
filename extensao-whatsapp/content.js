@@ -6128,6 +6128,11 @@
               (_cotQuando(c.dias) ? '<span class="job-cot-item-q">' + esc(_cotQuando(c.dias)) + '</span>' : '') +
             '</div>' +
             (partes.length ? '<div class="job-cot-item-s">' + esc(partes.join(' · ')) + '</div>' : '') +
+            '<a class="job-cot-abrir" href="' +
+              esc(_SITE_BASE_URL_EXT + '/cotacao/documento/' + c.id) + '" target="_blank" rel="noopener" ' +
+              'title="Abre esta cotação salva com correção de valor, destaque, legenda, imagem e PDF">' +
+              'Abrir cotação completa</a>' +
+            '<div class="job-cot-item-s job-cot-abrir-dica">Usa os preços já salvos. Não faz uma nova cotação.</div>' +
             (c.url
               ? '<div class="job-cot-item-acoes">' +
                   // AS DUAS SAO SECUNDARIAS DE PROPOSITO. Cada cartao do

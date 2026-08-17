@@ -1260,6 +1260,13 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-cot-item-t { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; color: var(--job-txt); line-height: 1.35; }
 .job-cot-item-q { flex: none; font-size: 10.5px; font-weight: 700; color: var(--job-txt-fraco); background: var(--job-bg3); border-radius: 6px; padding: 3px 7px; white-space: nowrap; }
 .job-cot-item-s { font-size: 12px; color: var(--job-txt-fraco); margin-top: 6px; }
+.job-cot-abrir { display:flex; align-items:center; justify-content:center; width:100%; min-height:42px;
+  margin-top:10px; border-radius:10px; background:var(--job-acento); color:var(--job-sobre-acento);
+  font:700 12.5px var(--job-ui); text-decoration:none; transition:filter var(--job-t-rapido) ease,
+  transform var(--job-t-toque) ease-out; }
+.job-cot-abrir:hover { filter:brightness(1.06); }
+.job-cot-abrir:active { transform:scale(.98); }
+.job-cot-abrir-dica { margin-top:5px; font-size:10.5px; }
 .job-cot-sem-link { font-style: italic; }
 
 @media (prefers-reduced-motion: reduce) {

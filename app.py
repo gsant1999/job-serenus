@@ -38772,7 +38772,7 @@ def cotacao_documento(cid):
     except Exception:
         engajamento = None
     close_db(conn)
-    return render_template('cotacao_documento.html', cot=cot, engajamento=engajamento)
+    return render_template('cotacao_documento.html', cot=cot, c=c, engajamento=engajamento)
 
 
 @app.route('/cotacao/<int:cid>/reabrir')
@@ -38881,7 +38881,7 @@ def cotacao_publica(token):
                        '/cotacao/documento/' + str(cd['id']))
         except Exception:
             pass
-    return render_template('cotacao_documento.html', cot=cot, publico=True)
+    return render_template('cotacao_documento.html', cot=cot, c=c, publico=True)
 
 
 @app.route('/c/<token>/feedback', methods=['POST'])
