@@ -312,6 +312,22 @@
       () => { void chrome.runtime.lastError; });
   } catch (e) { /* sem background: segue */ }
 
+  // FILA RAPIDA SEM TOCAR NO PAINEL.
+  //
+  // O alarme do Manifest V3 so pode acordar o worker em intervalos longos e
+  // fazia cada etapa remota esperar ate um minuto. Esta ponte ja esta viva
+  // enquanto a aba do Painel esta aberta, entao apenas acorda o background
+  // para ele consultar o JOB. Nenhuma chamada sai para o Painel aqui.
+  function _acordarFila() {
+    try {
+      chrome.runtime.sendMessage({ type: 'painel_fila_tick' },
+        () => { void chrome.runtime.lastError; });
+    } catch (e) { /* extensao recarregando: a reinjecao retoma */ }
+    const atraso = 3500 + Math.floor(Math.random() * 1500);
+    setTimeout(_acordarFila, atraso);
+  }
+  setTimeout(_acordarFila, 1200);
+
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || !ACEITOS[msg.type]) return;
     const [tipo, limite] = ACEITOS[msg.type];

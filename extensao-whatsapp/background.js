@@ -153,16 +153,21 @@ function _filaAvisarTela(id, s) {
 // 55 segundos e consultava a cada 2 segundos: na maquina trabalhadora o worker
 // ficava acordado praticamente o tempo inteiro, mesmo sem nenhuma cotacao.
 let _trabOcupado = false;
+let _trabConsultando = false;
+let _trabUltimaConsulta = 0;
 
 function _trabalhadorTick() {
-  if (_trabOcupado) return;
+  const agora = Date.now();
+  if (_trabOcupado || _trabConsultando || agora - _trabUltimaConsulta < 3000) return;
+  _trabConsultando = true;
+  _trabUltimaConsulta = agora;
   chamarJob('/api/whatsapp/cotacao/fila/proximo', 'GET', null, 12000).then((r) => {
     if (!r) return;
     if (r.motivo === 'nao_e_trabalhador' || r.motivo === 'trabalhador_indisponivel') return;
     if (!r.ok || !r.id) return;
     _trabOcupado = true;
     _trabalhadorExecutar(r.id, r.pedido);
-  }).catch(() => {});
+  }).catch(() => {}).finally(() => { _trabConsultando = false; });
 }
 
 // Roda o pedido na aba do Painel DESTA maquina e devolve o resultado.
@@ -1423,6 +1428,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // saber a diferença entre "nunca abriu" e "abriu e fechou".
   if (msg && msg.type === 'painel_vivo') {
     chrome.storage.local.set({ painelVivoEm: Date.now() });
+    // A abertura da ponte e um evento confiavel e barato: aproveita para
+    // renovar o sinal e buscar trabalho sem esperar o alarme de um minuto.
+    _rodadaDeFundo().catch(() => {});
+    return false;
+  }
+  if (msg && msg.type === 'painel_fila_tick') {
+    // A aba do Painel apenas acorda a extensao. A consulta vai ao JOB; nada e
+    // clicado, lido ou requisitado no Painel ate existir uma cotacao real.
+    // O sinal de trabalhador continua renovado pelo alarme, portanto este
+    // caminho faz somente a retirada leve da fila.
+    _trabalhadorTick();
     return false;
   }
 
