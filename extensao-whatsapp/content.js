@@ -7773,6 +7773,7 @@
                 qtdVidaMin: x.vidas_min || 0, qtdVidaMax: x.vidas_max || 0 },
       operadora: { nome: x.operadora || '' },
       vigencia: x.vigencia || '',
+      atualizadoEm: x.criado_em || '',
       faixasDisponiveis: x.faixas || {},
     };
   }
@@ -7885,8 +7886,28 @@
             faixas: (x.linhas || []).map((l) => Object.assign({ unitario: l.preco }, l)) }
         : { total: null, motivo: motivo[String(p._planoId)] || 'sem_valor_na_resposta' });
     });
+    const limiteCache = Date.now() - (7 * 24 * 60 * 60 * 1000);
+    const precisaAoVivo = feitos.filter((p) => {
+      const atualizado = Date.parse(p.atualizadoEm || '');
+      return p.total == null || !atualizado || atualizado < limiteCache;
+    });
+    if (precisaAoVivo.length) {
+      precisaAoVivo.forEach((p) => {
+        const atualizado = Date.parse(p.atualizadoEm || '');
+        if (p.total != null && (!atualizado || atualizado < limiteCache)) {
+          p.total = null;
+          p.motivo = 'cache_desatualizado';
+        }
+      });
+      _cotRegistrarDiagnostico('fallback_ao_vivo', precisaAoVivo);
+      const vivos = await _cotFallbackAoVivo(_cot.operadoraAtual.nome, precisaAoVivo);
+      vivos.forEach((v) => {
+        const i = feitos.findIndex((p) => String(p._planoId) === String(v._planoId));
+        if (i >= 0 && v.total != null) feitos[i] = v;
+      });
+    }
     const falhos = feitos.filter((p) => p.total == null);
-    if (falhos.length) _cotRegistrarDiagnostico('tabela_sem_preco', falhos);
+    if (falhos.length) _cotRegistrarDiagnostico('sem_preco_apos_fallback', falhos);
     feitos.sort((a, b) => (a.total == null) - (b.total == null) || (a.total - b.total));
     _cot.resultado = feitos;
     _cotFeitas = _cotFeitas.filter((f) => String(f.operadoraId) !== String(_cot.operadoraAtual.id));
@@ -7895,6 +7916,48 @@
     // ADIANTA A REDE E A DECODIFICACAO, antes de ele clicar em "Ver imagem".
     _cotPreAquecer();
     if (!emLote) _cotPintarResultado();
+  }
+
+  function _cotNomeNormalizado(v) {
+    return String(v || '').toLowerCase().normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+
+  async function _cotFallbackAoVivo(nomeOperadora, planosJob) {
+    const alvoOp = _cotNomeNormalizado(nomeOperadora);
+    const op = (_cot.operadoras || []).find((o) => {
+      const n = _cotNomeNormalizado(o.nome);
+      return n === alvoOp || n.indexOf(alvoOp) >= 0 || alvoOp.indexOf(n) >= 0;
+    });
+    if (!op) return [];
+    const rp = await _cotPasso(Object.assign({ acao: 'planos', cotacaoId: _cot.cotacaoId,
+                                               operadoraId: op.id }, _cotBase()));
+    if (!rp || !rp.ok) return [];
+    const disponiveis = (rp.dados && rp.dados.planos) || [];
+    const pares = [];
+    planosJob.forEach((pj) => {
+      const nome = _cotNomeNormalizado(_cotNomePlano(pj));
+      const acomodacao = _cotNomeNormalizado(_cotAcomod(pj.plano));
+      const candidatos = disponiveis.filter((p) =>
+        _cotNomeNormalizado(_cotNomePlano(p)) === nome &&
+        (!acomodacao || _cotNomeNormalizado(_cotAcomod(p.plano)) === acomodacao));
+      if (candidatos.length === 1) pares.push({ job: pj, vivo: candidatos[0] });
+    });
+    if (!pares.length) return [];
+    const resposta = await _safeSendMessage({ type: 'cotador_precos_paralelos',
+      pedido: Object.assign({ planos: pares.map((x) => x.vivo) }, _cotBase()) }).catch(() => null);
+    const recebidos = (resposta && resposta.ok && resposta.dados && Array.isArray(resposta.dados.planos))
+      ? resposta.dados.planos : [];
+    const porChave = {};
+    recebidos.forEach((x) => { porChave[String(x.chave || '')] = x; });
+    return pares.map((par) => {
+      const x = porChave[String(par.vivo.key || par.vivo.chave || '')];
+      const cartao = x && x.cartao;
+      return Object.assign({}, par.job, cartao
+        ? { total: cartao.total, faixas: cartao.faixas, conferido: true,
+            fontePreco: 'painel_ao_vivo' }
+        : { total: null, motivo: (x && x.motivo) || 'fallback_sem_valor' });
+    });
   }
 
   async function _cotBuscarPlanos(op) {
@@ -8046,10 +8109,10 @@
               const faltantes = faixasPedidas.filter((f) =>
                 Number((pls[i].faixasDisponiveis || {})[f] || 0) <= 0);
               const semFaixa = !!(pls[i]._job && faltantes.length);
-              const bloqueado = naoServeMei || naoServeVidas || semFaixa;
+              const bloqueado = naoServeMei || naoServeVidas;
               const porque = naoServeMei ? 'Não aceita MEI'
                 : (naoServeVidas ? 'Disponível para ' + (vmin || 1) + (vmax ? ' a ' + vmax : '+') + ' vidas'
-                  : (semFaixa ? 'Indisponível para estas vidas' : ''));
+                  : '');
               if (semFaixa) {
                 pls[i].motivo = 'faixas_ausentes:' + faltantes.join(',');
               }

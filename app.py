@@ -24926,6 +24926,7 @@ def api_v1_cotacao_planos():
                                 'modalidade': t['modalidade'], 'acomodacao': t['acomodacao'],
                                 'coparticipacao': t['coparticipacao'], 'abrangencia': t['abrangencia'],
                                 'vigencia': t['vigencia'], 'ativo': bool(t['ativo']),
+                                'criado_em': str(dict(t).get('criado_em') or ''),
                                 'cidade': dict(t).get('cidade') or '',
                                 'entidade': dict(t).get('entidade') or '',
                                 'administradora': dict(t).get('administradora') or '',
