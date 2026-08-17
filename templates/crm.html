@@ -245,7 +245,17 @@
   .lead-bottom-row > .lead-sub-status { flex:1 1 100%; }
   .lead-acoes-row { display:flex; align-items:center; gap:6px; margin-top:6px; }
   .lead-card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
-  .lead-nome   { font-size:13.5px; font-weight:600; color:var(--texto); margin-bottom:2px; line-height:1.3; }
+  /* CAIXA ALTA NA EXIBICAO, e nao no banco.
+     O nome do lead vem de formulario da Meta e do Google — a pessoa escreve do
+     jeito dela. Padronizar no banco custaria migrar 5.600 linhas numa
+     requisicao so (risco de estourar o tempo no Railway) e patchar 13 pontos de
+     insercao, todos sujeitos a esquecer um.
+     E nao compraria nada: o unico consumidor do nome em caixa alta e ESTA tela.
+     Quem fala com o cliente ja converte pra "Oi Maria" (_nome_pra_pessoa), e o
+     casamento de lead e por telefone. Entao padroniza aqui, onde se ve — lead
+     velho e lead novo ficam iguais na hora, sem tocar em dado. */
+  .lead-nome   { font-size:13.5px; font-weight:600; color:var(--texto); margin-bottom:2px; line-height:1.3;
+                 text-transform:uppercase; }
   .lead-cidade { font-size:11px; color:var(--cinza); display:flex; align-items:center; gap:4px; }
   .lead-avatar { width:30px; height:30px; border-radius:50%; background:linear-gradient(135deg,var(--azul),var(--roxo)); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; color:#fff; flex-shrink:0; }
   .lead-tags   { display:flex; gap:5px; flex-wrap:wrap; margin-top:9px; align-items:center; }

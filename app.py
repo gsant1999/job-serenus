@@ -23163,22 +23163,22 @@ def admin_normalizar_caixa():
     por_col = {}
     for _pid, col, _a, _d in plano:
         por_col[col] = por_col.get(col, 0) + 1
-    amostra = [{"proposta": (f"lead {i[1]}" if isinstance(i, tuple) else f"#{i}"),
-                "campo": c, "antes": a[:55], "depois": d[:55]}
+    amostra = [{"proposta": f"#{i}", "campo": c, "antes": a[:55], "depois": d[:55]}
                for i, c, a, d in plano[:12]]
 
-    # LEADS DO CRM entram na mesma ferramenta. O nome deles nao e chave: a busca
-    # do funil ja compara com LOWER dos dois lados, e o casamento de lead e por
-    # telefone_norm. O que fala com o cliente ("Oi {nome}") passa pelo
-    # _nome_pra_pessoa, entao o prospect continua recebendo "Oi Maria".
-    try:
-        for l in conn.execute("SELECT id, nome, empresa FROM crm_leads").fetchall():
-            for col in ('nome', 'empresa'):
-                antes = l[col]
-                if antes and isinstance(antes, str) and _maiusc(antes) != antes:
-                    plano.append((('lead', l['id']), col, antes, _maiusc(antes)))
-    except Exception:
-        pass
+    # LEADS DO CRM FICARAM DE FORA, e por decisao consciente.
+    #
+    # Sao 5.600+ linhas: varrer e atualizar tudo numa requisicao HTTP so passa
+    # de 8.000 UPDATEs e arrisca estourar o tempo limite no Railway. O dado nao
+    # correria perigo (e uma transacao unica, ou aplica tudo ou nada), mas o
+    # admin veria o sistema falhando — e so o GET desta pagina ja ficaria lento,
+    # porque a previa varre o mesmo tanto.
+    #
+    # E nao compraria nada: o unico consumidor do nome de lead em caixa alta e a
+    # TELA do CRM, e ela ja padroniza na exibicao. Quem fala com o cliente
+    # converte pra "Oi Maria" (_nome_pra_pessoa), e o casamento de lead e por
+    # telefone_norm. Proposta e diferente: ali o nome vira documento e vai pra
+    # operadora, por isso vale gravar.
 
     if request.method == 'GET':
         close_db(conn)
@@ -23188,18 +23188,15 @@ def admin_normalizar_caixa():
                                propostas_tocadas=0)
 
     for pid, col, antes, depois in plano:
-        if isinstance(pid, tuple):          # ('lead', id)
-            conn.execute(f"UPDATE crm_leads SET {col}=? WHERE id=?", (depois, pid[1]))
-        else:
-            conn.execute(f"UPDATE propostas SET {col}=? WHERE id=?", (depois, pid))
-    pid_prop = next((x[0] for x in plano if not isinstance(x[0], tuple)), None)
-    if pid_prop:
+        conn.execute(f"UPDATE propostas SET {col}=? WHERE id=?", (depois, pid))
+    if plano:
+        pid_prop = plano[0][0]
         conn.execute("""INSERT INTO historico_proposta
             (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
             VALUES (?,?,?,?,?,?)""",
             (pid_prop, session.get('user_id'), session.get('nome', 'admin'), 'sistema',
-             f"Padronização de caixa alta: {len(plano)} campo(s)", datetime.now(TZ_SP)))
-    if plano:
+             f"Padronização de caixa alta: {len(plano)} campo(s) em "
+             f"{len({x[0] for x in plano})} proposta(s)", datetime.now(TZ_SP)))
         conn.commit()
     close_db(conn)
     app.logger.info(f"[CAIXA] normalizadas {len(plano)} celula(s) por {session.get('nome')}")
