@@ -31324,11 +31324,20 @@ def regra_gestor_salvar():
         except (TypeError, ValueError):
             return None
 
+    def _mes(v):
+        """Mês como número. A tela manda texto; gravar '2' onde o resto do
+        sistema grava 2 faz a régua comparar string com int e errar calado."""
+        try:
+            n = int(str(v).strip())
+        except (TypeError, ValueError):
+            return None
+        return n if n >= 1 else None
+
     fracoes, gestor = [], []
     for i, f in enumerate(d.get('fracoes') or [], start=1):
         fracoes.append({'ordem': i, 'percentual': _pct(f.get('percentual')),
                         'evento': (f.get('evento') or '').strip()[:60],
-                        'mes': (f.get('mes') if str(f.get('mes') or '').strip() else None)})
+                        'mes': _mes(f.get('mes'))})
         gestor.append({'ordem': i, 'percentual_gestor': _pct(f.get('percentual_gestor'))})
     if not fracoes:
         return jsonify({"ok": False, "erro": "Cadastre pelo menos uma fração de recebimento."}), 400
@@ -31356,6 +31365,27 @@ def regra_gestor_salvar():
              (d.get('vigencia_inicio') or '')[:10], (d.get('vigencia_fim') or '')[:10],
              session.get('nome'), agora, session.get('nome'), agora))
         rid = _last_insert_id(cur)
+        # Cópia de outra operadora: as retenções vêm junto. Sem isto a regra
+        # nova nasce "completa" e SEM imposto — o gestor receberia bruto e
+        # ninguém veria, porque regra sem nenhuma retenção não acusa falta.
+        # Só no INSERT: em regra que já existe, copiar duplicaria as dela.
+        try:
+            origem_id = int(d.get('copiar_retencoes_de') or 0)
+        except (TypeError, ValueError):
+            origem_id = 0
+        if origem_id and origem_id != rid:
+            for r in conn.execute("""SELECT * FROM gestor_retencao
+                                     WHERE regra_id=? AND COALESCE(ativo,1)=1 ORDER BY id""",
+                                  (origem_id,)).fetchall():
+                x = dict(r)
+                conn.execute("""INSERT INTO gestor_retencao
+                    (regra_id, tipo, nome, percentual, base_calculo, responsavel,
+                     vigencia_inicio, vigencia_fim, observacao, ativo, criado_por, criado_em)
+                    VALUES (?,?,?,?,?,?,?,?,?,1,?,?)""",
+                    (rid, x.get('tipo'), x.get('nome'), x.get('percentual'),
+                     x.get('base_calculo'), x.get('responsavel'),
+                     x.get('vigencia_inicio') or '', x.get('vigencia_fim') or '',
+                     (x.get('observacao') or '')[:400], session.get('nome'), agora))
     conn.commit()
     regra = dict(conn.execute("SELECT * FROM gestor_regra WHERE id=?", (rid,)).fetchone())
     ret = [dict(x) for x in conn.execute(

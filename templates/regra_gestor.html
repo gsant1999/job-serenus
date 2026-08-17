@@ -32,10 +32,22 @@
   .rg-acoes { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px; }
   .rg-mini { padding:6px 12px; font-size:12px; border-radius:8px; border:1px solid var(--borda);
              background:var(--panel-2); color:var(--texto); cursor:pointer; font-family:inherit; font-weight:600; }
-  .rg-mini:hover { border-color:var(--azul); }
+  /* transform/opacity só: as duas que a GPU anima sem refazer layout. */
+  .rg-mini { transition:transform .14s var(--ease-saida, cubic-bezier(.23,1,.32,1)),
+                        border-color .14s ease-out; }
+  .rg-mini:active { transform:scale(.97); }
+  @media (hover:hover) and (pointer:fine) { .rg-mini:hover { border-color:var(--azul); } }
   .rg-mini:disabled { opacity:.5; cursor:progress; }
+  .rg-modo { border-left:3px solid var(--azul); background:rgba(59,130,246,.08);
+             border-radius:8px; padding:11px 14px; margin:0 0 16px;
+             font-size:12.5px; color:var(--cinza); line-height:1.6; }
+  .rg-modo b { color:var(--texto); }
   .rg-mini-del { color:var(--erro); border-color:rgba(244,63,94,.3); }
-  .rg-mini-del:hover { border-color:var(--erro); background:rgba(244,63,94,.08); }
+  @media (hover:hover) and (pointer:fine) {
+    .rg-mini-del:hover { border-color:var(--erro); background:rgba(244,63,94,.08); }
+  }
+  @media (prefers-reduced-motion:reduce) { .rg-mini { transition:border-color .14s ease-out; }
+    .rg-mini:active { transform:none; } }
   .rg-confirma { display:flex; gap:8px; align-items:flex-start; font-size:12px; color:var(--texto);
                  background:var(--panel-2); border:1px solid var(--borda); border-radius:10px;
                  padding:10px 12px; margin:10px 0; line-height:1.55; }
@@ -164,6 +176,12 @@
       qualquer percentual antes de salvar.
       <i class="ajuda-i" title="O JOB não sabe quantas frações a sua operadora paga nem em que percentuais. Ele sugere a distribuição entre gestor e empresa (100% na primeira, 0% nas demais) sobre as frações que você cadastrar.">i</i>
     </p>
+
+    {# Em que modo o formulário está (novo, editando, copiando). Fica ANTES dos
+       campos porque é para onde a tela rola ao clicar em Editar ou Copiar — o
+       aviso embaixo do botão Salvar ficava fora da vista justo na hora de
+       decidir. Vazio no carregamento: cadastro novo não precisa de rótulo. #}
+    <div class="rg-modo" id="rgModo" hidden></div>
 
     <div class="rg-grade">
       <div class="rg-campo">
@@ -308,6 +326,18 @@
                                     'confirmada': (r.confirmada or 0)|int,
                                     'display': r.display,
                                     'fracoes': r.fracoes, 'gestor': r.gestor}|tojson|forceescape }}">Editar</button>
+            {# Copiar so aparece em regra COMPLETA: copiar rascunho so espalha o
+               que ainda falta decidir por mais uma operadora. Usa o MESMO
+               formulario de cima, entao a pessoa ve as fracoes antes de salvar
+               em vez de confiar num dialogo. #}
+            {% if not r.falta %}
+            <button type="button" class="rg-mini" data-copiar="{{ r.id }}"
+                    data-retencoes="{{ r.retencoes|length }}"
+                    data-regra="{{ {'operadora': r.operadora, 'obs': r.obs or '', 'plano': r.plano,
+                                    'display': r.display,
+                                    'fracoes': r.fracoes, 'gestor': r.gestor}|tojson|forceescape }}"
+                    >Copiar para outra</button>
+            {% endif %}
             <button type="button" class="rg-mini rg-mini-del" data-del-regra="{{ r.id }}"
                     data-nome="{{ r.display }} · {{ r.plano }}">Excluir</button>
           </td>
@@ -321,8 +351,22 @@
 
 <script>
 var corpo = document.querySelector('#rgTab tbody');
-function linhaFracao(ordem, evento, pct, pctG){
+// Id da regra de origem quando o formulário está sendo usado para copiar.
+// Zerado em qualquer outro uso, senão uma edição comum arrastaria retenções.
+var copiarRetDe = 0;
+function esc(t){ var d = document.createElement('div'); d.textContent = t || ''; return d.innerHTML; }
+// Diz em que modo o formulário está, no topo dele — onde a tela para de rolar.
+function modo(html){
+  var el = document.getElementById('rgModo');
+  el.innerHTML = html; el.hidden = false;
+}
+// `mes` não tem campo neste formulário (a coluna é "mês OU evento" e ela grava
+// evento). Mas a regra pode ter mês vindo de outra origem, e sem carregar aqui
+// toda edição zerava esse mês em silêncio — a régua caía no número da ordem, e
+// uma fração paga no mês 6 virava mês 2. Viaja escondido na linha.
+function linhaFracao(ordem, evento, pct, pctG, mes){
   var tr = document.createElement('tr');
+  if (mes !== null && mes !== undefined && String(mes) !== '') tr.dataset.mes = mes;
   tr.innerHTML =
     '<td style="color:var(--cinza);font-size:12px;padding-top:12px;"></td>' +
     '<td><input data-c="evento" placeholder="1a mensalidade"></td>' +
@@ -361,6 +405,7 @@ document.getElementById('rgSalvar').addEventListener('click', function(){
   var fracoes = Array.prototype.map.call(corpo.children, function(tr){
     return {
       evento: tr.querySelector('[data-c=evento]').value,
+      mes: tr.dataset.mes || '',
       percentual: tr.querySelector('[data-c=percentual]').value,
       percentual_gestor: tr.querySelector('[data-c=percentual_gestor]').value
     };
@@ -375,6 +420,7 @@ document.getElementById('rgSalvar').addEventListener('click', function(){
       vigencia_inicio: document.getElementById('rgVigIni').value,
       observacao: document.getElementById('rgObsTxt').value,
       confirmada: document.getElementById('rgConf').checked,
+      copiar_retencoes_de: copiarRetDe,
       fracoes: fracoes
     })
   }).then(function(r){ return r.json(); }).then(function(d){
@@ -408,12 +454,52 @@ document.querySelectorAll('[data-edit]').forEach(function(b){
       var g = ges[i] || {};
       corpo.appendChild(linhaFracao(i + 1, f.evento || '',
         (f.percentual === null || f.percentual === undefined) ? '' : f.percentual,
-        (g.percentual_gestor === null || g.percentual_gestor === undefined) ? '' : g.percentual_gestor));
+        (g.percentual_gestor === null || g.percentual_gestor === undefined) ? '' : g.percentual_gestor,
+        f.mes));
     });
-    var msg = document.getElementById('rgMsg');
-    msg.className = 'rg-msg';
-    msg.textContent = 'Editando "' + (r.display || '') + ' · ' + (r.plano || '') +
-                      '". Ajuste e clique em Salvar esta regra — vai sobrescrever a atual.';
+    copiarRetDe = 0;
+    modo('Editando <b>' + esc(r.display) + ' · ' + esc(r.plano) + '</b>. ' +
+         'Salvar vai sobrescrever esta regra — as vendas já congeladas não mudam.');
+    document.getElementById('rgMsg').textContent = '';
+    document.getElementById('rgOp').scrollIntoView({block: 'center', behavior: 'smooth'});
+    document.getElementById('rgOp').focus();
+  });
+});
+
+// COPIAR: mesmo formulário do Editar, mas sem a identidade da origem. A pessoa
+// escolhe a operadora nova e VÊ as frações antes de salvar. As retenções não
+// cabem neste formulário, então viajam pelo servidor — daí o copiarRetDe.
+document.querySelectorAll('[data-copiar]').forEach(function(b){
+  b.addEventListener('click', function(){
+    var r;
+    try { r = JSON.parse(b.dataset.regra); } catch(e) { return; }
+    document.getElementById('rgOp').value = '';
+    document.getElementById('rgObs').value = '';
+    document.getElementById('rgPlano').value = r.plano || 'PME';
+    document.getElementById('rgVigIni').value = '';
+    document.getElementById('rgObsTxt').value = 'Mesmas condições de ' + (r.display || '') +
+                                                ' · ' + (r.plano || '') + '.';
+    // Confirmar é decisão de quem responde pelo comercial. A regra da Amil ser
+    // essa não prova que a da Porto é igual, então a cópia chega desmarcada.
+    document.getElementById('rgConf').checked = false;
+    corpo.innerHTML = '';
+    var ges = r.gestor || [];
+    (r.fracoes || []).forEach(function(f, i){
+      var g = ges[i] || {};
+      corpo.appendChild(linhaFracao(i + 1, f.evento || '',
+        (f.percentual === null || f.percentual === undefined) ? '' : f.percentual,
+        (g.percentual_gestor === null || g.percentual_gestor === undefined) ? '' : g.percentual_gestor,
+        f.mes));
+    });
+    copiarRetDe = parseInt(b.dataset.copiar, 10) || 0;
+    var n = parseInt(b.dataset.retencoes, 10) || 0;
+    modo('Copiando de <b>' + esc(r.display) + ' · ' + esc(r.plano) + '</b>. ' +
+         'Escreva a operadora de destino no campo abaixo' +
+         (n === 1 ? ', e a retenção dela vem junto ao salvar'
+                  : (n ? ', e as ' + n + ' retenções dela vêm junto ao salvar' : '')) +
+         '. A confirmação está desmarcada de propósito: a regra da origem ser esta não prova ' +
+         'que a do destino é igual.');
+    document.getElementById('rgMsg').textContent = '';
     document.getElementById('rgOp').scrollIntoView({block: 'center', behavior: 'smooth'});
     document.getElementById('rgOp').focus();
   });
