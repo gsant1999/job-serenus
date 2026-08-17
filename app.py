@@ -28129,9 +28129,20 @@ def api_wa_cotacao_fila():
     req = request.get_json(silent=True) or {}
     pedido_json = req.get('pedido')
     chave_pedido = str(req.get('chave_pedido') or '').strip()
+    # `cotador_precos_paralelos` PRECISA ESTAR AQUI.
+    #
+    # Sem ele o aparelho sem Painel montava a cotação inteira e morria na
+    # última etapa: operadoras e planos passam (são `cotador_passo`), mas o
+    # preço é este tipo — e levava 400 `pedido_invalido`. O background lê o
+    # 400 como fila indisponível e responde `painel_fechado`; a tela, sem
+    # nenhum preço, pinta "Não foi possível concluir a consulta. Tente
+    # novamente." Tentar de novo não resolvia nada, porque o pedido nunca
+    # chegou a entrar na fila. O lado trabalhador já sabia executar este tipo
+    # (background.js, `_trabalhadorExecutar`); só a porta de entrada recusava.
     if not isinstance(pedido_json, dict) or pedido_json.get('type') not in {
         'cotar_aqui', 'cotador_cidades', 'cotador_catalogo',
-        'cotador_modalidades', 'cotador_passo', 'cotador_estado'
+        'cotador_modalidades', 'cotador_passo', 'cotador_estado',
+        'cotador_precos_paralelos'
     }:
         close_db(conn)
         return _wa_cors(jsonify({"ok": False, "erro": "pedido_invalido"})), 400
