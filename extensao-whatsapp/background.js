@@ -155,6 +155,7 @@ function _filaAvisarTela(id, s) {
 let _trabOcupado = false;
 let _trabConsultando = false;
 let _trabUltimaConsulta = 0;
+let _paraleloAtual = null;
 
 function _trabalhadorTick() {
   const agora = Date.now();
@@ -185,6 +186,15 @@ function _trabalhadorExecutar(id, pedido) {
       .catch(() => {})
       .then(() => { _trabOcupado = false; });
   };
+  if (pedido && pedido.type === 'cotador_precos_paralelos') {
+    _precosParalelosExecutar(pedido.pedido || {}, (feito, total) => {
+      chamarJob('/api/whatsapp/cotacao/fila/' + id + '/etapa', 'POST',
+                { etapa: 'Conferindo preços — ' + feito + ' de ' + total,
+                  fracao: total ? feito / total : 0 }, 8000).catch(() => {});
+    }).then((r) => terminar({ resultado: r }))
+      .catch(() => terminar({ erro: 'falha_nas_frentes_de_preco' }));
+    return;
+  }
   chrome.tabs.query({}, (todas) => {
     const lista = (todas || []).filter(
       (a) => a.url && a.url.indexOf('paineldocorretor.com.br') >= 0);
@@ -213,6 +223,99 @@ function _trabalhadorExecutar(id, pedido) {
     };
     tentar(0);
   });
+}
+
+function _abasDoPainel() {
+  return new Promise((resolve) => chrome.tabs.query({}, (todas) => resolve(
+    (todas || []).filter((a) => a.url && a.url.indexOf('paineldocorretor.com.br') >= 0))));
+}
+
+function _esperarPontePainel(abaId, limiteMs) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    const tentar = () => {
+      try {
+        chrome.tabs.sendMessage(abaId, { type: 'cotador_estado' }, () => {
+          if (!chrome.runtime.lastError) { resolve(true); return; }
+          if (Date.now() - t0 >= limiteMs) { resolve(false); return; }
+          setTimeout(tentar, 400);
+        });
+      } catch (e) {
+        if (Date.now() - t0 >= limiteMs) resolve(false);
+        else setTimeout(tentar, 400);
+      }
+    };
+    tentar();
+  });
+}
+
+async function _garantirAbasPainel(quantas) {
+  let abas = await _abasDoPainel();
+  if (!abas.length) return [];
+  let origem = 'https://paineldocorretor.com.br';
+  try { origem = new URL(abas[0].url).origin; } catch (e) {}
+  while (abas.length < quantas) {
+    const nova = await new Promise((resolve) => chrome.tabs.create(
+      { url: origem + '/', active: false }, (a) => resolve(a || null)));
+    if (!nova) break;
+    const pronta = await _esperarPontePainel(nova.id, 12000);
+    if (!pronta) break;
+    abas.push(nova);
+  }
+  return abas.slice(0, quantas);
+}
+
+async function _precosParalelosExecutar(pedido, aoAndar) {
+  const planos = Array.isArray(pedido.planos) ? pedido.planos.slice(0, 6) : [];
+  if (!planos.length) return { ok: true, dados: { planos: [], frentes: 0, ms: 0 } };
+  if (_paraleloAtual) return { ok: false, motivo: 'outra_cotacao_em_andamento' };
+  _paraleloAtual = { total: planos.length, concluidos: new Set(), aoAndar: aoAndar };
+  const t0 = Date.now();
+  let abas = [];
+  try { abas = await _garantirAbasPainel(Math.min(3, planos.length)); }
+  catch (e) {
+    _paraleloAtual = null;
+    _anotarTempo('cotacao:precos_paralelos', Date.now() - t0, false);
+    return { ok: false, motivo: 'painel_fechado' };
+  }
+  if (!abas.length) {
+    _paraleloAtual = null;
+    _anotarTempo('cotacao:precos_paralelos', Date.now() - t0, false);
+    return { ok: false, motivo: 'painel_fechado' };
+  }
+  const lotes = abas.map(() => []);
+  planos.forEach((p, i) => lotes[i % lotes.length].push(p));
+  const executar = (aba, lote, indice) => new Promise((resolve) => {
+    setTimeout(() => {
+      const porChave = {};
+      lote.forEach((p) => { porChave[String(p.key || p.chave || '')] = p; });
+      try {
+        chrome.tabs.sendMessage(aba.id, {
+          type: 'cotador_precos_lote',
+          pedido: Object.assign({}, pedido, { acao: 'precos_lote', planos: lote,
+                                              reqId: 'frente-' + indice + '-' + Date.now() })
+        }, (r) => {
+          if (chrome.runtime.lastError || !r || !r.ok) {
+            resolve(lote.map((p) => ({ chave: p.key || p.chave || '', plano: p,
+                                      cartao: null, motivo: 'frente_nao_respondeu' })));
+            return;
+          }
+          resolve((r.dados && r.dados.planos) || []);
+        });
+      } catch (e) {
+        resolve(lote.map((p) => ({ chave: p.key || p.chave || '', plano: p,
+                                  cartao: null, motivo: 'frente_nao_respondeu' })));
+      }
+    }, indice * 180);
+  });
+  try {
+    const partes = await Promise.all(abas.map((a, i) => executar(a, lotes[i], i)));
+    _anotarTempo('cotacao:precos_paralelos', Date.now() - t0, true);
+    return { ok: true, dados: { planos: partes.flat(), frentes: abas.length,
+                                ms: Date.now() - t0 } };
+  } finally {
+    _paraleloAtual = null;
+  }
 }
 
 // SINAL DE VIDA. Escreve numa coluna propria no servidor — nao no carimbo
@@ -1210,6 +1313,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // quinze segundos. Quinze segundos sem sinal parecem um minuto, e o
   // consultor nao tem como saber se esta rodando ou se quebrou.
   if (msg && msg.type === 'cotacao_andamento') {
+    if (_paraleloAtual && msg.planoChave) {
+      _paraleloAtual.concluidos.add(String(msg.planoChave));
+      try {
+        _paraleloAtual.aoAndar(_paraleloAtual.concluidos.size, _paraleloAtual.total);
+      } catch (e) {}
+      return;
+    }
     if (_abaQuePediuCotacao != null) {
       chrome.tabs.sendMessage(_abaQuePediuCotacao, msg, () => { void chrome.runtime.lastError; });
     }
@@ -1262,12 +1372,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg && (msg.type === 'cotar_painel' || msg.type === 'cotador_pronto' ||
               msg.type === 'cotador_cidades' || msg.type === 'cotador_catalogo' ||
-              msg.type === 'cotador_modalidades' || msg.type === 'cotador_passo')) {
+              msg.type === 'cotador_modalidades' || msg.type === 'cotador_passo' ||
+              msg.type === 'cotador_precos_paralelos')) {
     const oQuePedir =
       msg.type === 'cotar_painel'        ? { type: 'cotar_aqui', pedido: msg.pedido } :
       msg.type === 'cotador_cidades'     ? { type: 'cotador_cidades', termo: msg.termo } :
       msg.type === 'cotador_catalogo'    ? { type: 'cotador_catalogo', pedido: msg.pedido } :
       msg.type === 'cotador_modalidades' ? { type: 'cotador_modalidades', pedido: msg.pedido } :
+      msg.type === 'cotador_precos_paralelos' ? { type: 'cotador_precos_paralelos', pedido: msg.pedido } :
       msg.type === 'cotador_passo'       ? { type: 'cotador_passo', pedido: msg.pedido } :
                                            { type: 'cotador_estado' };
     // Guarda quem pediu, pra devolver o andamento pra aba certa.
@@ -1275,7 +1387,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // ("2 na frente") precisa achar a aba que pediu, e antes so o multicalculo
     // registrava isso.
     if ((msg.type === 'cotar_painel' || msg.type === 'cotador_catalogo' ||
-         msg.type === 'cotador_passo') &&
+         msg.type === 'cotador_passo' || msg.type === 'cotador_precos_paralelos') &&
         sender && sender.tab && sender.tab.id != null) {
       _abaQuePediuCotacao = sender.tab.id;
     }
@@ -1291,6 +1403,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chrome.tabs.query({}, (todas) => {
       const lista = (todas || []).filter(
         (a) => a.url && a.url.indexOf('paineldocorretor.com.br') >= 0);
+      if (msg.type === 'cotador_precos_paralelos' && lista.length) {
+        _precosParalelosExecutar(msg.pedido || {}, (feito, total) => {
+          if (_abaQuePediuCotacao == null) return;
+          chrome.tabs.sendMessage(_abaQuePediuCotacao,
+            { type: 'cotacao_andamento', fase: 'precos', feito: feito, total: total },
+            () => { void chrome.runtime.lastError; });
+        }).then(sendResponse).catch(() => sendResponse(
+          { ok: false, motivo: 'falha_nas_frentes_de_preco' }));
+        return;
+      }
       // Prefere a aba que o consultor está usando: se ele tem mais de uma
       // aberta, a ativa é a que ele acabou de olhar.
       // Quantas abas do Painel existem: a tela usa isso pra decidir se pode

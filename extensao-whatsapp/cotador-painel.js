@@ -1136,6 +1136,36 @@
       _cartoesGravar(p.cotacaoId, r.estado);
       return { cartao: r.cartao };
     }
+    if (a === 'precos_lote') {
+      if (!Array.isArray(p.planos) || !p.planos.length) return { planos: [], ms: 0 };
+      const t0 = Date.now();
+      const cid = await criarCotacao(p.titulo);
+      ultimaCotacao = cid;
+      _cartoesGravar(cid, []);
+      await abrirCotacao(cid);
+      await salvarVidas(cid, p.vidas);
+      await salvarFiltro(cid, p);
+      const resultado = [];
+      let estado = [];
+      for (let i = 0; i < p.planos.length; i++) {
+        const plano = p.planos[i];
+        try {
+          const r = await precoDoPlano(cid, p, plano, estado);
+          estado = r.estado;
+          resultado.push({ chave: plano.key || plano.chave || '', plano: plano,
+                           cartao: r.cartao || null });
+        } catch (e) {
+          resultado.push({ chave: plano.key || plano.chave || '', plano: plano,
+                           cartao: null, motivo: String(e && e.message || e) });
+        }
+        window.postMessage({ source: 'JOB_COTADOR', tipo: 'andamento', reqId: p.reqId,
+                             fase: 'precos', feito: i + 1, total: p.planos.length,
+                             planoChave: plano.key || plano.chave || '' }, ORIGEM);
+        if (i + 1 < p.planos.length) await respira(180, 420);
+      }
+      _cartoesGravar(cid, estado);
+      return { cotacaoId: cid, planos: resultado, ms: Date.now() - t0 };
+    }
     throw new Error('passo_desconhecido:' + a);
   }
 
@@ -1284,7 +1314,7 @@
     if (d.tipo === 'passo') {
       const f = faltando();
       if (f.length) { responder({ ok: false, motivo: 'precisa_aprender', faltando: f }); return; }
-      try { responder({ ok: true, dados: await passo(d.pedido) }); }
+      try { responder({ ok: true, dados: await passo({ ...(d.pedido || {}), reqId: d.reqId }) }); }
       catch (e) {
         // O detalhe viaja junto: sem ele o motivo vira 'http_500' de novo, e
         // eu volto a adivinhar entre sete passos.

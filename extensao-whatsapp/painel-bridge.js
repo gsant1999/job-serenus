@@ -227,7 +227,8 @@
       try {
         chrome.runtime.sendMessage(
           { type: 'cotacao_andamento', reqId: d.reqId,
-            fase: d.fase, feito: d.feito, total: d.total },
+            fase: d.fase, feito: d.feito, total: d.total,
+            planoChave: d.planoChave || '' },
           () => { void chrome.runtime.lastError; });
       } catch (e) { /* sem ouvinte, o andamento simplesmente não aparece */ }
       return;
@@ -259,6 +260,7 @@
     cotador_catalogo: ['catalogo', 180000], // uma cidade tem ~19 operadoras, uma a uma
     cotador_modalidades: ['descobrir_modalidades', 40000],
     cotador_passo: ['passo', 30000],   // uma acao so: nunca deveria demorar tanto
+    cotador_precos_lote: ['passo', 45000],
   };
 
   // ══ MANTER A SESSÃO VIVA ══════════════════════════════════════════════
