@@ -489,11 +489,13 @@
     return !!cru && cru === alvoCru;
   }
 
-  function _acharModelo(id) {
+  function _acharModelo(id, tiposAceitos) {
     const cru = _idCru(id);
+    const serve = (x) => _casa(x, id, cru) &&
+      (!tiposAceitos || tiposAceitos.indexOf(x.type) >= 0);
     // 1) Colecao da conversa aberta — e onde a mensagem da tela SEMPRE esta.
     try {
-      const m = _colecaoDaConversa().find((x) => _casa(x, id, cru));
+      const m = _colecaoDaConversa().find(serve);
       if (m) return { msg: m, via: 'colecao' };
     } catch (e) { /* segue */ }
     // 2) Store global.
@@ -502,10 +504,10 @@
       if (W && W.MsgStore) {
         if (W.MsgStore.get) {
           const direto = W.MsgStore.get(id);
-          if (direto) return { msg: direto, via: 'store' };
+          if (direto && serve(direto)) return { msg: direto, via: 'store' };
         }
         if (W.MsgStore.getModelsArray) {
-          const m = W.MsgStore.getModelsArray().find((x) => _casa(x, id, cru));
+          const m = W.MsgStore.getModelsArray().find(serve);
           if (m) return { msg: m, via: 'store_varredura' };
         }
       }
@@ -763,7 +765,10 @@
     const erros = {};
     for (const id of alvos) {
       let media = null;
-      const achado = _acharModelo(id);
+      // O id reduzido pode aparecer em mensagens auxiliares do WhatsApp. Para
+      // transcrever, aceitar apenas um modelo que seja realmente áudio evita
+      // casar com `notification_template` e esperar um download impossível.
+      const achado = _acharModelo(id, ['ptt', 'audio']);
       if (achado.msg) {
         try {
           media = await _blobDoModelo(achado.msg);
