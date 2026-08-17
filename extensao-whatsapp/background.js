@@ -163,13 +163,21 @@ function _trabalhadorTick() {
   if (_trabOcupado || _trabConsultando || agora - _trabUltimaConsulta < 1500) return;
   _trabConsultando = true;
   _trabUltimaConsulta = agora;
-  chamarJob('/api/whatsapp/cotacao/fila/proximo', 'GET', null, 12000).then((r) => {
+  // A chamada fica pendente no JOB por até 20s. É o servidor que acorda esta
+  // extensão quando entra trabalho; temporizador de aba escondida não manda
+  // mais no tempo da fila.
+  chamarJob('/api/whatsapp/cotacao/fila/proximo?esperar=20', 'GET', null, 25000).then((r) => {
     if (!r) return;
     if (r.motivo === 'nao_e_trabalhador' || r.motivo === 'trabalhador_indisponivel') return;
     if (!r.ok || !r.id) return;
     _trabOcupado = true;
     _trabalhadorExecutar(r.id, r.pedido);
-  }).catch(() => {}).finally(() => { _trabConsultando = false; });
+  }).catch(() => {}).finally(() => {
+    _trabConsultando = false;
+    // Renova a escuta enquanto este for o aparelho responsável. O pequeno
+    // intervalo só cede o event loop; não é o relógio que determina a busca.
+    if (_souTrabalhador && !_trabOcupado) setTimeout(_trabalhadorTick, 50);
+  });
 }
 
 // Roda o pedido na aba do Painel DESTA maquina e devolve o resultado.
@@ -185,7 +193,10 @@ function _trabalhadorExecutar(id, pedido) {
     chamarJob('/api/whatsapp/cotacao/fila/' + id + '/pronto', 'POST', corpo,
               20000, null, { repetivel: true })
       .catch(() => {})
-      .then(() => { _trabOcupado = false; });
+      .then(() => {
+        _trabOcupado = false;
+        _trabalhadorTick();
+      });
   };
   if (pedido && pedido.type === 'cotador_precos_paralelos') {
     _precosParalelosExecutar(pedido.pedido || {}, (feito, total) => {

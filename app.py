@@ -28236,12 +28236,26 @@ def api_wa_cotacao_fila_proximo():
     """, (cutoff_3m,))
     conn.commit()
     
-    # 2. Pega o mais antigo esperando
-    candidato = conn.execute("""
-        SELECT id, pedido_json FROM cotacao_fila 
-        WHERE estado='esperando' 
-        ORDER BY criado_em ASC LIMIT 1
-    """).fetchone()
+    # 2. ESCUTA LONGA. O Chrome reduz temporizadores de abas em segundo plano
+    # para ciclos de cerca de 30 segundos. Se esta rota responder imediatamente
+    # quando a fila esta vazia, o computador trabalhador só volta depois desse
+    # intervalo. Mantendo a chamada aberta, o servidor entrega o pedido assim
+    # que ele nasce, sem depender de relógio do navegador.
+    try:
+        esperar = max(0, min(20, int(request.args.get('esperar') or 0)))
+    except (TypeError, ValueError):
+        esperar = 0
+    fim_espera = time.monotonic() + esperar
+    candidato = None
+    while True:
+        candidato = conn.execute("""
+            SELECT id, pedido_json FROM cotacao_fila
+            WHERE estado='esperando'
+            ORDER BY criado_em ASC LIMIT 1
+        """).fetchone()
+        if candidato or time.monotonic() >= fim_espera:
+            break
+        time.sleep(0.35)
     
     if not candidato:
         close_db(conn)
