@@ -1409,7 +1409,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // cotacao para um acesso que sera cancelado. Todos os demais aparelhos
       // enviam o pedido ao trabalhador central, mesmo que ainda tenham uma
       // sessao antiga aberta localmente.
-      if (!_souTrabalhador) { pedirAoTrabalhador(); return; }
+      // Cidade é uma consulta somente leitura. Se este computador tem o
+      // Painel aberto, usa a sessão local imediatamente mesmo enquanto o
+      // sinal de trabalhador ainda está sendo renovado. Sem isso, a cidade
+      // padrão parecia funcionar por já estar salva, mas qualquer outra
+      // ficava presa na fila até o próximo heartbeat.
+      if (!_souTrabalhador && msg.type !== 'cotador_cidades') {
+        pedirAoTrabalhador();
+        return;
+      }
       if (msg.type === 'cotador_precos_paralelos' && lista.length) {
         _precosParalelosExecutar(msg.pedido || {}, (feito, total) => {
           if (_abaQuePediuCotacao == null) return;
