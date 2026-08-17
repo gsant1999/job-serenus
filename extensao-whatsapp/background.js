@@ -230,39 +230,16 @@ function _abasDoPainel() {
     (todas || []).filter((a) => a.url && a.url.indexOf('paineldocorretor.com.br') >= 0))));
 }
 
-function _esperarPontePainel(abaId, limiteMs) {
-  return new Promise((resolve) => {
-    const t0 = Date.now();
-    const tentar = () => {
-      try {
-        chrome.tabs.sendMessage(abaId, { type: 'cotador_estado' }, () => {
-          if (!chrome.runtime.lastError) { resolve(true); return; }
-          if (Date.now() - t0 >= limiteMs) { resolve(false); return; }
-          setTimeout(tentar, 400);
-        });
-      } catch (e) {
-        if (Date.now() - t0 >= limiteMs) resolve(false);
-        else setTimeout(tentar, 400);
-      }
-    };
-    tentar();
-  });
-}
-
 async function _garantirAbasPainel(quantas) {
-  let abas = await _abasDoPainel();
+  const abas = await _abasDoPainel();
   if (!abas.length) return [];
-  let origem = 'https://paineldocorretor.com.br';
-  try { origem = new URL(abas[0].url).origin; } catch (e) {}
-  while (abas.length < quantas) {
-    const nova = await new Promise((resolve) => chrome.tabs.create(
-      { url: origem + '/', active: false }, (a) => resolve(a || null)));
-    if (!nova) break;
-    const pronta = await _esperarPontePainel(nova.id, 12000);
-    if (!pronta) break;
-    abas.push(nova);
-  }
-  return abas.slice(0, quantas);
+  // Uma aba autenticada suporta varias requisicoes independentes. As frentes
+  // sao logicas e cada uma cria seu proprio cotacaoId; abrir abas fisicas so
+  // poluia o navegador e ainda submetia os timers ao estrangulamento de abas
+  // ocultas do Chrome. Repetir a referencia envia os lotes concorrentes pela
+  // mesma ponte, sem misturar o estado de cada cotacao.
+  const aba = abas.find((a) => a.active) || abas[0];
+  return Array.from({ length: quantas }, () => aba);
 }
 
 async function _precosParalelosExecutar(pedido, aoAndar) {

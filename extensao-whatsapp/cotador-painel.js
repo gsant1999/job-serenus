@@ -1161,7 +1161,9 @@
         window.postMessage({ source: 'JOB_COTADOR', tipo: 'andamento', reqId: p.reqId,
                              fase: 'precos', feito: i + 1, total: p.planos.length,
                              planoChave: plano.key || plano.chave || '' }, ORIGEM);
-        if (i + 1 < p.planos.length) await respira(180, 420);
+        // A propria ida e volta do preco ja separa as chamadas. Um timer aqui
+        // roda em aba oculta e o Chrome pode alonga-lo para dezenas de
+        // segundos, anulando justamente o ganho do paralelismo.
       }
       _cartoesGravar(cid, estado);
       return { cotacaoId: cid, planos: resultado, ms: Date.now() - t0 };
