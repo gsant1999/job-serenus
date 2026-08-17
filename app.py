@@ -4937,15 +4937,48 @@ def _op_compact(s):
     return ''.join(ch for ch in _normaliza_op(s or '') if ch.isalnum())
 
 
+# Nomes comerciais diferentes para a MESMA operadora, quando a regra de prefixo
+# não dá conta. 'Porto Saúde' e 'Porto Seguro' são a mesma empresa, mas divergem
+# já na segunda palavra — e sem isto uma venda gravada com um dos nomes não acha
+# preço nenhum e a comissão zera calada.
+#
+# Só entra aqui o que é fato comercial, não erro de digitação: para grafia
+# diferente do mesmo nome existe a regra de prefixo, e para unificar de vez existe
+# o "Renomear" em /operadoras, que troca o nome no cadastro, no repasse e em todas
+# as propostas de uma vez.
+_OP_SINONIMOS = [
+    {'porto seguro', 'porto saude', 'porto seguro saude'},
+]
+_OP_SINONIMOS_IDX = {}
+for _g in _OP_SINONIMOS:
+    _chave = frozenset(_op_compact(n) for n in _g)
+    for _n in _g:
+        _OP_SINONIMOS_IDX.setdefault(_op_compact(_n), _chave)
+
+
 def _op_casa(a, b):
     """True se dois nomes são a MESMA operadora tolerando acento, espaço e sufixo
     de praça ('MedSênior' == 'Medsenior' == 'Med Senior SP/RJ'). Exige que o menor
-    tenha >=4 chars e seja prefixo do maior — não casa nomes só parecidos."""
+    tenha >=4 chars e seja prefixo do maior — não casa nomes só parecidos.
+
+    Além disso casa os sinônimos comerciais declarados em `_OP_SINONIMOS`, que a
+    regra de prefixo não alcança ('Porto Saúde' x 'Porto Seguro')."""
     ca, cb = _op_compact(a), _op_compact(b)
     if not ca or not cb:
         return False
     if ca == cb:
         return True
+    ga = _OP_SINONIMOS_IDX.get(ca)
+    if ga and cb in ga:
+        return True
+    # Sinônimo com sufixo de praça: 'Porto Saude SP' x 'Porto Seguro'.
+    for grupo in _OP_SINONIMOS:
+        alcanca_a = any(ca.startswith(n) or n.startswith(ca)
+                        for n in (_op_compact(x) for x in grupo))
+        alcanca_b = any(cb.startswith(n) or n.startswith(cb)
+                        for n in (_op_compact(x) for x in grupo))
+        if alcanca_a and alcanca_b:
+            return True
     menor, maior = (ca, cb) if len(ca) <= len(cb) else (cb, ca)
     return len(menor) >= 4 and maior.startswith(menor)
 
