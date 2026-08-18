@@ -89,8 +89,18 @@ function _resumoTempos() {
 // segunda maquina estar ligada. So cai na fila quem hoje receberia
 // "Painel fechado" e ficaria sem cotar.
 
-const _FILA_ESPERA_MS = 1000;     // evita martelar o servidor enquanto espera
-const _FILA_LIMITE_MS = 120000;   // 2 min: uma cotacao inteira cabe folgada
+// RELOGIOS EM SERIE, DO MENOR PRO MAIOR.
+//
+// Estavam invertidos: a ponte do Painel aceita ate 180s pra um catalogo
+// (painel-bridge.js, ACEITOS), o cao de guarda do trabalhador cortava aos 90s
+// e o cliente desistia aos 120s. Um catalogo de ~19 operadoras leva ~110s:
+// o trabalhador ja tinha gravado 'sem_resposta_a_tempo' e a resposta boa
+// chegava pra ser descartada — catalogo que nunca terminava por mais que se
+// tentasse. A ordem tem que ser ponte < cao de guarda < cliente, e o
+// servidor (3 min pra considerar preso) por ultimo.
+const _FILA_ESPERA_MS = 2000;     // 1s dobrava as consultas de status sem ganho
+const _TRAB_LIMITE_MS = 195000;   // ponte (180s) + folga
+const _FILA_LIMITE_MS = 210000;   // cliente espera mais que o cao de guarda
 
 // Manda um passo pra fila e espera a resposta. `cb(null)` quando nao ha
 // trabalhador — ai quem chamou devolve o "Painel fechado" de sempre, que
@@ -255,7 +265,7 @@ function _trabalhadorExecutar(id, pedido) {
     let respondeu = false;
     const relogio = setTimeout(() => {
       if (!respondeu) { respondeu = true; terminar({ erro: 'sem_resposta_a_tempo_no_trabalhador' }); }
-    }, 90000);
+    }, _TRAB_LIMITE_MS);
     const tentar = (indice) => {
       if (respondeu) return;
       if (indice >= candidatas.length) {
@@ -1624,6 +1634,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
   if (msg && msg.type === 'painel_fila_tick') {
+    // SO A MAQUINA QUE COTA PERGUNTA POR TRABALHO.
+    //
+    // Uma consultora com uma aba do Painel esquecida disparava ~1.700
+    // chamadas por hora a /fila/proximo que o servidor rejeitava na primeira
+    // linha — trafego e log inuteis, e uma escuta a mais competindo pelas 4
+    // threads do gunicorn. A linha 179 ja aplica esta mesma guarda ao
+    // reagendamento; faltava na porta de entrada.
+    if (!_souTrabalhador) return false;
     // A aba do Painel apenas acorda a extensao. A consulta vai ao JOB; nada e
     // clicado, lido ou requisitado no Painel ate existir uma cotacao real.
     // O sinal de trabalhador continua renovado pelo alarme, portanto este

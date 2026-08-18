@@ -28307,6 +28307,15 @@ def api_wa_cotacao_fila_proximo():
     agora = datetime.now(TZ_SP)
     agora_txt = agora.strftime('%Y-%m-%d %H:%M:%S')
     cutoff_3m = (agora - timedelta(minutes=3)).strftime('%Y-%m-%d %H:%M:%S')
+    # DUAS CONTAS DIFERENTES QUE ESTAVAM USANDO O MESMO NUMERO.
+    #
+    # 3 minutos e o silencio que mata o TRABALHADOR. "Pedido preso" e outra
+    # coisa: a ponte do Painel aceita ate 180s num catalogo, o cao de guarda
+    # do trabalhador corta aos 195s e o cliente espera 210s. Reenfileirar aos
+    # 180s significava tirar da mao do trabalhador um pedido que ele ainda
+    # estava executando — e o resultado dele chegava depois pra virar 409.
+    # A ordem tem que ser ponte < cao de guarda < cliente < servidor.
+    cutoff_preso = (agora - timedelta(minutes=5)).strftime('%Y-%m-%d %H:%M:%S')
     cutoff_7d = (agora - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
     
     # 0. Limpeza
@@ -28328,7 +28337,7 @@ def api_wa_cotacao_fila_proximo():
         SET estado='esperando', pegado_em=NULL, trabalhador_sessao=NULL,
             etapa='', fracao=0
         WHERE estado='rodando' AND pegado_em < ?
-    """, (cutoff_3m,))
+    """, (cutoff_preso,))
     conn.commit()
     
     # 2. ESCUTA LONGA. O Chrome reduz temporizadores de abas em segundo plano
@@ -28499,7 +28508,7 @@ def api_wa_cotacao_fila_status(cid):
         
     conn = db()
     agora = datetime.now(TZ_SP)
-    cutoff_3m = (agora - timedelta(minutes=3)).strftime('%Y-%m-%d %H:%M:%S')
+    cutoff_preso = (agora - timedelta(minutes=5)).strftime('%Y-%m-%d %H:%M:%S')
 
     # LE PRIMEIRO, SO DEPOIS RECUPERA — E SO O QUE E SEU.
     #
@@ -28525,7 +28534,7 @@ def api_wa_cotacao_fila_status(cid):
             SET estado='esperando', pegado_em=NULL, trabalhador_sessao=NULL,
                 etapa='', fracao=0
             WHERE estado='rodando' AND pegado_em < ? AND id=?
-        """, (cutoff_3m, cid))
+        """, (cutoff_preso, cid))
         conn.commit()
         item = conn.execute("SELECT * FROM cotacao_fila WHERE id=?", (cid,)).fetchone()
     
