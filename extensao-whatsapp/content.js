@@ -465,7 +465,6 @@
   let _cxOperacao = '';              // o que a extensão estava fazendo por último
   let _cxNosDom = null;              // caro de contar: só amostrado de 10 em 10 tiques
   let _cxTique = 0;
-  let _cxAvisou = false;
 
   function _cxMarcarOperacao(nome) { _cxOperacao = String(nome || '').slice(0, 40); }
 
@@ -521,77 +520,84 @@
     } catch (e) { /* medir nunca atrapalha */ }
   }
 
-  // AVISO ANTES DE MORRER. O Chrome dá um teto de memória por aba; ao encostar
-  // nele, mata a aba sem avisar e sem log. Em 75% ainda dá tempo de a consultora
-  // terminar o que está fazendo e atualizar por vontade própria — em vez de
-  // perder o que estava escrevendo no meio de um atendimento.
+  // ANTES DE MORRER, A EXTENSÃO SE LIMPA — SEM PEDIR NADA A NINGUÉM.
+  //
+  // A primeira versão disto era um aviso no alto da tela pedindo F5. Guilherme
+  // reclamou, com razão: "isso é bem chato, não tem uma solução que não incomode
+  // o usuário?" Tem, e é melhor em tudo. Interromper alguém no meio de um
+  // atendimento para pedir que ELA resolva um problema NOSSO é empurrar trabalho
+  // para o lado errado do balcão.
+  //
+  // O que a extensão guarda é tudo refazível — está escrito no comentário do
+  // _capMap: "NADA AQUI É FONTE DE VERDADE". Transcrição perdida volta pelo
+  // botão (e o servidor tem cache, não paga de novo); análise perdida o painel
+  // rebusca; logo perdido volta do storage. Então, ao encostar em 75% do teto,
+  // ela despeja os próprios caches e segue. A consultora não vê nada acontecer.
+  //
+  // E o dado que sai daqui vale mais que o aviso valia: se soltar 600 MB e a aba
+  // continuar viva, o problema era nosso e acabou de ser resolvido. Se soltar
+  // 12 MB e a aba morrer assim mesmo, está provado que a memória não é nossa —
+  // e isso encerra a discussão em vez de mandar a consultora dar F5 à toa.
+  const _CX_INTERVALO_ALIVIO = 5 * 60 * 1000;
+  let _cxUltimoAlivio = 0;
+
   function _cxConferirTeto() {
-    if (_cxAvisou || document.hidden) return;
     const m = (window.performance && window.performance.memory) || null;
     if (!m || !m.jsHeapSizeLimit) return;
     if ((m.usedJSHeapSize || 0) <= m.jsHeapSizeLimit * 0.75) return;
-    _cxAvisou = true;
-    _metrica('aba_perto_do_teto', Date.now() - _CX_NASCEU, true,
-             Math.round((m.usedJSHeapSize || 0) / 1048576) + 'MB');
-    _cxMostrarAviso();
+    // Com folga entre um alívio e outro: numa aba que vaza de verdade o teto é
+    // reencostado, e limpar em laço só gastaria trabalho refazendo cache.
+    if (Date.now() - _cxUltimoAlivio < _CX_INTERVALO_ALIVIO) return;
+    _cxUltimoAlivio = Date.now();
+    _cxAliviar(m);
   }
 
-  function _cxMostrarAviso() {
-    try {
-      if (document.getElementById('job-aviso-memoria')) return;
-      const d = document.createElement('div');
-      d.id = 'job-aviso-memoria';
-      // Âmbar, não vermelho: isto é um aviso com tempo de sobra, não uma quebra.
-      // O vermelho já é do aviso de "extensão atualizada", que é bloqueante.
-      d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483646;' +
-        'background:#b45309;color:#fff;padding:9px 14px;font:13px -apple-system,sans-serif;' +
-        'text-align:center;box-shadow:0 2px 12px rgba(0,0,0,.35);' +
-        'opacity:0;transform:translateY(-100%);' +
-        'transition:opacity 200ms cubic-bezier(.23,1,.32,1),transform 200ms cubic-bezier(.23,1,.32,1)';
-      // Diz o que aconteceu, o que fazer, e o que NÃO se perde (que é a dúvida
-      // real de quem está no meio de um atendimento).
-      d.innerHTML =
-        '<span>Esta aba está pesada e pode fechar sozinha. Atualize quando puder — nenhuma conversa se perde.</span>' +
-        '<button type="button" id="job-mem-i" title="Por que isto aparece" aria-label="Por que isto aparece" ' +
-        'style="margin-left:8px;width:18px;height:18px;border-radius:50%;border:1px solid rgba(255,255,255,.82);' +
-        'background:transparent;color:#fff;font:700 11px -apple-system,sans-serif;cursor:pointer;padding:0;' +
-        'line-height:16px;vertical-align:middle">i</button>' +
-        '<button type="button" id="job-mem-reload" ' +
-        'style="margin-left:12px;background:#fff;color:#92400e;border:none;border-radius:6px;padding:5px 12px;' +
-        'font-weight:700;cursor:pointer;transition:transform 140ms cubic-bezier(.23,1,.32,1)">Atualizar agora</button>' +
-        '<button type="button" id="job-mem-fechar" aria-label="Dispensar aviso" ' +
-        'style="margin-left:8px;background:transparent;color:#fff;border:none;font-size:15px;cursor:pointer;' +
-        'padding:2px 6px">&times;</button>' +
-        // Sem opacidade: a 12px sobre o âmbar ela derrubava o contraste para
-        // 4,50:1, exatamente em cima do mínimo. A hierarquia aqui se faz por
-        // tamanho (12 contra 13) e não por cinza — regra da régua do JOB.
-        '<div id="job-mem-expl" hidden style="max-width:640px;margin:8px auto 2px;font-size:12px;' +
-        'line-height:1.5;text-align:left">' +
-        'O navegador reserva uma quantidade de memória para cada aba. O WhatsApp aberto o dia inteiro vai ' +
-        'enchendo essa reserva e, quando ela lota, o Chrome fecha a aba sozinho e mostra a tela de erro. ' +
-        'Atualizar a página esvazia a reserva e recomeça do zero. Suas conversas ficam no WhatsApp, não aqui.' +
-        '</div>';
-      document.body.appendChild(d);
-      // Nasce deslocado e entra: nada aparece do nada, e só transform/opacity
-      // se movem (as duas que rodam na GPU e não refazem layout).
-      const suave = !window.matchMedia || !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      requestAnimationFrame(() => {
-        d.style.opacity = '1';
-        d.style.transform = suave ? 'translateY(0)' : 'none';
-      });
-      const btnI = d.querySelector('#job-mem-i');
-      const expl = d.querySelector('#job-mem-expl');
-      if (btnI && expl) _ouvir(btnI, 'click', () => { expl.hidden = !expl.hidden; });
-      const rec = d.querySelector('#job-mem-reload');
-      if (rec) {
-        _ouvir(rec, 'click', () => { _cxGravar(true, 'recarga_pedida_no_aviso'); location.reload(); });
-        _ouvir(rec, 'pointerdown', () => { rec.style.transform = 'scale(.97)'; });
-        _ouvir(rec, 'pointerup', () => { rec.style.transform = 'none'; });
-        _ouvir(rec, 'pointerleave', () => { rec.style.transform = 'none'; });
-      }
-      const fec = d.querySelector('#job-mem-fechar');
-      if (fec) _ouvir(fec, 'click', () => { try { d.remove(); } catch (e) {} });
-    } catch (e) { /* o aviso nunca pode virar outro erro */ }
+  // Despeja os caches da extensão. Reusa o _capMap com teto ZERO e os MESMOS
+  // guardas de "trabalho em andamento" que cada chamada já usa no dia a dia —
+  // é o caminho testado, e trabalho em curso continua protegido.
+  function _cxAliviar(m) {
+    const t0 = Date.now();
+    const antes = m.usedJSHeapSize || 0;
+    let itens = 0;
+    const tenta = (fn) => { try { itens += fn() || 0; } catch (e) { /* cache que ainda não existe */ } };
+
+    tenta(() => _capMap(TR.cache, 0, (_v, k) => TR.ocupado.has(k)));
+    tenta(() => _capMap(TR.erro, 0, (_v, k) => TR.ocupado.has(k)));
+    tenta(() => _capMap(DOC.estado, 0, (v) => v && v.status === 'lendo'));
+    tenta(() => _capMap(_analises, 0, (a) => a && a.status === 'rodando'));
+    tenta(() => _capMap(_cvCache, 0));
+    tenta(() => {
+      // Os logos são o item mais pesado por unidade (data URL base64). Zerar o
+      // objeto SEM zerar o _cotLogosLidos deixaria a cotação sem logo até o F5 —
+      // que é exatamente a funcionalidade que não pode ser perdida. O flag volta
+      // junto, e a próxima pintura recarrega do storage.
+      const ks = Object.keys(_cotLogos);
+      ks.forEach((k) => { delete _cotLogos[k]; });
+      _cotLogosLidos = false;
+      return ks.length;
+    });
+    tenta(() => (_capSet(_enviosRecentes, 0) ? 1 : 0));
+    tenta(() => (_capSet(_chatsVistos, 0) ? 1 : 0));
+
+    // O V8 não devolve a memória na hora: a coleta é assíncrona. Ler o heap
+    // imediatamente mostraria "nada mudou" e faria o número mentir. Espera um
+    // pouco e mede — ainda é aproximado, e está dito no detalhe.
+    _registrarTimeout(() => {
+      try {
+        const m2 = (window.performance && window.performance.memory) || null;
+        const depois = m2 ? (m2.usedJSHeapSize || 0) : antes;
+        const mb = (v) => Math.round(v / 1048576);
+        _metrica('alivio_memoria', Date.now() - t0, true,
+                 mb(antes) + 'MB para ' + mb(depois) + 'MB, ' + itens + ' itens');
+        // Continuou no limite mesmo depois de soltar tudo o que era nosso: isso
+        // é a prova de que a memória não está na extensão. Sem tela, sem aviso —
+        // vira registro, e o registro é que decide onde mexer.
+        if (m2 && m2.jsHeapSizeLimit && depois > m2.jsHeapSizeLimit * 0.9) {
+          _metrica('aba_no_limite_apos_alivio', Date.now() - _CX_NASCEU, false, mb(depois) + 'MB');
+        }
+        _cxGravar(false, 'alivio');
+      } catch (e) { /* medir nunca atrapalha */ }
+    }, 4000);
   }
 
   // Varre os retratos que ficaram para trás e reporta as abas que morreram.
