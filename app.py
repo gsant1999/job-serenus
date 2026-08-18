@@ -1,5 +1,6 @@
 # HOTFIX 20.06.2026 20:59 — Force rebuild (indentação OK, sintaxe verificada)
 import os, sqlite3, json, hashlib, hmac, secrets, re, threading, time, mimetypes, calendar, math
+from collections import Counter
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort, Response, g, render_template_string, has_request_context
 from datetime import datetime, timedelta, date
 from functools import wraps, lru_cache
@@ -14744,6 +14745,97 @@ def enviar_conversoes_ads(limite=200, so_simular=False):
     return resumo
 
 
+def _rotulo_venda(v):
+    """Só limpa. A juntada de 'Apartamento' com 'APARTAMENTO' acontece na hora
+    de contar (_canonizar_rotulos), e não aqui com .title(): title-case cru
+    destrói sigla — 'PF' virava 'Pf' e 'PME PORTE 1' virava 'Pme Porte 1'."""
+    v = (str(v or '')).strip()
+    return v or None
+
+
+def _canonizar_rotulos(clientes, chaves):
+    """Junta as grafias do mesmo valor e elege a MAIS USADA como a oficial.
+
+    O cadastro é digitado à mão: 'Apartamento' (17x) convive com 'APARTAMENTO'
+    (2x) e 'Saúde' com 'SAÚDE'. Contadas separadas, viram duas categorias e o
+    gráfico mente. Eleger a grafia mais frequente (em vez de forçar um formato)
+    preserva sigla e acento como a corretora escreve.
+
+    Roda sobre a lista COMPLETA, antes de qualquer filtro: assim o nome de uma
+    categoria não muda quando o usuário filtra por consultor.
+    """
+    for k in chaves:
+        grafias = {}
+        for c in clientes:
+            v = c.get(k)
+            if v:
+                grafias.setdefault(str(v).casefold(), Counter())[str(v)] += 1
+        oficial = {ch: cnt.most_common(1)[0][0] for ch, cnt in grafias.items()}
+        for c in clientes:
+            v = c.get(k)
+            if v:
+                c[k] = oficial.get(str(v).casefold(), v)
+
+
+def _rotulo_copart(v):
+    """'Sem' e 'Sem coparticipação' são o mesmo fator moderador."""
+    v = (str(v or '')).strip().lower()
+    if not v:
+        return None
+    if v.startswith('sem'):
+        return 'Sem coparticipação'
+    if v.startswith('com'):
+        return 'Com coparticipação'
+    return _rotulo_venda(v)
+
+
+def _faixa_vidas(n):
+    try:
+        n = int(n or 0)
+    except Exception:
+        return None
+    if n <= 0:
+        return None
+    return '1 vida' if n == 1 else ('%d vidas' % n if n <= 3 else '4 ou mais vidas')
+
+
+def _faixa_valor(v):
+    try:
+        v = float(v or 0)
+    except Exception:
+        return None
+    if v <= 0:
+        return None
+    if v < 500:
+        return 'Até R$ 500'
+    if v < 1000:
+        return 'R$ 500 a R$ 1.000'
+    if v < 2000:
+        return 'R$ 1.000 a R$ 2.000'
+    return 'Acima de R$ 2.000'
+
+
+def _faixa_idade(nasc, quando):
+    """Idade do titular NA DATA DA VENDA, não hoje: preço de plano de saúde é
+    faixa etária, então a idade que explica a venda é a de quando ela aconteceu."""
+    d1, d2 = _parse_dt_seguro(nasc), _parse_dt_seguro(quando)
+    if not d1 or not d2:
+        return None
+    anos = d2.year - d1.year - ((d2.month, d2.day) < (d1.month, d1.day))
+    # Titular com menos de 16 anos nao existe — e erro de digitacao no cadastro
+    # (ha registro com nascimento no proprio mes da venda). Entra como nao
+    # medido em vez de engordar a faixa mais nova com lixo.
+    if anos < 16 or anos > 120:
+        return None
+    if anos <= 33:
+        return 'Até 33 anos'
+    if anos <= 48:
+        return '34 a 48 anos'
+    if anos <= 58:
+        return '49 a 58 anos'
+    return '59 anos ou mais'
+
+
 def _fechados_com_analise(conn):
     """Vendas registradas cruzadas com a última análise de conversa e com o lead
     do CRM.
@@ -14772,7 +14864,9 @@ def _fechados_com_analise(conn):
                p.valor, p.total_vidas, p.criado_em,
                p.tel_resp_contrato, p.tel_resp_negociacao,
                p.lead_id, p.lead_vinculo,
-               p.status_operacional, p.fase, p.comprovante_boleto
+               p.status_operacional, p.fase, p.comprovante_boleto,
+               p.acomodacao, p.fator_moderador, p.tipo_pessoa, p.produto,
+               p.data_nasc_titular, p.cidade, p.end_cidade
         FROM propostas p
         WHERE p.status <> 'Excluída' AND COALESCE(p.estornada,0)=0
         ORDER BY p.criado_em DESC
@@ -14848,7 +14942,20 @@ def _fechados_com_analise(conn):
             'analise_id': (wa['id'] if wa is not None else None),
             'score': (wa['score'] if wa is not None else None),
             'faixa': (wa['score_faixa'] if wa is not None else None),
-            'objecoes': extr.get('objecoes') or [], 'cidade': extr.get('cidade'),
+            # Fatores da venda: saem do CADASTRO da proposta, então existem
+            # pra toda venda — não só pras que têm conversa lida. É isso que
+            # deixa a leitura valer sobre a base inteira.
+            'acomodacao': _rotulo_venda(r['acomodacao']),
+            'copart': _rotulo_copart(r['fator_moderador']),
+            'tipo_pessoa': _rotulo_venda(r['tipo_pessoa']),
+            'produto': (r['produto'] or '').strip(),
+            'faixa_vidas': _faixa_vidas(r['total_vidas']),
+            'faixa_valor': _faixa_valor(r['valor']),
+            'faixa_idade': _faixa_idade(r['data_nasc_titular'], r['criado_em']),
+            # Cidade do cadastro primeiro; a da conversa entra só como reforço.
+            'cidade': (str(r['cidade'] or r['end_cidade'] or '').strip().title()
+                       or (str(extr.get('cidade') or '').strip().title() or None)),
+            'objecoes': extr.get('objecoes') or [],
             'resumo_ia': (ia.get('resumo') or '').strip(),
             'followup': (diag.get('followup') or '').strip(),
             'dias_para_fechar': dias,
@@ -14863,41 +14970,44 @@ def _fechados_com_analise(conn):
 @login_required
 @admin_required
 def inteligencia_vendas():
-    """O que fecha, lido das vendas já registradas cruzadas com a análise de
-    conversa: objeções que apareceram, operadoras, cidades, consultores, tempo
-    do lead até a venda — e onde cada venda está parada na esteira."""
+    """O que faz a venda acontecer, lido de TODA proposta cadastrada.
+
+    Não olha o andamento da proposta: o status operacional é a esteira de
+    implantação e responde outra pergunta ("a apólice já está valendo?"). Aqui a
+    pergunta é o que levou o cliente a contratar — e isso já está decidido no
+    instante em que a proposta é cadastrada. Os fatores saem do próprio cadastro
+    (acomodação, coparticipação, vidas, faixa etária, valor), então valem pra
+    todas as vendas; a análise da conversa entra por cima, trazendo objeção e
+    contexto pras que têm conversa lida.
+    """
     conn = db()
     clientes = _fechados_com_analise(conn)
     close_db(conn)
-    from collections import Counter
+    FATORES = ('acomodacao', 'copart', 'faixa_vidas', 'faixa_idade', 'faixa_valor', 'modalidade')
+    _canonizar_rotulos(clientes, ('acomodacao', 'modalidade', 'tipo_pessoa'))
 
-    # Listas de opção saem da base COMPLETA, senão o filtro se apaga sozinho:
-    # escolher um consultor sumia com os outros nomes do select.
+    # Opções saem da base COMPLETA, senão o filtro se apaga sozinho: escolher um
+    # consultor sumia com os outros nomes do select.
     opc_consultores = sorted({(c['consultor'] or '').strip() for c in clientes if (c['consultor'] or '').strip()})
     opc_operadoras = sorted({(c['operadora'] or '').strip() for c in clientes if (c['operadora'] or '').strip()})
-    opc_esteira = sorted({c['esteira'] for c in clientes if c['esteira']})
-
-    # Distribuição da esteira SEMPRE sobre a base completa — é o diagnóstico de
-    # quantas vendas estão paradas, e ele não pode mudar quando o usuário
-    # filtra por consultor.
-    esteira_geral = Counter(c['esteira'] for c in clientes)
+    opc_modalidades = sorted({(c['modalidade'] or '').strip() for c in clientes if (c['modalidade'] or '').strip()})
     total_geral = len(clientes)
 
     f_consultor = (request.args.get('consultor') or '').strip()
     f_operadora = (request.args.get('operadora') or '').strip()
-    f_esteira = (request.args.get('esteira') or '').strip()
+    f_modalidade = (request.args.get('modalidade') or '').strip()
     f_analise = (request.args.get('analise') or '').strip()
     if f_consultor:
         clientes = [c for c in clientes if (c['consultor'] or '').strip() == f_consultor]
     if f_operadora:
         clientes = [c for c in clientes if (c['operadora'] or '').strip() == f_operadora]
-    if f_esteira:
-        clientes = [c for c in clientes if c['esteira'] == f_esteira]
+    if f_modalidade:
+        clientes = [c for c in clientes if (c['modalidade'] or '').strip() == f_modalidade]
     if f_analise == 'com':
         clientes = [c for c in clientes if c['analise_id']]
     elif f_analise == 'sem':
         clientes = [c for c in clientes if not c['analise_id']]
-    filtrando = bool(f_consultor or f_operadora or f_esteira or f_analise)
+    filtrando = bool(f_consultor or f_operadora or f_modalidade or f_analise)
 
     total = len(clientes)
     soma_valor = sum(c['valor'] for c in clientes)
@@ -14905,6 +15015,9 @@ def inteligencia_vendas():
     por_consultor, val_consultor = Counter(), {}
     objecoes, cidades = Counter(), Counter()
     scores, dias_ate_fechar, com_analise, com_lead = [], [], 0, 0
+    # Cada fator é um Counter próprio: são perguntas diferentes sobre a mesma
+    # venda, e cada um tem sua própria cobertura (nem todo cadastro traz tudo).
+    fatores = {k: Counter() for k in FATORES}
     for c in clientes:
         op = c['operadora'] or '—'
         por_operadora[op] += 1; val_operadora[op] = val_operadora.get(op, 0) + c['valor']
@@ -14916,63 +15029,76 @@ def inteligencia_vendas():
             com_lead += 1
         if c['score'] is not None:
             scores.append(c['score'])
-        # Prefere o tempo desde o LEAD entrar no CRM (funil completo); só cai
-        # pro tempo desde a análise quando não achou lead casado.
         dias_c = c['dias_desde_lead'] if c['dias_desde_lead'] is not None else c['dias_para_fechar']
         if dias_c is not None:
             dias_ate_fechar.append(dias_c)
         for o in (c['objecoes'] or []):
             objecoes[str(o).strip().lower()] += 1
         if c['cidade']:
-            cidades[str(c['cidade']).strip().title()] += 1
+            cidades[c['cidade']] += 1
+        for k in fatores:
+            v = c.get(k)
+            if v:
+                fatores[k][v] += 1
 
-    # Mediana junto da média: com 71 vendas uma proposta antiga puxa a média
-    # sozinha, e aí o "tempo até fechar" vira número bonito e mentiroso.
     def _limpo(v):
-        # 19.0 e 19 sao o mesmo numero de dias; mostrar os dois formatos na
-        # mesma metrica, conforme o filtro caia em lista par ou impar, parece
-        # precisao que nao existe.
         return int(v) if float(v) == int(v) else round(float(v), 1)
 
     def _mediana(vals):
         if not vals:
             return None
-        s = sorted(vals); n = len(s)
-        return _limpo(s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2)
+        s2 = sorted(vals); n = len(s2)
+        return _limpo(s2[n // 2] if n % 2 else (s2[n // 2 - 1] + s2[n // 2]) / 2)
 
     m = {
         'total': total, 'soma_valor': soma_valor,
         'ticket': round(soma_valor / total, 2) if total else 0,
         'com_analise': com_analise, 'com_lead': com_lead,
-        'sem_analise': total - com_analise,
         'pct_analise': round(com_analise * 100 / total) if total else 0,
         'score_medio': round(sum(scores) / len(scores)) if scores else None,
         'tempo_medio': _limpo(sum(dias_ate_fechar) / len(dias_ate_fechar)) if dias_ate_fechar else None,
         'tempo_mediana': _mediana(dias_ate_fechar),
         'tempo_base': len(dias_ate_fechar),
     }
+
+    # Cada painel de fator carrega a própria base medida. Sem isso, "Enfermaria
+    # 52" parece 52 de 71 mesmo quando o campo só existe em 60 cadastros — e a
+    # tela mente sem ninguém perceber.
+    rotulos = {'acomodacao': 'Acomodação', 'copart': 'Coparticipação',
+               'faixa_vidas': 'Quantas vidas', 'faixa_idade': 'Idade do titular',
+               'faixa_valor': 'Valor mensal', 'modalidade': 'Modalidade'}
+    ordem_fixa = {
+        'faixa_vidas': ['1 vida', '2 vidas', '3 vidas', '4 ou mais vidas'],
+        'faixa_idade': ['Até 33 anos', '34 a 48 anos', '49 a 58 anos', '59 anos ou mais'],
+        'faixa_valor': ['Até R$ 500', 'R$ 500 a R$ 1.000', 'R$ 1.000 a R$ 2.000', 'Acima de R$ 2.000'],
+    }
+    perfil = []
+    for k in ('faixa_vidas', 'faixa_idade', 'faixa_valor', 'acomodacao', 'copart', 'modalidade'):
+        cnt = fatores[k]
+        base = sum(cnt.values())
+        if not base:
+            continue
+        if k in ordem_fixa:
+            itens = [(n, cnt[n]) for n in ordem_fixa[k] if cnt.get(n)]
+        else:
+            itens = cnt.most_common(6)
+        perfil.append({
+            'chave': k, 'titulo': rotulos[k], 'base': base,
+            'itens': [{'nome': n, 'qtd': q, 'pct': round(q * 100 / base)} for n, q in itens],
+        })
+
     top_operadoras = [{'nome': k, 'qtd': v, 'valor': val_operadora[k]} for k, v in por_operadora.most_common(10)]
     top_consultores = [{'nome': k, 'qtd': v, 'valor': val_consultor[k]} for k, v in por_consultor.most_common(15)]
     top_objecoes = [{'nome': k, 'qtd': v} for k, v in objecoes.most_common(12)]
     top_cidades = [{'nome': k, 'qtd': v} for k, v in cidades.most_common(10)]
-    # Ordem da esteira é a do processo, não a alfabética nem a de volume: a
-    # tela precisa ler como uma fila que anda da esquerda pra direita.
-    ordem_esteira = ['Aguardando Documentos', 'Em Análise Operadora', 'Emitida/Ativa']
-    esteira = [{'nome': n, 'qtd': esteira_geral.get(n, 0),
-                'pct': round(esteira_geral.get(n, 0) * 100 / total_geral) if total_geral else 0}
-               for n in ordem_esteira if esteira_geral.get(n)]
-    for n, q in esteira_geral.items():
-        if n not in ordem_esteira:
-            esteira.append({'nome': n, 'qtd': q,
-                            'pct': round(q * 100 / total_geral) if total_geral else 0})
     return render_template('inteligencia_vendas.html', m=m, clientes=clientes,
                            top_operadoras=top_operadoras, top_consultores=top_consultores,
                            top_objecoes=top_objecoes, top_cidades=top_cidades,
-                           esteira=esteira, total_geral=total_geral, filtrando=filtrando,
+                           perfil=perfil, total_geral=total_geral, filtrando=filtrando,
                            opc_consultores=opc_consultores, opc_operadoras=opc_operadoras,
-                           opc_esteira=opc_esteira,
+                           opc_modalidades=opc_modalidades,
                            f_consultor=f_consultor, f_operadora=f_operadora,
-                           f_esteira=f_esteira, f_analise=f_analise)
+                           f_modalidade=f_modalidade, f_analise=f_analise)
 
 
 @app.route('/playbook')

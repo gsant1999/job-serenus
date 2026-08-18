@@ -39,16 +39,30 @@
     .iv-bar-track { grid-column:1 / -1; }
   }
 
-  /* Esteira: uma fila só, que anda da esquerda pra direita. Segmentos
-     proporcionais mostram de imediato onde as vendas empacam. */
-  .iv-esteira { display:flex; height:12px; border-radius:99px; overflow:hidden; gap:2px; }
-  .iv-esteira span { display:block; }
-  .iv-leg { display:flex; flex-wrap:wrap; gap:8px 22px; margin-top:14px; }
-  .iv-leg-i { display:flex; align-items:baseline; gap:8px; font-size:12.5px; }
-  .iv-leg-p { width:8px; height:8px; border-radius:2px; flex:0 0 auto;
-              transform:translateY(-1px); }
-  .iv-leg-n { color:var(--texto); }
-  .iv-leg-q { color:var(--cinza); font-variant-numeric:tabular-nums; }
+  /* Perfil da venda: um painel por fator. Barra fina com o percentual ao
+     lado — a pergunta aqui e "de cada 10 vendas, quantas foram assim?", entao
+     o percentual e o numero principal e a contagem vem junto, menor. */
+  .iv-perfil { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  @media (max-width:1100px){ .iv-perfil { grid-template-columns:repeat(2,1fr); } }
+  @media (max-width:700px){ .iv-perfil { grid-template-columns:1fr; } }
+  .iv-fator { background:var(--panel-2); border:1px solid var(--borda);
+              border-radius:10px; padding:14px 15px; }
+  .iv-fator-t { font-size:12.5px; font-weight:600; color:var(--texto); }
+  .iv-fator-b { font-size:11px; color:var(--cinza-2); margin:2px 0 12px; }
+  .iv-fator-l { display:flex; flex-direction:column; gap:9px; }
+  .iv-fl { display:grid; grid-template-columns:1fr auto; gap:6px 10px; align-items:baseline; }
+  .iv-fl-n { font-size:12px; color:var(--texto); overflow:hidden;
+             text-overflow:ellipsis; white-space:nowrap; }
+  .iv-fl-q { font-size:11.5px; color:var(--cinza); font-variant-numeric:tabular-nums;
+             white-space:nowrap; }
+  .iv-fl-q b { color:var(--texto); font-weight:600; font-size:12.5px; }
+  .iv-fl-t { grid-column:1 / -1; height:5px; background:var(--panel-3);
+             border-radius:99px; overflow:hidden; }
+  .iv-fl-f { height:100%; border-radius:99px; transform-origin:left center;
+             transform:scaleX(var(--p,0)); background:linear-gradient(90deg,var(--teal),var(--azul)); }
+  @media (prefers-reduced-motion: no-preference) {
+    .iv-fl-f { transition: transform 260ms var(--ease-saida); }
+  }
 
   .iv-nota { background:var(--panel-2); border:1px solid var(--borda);
              border-left:3px solid var(--amarelo); border-radius:10px;
@@ -116,53 +130,11 @@
     <div class="iv-cab" style="padding-bottom:16px;">
       <div class="iv-sec">Base desta tela</div>
       <p class="iv-sec-sub">
-        Conta <b style="color:var(--texto);">{{ total_geral }} vendas registradas</b> — toda proposta viva no JOB,
-        sem as excluídas e sem as estornadas. No sistema, uma proposta cadastrada já é uma venda
-        registrada pelo consultor; a esteira abaixo diz em que ponto da implantação cada uma está.
+        Lê <b style="color:var(--texto);">{{ total_geral }} vendas</b> — toda proposta cadastrada no JOB, sem as
+        excluídas e sem as estornadas. Não olha o andamento da proposta: o que explica a venda já
+        está decidido quando ela é cadastrada. Os fatores abaixo saem do próprio cadastro, então
+        valem para todas; a leitura da conversa entra por cima, trazendo as objeções.
       </p>
-    </div>
-  </div>
-
-  <!-- Esteira: sempre sobre a base COMPLETA. Se ela mudasse com o filtro,
-       deixaria de ser diagnóstico e viraria mais um recorte. -->
-  <div class="card">
-    <div class="iv-cab">
-      <div class="iv-sec">
-        Onde as vendas estão na esteira
-        <i class="ajuda-i" title="Esteira de implantação: o caminho da venda até a apólice ficar valendo. 'Aguardando Documentos' é o valor inicial de toda proposta nova; 'Emitida/Ativa' é a apólice implantada, e é o status que destrava as parcelas de comissão.">i</i>
-      </div>
-      <p class="iv-sec-sub">Sobre as {{ total_geral }} vendas, sem filtro — é o retrato da fila, não do recorte.</p>
-    </div>
-    <div class="iv-corpo">
-      {% if esteira %}
-      {% set cores = {'Aguardando Documentos':'var(--laranja)','Em Análise Operadora':'var(--azul)','Emitida/Ativa':'var(--verde)'} %}
-      <div class="iv-esteira">
-        {% for e in esteira %}
-        <span style="width:{{ e.pct }}%; background:{{ cores.get(e.nome,'var(--roxo)') }};" title="{{ e.nome }}: {{ e.qtd }}"></span>
-        {% endfor %}
-      </div>
-      <div class="iv-leg">
-        {% for e in esteira %}
-        <div class="iv-leg-i">
-          <span class="iv-leg-p" style="background:{{ cores.get(e.nome,'var(--roxo)') }};"></span>
-          <span class="iv-leg-n">{{ e.nome }}</span>
-          <span class="iv-leg-q">{{ e.qtd }} · {{ e.pct }}%</span>
-        </div>
-        {% endfor %}
-      </div>
-      {% set parado = (esteira | selectattr('nome','equalto','Aguardando Documentos') | list | first) %}
-      {% if parado and parado.pct >= 40 %}
-      <div class="iv-nota">
-        <b>{{ parado.qtd }} das {{ total_geral }} vendas nunca saíram de "Aguardando Documentos"</b> —
-        esse é o valor inicial da coluna, então provavelmente a esteira não vem sendo atualizada,
-        e não que as {{ parado.qtd }} estejam de fato travadas. Enquanto elas não chegam em
-        "Emitida/Ativa", as parcelas de comissão delas seguem bloqueadas.
-        <a href="/admin/auditoria" style="color:var(--amarelo); font-weight:600;">Abrir a esteira</a>
-      </div>
-      {% endif %}
-      {% else %}
-      <div class="iv-vazio">Nenhuma venda registrada ainda.</div>
-      {% endif %}
     </div>
   </div>
 
@@ -175,9 +147,9 @@
       <option value="">Todas as operadoras</option>
       {% for o in opc_operadoras %}<option value="{{ o }}" {% if o==f_operadora %}selected{% endif %}>{{ o }}</option>{% endfor %}
     </select>
-    <select name="esteira">
-      <option value="">Toda a esteira</option>
-      {% for o in opc_esteira %}<option value="{{ o }}" {% if o==f_esteira %}selected{% endif %}>{{ o }}</option>{% endfor %}
+    <select name="modalidade">
+      <option value="">Todas as modalidades</option>
+      {% for o in opc_modalidades %}<option value="{{ o }}" {% if o==f_modalidade %}selected{% endif %}>{{ o }}</option>{% endfor %}
     </select>
     <select name="analise">
       <option value="">Com e sem análise de conversa</option>
@@ -208,6 +180,43 @@
       <div class="lbl">Conversas analisadas</div>
       <div class="val">{{ m.pct_analise }}%</div>
       <div class="sub">{{ m.com_analise }} de {{ m.total }} vendas · o resto não tem conversa lida</div>
+    </div>
+  </div>
+
+  <!-- Fatores da venda: medidos no cadastro, entao valem pra base inteira. -->
+  <div class="card">
+    <div class="iv-cab">
+      <div class="iv-sec">
+        O perfil de quem contrata
+        <i class="ajuda-i" title="Sai do cadastro da proposta, não da conversa: por isso vale para todas as vendas, mesmo as que ninguém leu a conversa. Cada painel diz quantas vendas ele conseguiu medir.">i</i>
+      </div>
+      <p class="iv-sec-sub">
+        O que as vendas têm em comum. Cada painel mostra a fatia de cada resposta e diz sobre
+        quantas vendas ele conseguiu medir — quando o cadastro não traz o campo, a venda fica de fora daquele painel.
+      </p>
+    </div>
+    <div class="iv-corpo">
+      {% if perfil %}
+      <div class="iv-perfil">
+        {% for f in perfil %}
+        <div class="iv-fator">
+          <div class="iv-fator-t">{{ f.titulo }}</div>
+          <div class="iv-fator-b">medido em {{ f.base }} de {{ m.total }} venda{{ 's' if m.total != 1 }}</div>
+          <div class="iv-fator-l">
+            {% for i in f.itens %}
+            <div class="iv-fl">
+              <div class="iv-fl-n" title="{{ i.nome }}">{{ i.nome }}</div>
+              <div class="iv-fl-q"><b>{{ i.pct }}%</b> · {{ i.qtd }}</div>
+              <div class="iv-fl-t"><div class="iv-fl-f" style="--p:{{ (i.pct / 100)|round(3) }};"></div></div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="iv-vazio">{% if filtrando %}Nenhuma venda com esses filtros para ler o perfil.{% else %}Nenhuma venda cadastrada ainda.{% endif %}</div>
+      {% endif %}
     </div>
   </div>
 
@@ -248,6 +257,7 @@
   </div>
 
   <div class="iv-grid2" style="margin-bottom:16px;">
+    {% if not f_operadora %}
     <div class="card" style="margin-bottom:0;">
       <div class="iv-cab"><div class="iv-sec">Operadoras que mais vendem</div></div>
       <div class="iv-corpo">
@@ -265,11 +275,12 @@
         {% else %}<div class="iv-vazio">Nenhuma venda no filtro atual.</div>{% endif %}
       </div>
     </div>
+    {% endif %}
     <div class="card" style="margin-bottom:0;">
       <div class="iv-cab">
         <div class="iv-sec">
           Cidades que mais compram
-          <i class="ajuda-i" title="A cidade não vem do cadastro da proposta: ela é lida da conversa analisada. Por isso só aparecem as vendas que têm conversa lida.">i</i>
+          <i class="ajuda-i" title="Vem da cidade do cadastro da proposta. Quando o cadastro está sem, usa a cidade que a conversa analisada mencionou.">i</i>
         </div>
       </div>
       <div class="iv-corpo">
@@ -285,12 +296,13 @@
           {% endfor %}
         </div>
         {% else %}
-        <div class="iv-vazio">A cidade vem da conversa analisada, e nenhuma destas vendas tem uma.</div>
+        <div class="iv-vazio">Nenhuma destas vendas tem cidade — nem no cadastro da proposta, nem na conversa.</div>
         {% endif %}
       </div>
     </div>
   </div>
 
+  {% if not f_consultor %}
   <div class="card">
     <div class="iv-cab"><div class="iv-sec">Vendas por consultor</div></div>
     <div class="iv-corpo">
@@ -308,6 +320,7 @@
       {% else %}<div class="iv-vazio">Nenhuma venda no filtro atual.</div>{% endif %}
     </div>
   </div>
+  {% endif %}
 
   <div class="card">
     <div class="iv-cab">
@@ -329,7 +342,10 @@
         <table class="iv-tab">
           <thead>
             <tr>
-              <th>Cliente</th><th>Consultor</th><th>Operadora</th><th>Esteira</th>
+              <th>Cliente</th>
+              {% if not f_consultor %}<th>Consultor</th>{% endif %}
+              {% if not f_operadora %}<th>Operadora</th>{% endif %}
+              <th>Plano</th>
               <th class="iv-num">Vidas</th><th class="iv-num">Valor</th>
               <th class="iv-num">Score</th><th>Objeções</th><th class="iv-num">Data</th><th></th>
             </tr>
@@ -341,12 +357,10 @@
                 <div class="iv-cli">{{ c.nome }}</div>
                 <div class="iv-cli-sub">{{ c.modalidade }}{% if c.cidade %} · {{ c.cidade }}{% endif %}</div>
               </td>
-              <td>{{ c.consultor or '—' }}</td>
-              <td>{{ c.operadora or '—' }}</td>
-              <td>
-                {% if c.esteira == 'Emitida/Ativa' %}<span class="tag tag-verde">Emitida/Ativa</span>
-                {% elif c.esteira == 'Em Análise Operadora' %}<span class="tag tag-info">Em análise</span>
-                {% else %}<span class="tag tag-am">{{ c.esteira }}</span>{% endif %}
+              {% if not f_consultor %}<td>{{ c.consultor or '—' }}</td>{% endif %}
+              {% if not f_operadora %}<td>{{ c.operadora or '—' }}</td>{% endif %}
+              <td style="font-size:12px; color:var(--cinza); min-width:132px; white-space:normal;">
+                {{ c.acomodacao or '—' }}{% if c.copart %}<div>{{ c.copart }}</div>{% endif %}
               </td>
               <td class="iv-num">{{ c.vidas }}</td>
               <td class="iv-num">{{ c.valor|moeda }}</td>
