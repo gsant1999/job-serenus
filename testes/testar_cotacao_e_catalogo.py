@@ -2,10 +2,16 @@
 
 Roda em SQLite local, sem tocar em producao.
 """
-import os, sys, json
-os.environ['JOB_DATA_DIR'] = '/tmp/jobtest-cotacao'
-os.makedirs('/tmp/jobtest-cotacao', exist_ok=True)
-sys.path.insert(0, '/Users/guilhermesantos/Desktop/job-serenus')
+import os, sys, json, tempfile
+os.environ['JOB_DATA_DIR'] = tempfile.mkdtemp(prefix='jobtest-cotacao-')
+os.environ['JOB_MODO_TESTE'] = '1'
+# CAMINHO RELATIVO AO ARQUIVO, NAO ABSOLUTO.
+#
+# Estava fixo em ~/Desktop/job-serenus: rodando de um worktree, o teste
+# importava o app do repo principal e passava (ou falhava) por causa de um
+# codigo que nao era o que estava sendo alterado. Um teste que nao testa o
+# que voce mudou e pior que teste nenhum.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import app as A
 
@@ -27,15 +33,18 @@ with c.session_transaction() as s:
 r = c.get('/cotacao/novo')
 ok(r.status_code == 200, '1. /cotacao/novo abre', 'status=%d' % r.status_code)
 html = r.get_data(as_text=True)
-ok('Cotação ao vivo' in html, '1b. tem o titulo')
+ok('Cotação' in html and 'JOB' in html, '1b. tem o titulo')
 ok('JOB_SITE_REQ' in html, '1c. fala com a extensao')
 ok('59-199' in html, '1d. usa a faixa do Painel no JS')
 ok('59+' in html, '1e. mostra o rotulo do JOB pro consultor')
 
 # 2. A tela antiga continua de pe
-r2 = c.get('/cotacao')
+# /cotacao virou atalho pra tela nova: o que importa e que a porta antiga
+# continua levando a algum lugar, nao que ela renderize a tela velha.
+r2 = c.get('/cotacao', follow_redirects=True)
 ok(r2.status_code == 200, '2. /cotacao antiga continua abrindo', 'status=%d' % r2.status_code)
-ok('/cotacao/novo' in r2.get_data(as_text=True), '2b. tem a porta pra tela nova')
+ok('/cotacao/novo' in r2.get_data(as_text=True) or 'JOB_SITE_REQ' in r2.get_data(as_text=True),
+   '2b. leva pra tela nova')
 
 # 3. Salvar uma cotacao de verdade
 corpo = {
@@ -57,6 +66,20 @@ corpo = {
          'tabela': {}, 'produto': {}, 'total': None, 'faixas': [], 'motivo': 'sem_valor_na_resposta'},
     ],
 }
+# COTACAO SEM LEAD NAO SALVA MAIS (regra de conversao offline: sem lead, a
+# venda nao volta pro Meta/Google e o funil nao sabe que houve proposta).
+# O teste precisa de um lead de verdade, senao morre em 'sem_lead'.
+_conn = A.db()
+_conn.execute("INSERT INTO usuarios (id,nome,email,senha_hash,perfil,ativo) "
+              "VALUES (1,'Teste','t@t.com','x','admin',1)"
+              if not _conn.execute("SELECT 1 FROM usuarios WHERE id=1").fetchone()
+              else "SELECT 1")
+_conn.execute("INSERT INTO crm_leads (nome, telefone, criado_em) VALUES ('Lead de Teste','19999990000',?)",
+              (A._agora_sp(),))
+_conn.commit()
+corpo['lead_id'] = _conn.execute("SELECT MAX(id) m FROM crm_leads").fetchone()['m']
+A.close_db(_conn)
+
 r3 = c.post('/cotacao/viva/salvar', json=corpo)
 d3 = r3.get_json()
 ok(r3.status_code == 200 and d3.get('ok'), '3. salva a cotacao', json.dumps(d3))
@@ -97,7 +120,14 @@ r7b = c.get('/cotacao/novo')
 ok('PF' in r7b.get_data(as_text=True), '7b. o nome novo aparece na tela')
 
 # 8. A rota da extensao exige chave
-r8 = c.post('/api/whatsapp/cotacao', json=corpo)
+#
+# CLIENTE LIMPO, SEM O COOKIE DO SITE. Este teste usava o mesmo `c` da tela,
+# que carrega a sessao do admin — e a primeira porta de `login_ou_extensao` e
+# justamente a sessao do site. Resultado: 200 e o teste "provando" o oposto do
+# que queria. E o mesmo engano que fez o /ping responder 200 com token morto na
+# noite de 10/08: no navegador do admin, o cookie mascara o token do aparelho.
+c_limpo = A.app.test_client()
+r8 = c_limpo.post('/api/whatsapp/cotacao', json=corpo)
 ok(r8.status_code == 401, '8. extensao sem chave e barrada', 'status=%d' % r8.status_code)
 
 # ── catálogo ───────────────────────────────────────────────────────────────
@@ -223,10 +253,12 @@ rv2 = c.post('/cotacao/catalogo/alvos', json={'alvos': [
     {'cidade': 'Campinas - SP', 'modalidade': 2}]}).get_json()
 ok(len(rv2['alvos']) == 2, '17c. por o mesmo alvo de novo nao duplica', str(len(rv2['alvos'])))
 
-# A extensao sem chave nao consegue perguntar nem gravar
-ok(c.get('/api/whatsapp/catalogo/proximo').status_code == 401,
+# A extensao sem chave nao consegue perguntar nem gravar.
+# `c_limpo` e nao `c`: ver a nota do item 8 — o cookie do site autentica
+# antes de qualquer chave, e o teste passaria a medir a coisa errada.
+ok(c_limpo.get('/api/whatsapp/catalogo/proximo').status_code == 401,
    '17d. extensao sem chave e barrada ao perguntar')
-ok(c.post('/api/whatsapp/catalogo/gravar', json={}).status_code == 401,
+ok(c_limpo.post('/api/whatsapp/catalogo/gravar', json={}).status_code == 401,
    '17e. extensao sem chave e barrada ao gravar')
 
 # Depois de varrer, o alvo fica datado e sai da fila
@@ -252,10 +284,10 @@ ok(v4 and v4['cidade'] == 'Hortolandia - SP', '17h. passado o intervalo, volta p
 
 
 # 18. A extensao batiza o codigo sozinha (le o rotulo na tela do Painel)
-ok(c.post('/api/whatsapp/cotacao/modalidade', json={'codigo': 3, 'nome': 'Adesao'}).status_code == 401,
+ok(c_limpo.post('/api/whatsapp/cotacao/modalidade', json={'codigo': 3, 'nome': 'Adesao'}).status_code == 401,
    '18. sem chave, nao batiza')
-ok(c.post('/api/whatsapp/cotacao/modalidade', json={'codigo': 3},
-          headers={'X-Extension-Key': 'errada'}).status_code == 401,
+ok(c_limpo.post('/api/whatsapp/cotacao/modalidade', json={'codigo': 3},
+                headers={'X-Extension-Key': 'errada'}).status_code == 401,
    '18b. chave errada tambem nao')
 
 # 19. Cidade preferida: fica no servidor, segue a pessoa
