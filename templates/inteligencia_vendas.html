@@ -72,6 +72,20 @@
 
   .iv-vazio { font-size:13px; color:var(--cinza); line-height:1.6; }
 
+  /* Cobertura: nao e alerta de erro, e uma lista de tarefa. Por isso quadro
+     neutro com uma acao clara, e nao faixa vermelha. */
+  .iv-cob { display:flex; gap:12px; flex-wrap:wrap; align-items:stretch; }
+  .iv-cob-i { flex:1 1 190px; background:var(--panel-2); border:1px solid var(--borda);
+              border-radius:10px; padding:12px 14px; }
+  .iv-cob-n { font-family:'Sora',sans-serif; font-size:19px; font-weight:700; color:var(--texto); }
+  .iv-cob-t { font-size:12px; color:var(--texto); margin-top:3px; font-weight:600; }
+  .iv-cob-d { font-size:11.5px; color:var(--cinza); margin-top:4px; line-height:1.5; }
+  .iv-cob-ok .iv-cob-n { color:var(--verde); }
+  .iv-cob-go .iv-cob-n { color:var(--amarelo); }
+  .iv-acao { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:14px; }
+  .iv-msg { font-size:12.5px; color:var(--cinza); }
+  .iv-msg.ok { color:var(--verde); }
+
   /* Piso de largura + rolagem no contêiner: espremida, a tabela quebrava
      "Cliente Sem Lead" em tres linhas e empilhava os tres botoes de acao um
      sobre o outro, deixando cada linha com uma altura diferente. Rolar na
@@ -120,6 +134,9 @@
   <div>
     <h1>Inteligência de Vendas</h1>
     <div class="sub">O que fecha, lido das vendas que já entraram</div>
+  </div>
+  <div>
+    <a href="/ebook-vendas" class="btn">Gerar o material de treino</a>
   </div>
 </div>
 
@@ -180,6 +197,54 @@
       <div class="lbl">Conversas analisadas</div>
       <div class="val">{{ m.pct_analise }}%</div>
       <div class="sub">{{ m.com_analise }} de {{ m.total }} vendas · o resto não tem conversa lida</div>
+    </div>
+  </div>
+
+  <!-- Cobertura da leitura de conversa: e daqui que sai a materia-prima do
+       ebook, entao a tela tem que dizer quanto falta e como fechar. -->
+  <div class="card">
+    <div class="iv-cab">
+      <div class="iv-sec">
+        Conversas lidas das vendas
+        <i class="ajuda-i" title="Toda venda deveria ter a conversa que a produziu lida e analisada — é dela que saem as objeções, o follow-up que funcionou e o material do ebook. Aqui você vê quantas faltam e o que impede cada uma.">i</i>
+      </div>
+      <p class="iv-sec-sub">
+        {{ m.com_analise }} de {{ total_geral }} vendas já têm a conversa lida. O que falta:
+      </p>
+    </div>
+    <div class="iv-corpo">
+      <div class="iv-cob">
+        <div class="iv-cob-i {% if cobertura.prontas %}iv-cob-go{% else %}iv-cob-ok{% endif %}">
+          <div class="iv-cob-n">{{ cobertura.prontas }}</div>
+          <div class="iv-cob-t">esperando você mandar ler</div>
+          <div class="iv-cob-d">A conversa está vinculada e é só mandar. Elas entram na fila da extensão do consultor, uma por vez.</div>
+        </div>
+        <div class="iv-cob-i">
+          <div class="iv-cob-n">{{ cobertura.na_fila }}</div>
+          <div class="iv-cob-t">já na fila</div>
+          <div class="iv-cob-d">Mandadas e aguardando a extensão do consultor abrir o WhatsApp Web. Ela lê uma a cada 25 segundos, sozinha.</div>
+        </div>
+        <div class="iv-cob-i">
+          <div class="iv-cob-n">{{ cobertura.sem_conversa }}</div>
+          <div class="iv-cob-t">sem conversa vinculada</div>
+          <div class="iv-cob-d">O lead existe, mas o JOB ainda não sabe qual conversa do WhatsApp é dele. Resolve rodando "Sincronizar @lid" na extensão.</div>
+        </div>
+        <div class="iv-cob-i">
+          <div class="iv-cob-n">{{ cobertura.sem_lead }}</div>
+          <div class="iv-cob-t">sem lead no CRM</div>
+          <div class="iv-cob-d">A proposta nunca foi ligada a um lead, então não há conversa para procurar. Só se resolve ligando a proposta ao lead na ficha dela.</div>
+        </div>
+      </div>
+      <div class="iv-acao">
+        <button class="btn" id="iv-btn-fila" {% if not cobertura.prontas %}disabled style="opacity:.5;cursor:default;"{% endif %}>
+          {% if cobertura.prontas %}Mandar ler {{ cobertura.prontas }} conversa{{ 's' if cobertura.prontas != 1 }}{% else %}Nada novo para mandar ler{% endif %}
+        </button>
+        <span class="iv-msg" id="iv-msg-fila">
+          {% if cobertura.prontas %}Entra na fila que a extensão já usa — uma conversa a cada 25 segundos, em segundo plano.
+          {% elif cobertura.na_fila %}As {{ cobertura.na_fila }} já mandadas estão na fila, esperando a extensão do consultor abrir o WhatsApp Web.
+          {% else %}Toda venda com conversa vinculada já foi lida.{% endif %}
+        </span>
+      </div>
     </div>
   </div>
 
@@ -399,6 +464,39 @@
 </div>
 
 <script>
+// Enfileira as conversas das vendas que ainda nao foram lidas. Botao trava
+// enquanto envia: sem isso, dois cliques viram dois pedidos — e a regra da casa
+// e que toda acao tem reacao imediata e visivel.
+(function () {
+  var b = document.getElementById('iv-btn-fila');
+  if (!b || b.disabled) return;
+  var msg = document.getElementById('iv-msg-fila');
+  b.addEventListener('click', function () {
+    var original = b.textContent;
+    b.disabled = true; b.style.opacity = '.6'; b.textContent = 'Colocando na fila...';
+    msg.className = 'iv-msg'; msg.textContent = '';
+    fetch('/inteligencia-vendas/analisar-faltantes', {method: 'POST'})
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.ok) throw new Error('falhou');
+        b.textContent = 'Pronto';
+        msg.className = 'iv-msg ok';
+        var espera = d.enfileiradas + (d.ja_esperando || 0);
+        msg.textContent = d.enfileiradas
+          ? (d.enfileiradas + ' conversa' + (d.enfileiradas === 1 ? '' : 's') + ' mandada' +
+             (d.enfileiradas === 1 ? '' : 's') + '. Agora são ' + espera + ' na fila. A extensão do ' +
+             'consultor lê em segundo plano; volte aqui mais tarde para ver as objeções aparecerem.')
+          : ('Nada novo para mandar — as ' + (d.ja_esperando || 0) + ' que faltam já estão na fila, ' +
+             'esperando a extensão do consultor abrir o WhatsApp Web.');
+      })
+      .catch(function () {
+        b.disabled = false; b.style.opacity = ''; b.textContent = original;
+        msg.className = 'iv-msg';
+        msg.textContent = 'Não deu para colocar na fila agora. Tente de novo em instantes.';
+      });
+  });
+})();
+
 // Busca por nome: filtra as linhas que já estão na tela, sem ida ao servidor.
 // Os filtros de análise moram na barra acima porque mudam os números do topo;
 // este só esconde linha, então pode ser local.

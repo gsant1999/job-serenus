@@ -3539,6 +3539,10 @@ def init_db():
         ("usuarios", "waspeed_token", "TEXT"),
         ("usuarios", "som_notificacao", "TEXT"),  # NULL = padrao do sistema (thriller)
         ("crm_leads", "telefone_norm", "TEXT"),
+        # Fila de análise obrigatória das vendas fechadas: ela precisa passar na
+        # frente da varredura exploratória, senão fica atrás de centenas de itens
+        # antigos e a venda — que é o dado caro — nunca é lida.
+        ("varredura_lote", "prioridade", "INTEGER DEFAULT 0"),
         # Qualificação do lead (aba na ficha existia só no front — nunca teve rota nem coluna)
         ("crm_leads", "qual_tipo_plano", "TEXT"),
         ("crm_leads", "qual_idade", "TEXT"),
@@ -10654,7 +10658,28 @@ def salvar_proposta():
                                           dono_uid, dono_nome)
             except Exception as e:
                 app.logger.warning(f"[REGRA-GESTOR] snapshot da proposta {proposta_id} pulado: {e}")
-        conn.commit(); close_db(conn)
+        conn.commit()
+        # A VENDA JA NASCE NA FILA DE LEITURA.
+        #
+        # Era aqui que a inteligencia de vendas se perdia: a proposta entrava, a
+        # conversa que a produziu ficava pra tras, e ninguem lembrava de mandar
+        # ler. Das 71 vendas vivas, 38 tinham lead com conversa vinculada e
+        # simplesmente nunca foram lidas. Enfileirar no cadastro fecha o ciclo
+        # sozinho — e cai no MESMO protocolo de sempre da extensao (um item por
+        # vez, 25s entre eles), entao nao pesa nada nela.
+        #
+        # Nunca derruba o cadastro: a venda ja esta salva e commitada acima.
+        try:
+            prontas, _sc, _sl, _nf = _vendas_sem_analise(conn)
+            so_esta = [p for p in prontas if p['id'] == proposta_id]
+            if so_esta:
+                _fila_vendas_enfileirar(conn, so_esta)
+                conn.commit()
+        except Exception as e:
+            app.logger.info(f"[FILA_VENDAS] proposta {proposta_id} nao enfileirada: {e}")
+            try: conn.rollback()
+            except Exception: pass
+        close_db(conn)
         try:
             quem = session.get('nome') or c.get('consultor') or 'Consultor'
             cliente_prop = d.get('razao_social') or d.get('resp_contrato') or 'novo cliente'
@@ -14745,6 +14770,150 @@ def enviar_conversoes_ads(limite=200, so_simular=False):
     return resumo
 
 
+def _perfil_da_venda(clientes):
+    """Os fatores da venda agregados. Mora fora da rota porque a tela e o ebook
+    precisam do MESMO número — dois cálculos parecidos divergem na primeira
+    mudança, e aí o documento impresso contradiz a tela que o gerou."""
+    rotulos = {'acomodacao': 'Acomodação', 'copart': 'Coparticipação',
+               'faixa_vidas': 'Quantas vidas', 'faixa_idade': 'Idade do titular',
+               'faixa_valor': 'Valor mensal', 'modalidade': 'Modalidade'}
+    ordem_fixa = {
+        'faixa_vidas': ['1 vida', '2 vidas', '3 vidas', '4 ou mais vidas'],
+        'faixa_idade': ['Até 33 anos', '34 a 48 anos', '49 a 58 anos', '59 anos ou mais'],
+        'faixa_valor': ['Até R$ 500', 'R$ 500 a R$ 1.000', 'R$ 1.000 a R$ 2.000', 'Acima de R$ 2.000'],
+    }
+    fatores = {k: Counter() for k in rotulos}
+    for c in clientes:
+        for k in fatores:
+            v = c.get(k)
+            if v:
+                fatores[k][v] += 1
+    perfil = []
+    for k in ('faixa_vidas', 'faixa_idade', 'faixa_valor', 'acomodacao', 'copart', 'modalidade'):
+        cnt = fatores[k]
+        base = sum(cnt.values())
+        if not base:
+            continue
+        itens = ([(n, cnt[n]) for n in ordem_fixa[k] if cnt.get(n)]
+                 if k in ordem_fixa else cnt.most_common(6))
+        perfil.append({
+            'chave': k, 'titulo': rotulos[k], 'base': base,
+            'itens': [{'nome': n, 'qtd': q, 'pct': round(q * 100 / base)} for n, q in itens],
+            # O item mais forte serve pra frase do ebook ("55% compram 1 vida").
+            'topo': (lambda t: {'nome': t[0][0], 'qtd': t[0][1],
+                                'pct': round(t[0][1] * 100 / base)})(cnt.most_common(1)),
+        })
+    return perfil
+
+
+def _vendas_sem_analise(conn):
+    """Vendas fechadas que ainda não têm conversa lida, com o que falta em cada.
+
+    Medido em produção (18/08/2026), de 71 vendas: 21 tinham análise, 38 tinham
+    lead mas ninguém mandou ler a conversa — e 33 dessas 38 JÁ TINHAM o vínculo
+    @lid, ou seja, dava pra ler naquele instante. O problema nunca foi a
+    extensão capturar mal: foi ninguém enfileirar. As 12 restantes nem lead têm.
+
+    Devolve (prontas, sem_conversa, sem_lead) pra tela poder dizer exatamente
+    qual é o impedimento de cada uma em vez de um total sem ação.
+    """
+    linhas = conn.execute("""
+        SELECT p.id, p.razao_social, p.consultor, p.criado_em, p.lead_id,
+               p.usuario_id, l.nome lead_nome, l.responsavel_id,
+               (SELECT w.chat_id FROM wa_chat_lead w
+                 WHERE w.lead_id = p.lead_id
+                   AND NOT EXISTS (SELECT 1 FROM wa_conversa_ignorada i
+                                    WHERE i.chat_id = w.chat_id)
+                 LIMIT 1) chat_id,
+               (SELECT COUNT(*) FROM varredura_item vi
+                 JOIN varredura_lote vl ON vl.id = vi.lote_id
+                WHERE vi.lead_id = p.lead_id AND vi.status IN ('pendente','lendo')
+                  AND vl.status='rodando') na_fila
+        FROM propostas p
+        LEFT JOIN crm_leads l ON l.id = p.lead_id
+        WHERE p.status <> 'Excluída' AND COALESCE(p.estornada,0)=0
+          AND NOT EXISTS (SELECT 1 FROM whatsapp_analises wa WHERE wa.lead_id = p.lead_id)
+        ORDER BY p.criado_em DESC
+    """).fetchall()
+    prontas, sem_conversa, sem_lead, na_fila = [], [], [], []
+    for r in linhas:
+        item = {'id': r['id'], 'nome': r['razao_social'], 'consultor': r['consultor'],
+                'criado_em': r['criado_em'], 'lead_id': r['lead_id'],
+                'lead_nome': r['lead_nome'], 'chat_id': r['chat_id'],
+                # Quem tem a conversa no WhatsApp é quem vai lê-la: o responsável
+                # pelo lead; sem ele, quem cadastrou a proposta.
+                'dono': r['responsavel_id'] or r['usuario_id']}
+        if not r['lead_id']:
+            sem_lead.append(item)
+        elif not r['chat_id']:
+            sem_conversa.append(item)
+        elif r['na_fila']:
+            # JÁ ESPERANDO A EXTENSÃO. Sem separar isto de 'prontas', o botão
+            # prometia "mandar ler as 24" e respondia "0 na fila" — porque as 24
+            # já estavam lá. Quem clicou entendeu que quebrou.
+            na_fila.append(item)
+        else:
+            prontas.append(item)
+    return prontas, sem_conversa, sem_lead, na_fila
+
+
+def _fila_vendas_enfileirar(conn, prontas):
+    """Põe as vendas prontas na fila de leitura que a extensão JÁ drena.
+
+    Não existe máquina nova aqui, e isso é o ponto: a extensão continua com o
+    mesmo protocolo de sempre (pede um item, lê, devolve, espera 25s). O que
+    muda é só QUEM entra na fila e em que ordem. Um lote permanente por
+    consultor, marcado com prioridade 1, que vai sendo completado — em vez de
+    varredura gigante criada à mão e abandonada no meio (7 dos 8 lotes já
+    criados estavam 'parado', com 512 itens pendentes que ninguém leria).
+
+    A fila fica minúscula por construção: são as vendas do mês, não a base de
+    leads. Peso pra extensão: o mesmo de ler uma conversa, algumas vezes por mês.
+    """
+    if not prontas:
+        return {'enfileiradas': 0, 'lotes': 0}
+    porconsultor = {}
+    for p in prontas:
+        if p['dono']:
+            porconsultor.setdefault(p['dono'], []).append(p)
+    enfileiradas, lotes = 0, 0
+    for uid, itens in porconsultor.items():
+        lote = conn.execute("""SELECT id FROM varredura_lote
+                                WHERE consultor_id=? AND status='rodando'
+                                  AND COALESCE(prioridade,0) >= 1
+                                ORDER BY id DESC LIMIT 1""", (uid,)).fetchone()
+        if lote:
+            lote_id = lote['id']
+        else:
+            cur = conn.execute("""INSERT INTO varredura_lote
+                (consultor_id, criado_por, filtro_txt, total, status, criado_em, prioridade)
+                VALUES (?,?,?,?,?,?,?)""",
+                (uid, 'automático', 'Vendas fechadas sem conversa lida', 0, 'rodando',
+                 _agora_sp(), 1))
+            lote_id = _last_insert_id(cur)
+            if lote_id is None:
+                lote_id = conn.execute(
+                    "SELECT id FROM varredura_lote ORDER BY id DESC LIMIT 1").fetchone()['id']
+            lotes += 1
+        for p in itens:
+            # Idempotente: rodar de novo não duplica item que já está na fila.
+            ja = conn.execute("""SELECT 1 FROM varredura_item
+                                  WHERE lote_id=? AND lead_id=? AND status IN ('pendente','lendo')
+                                  LIMIT 1""", (lote_id, p['lead_id'])).fetchone()
+            if ja:
+                continue
+            conn.execute("""INSERT INTO varredura_item
+                (lote_id, lead_id, chat_id, lead_nome, status, atualizado_em)
+                VALUES (?,?,?,?,?,?)""",
+                (lote_id, p['lead_id'], p['chat_id'],
+                 (p['lead_nome'] or p['nome'] or '')[:120], 'pendente', _agora_sp()))
+            enfileiradas += 1
+        conn.execute("""UPDATE varredura_lote SET total =
+            (SELECT COUNT(*) FROM varredura_item WHERE lote_id=?) WHERE id=?""",
+            (lote_id, lote_id))
+    return {'enfileiradas': enfileiradas, 'lotes': lotes}
+
+
 def _rotulo_venda(v):
     """Só limpa. A juntada de 'Apartamento' com 'APARTAMENTO' acontece na hora
     de contar (_canonizar_rotulos), e não aqui com .title(): title-case cru
@@ -14982,8 +15151,13 @@ def inteligencia_vendas():
     """
     conn = db()
     clientes = _fechados_com_analise(conn)
+    # Cobertura: quantas vendas ainda não tiveram a conversa lida e, de cada
+    # uma, QUAL é o impedimento. Sem separar assim, "50 sem análise" não diz o
+    # que fazer — e o que fazer é diferente em cada caso.
+    _pr, _sc, _sl, _nf = _vendas_sem_analise(conn)
+    cobertura = {'prontas': len(_pr), 'sem_conversa': len(_sc),
+                 'sem_lead': len(_sl), 'na_fila': len(_nf)}
     close_db(conn)
-    FATORES = ('acomodacao', 'copart', 'faixa_vidas', 'faixa_idade', 'faixa_valor', 'modalidade')
     _canonizar_rotulos(clientes, ('acomodacao', 'modalidade', 'tipo_pessoa'))
 
     # Opções saem da base COMPLETA, senão o filtro se apaga sozinho: escolher um
@@ -15017,7 +15191,6 @@ def inteligencia_vendas():
     scores, dias_ate_fechar, com_analise, com_lead = [], [], 0, 0
     # Cada fator é um Counter próprio: são perguntas diferentes sobre a mesma
     # venda, e cada um tem sua própria cobertura (nem todo cadastro traz tudo).
-    fatores = {k: Counter() for k in FATORES}
     for c in clientes:
         op = c['operadora'] or '—'
         por_operadora[op] += 1; val_operadora[op] = val_operadora.get(op, 0) + c['valor']
@@ -15036,10 +15209,6 @@ def inteligencia_vendas():
             objecoes[str(o).strip().lower()] += 1
         if c['cidade']:
             cidades[c['cidade']] += 1
-        for k in fatores:
-            v = c.get(k)
-            if v:
-                fatores[k][v] += 1
 
     def _limpo(v):
         return int(v) if float(v) == int(v) else round(float(v), 1)
@@ -15061,31 +15230,7 @@ def inteligencia_vendas():
         'tempo_base': len(dias_ate_fechar),
     }
 
-    # Cada painel de fator carrega a própria base medida. Sem isso, "Enfermaria
-    # 52" parece 52 de 71 mesmo quando o campo só existe em 60 cadastros — e a
-    # tela mente sem ninguém perceber.
-    rotulos = {'acomodacao': 'Acomodação', 'copart': 'Coparticipação',
-               'faixa_vidas': 'Quantas vidas', 'faixa_idade': 'Idade do titular',
-               'faixa_valor': 'Valor mensal', 'modalidade': 'Modalidade'}
-    ordem_fixa = {
-        'faixa_vidas': ['1 vida', '2 vidas', '3 vidas', '4 ou mais vidas'],
-        'faixa_idade': ['Até 33 anos', '34 a 48 anos', '49 a 58 anos', '59 anos ou mais'],
-        'faixa_valor': ['Até R$ 500', 'R$ 500 a R$ 1.000', 'R$ 1.000 a R$ 2.000', 'Acima de R$ 2.000'],
-    }
-    perfil = []
-    for k in ('faixa_vidas', 'faixa_idade', 'faixa_valor', 'acomodacao', 'copart', 'modalidade'):
-        cnt = fatores[k]
-        base = sum(cnt.values())
-        if not base:
-            continue
-        if k in ordem_fixa:
-            itens = [(n, cnt[n]) for n in ordem_fixa[k] if cnt.get(n)]
-        else:
-            itens = cnt.most_common(6)
-        perfil.append({
-            'chave': k, 'titulo': rotulos[k], 'base': base,
-            'itens': [{'nome': n, 'qtd': q, 'pct': round(q * 100 / base)} for n, q in itens],
-        })
+    perfil = _perfil_da_venda(clientes)
 
     top_operadoras = [{'nome': k, 'qtd': v, 'valor': val_operadora[k]} for k, v in por_operadora.most_common(10)]
     top_consultores = [{'nome': k, 'qtd': v, 'valor': val_consultor[k]} for k, v in por_consultor.most_common(15)]
@@ -15095,10 +15240,97 @@ def inteligencia_vendas():
                            top_operadoras=top_operadoras, top_consultores=top_consultores,
                            top_objecoes=top_objecoes, top_cidades=top_cidades,
                            perfil=perfil, total_geral=total_geral, filtrando=filtrando,
+                           cobertura=cobertura,
                            opc_consultores=opc_consultores, opc_operadoras=opc_operadoras,
                            opc_modalidades=opc_modalidades,
                            f_consultor=f_consultor, f_operadora=f_operadora,
                            f_modalidade=f_modalidade, f_analise=f_analise)
+
+
+@app.route('/ebook-vendas')
+@login_required
+@admin_required
+def ebook_vendas():
+    """O material de treino montado a partir das vendas reais, em formato de
+    documento — pra ler, imprimir ou virar PDF pelo navegador.
+
+    Não é a tela de Inteligência com outra roupa: lá o admin investiga e filtra,
+    aqui o consultor novo LÊ. Por isso vira texto corrido com os números dentro
+    da frase, e cada objeção vem com os casos reais em que ela apareceu e o
+    cliente comprou assim mesmo — que é a única prova de que dá pra contornar.
+
+    Sem dependência de biblioteca de PDF: o navegador imprime. Uma dependência
+    nova no Railway pra gerar um documento que o Chrome já gera é custo sem
+    ganho.
+    """
+    conn = db()
+    clientes = _fechados_com_analise(conn)
+    close_db(conn)
+    _canonizar_rotulos(clientes, ('acomodacao', 'modalidade', 'tipo_pessoa'))
+    total = len(clientes)
+    com_analise = [c for c in clientes if c['analise_id']]
+    perfil = _perfil_da_venda(clientes)
+
+    # Objeção -> casos reais em que ela apareceu E a venda aconteceu.
+    por_objecao = {}
+    for c in com_analise:
+        for o in (c['objecoes'] or []):
+            chave = str(o).strip().lower()
+            if chave:
+                por_objecao.setdefault(chave, []).append(c)
+    objecoes = sorted(({'nome': k, 'qtd': len(v),
+                        'casos': sorted(v, key=lambda x: -(x['score'] or 0))[:6]}
+                       for k, v in por_objecao.items()), key=lambda x: -x['qtd'])
+
+    # Mensagens que funcionaram: só as de venda fechada, sem repetir texto igual
+    # (o gerador de follow-up repete o mesmo molde e o ebook ficaria com vinte
+    # páginas da mesma frase).
+    vistos, followups = set(), []
+    for c in sorted(com_analise, key=lambda x: -(x['score'] or 0)):
+        t = (c['followup'] or '').strip()
+        if not t:
+            continue
+        assinatura = t[:60].lower()
+        if assinatura in vistos:
+            continue
+        vistos.add(assinatura)
+        followups.append(c)
+        if len(followups) >= 12:
+            break
+
+    cidades = Counter(c['cidade'] for c in clientes if c['cidade'])
+    operadoras = Counter(c['operadora'] for c in clientes if c['operadora'])
+    tempos = [c['dias_desde_lead'] for c in clientes if c['dias_desde_lead'] is not None]
+    tempos.sort()
+    mediana = (tempos[len(tempos) // 2] if len(tempos) % 2
+               else round((tempos[len(tempos) // 2 - 1] + tempos[len(tempos) // 2]) / 2, 1)) if tempos else None
+    datas = [_parse_dt_seguro(c['criado_em']) for c in clientes]
+    datas = sorted(d for d in datas if d)
+    resumo = {
+        'total': total, 'com_analise': len(com_analise),
+        'soma': sum(c['valor'] for c in clientes),
+        'ticket': round(sum(c['valor'] for c in clientes) / total, 2) if total else 0,
+        'mediana_dias': mediana, 'base_tempo': len(tempos),
+        'de': datas[0] if datas else None, 'ate': datas[-1] if datas else None,
+    }
+    return render_template('ebook_vendas.html', resumo=resumo, perfil=perfil,
+                           objecoes=objecoes, followups=followups,
+                           cidades=cidades.most_common(8), operadoras=operadoras.most_common(8),
+                           gerado_em=datetime.now(TZ_SP))
+
+
+@app.route('/inteligencia-vendas/analisar-faltantes', methods=['POST'])
+@login_required
+@admin_required
+def inteligencia_analisar_faltantes():
+    """Manda ler a conversa de toda venda fechada que ainda não foi lida."""
+    conn = db()
+    prontas, sem_conversa, sem_lead, na_fila = _vendas_sem_analise(conn)
+    r = _fila_vendas_enfileirar(conn, prontas)
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "enfileiradas": r['enfileiradas'],
+                    "ja_esperando": len(na_fila),
+                    "sem_conversa": len(sem_conversa), "sem_lead": len(sem_lead)})
 
 
 @app.route('/playbook')
@@ -26703,7 +26935,7 @@ def api_whatsapp_varredura_proximo():
         FROM varredura_item i JOIN varredura_lote t ON t.id = i.lote_id
         LEFT JOIN wa_conversa_estado e ON e.chat_id = i.chat_id
         WHERE t.consultor_id=? AND t.status='rodando' AND i.status='pendente'
-        ORDER BY i.id LIMIT 1""", (uid,)).fetchone()
+        ORDER BY COALESCE(t.prioridade,0) DESC, i.id LIMIT 1""", (uid,)).fetchone()
     if not r:
         # Fecha os lotes que acabaram — sem isso ficam 'rodando' pra sempre e o
         # painel mente sobre o que ainda está em pé.
