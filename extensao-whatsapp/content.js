@@ -85,7 +85,20 @@
     if (ev.source !== window) return;
     const d = ev.data;
     if (!d || d.source !== 'JOB_INJETOR') return;
-    if (d.tipo === 'pronto' && d.temPonte) _ponteConfirmada = true;
+    // O MOTIVO CHEGA E ERA JOGADO FORA. O injetor posta {tipo:'falhou', erro}
+    // com a causa real (CSP, extensao recarregada no meio, wa-js quebrada pela
+    // atualizacao do WhatsApp) — a unica informacao que existia sobre por que
+    // nada funciona morria nesta linha.
+    if (d.tipo === 'falhou') {
+      _saudePor('ponte', false, 'A extensao nao carregou dentro do WhatsApp: '
+        + (d.erro || 'motivo desconhecido') + '. De F5 nesta aba.');
+      return;
+    }
+    if (d.tipo === 'pronto' && d.temWPP === false) {
+      _saudePor('ponte', false, 'A biblioteca do WhatsApp nao carregou nesta aba. De F5 — '
+        + 'se continuar depois de uma atualizacao do WhatsApp, avise o suporte do JOB.');
+    }
+    if (d.tipo === 'pronto' && d.temPonte) { _ponteConfirmada = true; _saudePor('ponte', true, ''); }
   });
 
   // Vigia barato: a cada 5s, enquanto a ponte não confirmar, tenta de novo.
@@ -97,6 +110,14 @@
     _injetarPonteNaPagina();
     _vigia = setInterval(() => {
       if (_ponteConfirmada || ++_tentativasPonte > 12) {
+        // DESISTIR EM SILENCIO ERA O PIOR FINAL POSSIVEL. Sem a ponte, o trilho
+        // do JOB continua desenhado e clicavel e TODA acao devolve timeout — o
+        // consultor conclui "esta lento" e fica reclicando. Agora, quando o
+        // vigia desiste depois de 1 minuto, ele diz o que fazer.
+        if (!_ponteConfirmada) {
+          _saudePor('ponte', false, 'A extensao nao conseguiu se conectar ao WhatsApp Web nesta aba. '
+            + 'De F5 — se continuar, feche e reabra o WhatsApp Web.');
+        }
         clearInterval(_vigia); _vigia = null; return;
       }
       _injetarPonteNaPagina();
@@ -4124,6 +4145,9 @@
     _bcSinalPintar();
   }
   let _sinoItens = [];
+  // 'nunca' ate a primeira consulta dar certo. Sem isso a tela conclui
+  // "nenhum lead" a partir de uma lista que nunca foi buscada.
+  let _inboxEstado = 'nunca';
 
   // O bloco de status que abre junto do menu. Uma linha quando esta tudo bem —
   // e a resposta pra "esta funcionando?" sem ele precisar testar cotando.
@@ -9759,6 +9783,22 @@
   var _INBOX_SUB = 'Leads que caíram pra você e ainda não foram atendidos — o mais antigo primeiro.';
 
   function renderInbox() {
+    // TRES ESTADOS, NAO DOIS. Lista vazia nao e a mesma coisa que lista nunca
+    // buscada: dizer "nenhum lead esperando" quando a extensao nem perguntou e
+    // afirmar que esta tudo atendido sem ter olhado — e o consultor confia e
+    // nao vai procurar.
+    if (!_inboxCache.length && _inboxEstado !== 'ok') {
+      return _secHead('Leads', _INBOX_SUB) +
+        '<div class="job-sem-analise">' +
+          '<div class="job-sem-analise-t">' +
+            (_inboxEstado === 'sem_conexao' ? 'Nao consegui ver seus leads'
+                                            : 'Ainda nao consultei seus leads') + '</div>' +
+          '<div class="job-sem-analise-txt">' +
+            (_inboxEstado === 'sem_conexao'
+              ? 'Este computador nao esta conectado a nenhuma conta do JOB. Entre com e-mail e senha no icone do JOB — ate la esta lista fica em branco mesmo havendo lead esperando.'
+              : 'Consultando o JOB. Se continuar assim, confira sua conexao.') + '</div>' +
+        '</div>' + _blocoSincLid();
+    }
     if (!_inboxCache.length) {
       return _secHead('Leads', _INBOX_SUB) +
         '<div class="job-sem-analise">' +
@@ -9866,8 +9906,23 @@
 
   async function buscarInbox() {
     if (_contextoMorto) return;
-    const { extKey, usuarioId } = await _safeStorageGet(['extKey', 'usuarioId']);
-    if (!extKey || !usuarioId) return;
+    // ACEITA AS DUAS FORMAS DE ENTRAR — era so a chave ANTIGA aqui.
+    //
+    // O login por e-mail e senha (que o portao OBRIGA, PORTAO_EXIGE_LOGIN)
+    // grava extToken e NUNCA extKey. chamarJob ja aceitava os dois desde
+    // sempre; estas rotinas de fundo nao. Quem entrou do jeito novo ficava
+    // com quatro delas mortas — inbox, fila de envio, vigilia de campanha e
+    // batimento de presenca —, todas saindo por um return mudo.
+    const { extKey, extToken, usuarioId } = await _safeStorageGet(['extKey', 'extToken', 'usuarioId']);
+    if ((!extKey && !extToken) || !usuarioId) {
+      _inboxEstado = 'sem_conexao';
+      _saudePor('conexao_job', false, 'Este computador nao esta conectado a nenhuma conta do JOB: '
+        + 'a lista de leads, os envios agendados e as campanhas estao parados. '
+        + 'Entre com e-mail e senha no icone do JOB.');
+      return;
+    }
+    _saudePor('conexao_job', true, '');
+    _inboxEstado = 'ok';
     try {
       const r = await chrome.runtime.sendMessage({ type: 'inbox', usuario_id: usuarioId });
       if (r && r.ok) { _inboxCache = r.leads || []; atualizarBadgeInbox(); }
@@ -13384,8 +13439,13 @@
     // minuto preserva os envios agendados e deixa a aba descansar.
     if (document.hidden) { _agendarFila(60); return; }
     if (_filaOcupada) return;
-    const { extKey, usuarioId } = await _safeStorageGet(['extKey', 'usuarioId']);
-    if (!extKey || !usuarioId) return;
+    // Mesma trava da chave antiga: ver o comentario em buscarInbox.
+    const { extKey, extToken, usuarioId } = await _safeStorageGet(['extKey', 'extToken', 'usuarioId']);
+    if ((!extKey && !extToken) || !usuarioId) {
+      _saudePor('conexao_job', false, 'Este computador nao esta conectado a nenhuma conta do JOB: '
+        + 'os envios agendados estao parados. Entre com e-mail e senha no icone do JOB.');
+      return;
+    }
     _filaOcupada = true;
     const _t0 = Date.now();
     try {
@@ -13625,8 +13685,9 @@
 
   async function checarCampanhaAguardando() {
     if (_contextoMorto) return;
-    const { extKey, usuarioId } = await _safeStorageGet(['extKey', 'usuarioId']);
-    if (!extKey || !usuarioId) return;
+    // Mesma trava da chave antiga: ver o comentario em buscarInbox.
+    const { extKey, extToken, usuarioId } = await _safeStorageGet(['extKey', 'extToken', 'usuarioId']);
+    if ((!extKey && !extToken) || !usuarioId) return;
     let resp;
     try {
       resp = await chrome.runtime.sendMessage({ type: 'campanha_aguardando', usuario_id: usuarioId });
@@ -13678,8 +13739,12 @@
   //    logado e se a wa-js está de pé. O admin vê na aba Disparos quem está apto. ──
   async function baterPontoDisparo() {
     if (_contextoMorto) return;
-    const { extKey, usuarioId } = await _safeStorageGet(['extKey', 'usuarioId']);
-    if (!extKey || !usuarioId) return;
+    // Mesma trava da chave antiga: ver o comentario em buscarInbox. Aqui o
+    // efeito e o pior de todos: sem bater ponto o consultor aparece offline
+    // pro servidor e sai do rodizio de disparo — os contatos dele ficam
+    // esperando e ninguem entende por que so ele nao dispara.
+    const { extKey, extToken, usuarioId } = await _safeStorageGet(['extKey', 'extToken', 'usuarioId']);
+    if ((!extKey && !extToken) || !usuarioId) return;
     let versao = ''; try { versao = chrome.runtime.getManifest().version; } catch (e) {}
     let numero = ''; try { numero = await pedirMeuNumero(); } catch (e) {}
     try {

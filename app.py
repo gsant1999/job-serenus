@@ -14853,6 +14853,23 @@ def _pendencia_abrir(conn, chave, titulo, descricao='', link='', como_resolver='
             VALUES (?,?,?,?,?,?,?,?,?)""",
             (usuario_id, 'pendencia', titulo, descricao, link, _agora_sp(),
              chave, severidade, como_resolver))
+        # PENDENCIA GRAVE PROCURA A PESSOA, uma unica vez: na abertura.
+        #
+        # O sino so avisa quem abre o sino, e o apagao de 7 dias aconteceu com
+        # todo mundo trabalhando normalmente — ninguem tinha motivo pra abrir.
+        # Coisa grave tem que ir atras. Uma vez so, na abertura, porque a
+        # pendencia e idempotente por chave: sem isso o mesmo problema mandaria
+        # WhatsApp a cada reconciliacao, que e de minuto em minuto, e a pessoa
+        # aprenderia a ignorar.
+        if severidade == 'erro':
+            try:
+                threading.Thread(
+                    target=_notificar_whatsapp,
+                    args=(usuario_id, 'pendencia', titulo,
+                          (descricao + ' ' + (como_resolver or '')).strip(), link),
+                    daemon=True).start()
+            except Exception:
+                pass
         return True
     except Exception as e:
         app.logger.warning(f"[PENDENCIA] abrir {chave}: {e}")
@@ -14888,11 +14905,30 @@ def _pendencias_reconciliar(conn):
     # 1) EXTENSAO ABAIXO DO IDEAL — por pessoa. Nao bloqueia o trabalho dela;
     #    so avisa que esta rodando reduzida, e some sozinha quando atualizar.
     try:
-        for u in conn.execute("""SELECT id, nome, varr_versao FROM usuarios
+        for u in conn.execute("""SELECT id, nome, varr_versao, varr_visto_em FROM usuarios
                                   WHERE ativo=1 AND COALESCE(varredura_ativa,0)=1""").fetchall():
             chave = f'ext_versao:{u["id"]}'
             v = (u['varr_versao'] or '').strip()
             primeiro = (u['nome'] or '').split()[0]
+            # VERSAO DESCONHECIDA E TRATADA COMO ANTIGA, de proposito.
+            #
+            # Quem nao manda a versao escapava de tudo: nao abria pendencia, nao
+            # fechava, nao aparecia como atrasada. E o buraco cai justamente em
+            # cima de quem mais precisa aparecer — as extensoes velhas sao as
+            # que nao reportam versao. Silencio aqui nao e sinal de saude.
+            if not v and u['varr_visto_em']:
+                if _pendencia_abrir(
+                    conn, chave,
+                    f'A extensão de {primeiro} não diz qual versão é',
+                    'Ela conversa com o JOB mas não informa a versão, o que só acontece '
+                    'em versões antigas. Enquanto isso, não dá para garantir que a leitura '
+                    'de conversa dela está correta.',
+                    '/configuracoes',
+                    f'Peça para atualizar para a {EXT_VERSAO["ideal"]}: chrome://extensions, '
+                    'botão de atualizar, e F5 no WhatsApp Web.',
+                    'atencao', None):
+                    abertas += 1
+                continue
             # DUAS GRAVIDADES, e a diferenca entre elas nao pode ser inventada
             # pelo texto: abaixo do piso a pessoa esta PARADA; entre o piso e o
             # ideal ela esta trabalhando reduzida. Dizer "continua lendo" pra
@@ -14943,12 +14979,19 @@ def _pendencias_reconciliar(conn):
         # So acusa DENTRO do expediente: 12h de silencio de madrugada e o
         # esperado, e alarme que toca quando esta tudo bem ensina a ignorar.
         if cfg.get('ativa') and dentro and (horas is None or horas >= 6):
-            quanto = 'nunca rodou' if horas is None else (
-                f'há {horas // 24} dia(s)' if horas >= 24 else f'há {horas}h')
+            # Frase montada, nao concatenada: 'Nenhuma conversa foi lida nunca
+            # rodou' foi o que saiu na primeira versao.
+            if horas is None:
+                quanto = 'Nenhuma conversa foi lida ainda'
+            elif horas >= 24:
+                d = horas // 24
+                quanto = f'A última conversa foi lida há {d} dia{"s" if d != 1 else ""}'
+            else:
+                quanto = f'A última conversa foi lida há {horas}h'
             if _pendencia_abrir(
                 conn, chave,
                 'A leitura de conversas parou',
-                f'Nenhuma conversa foi lida {quanto}, e a leitura automática está ligada. '
+                f'{quanto}, e a leitura automática está ligada. '
                 f'Enquanto isso, nenhuma venda nova ganha objeção, score ou material de treino.',
                 '/configuracoes',
                 'Abra Configurações e veja "Está rodando agora?": ela diz o motivo de cada '
@@ -14988,7 +15031,7 @@ EXT_VERSAO = {
     'bloqueia_abaixo': '3.27.0',
     # Abaixo disto funciona, porem sem a decisao autenticada e sem o pulso.
     # Nunca bloqueia: abre pendencia no sino e segue trabalhando.
-    'ideal': '4.97.0',
+    'ideal': '4.98.0',
 }
 _VARR_VERSAO_MINIMA = EXT_VERSAO['ideal']
 
@@ -15011,6 +15054,9 @@ _VARR_MOTIVOS = {
     'fora_do_horario': ('Fora da janela de horário configurada', 'neutro'),
     'fim_de_semana': ('Fim de semana, e a configuração diz "só dias úteis"', 'neutro'),
     'consultor_desconhecido': ('O servidor não reconheceu este consultor', 'erro'),
+    # A rota da fila grava este motivo; sem a entrada aqui o token cru vazava
+    # pra tela, em cinza neutro, como se fosse normal.
+    'versao_bloqueada': ('Extensão antiga demais: a fila recusou a leitura', 'erro'),
     'decisao_em_outra_rota': ('Extensão antiga: ela ainda pergunta no lugar errado', 'erro'),
     'sem_resposta_do_servidor': ('A extensão perguntou e não entendeu a resposta', 'erro'),
     'servidor_inacessivel': ('A extensão não conseguiu falar com o JOB', 'erro'),
@@ -15054,8 +15100,14 @@ def _varredura_saude(conn):
                 visto = TZ_SP.localize(visto)
             min_visto = int((agora - visto).total_seconds() // 60)
         versao = (r['varr_versao'] or '').strip()
-        atrasada = bool(versao) and not _versao_ge(versao, EXT_VERSAO['ideal'])
-        travada = bool(versao) and not _versao_ge(versao, EXT_VERSAO['bloqueia_abaixo'])
+        # VERSAO DESCONHECIDA E VERSAO VELHA — a mesma regra que o sino ja
+        # aplica. Aqui ela estava faltando, e as duas telas se contradiziam: o
+        # sino abria pendencia dizendo "nao diz qual versao e" enquanto esta
+        # logo abaixo pintava a mesma pessoa de verde, "pode rodar". E a fila
+        # de fato recusa quem nao se identifica, entao verde era mentira.
+        desconhecida = (not versao) and bool(r['varr_visto_em'])
+        atrasada = desconhecida or (bool(versao) and not _versao_ge(versao, EXT_VERSAO['ideal']))
+        travada = desconhecida or (bool(versao) and not _versao_ge(versao, EXT_VERSAO['bloqueia_abaixo']))
         motivo = (r['varr_motivo'] or '').strip()
         # Versão velha é o motivo que MANDA: ela explica todos os outros, e sem
         # dizer isso a pessoa fica caçando configuração que já está certa.
@@ -15063,7 +15115,11 @@ def _varredura_saude(conn):
         # abaixo do piso a pessoa esta PARADA; entre o piso e o ideal ela
         # trabalha reduzida. Pintar as duas de vermelho ensinaria a ignorar as
         # duas.
-        if travada:
+        if desconhecida:
+            texto, cor = ('A extensão não diz qual versão é — só versão antiga faz isso, '
+                          f'e a fila recusa quem não se identifica. Atualize para a '
+                          f'{EXT_VERSAO["ideal"]}'), 'erro'
+        elif travada:
             texto, cor = (f'Extensão {versao} não lê conversa — precisa atualizar '
                           f'para a {EXT_VERSAO["ideal"]}'), 'erro'
         elif atrasada:
