@@ -1,7 +1,19 @@
 import os
 import psycopg2
 
-db_url = "postgresql://postgres:8G@vitoriafernanda@db.ghzdebngvkuhjygjuypm.supabase.co:5432/postgres?sslmode=require"
+# A CREDENCIAL NAO MORA MAIS AQUI.
+#
+# Este arquivo teve, versionada, a senha do Postgres em texto puro. Apagar a
+# linha nao desfaz a exposicao — o commit antigo continua no historico, e a
+# senha so deixa de valer quando for rotacionada. O que esta linha garante e
+# que nao ha uma SEGUNDA exposicao a partir de agora.
+#
+# Sem DATABASE_URL o script para de cara, em vez de cair num destino embutido:
+# um padrao silencioso e como a credencial voltou a aparecer aqui da primeira
+# vez.
+db_url = os.environ.get('DATABASE_URL')
+if not db_url:
+    raise SystemExit('Defina DATABASE_URL antes de rodar este script.')
 
 try:
     conn = psycopg2.connect(db_url)
