@@ -15063,6 +15063,65 @@ _VARR_MOTIVOS = {
 }
 
 
+def _fila_envio_saude(conn):
+    """O estado da fila de envio, em número, para quem precisa decidir.
+
+    ESTA FUNÇÃO EXISTE POR CAUSA DE UM ESTRAGO REAL.
+
+    Em 18/08/2026 uma rotina de envio parada foi religada sem ninguém medir o
+    que estava represado, e 17 mensagens de até três semanas atrás saíram para
+    clientes. A lição escrita no ROADMAP foi "medir antes de religar" — só que
+    a consulta ficou registrada como SQL que ninguém tinha como rodar: o banco
+    de produção só aceita conexão de dentro da Railway. Regra que depende de um
+    acesso que ninguém tem não é regra, é intenção.
+
+    Agora o número está na tela, ao lado do resto da saúde da extensão.
+    """
+    agora = datetime.now(TZ_SP)
+    corte = (agora - timedelta(hours=_WA_FILA_VALIDADE_HORAS)).strftime('%Y-%m-%d %H:%M:%S')
+    out = {'validade_h': _WA_FILA_VALIDADE_HORAS, 'esperando': 0, 'vencendo': 0,
+           'mais_antiga_min': None, 'itens': [], 'cancelados_atraso': 0, 'falhou': 0}
+    linhas = conn.execute("""
+        SELECT f.id, f.responsavel_id, f.origem, f.status, f.criado_em, f.liberar_em,
+               u.nome AS consultor
+        FROM whatsapp_extensao_fila f
+        LEFT JOIN usuarios u ON u.id = f.responsavel_id
+        WHERE f.status IN ('pendente','enviando')
+        ORDER BY f.criado_em ASC LIMIT 50""").fetchall()
+    for r in linhas:
+        d = dict(r)
+        nasceu = _parse_dt_seguro(d.get('criado_em'))
+        idade_min = None
+        if nasceu:
+            if nasceu.tzinfo is None:
+                nasceu = TZ_SP.localize(nasceu)
+            idade_min = int((agora - nasceu).total_seconds() // 60)
+        # VENCIDA quer dizer NÃO VAI SAIR. É o número que interessa: cada uma
+        # dessas é um cliente que a mensagem nunca alcançou.
+        vencida = bool(nasceu and str(d.get('criado_em'))[:19] < corte)
+        out['itens'].append({
+            'id': d['id'], 'consultor': (d.get('consultor') or '?').split()[0],
+            'origem': d.get('origem') or '', 'status': d.get('status'),
+            'idade_min': idade_min, 'vencida': vencida,
+            'agendada': bool(d.get('liberar_em')),
+        })
+        out['esperando'] += 1
+        if vencida:
+            out['vencendo'] += 1
+        if idade_min is not None and (out['mais_antiga_min'] is None or idade_min > out['mais_antiga_min']):
+            out['mais_antiga_min'] = idade_min
+    try:
+        cutoff_7d = (agora - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+        out['cancelados_atraso'] = conn.execute(
+            "SELECT COUNT(*) c FROM whatsapp_extensao_fila WHERE status='cancelado_atraso'").fetchone()['c']
+        out['falhou'] = conn.execute(
+            "SELECT COUNT(*) c FROM whatsapp_extensao_fila WHERE status='falhou' AND CAST(criado_em AS TEXT) >= ?",
+            (cutoff_7d,)).fetchone()['c']
+    except Exception as e:
+        app.logger.warning(f"[FILA_SAUDE] contagens: {e}")
+    return out
+
+
 def _varredura_saude(conn):
     """Quem está lendo conversa, quem não está, e o MOTIVO REAL de cada um.
 
@@ -45049,6 +45108,7 @@ def configuracoes():
     # pra quem pode mexer.
     varr_cfg, varr_consultores, api_chaves, canario = None, [], [], None
     varr_saude = None
+    fila_saude = None
     if session.get('perfil') == 'admin':
         conn2 = db()
         try:
@@ -45077,6 +45137,13 @@ def configuracoes():
             try: conn2.rollback()
             except Exception: pass
             varr_saude = None
+        try:
+            fila_saude = _fila_envio_saude(conn2)
+        except Exception as e:
+            app.logger.warning(f"[FILA_SAUDE] {e}")
+            try: conn2.rollback()
+            except Exception: pass
+            fila_saude = None
         varr_consultores = [dict(r) for r in conn2.execute(
             """SELECT id, nome, COALESCE(varredura_ativa,0) varredura_ativa
                FROM usuarios WHERE ativo=1 ORDER BY nome""").fetchall()]
@@ -45087,7 +45154,7 @@ def configuracoes():
     return render_template('configuracoes.html', som_atual=som_atual, sons=SONS_NOTIFICACAO,
                            desempenho=desempenho, canario=canario,
                            varr_cfg=varr_cfg, varr_consultores=varr_consultores,
-                           varr_saude=varr_saude,
+                           varr_saude=varr_saude, fila_saude=fila_saude,
                            api_chaves=api_chaves, api_escopos=_API_ESCOPOS,
                            api_usuarios=api_usuarios, perfil_escopos=PERFIL_ESCOPOS,
                            notificar_wpp_leads=notificar_wpp_leads)
