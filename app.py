@@ -3542,6 +3542,14 @@ def init_db():
         # frente da varredura exploratória, senão fica atrás de centenas de itens
         # antigos e a venda — que é o dado caro — nunca é lida.
         ("varredura_lote", "prioridade", "INTEGER DEFAULT 0"),
+        # Pulso da varredura: a extensao registra CADA vez que pergunta se pode
+        # rodar, com a resposta e o motivo. Sem isso, "parou de rodar" so se
+        # descobre cavando log — foi assim que a varredura ficou 7 dias morta
+        # (11/08 a 18/08) sem ninguem saber.
+        ("usuarios", "varr_visto_em", "TEXT"),
+        ("usuarios", "varr_versao", "TEXT"),
+        ("usuarios", "varr_pode", "INTEGER DEFAULT 0"),
+        ("usuarios", "varr_motivo", "TEXT"),
         # Qualificação do lead (aba na ficha existia só no front — nunca teve rota nem coluna)
         ("crm_leads", "qual_tipo_plano", "TEXT"),
         ("crm_leads", "qual_idade", "TEXT"),
@@ -14805,6 +14813,114 @@ def _perfil_da_venda(clientes):
     return perfil
 
 
+_VARR_VERSAO_MINIMA = '4.96.0'
+
+
+def _versao_ge(v, minimo):
+    def _t(x):
+        p = [int(n) for n in str(x or '').split('.') if n.isdigit()]
+        return tuple(p + [0] * (3 - len(p)))[:3]
+    try:
+        return _t(v) >= _t(minimo)
+    except Exception:
+        return False
+
+
+_VARR_MOTIVOS = {
+    'ok': ('Pode rodar', 'ok'),
+    'rodar_agora': ('Rodando agora (forçado)', 'ok'),
+    'desligada': ('A leitura automática está desligada na chave geral acima', 'atencao'),
+    'consultor_fora': ('Esta pessoa não está marcada em "Quem participa"', 'atencao'),
+    'fora_do_horario': ('Fora da janela de horário configurada', 'neutro'),
+    'fim_de_semana': ('Fim de semana, e a configuração diz "só dias úteis"', 'neutro'),
+    'consultor_desconhecido': ('O servidor não reconheceu este consultor', 'erro'),
+    'decisao_em_outra_rota': ('Extensão antiga: ela ainda pergunta no lugar errado', 'erro'),
+    'sem_resposta_do_servidor': ('A extensão perguntou e não entendeu a resposta', 'erro'),
+    'servidor_inacessivel': ('A extensão não conseguiu falar com o JOB', 'erro'),
+}
+
+
+def _varredura_saude(conn):
+    """Quem está lendo conversa, quem não está, e o MOTIVO REAL de cada um.
+
+    Existe por causa de um apagão de 7 dias (11/08 a 18/08/2026) em que a
+    varredura não rodou uma única vez enquanto a tela de configuração mostrava
+    tudo ligado. Não havia como saber: nenhum registro de tentativa, nenhum
+    motivo, nada no log. A pergunta "está funcionando?" só tinha resposta
+    cavando o banco.
+
+    Agora cada extensão carimba no próprio usuário quando perguntou, com que
+    versão e o que ouviu de volta. Esta função lê esse carimbo e cruza com a
+    última análise que a pessoa de fato produziu — porque "perguntou e pode"
+    ainda não é "leu": se o pulso está fresco e a última análise é de ontem, o
+    problema está na máquina dela, não na configuração.
+    """
+    cfg = varredura_cfg(conn)
+    linhas = conn.execute("""
+        SELECT u.id, u.nome, COALESCE(u.varredura_ativa,0) participa,
+               u.varr_visto_em, u.varr_versao, COALESCE(u.varr_pode,0) varr_pode,
+               u.varr_motivo,
+               (SELECT MAX(wa.criado_em) FROM whatsapp_analises wa
+                 WHERE wa.criado_por = u.id) ultima_analise,
+               (SELECT COUNT(*) FROM whatsapp_analises wa
+                 WHERE wa.criado_por = u.id
+                   AND wa.criado_em >= ?) analises_hoje
+        FROM usuarios u WHERE u.ativo=1 ORDER BY u.nome
+    """, (datetime.now(TZ_SP).strftime('%Y-%m-%d 00:00:00'),)).fetchall()
+    agora = datetime.now(TZ_SP)
+    pessoas, silencio = [], 0
+    for r in linhas:
+        visto = _parse_dt_seguro(r['varr_visto_em'])
+        min_visto = None
+        if visto:
+            if visto.tzinfo is None:
+                visto = TZ_SP.localize(visto)
+            min_visto = int((agora - visto).total_seconds() // 60)
+        versao = (r['varr_versao'] or '').strip()
+        atrasada = bool(versao) and not _versao_ge(versao, _VARR_VERSAO_MINIMA)
+        motivo = (r['varr_motivo'] or '').strip()
+        # Versão velha é o motivo que MANDA: ela explica todos os outros, e sem
+        # dizer isso a pessoa fica caçando configuração que já está certa.
+        if atrasada:
+            texto, cor = f'Extensão {versao} está velha — precisa atualizar para {_VARR_VERSAO_MINIMA}', 'erro'
+        elif not min_visto and not motivo:
+            texto, cor = 'A extensão desta pessoa nunca perguntou se pode rodar', 'erro'
+        elif min_visto is not None and min_visto > 120:
+            texto, cor = f'Sem sinal há {min_visto // 60}h — WhatsApp Web fechado ou extensão parada', 'erro'
+        else:
+            texto, cor = _VARR_MOTIVOS.get(motivo, (motivo or 'sem motivo registrado', 'neutro'))
+        ultima = _parse_dt_seguro(r['ultima_analise'])
+        if r['participa'] and cor == 'erro':
+            silencio += 1
+        pessoas.append({
+            'id': r['id'], 'nome': r['nome'], 'participa': bool(r['participa']),
+            'visto_min': min_visto, 'versao': versao or None, 'atrasada': atrasada,
+            'pode': bool(r['varr_pode']), 'motivo': motivo,
+            'texto': texto, 'cor': cor,
+            'ultima_analise': ultima, 'analises_hoje': r['analises_hoje'] or 0,
+        })
+    ultima_geral = conn.execute(
+        "SELECT MAX(criado_em) u FROM whatsapp_analises").fetchone()['u']
+    ultima_geral = _parse_dt_seguro(ultima_geral)
+    horas_sem = None
+    if ultima_geral:
+        if ultima_geral.tzinfo is None:
+            ultima_geral = TZ_SP.localize(ultima_geral)
+        horas_sem = int((agora - ultima_geral).total_seconds() // 3600)
+    custo = conn.execute("""
+        SELECT COUNT(*) n,
+               COALESCE(SUM(COALESCE(custo_claude_usd,0) + COALESCE(custo_transcricao_usd,0)),0) usd
+        FROM whatsapp_analises WHERE criado_em >= ?
+    """, ((agora - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S'),)).fetchone()
+    return {
+        'pessoas': pessoas, 'participando': sum(1 for p in pessoas if p['participa']),
+        'em_silencio': silencio, 'ultima_geral': ultima_geral, 'horas_sem': horas_sem,
+        'ligada': bool(cfg.get('ativa')),
+        'analises_30d': custo['n'], 'custo_30d': float(custo['usd'] or 0),
+        'versao_minima': _VARR_VERSAO_MINIMA,
+    }
+
+
 def _vendas_sem_analise(conn):
     """Vendas fechadas que ainda não têm conversa lida, com o que falta em cada.
 
@@ -24084,15 +24200,72 @@ def api_whatsapp_config_remota():
     conn2 = db()
     cfg = varredura_cfg(conn2)
     close_db(conn2)
-    pode, motivo = False, 'nao_autenticado'
+    # A DECISAO NAO MORA MAIS AQUI, e a resposta diz isso em vez de fingir.
+    # 'nao_autenticado' cravado fazia a extensao entender "nao pode rodar" e
+    # desistir em silencio. Agora ela sabe que precisa perguntar na rota
+    # autenticada (/api/whatsapp/varredura/pode) — e uma extensao antiga, que
+    # nao conhece essa rota, cai no motivo abaixo e aparece na tela de saude
+    # como versao velha, em vez de sumir sem explicacao.
+    varr = {k: cfg.get(k) for k in ('horas', 'max_rodada', 'intervalo_min',
+                                    'hora_inicio', 'hora_fim', 'dias_uteis')}
+    varr['pode_rodar'] = False
+    varr['motivo'] = 'decisao_em_outra_rota'
+    varr['decisao_em'] = '/api/whatsapp/varredura/pode'
+    varr['rodar_agora'] = False
+    return _wa_cors(jsonify({"ok": True, "seletores": seletores, "flags": flags,
+                             "varredura": varr,
+                             "marca": BRAND['nome_curto'], "marca_nome": BRAND['nome']}))
+
+
+@app.route('/api/whatsapp/varredura/pode', methods=['GET', 'OPTIONS'])
+@requer('whatsapp:ler')
+def api_whatsapp_varredura_pode():
+    """A decisao POR CONSULTOR de rodar a varredura agora — autenticada.
+
+    POR QUE ESTA ROTA EXISTE. A decisao morava em /api/whatsapp/config-remota,
+    que e publica de proposito (e o canal de conserto remoto). Descobriu-se que
+    devolver decisao por usuario numa rota publica deixava ENUMERAR usuarios:
+    uid valido respondia 'ok', uid inexistente respondia 'consultor_fora'. O
+    conserto tirou a decisao de la — corretissimo — mas nada colocou ela de
+    volta em lugar nenhum, e a rota passou a devolver `pode_rodar=False,
+    motivo='nao_autenticado'` CRAVADO, pra todo mundo, pra sempre.
+
+    O efeito medido: a varredura automatica parou em 11/08/2026 as 17:17 e ficou
+    7 dias sem produzir uma unica analise, com a tela de configuracao mostrando
+    tudo ligado e 5 consultores marcados. O botao "Rodar agora" tambem morreu
+    junto, porque `rodar_agora` era derivado do mesmo motivo cravado — alguem
+    apertou em 12/08 e nao aconteceu nada.
+
+    Aqui a decisao volta, agora atras de autenticacao: quem pergunta ja provou
+    quem e (token do aparelho ou sessao), entao nao ha o que enumerar.
+
+    E toda pergunta fica REGISTRADA no proprio usuario: quando perguntou, com
+    que versao, se pode e por que nao. E o que transforma "acho que parou" em
+    "parou as 17:17 do dia 11, motivo X".
+    """
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    uid = getattr(g, 'usuario_id', None)
+    versao = (request.args.get('versao') or '').strip()[:20]
+    conn = db()
+    cfg = varredura_cfg(conn)
+    pode, motivo = varredura_pode_agora(cfg, uid, conn)
+    try:
+        conn.execute("""UPDATE usuarios SET varr_visto_em=?, varr_versao=?,
+                        varr_pode=?, varr_motivo=? WHERE id=?""",
+                     (_agora_sp(), versao, 1 if pode else 0, motivo, uid))
+        conn.commit()
+    except Exception as e:
+        app.logger.info(f"[VARREDURA_PULSO] {uid}: {e}")
+        try: conn.rollback()
+        except Exception: pass
+    close_db(conn)
     varr = {k: cfg.get(k) for k in ('horas', 'max_rodada', 'intervalo_min',
                                     'hora_inicio', 'hora_fim', 'dias_uteis')}
     varr['pode_rodar'] = pode
     varr['motivo'] = motivo
     varr['rodar_agora'] = (motivo == 'rodar_agora')
-    return _wa_cors(jsonify({"ok": True, "seletores": seletores, "flags": flags,
-                             "varredura": varr,
-                             "marca": BRAND['nome_curto'], "marca_nome": BRAND['nome']}))
+    return _wa_cors(jsonify({"ok": True, "varredura": varr}))
 
 
 @app.route('/extensao/config-remota', methods=['GET', 'POST'])
@@ -44393,6 +44566,7 @@ def configuracoes():
     # Varredura: só admin configura, mas a página é de todos — o bloco só aparece
     # pra quem pode mexer.
     varr_cfg, varr_consultores, api_chaves, canario = None, [], [], None
+    varr_saude = None
     if session.get('perfil') == 'admin':
         conn2 = db()
         try:
@@ -44414,6 +44588,13 @@ def configuracoes():
             app.logger.warning(f"[CANARIO] painel: {e}")
             canario = None
         varr_cfg = varredura_cfg(conn2)
+        try:
+            varr_saude = _varredura_saude(conn2)
+        except Exception as e:
+            app.logger.warning(f"[VARREDURA_SAUDE] {e}")
+            try: conn2.rollback()
+            except Exception: pass
+            varr_saude = None
         varr_consultores = [dict(r) for r in conn2.execute(
             """SELECT id, nome, COALESCE(varredura_ativa,0) varredura_ativa
                FROM usuarios WHERE ativo=1 ORDER BY nome""").fetchall()]
@@ -44424,6 +44605,7 @@ def configuracoes():
     return render_template('configuracoes.html', som_atual=som_atual, sons=SONS_NOTIFICACAO,
                            desempenho=desempenho, canario=canario,
                            varr_cfg=varr_cfg, varr_consultores=varr_consultores,
+                           varr_saude=varr_saude,
                            api_chaves=api_chaves, api_escopos=_API_ESCOPOS,
                            api_usuarios=api_usuarios, perfil_escopos=PERFIL_ESCOPOS,
                            notificar_wpp_leads=notificar_wpp_leads)

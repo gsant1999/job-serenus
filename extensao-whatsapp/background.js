@@ -1256,6 +1256,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/conversas/pendentes', 'POST', { conversas: msg.conversas || [] }, 20000).then(sendResponse);
     return true;
   }
+  // A DECISAO DE RODAR A VARREDURA VEM AUTENTICADA.
+  //
+  // Ela morava em /api/whatsapp/config-remota, que e publica. Devolver decisao
+  // por usuario numa rota publica deixava enumerar quem existe, entao ela saiu
+  // de la — e ficou sem casa: a rota passou a responder 'nao_autenticado' pra
+  // todo mundo, a varredura entendeu "nao posso" e parou 7 dias em silencio.
+  // Aqui ela volta pela porta autenticada, que chamarJob ja sabe abrir (o token
+  // do consultor vai no cabecalho). A versao viaja junto pra tela de saude
+  // conseguir dizer quem esta atrasado.
+  if (msg && msg.type === 'varredura_pode') {
+    let _vp = '';
+    try { _vp = (chrome.runtime.getManifest() || {}).version || ''; } catch (e) {}
+    chamarJob('/api/whatsapp/varredura/pode?versao=' + encodeURIComponent(_vp),
+      'GET', null, 15000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'varredura_proximo') {
     // A VERSAO VAI JUNTO: o servidor recusa a fila pra extensao anterior a
     // 3.16.0, que lia 1 mensagem por conversa e gravava analise sem dono.

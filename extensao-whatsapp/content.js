@@ -4685,14 +4685,25 @@
   // gasta dinheiro e usa a máquina do consultor não pode ligar sozinho porque
   // alguém instalou a extensão.
   async function varreduraConfig() {
+    // A DECISAO VEM PELA PORTA AUTENTICADA, e ela e obrigatoria.
+    //
+    // Antes isto lia `pode_rodar` de /api/whatsapp/config-remota, que e publica.
+    // Quando a decisao por usuario saiu de la (dava pra enumerar quem existe),
+    // a rota passou a responder `pode_rodar:false` cravado — e a varredura
+    // parou 7 dias sem que nada aparecesse na tela nem no log. Agora quem
+    // decide e /api/whatsapp/varredura/pode, via background, que manda o token
+    // do consultor. Sem essa resposta nao ha varredura: e melhor nao rodar e
+    // dizer o motivo do que rodar achando que pode.
     try {
-      const { usuarioId } = await _safeStorageGet(['usuarioId']);
-      const r = await fetch(_SITE_BASE_URL_EXT + '/api/whatsapp/config-remota' +
-                            (usuarioId ? '?usuario_id=' + encodeURIComponent(usuarioId) : ''),
-                            { cache: 'no-store' });
-      const d = await r.json();
-      return (d && d.varredura) || null;
-    } catch (e) { return null; }
+      const d = await _safeSendMessage({ type: 'varredura_pode' }).catch(() => null);
+      const v = d && d.ok && d.varredura;
+      if (v) return v;
+      // Servidor respondeu, mas sem decisao: extensao velha falando com servidor
+      // novo, ou o contrario. O motivo viaja pra tela em vez de virar silencio.
+      return { pode_rodar: false, motivo: (d && d.erro) ? String(d.erro) : 'sem_resposta_do_servidor' };
+    } catch (e) {
+      return { pode_rodar: false, motivo: 'servidor_inacessivel' };
+    }
   }
 
   async function varreduraRodar(manual) {

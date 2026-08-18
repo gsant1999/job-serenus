@@ -143,6 +143,35 @@ async function salvarNotificacaoWpp(ligado){
 </div>
 
 <style>
+  /* Saude da leitura automatica */
+  .vr-saude { border:1px solid var(--borda); border-radius:12px; padding:14px 16px;
+              background:var(--panel-2); margin-bottom:14px; }
+  .vr-saude-cab { display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap;
+                  align-items:flex-start; margin-bottom:12px; }
+  .vr-saude-t { font-size:13px; font-weight:700; color:var(--texto); }
+  .vr-saude-s { font-size:12.5px; color:var(--cinza); margin-top:3px; line-height:1.55; max-width:56ch; }
+  .vr-saude-num { display:flex; gap:18px; }
+  .vr-saude-num b { display:block; font-family:'Sora',sans-serif; font-size:16px; color:var(--texto); }
+  .vr-saude-num span { font-size:10.5px; color:var(--cinza-2); }
+  .vr-tab { width:100%; border-collapse:collapse; }
+  .vr-tab th { text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:.5px;
+               color:var(--cinza-2); font-weight:600; padding:0 8px 6px;
+               border-bottom:1px solid var(--borda); white-space:nowrap; }
+  .vr-tab td { padding:8px; font-size:12.5px; border-bottom:1px solid var(--borda);
+               color:var(--texto); }
+  .vr-tab tr:last-child td { border-bottom:none; }
+  .vr-fora td { opacity:.55; }
+  .vr-tag { font-size:9.5px; background:rgba(255,255,255,.08); color:var(--cinza);
+            border-radius:99px; padding:1px 7px; }
+  .vr-ok { color:var(--verde); }
+  .vr-erro { color:var(--erro); font-weight:600; }
+  .vr-atencao { color:var(--amarelo); }
+  .vr-neutro { color:var(--cinza); }
+  .vr-caminho { font-size:12px; color:var(--cinza); line-height:1.7; margin-top:12px;
+                padding-top:11px; border-top:1px solid var(--borda); }
+  .vr-caminho a { color:var(--info); text-decoration:none; font-weight:600; }
+  .vr-caminho a:hover { text-decoration:underline; }
+
   .ak-nova { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
   .ak-nova input[type=text] { flex:1; min-width:220px; background:var(--panel-2);
     border:1px solid var(--borda); border-radius:8px; padding:8px 12px; color:var(--texto); font-size:13px; }
@@ -399,6 +428,66 @@ async function akRevogar(id, nome){
         Comece por um só. O custo real aparece em Análises depois de uma semana, e aí você decide estender.
       </small>
     </div>
+
+    {% if varr_saude %}
+    <!-- SAUDE DA LEITURA. Existe porque a varredura ficou 7 dias parada com
+         esta mesma tela mostrando tudo ligado: nao havia onde ver que ela nao
+         estava rodando, nem por que. -->
+    <div class="vr-saude">
+      <div class="vr-saude-cab">
+        <div>
+          <div class="vr-saude-t">Está rodando agora?</div>
+          <div class="vr-saude-s">
+            {% if not varr_saude.ligada %}
+              A chave geral acima está <b>desligada</b> — nada roda enquanto ela estiver assim.
+            {% elif varr_saude.horas_sem is none %}
+              Nenhuma conversa foi lida ainda.
+            {% elif varr_saude.horas_sem >= 24 %}
+              <b class="vr-erro">Última conversa lida há {{ varr_saude.horas_sem // 24 }} dia{{ 's' if varr_saude.horas_sem // 24 != 1 }}.</b>
+              Veja o motivo de cada pessoa abaixo.
+            {% elif varr_saude.horas_sem >= 3 %}
+              Última conversa lida há {{ varr_saude.horas_sem }}h.
+            {% else %}
+              <b class="vr-ok">Rodando.</b> Última conversa lida há menos de 3h.
+            {% endif %}
+          </div>
+        </div>
+        <div class="vr-saude-num">
+          <div><b>{{ varr_saude.analises_30d }}</b><span>conversas lidas em 30 dias</span></div>
+          <div><b>US$ {{ '%.2f'|format(varr_saude.custo_30d) }}</b><span>custo desses 30 dias</span></div>
+        </div>
+      </div>
+
+      <table class="vr-tab">
+        <thead><tr><th>Pessoa</th><th>Último sinal</th><th>Versão</th><th>Hoje</th><th>Situação</th></tr></thead>
+        <tbody>
+        {% for p in varr_saude.pessoas %}
+          {% if p.participa or p.ultima_analise %}
+          <tr{% if not p.participa %} class="vr-fora"{% endif %}>
+            <td><b>{{ p.nome.split()[0] }}</b>{% if not p.participa %} <span class="vr-tag">fora</span>{% endif %}</td>
+            <td>{% if p.visto_min is none %}<span class="vr-erro">nunca</span>
+                {% elif p.visto_min < 60 %}{{ p.visto_min }} min
+                {% else %}{{ p.visto_min // 60 }}h{% endif %}</td>
+            <td>{% if p.versao %}<span class="{{ 'vr-erro' if p.atrasada else '' }}">{{ p.versao }}</span>{% else %}—{% endif %}</td>
+            <td>{{ p.analises_hoje }}</td>
+            <td class="vr-{{ p.cor }}">{{ p.texto }}</td>
+          </tr>
+          {% endif %}
+        {% endfor %}
+        </tbody>
+      </table>
+
+      <div class="vr-caminho">
+        <b>Onde cada coisa mora:</b>
+        a <b>conversa</b> fica no WhatsApp do consultor e é lida pela extensão;
+        a <b>análise</b> de cada uma abre em <a href="/whatsapp-analises">Análises</a>;
+        a <b>mensuração</b> (quantas, custo, tempo) é a soma que aparece aqui e em Análises;
+        e a <b>inteligência</b> — o que faz vender — está em
+        <a href="/inteligencia-vendas">Inteligência de Vendas</a>, que vira documento em
+        <a href="/ebook-vendas">material de treino</a>.
+      </div>
+    </div>
+    {% endif %}
 
     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
       <button class="btn btn-sm" onclick="vrSalvar(this)">Salvar</button>
