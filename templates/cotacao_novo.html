@@ -909,18 +909,24 @@
       html: '<b>A extensão está instalada mas não atendeu.</b><ol><li>Abra ' +
             '<code>chrome://extensions</code> e clique no ↻ da extensão do JOB.</li>' +
             '<li>Recarregue esta página.</li></ol>' },
-    painel_fechado: { classe: 'off', rotulo: 'Painel fechado',
-      html: '<b>O Painel do Corretor precisa estar aberto numa aba.</b> A cotação sai da sua ' +
-            'sessão lá — nenhuma senha passa pelo JOB.<ol><li>Abra ' +
-            '<a href="https://beta.paineldocorretor.com.br/cotacoes" target="_blank" rel="noopener">o Painel</a> ' +
-            'e faça login.</li><li>Volte aqui e recarregue.</li></ol>' },
-    painel_precisa_recarregar: { classe: 'off', rotulo: 'Painel precisa de F5',
-      html: '<b>A aba do Painel está aberta mas sem a extensão dentro.</b>' +
-            '<ol><li>Vá na aba do Painel e aperte F5.</li><li>Volte aqui e recarregue.</li></ol>' },
+    // NAO CITA NEM LINKA O PAINEL.
+    //
+    // O texto anterior trazia um link pronto pra beta.paineldocorretor.com.br
+    // com "faça login" ao lado. Quem le esta tela e a consultora, e ela nao
+    // tem — nem pode ter — acesso proprio ao Painel: uma maquina cota para
+    // todas. O link ensinava, com um clique, exatamente o contrario.
+    painel_fechado: { classe: 'off', rotulo: 'Preço indisponível',
+      html: '<b>O computador que busca preços para a equipe não está disponível agora.</b>' +
+            '<ol><li>Avise um administrador.</li><li>Não é preciso fazer nada nesta máquina.</li></ol>' },
+    sem_trabalhador: { classe: 'off', rotulo: 'Preço indisponível',
+      html: '<b>O computador que busca preços para a equipe não está disponível agora.</b>' +
+            '<ol><li>Avise um administrador.</li><li>Não é preciso fazer nada nesta máquina.</li></ol>' },
+    painel_precisa_recarregar: { classe: 'off', rotulo: 'Preço indisponível',
+      html: '<b>O computador que busca preços para a equipe precisa de um F5 na aba dele.</b>' +
+            '<ol><li>Avise um administrador.</li></ol>' },
     precisa_aprender: { classe: 'aprender', rotulo: 'Falta ensinar uma vez',
-      html: '<b>A extensão ainda não sabe como o Painel cota.</b> Ela aprende olhando, uma vez só.' +
-            '<ol><li>Vá na aba do Painel e faça <b>uma cotação normal, na mão</b>, até aparecer ' +
-            'preço na tela.</li><li>Volte aqui e recarregue.</li></ol>' }
+      html: '<b>A extensão ainda não sabe cotar esta combinação.</b> Quem ensina é o computador ' +
+            'que busca preços para a equipe.<ol><li>Avise um administrador.</li></ol>' }
   };
   function mostrarSinal(classe, rotulo, ajuda) {
     var s = el('sinal');

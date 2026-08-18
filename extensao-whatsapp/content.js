@@ -6713,26 +6713,44 @@
     // invisivel pro Chrome do Danilo. Sem essas duas palavras, a mensagem
     // parece dizer "alguem tem que estar com o Painel aberto" — e ai um erro
     // de um minuto vira uma hora de conversa achando que o sistema quebrou.
-    painel_fechado: 'O JOB busca o preço pela <b>sua sessão</b> no Painel do Corretor, ' +
-      'aberta <b>neste computador</b> — a aba de outra pessoa não serve, nem no mesmo escritório. ' +
-      'Enquanto a aba fica aberta aqui, o JOB segura a sessão viva sozinho.',
-    painel_precisa_recarregar: 'A aba do Painel do Corretor está aberta neste computador, ' +
+    // DUAS LEITURAS DO MESMO MOTIVO.
+    //
+    // Uma maquina cota para todas. Na maquina que cota, "Painel fechado" quer
+    // dizer "abra a aba"; em qualquer outra quer dizer "a maquina da equipe
+    // esta fora do ar". O texto antigo era so o primeiro caso e, lido por uma
+    // consultora, virava instrucao pra ela providenciar acesso proprio ao
+    // Painel — exatamente o que nao pode acontecer.
+    painel_fechado: 'O computador que busca preços para a equipe não está com o Painel do Corretor aberto. ' +
+      'Avise um administrador — não é preciso fazer nada nesta máquina.',
+    painel_fechado_trabalhador: 'O JOB busca o preço pela <b>sua sessão</b> no Painel do Corretor, ' +
+      'aberta <b>neste computador</b>. Enquanto a aba fica aberta aqui, o JOB segura a sessão viva sozinho.',
+    painel_precisa_recarregar: 'O computador que busca preços para a equipe precisa de um <b>F5</b> ' +
+      'na aba do Painel do Corretor. Avise um administrador.',
+    painel_precisa_recarregar_trabalhador: 'A aba do Painel do Corretor está aberta neste computador, ' +
       'mas precisa de <b>F5</b> depois da atualização da extensão.',
     painel_fechado_no_trabalhador: 'O computador que busca preços para a equipe está ligado, ' +
       'mas o Painel do Corretor foi fechado nele. Avise um administrador e tente novamente depois que a aba for aberta.',
     painel_precisa_recarregar_no_trabalhador: 'O computador que busca preços para a equipe está com uma versão antiga ' +
       'na aba do Painel do Corretor. Avise um administrador para atualizar essa aba com <b>F5</b>.',
-    precisa_aprender: 'Vá na aba do <b>Painel do Corretor</b> e faça uma cotação na mão até <b>ver o preço na tela</b>. ' +
+    precisa_aprender: 'A extensão ainda não sabe cotar esta combinação. Quem ensina é o computador ' +
+      'que busca preços para a equipe — avise um administrador.',
+    precisa_aprender_trabalhador: 'Vá na aba do <b>Painel do Corretor</b> e faça uma cotação na mão até <b>ver o preço na tela</b>. ' +
       'A extensão aprende vendo você usar, e destrava sozinha — não precisa terminar nem salvar a cotação lá.',
     hash_expirado: 'O Painel do Corretor publicou uma versão nova e um atalho venceu. ' +
+      'Quem reensina é o computador que busca preços para a equipe — avise um administrador.',
+    hash_expirado_trabalhador: 'O Painel do Corretor publicou uma versão nova e um atalho venceu. ' +
       'Faça uma cotação na mão lá até <b>ver o preço</b> — a extensão reaprende sozinha.',
-    sem_resposta_a_tempo: 'O Painel demorou demais pra responder. Confira se a aba dele está aberta e tente de novo.',
+    sem_resposta_a_tempo: 'A busca de preços para a equipe demorou demais. Tente novamente; ' +
+      'se acontecer de novo, avise um administrador.',
+    sem_resposta_a_tempo_trabalhador: 'O Painel demorou demais pra responder. Confira se a aba dele está aberta e tente de novo.',
     sem_resposta_a_tempo_no_trabalhador: 'O computador que busca preços para a equipe não respondeu a tempo. ' +
       'Tente novamente; se acontecer de novo, avise um administrador.',
     fila_demorou: 'A busca de preços para a equipe demorou mais de dois minutos e foi cancelada. ' +
       'Tente novamente; se acontecer de novo, avise um administrador.',
     sem_trabalhador: 'O computador que busca preços para a equipe não está disponível agora. ' +
-      'Avise um administrador ou abra o Painel do Corretor neste computador.',
+      'Avise um administrador.',
+    aparelho_nao_cota_no_painel: 'Esta máquina não cota pelo Painel do Corretor. ' +
+      'Quem cota é o computador da equipe — avise um administrador.',
     sem_resposta: 'O Painel terminou a busca sem devolver os preços. Tente novamente.',
     // As tabelas do JOB nao passam pelo Painel — o erro delas e outro, e a
     // saida tambem. Cair na frase do Painel mandaria ele abrir a aba errada.
@@ -6742,10 +6760,13 @@
       'Volte em "Cotar agora" e digite as idades (ex.: <b>59</b>) em vez de contar por faixa.',
     extensao_indisponivel: 'A extensão não respondeu. Recarregue a página do WhatsApp (F5).'
   };
-  function _cotMotivo(m) {
+  // `souTrab` decide qual das duas leituras sai. O padrao e a da consultora:
+  // se a pergunta ao background falhar, a tela nunca ensina a abrir o Painel.
+  function _cotMotivo(m, souTrab) {
     const s = String(m || '');
-    if (s.indexOf('hash_expirado') === 0) return _COT_EXPLICA.hash_expirado;
-    return _COT_EXPLICA[s] || 'Não consegui falar com o Painel do Corretor agora. Motivo: ' + esc(s || 'desconhecido');
+    const base = (s.indexOf('hash_expirado') === 0) ? 'hash_expirado' : s;
+    if (souTrab && _COT_EXPLICA[base + '_trabalhador']) return _COT_EXPLICA[base + '_trabalhador'];
+    return _COT_EXPLICA[base] || 'Não consegui buscar o preço agora. Motivo: ' + esc(s || 'desconhecido');
   }
   // NÃO É AVISO SOLTO, É TELA. Ela abria com um ladrilho amarelo e um "Voltar"
   // verde de largura cheia: sem cabeçalho, sem dizer onde a pessoa está, e com
@@ -6769,18 +6790,39 @@
 
   // Motivos em que o consultor precisa do Painel na tela. Pra eles a tela
   // oferece o botão que ABRE a aba, em vez de mandar procurar.
+  // IGUALDADE EXATA, NAO PREFIXO.
+  //
+  // Com `indexOf(x) === 0`, 'painel_fechado_no_trabalhador' casava com
+  // 'painel_fechado' — ou seja, a falha do OUTRO computador oferecia o botao
+  // de abrir o Painel na maquina de quem so estava esperando o preco.
   const _COT_PRECISA_PAINEL = ['painel_fechado', 'precisa_aprender', 'hash_expirado',
                                'painel_precisa_recarregar', 'sem_resposta_a_tempo'];
+  function _cotPedeOPainel(motivo) {
+    const s = String(motivo || '');
+    const base = (s.indexOf('hash_expirado:') === 0) ? 'hash_expirado' : s;
+    return _COT_PRECISA_PAINEL.indexOf(base) >= 0;
+  }
 
-  function _cotErro(motivo, aoVoltar) {
-    setCorpoSecao(_secHead('Cotar agora', 'Preço buscado no Painel do Corretor na hora, pela sua sessão.') +
+  // O BOTAO DE ABRIR O PAINEL SO EXISTE NA MAQUINA QUE COTA.
+  //
+  // Uma maquina cota para todas. Oferecer "Abrir o Painel do Corretor" pra
+  // quem nao e a trabalhadora ensinava a consultora a providenciar acesso
+  // proprio — e o clique ainda abria o site com "faca o login" escrito no
+  // botao. Aqui a tela pergunta antes de desenhar; o background recusa
+  // abrir de qualquer jeito, entao a tela nao e a unica tranca.
+  async function _cotErro(motivo, aoVoltar) {
+    const r = await _safeSendMessage({ type: 'sou_trabalhador' }).catch(() => null);
+    const souTrab = !!(r && r.ok && r.sou);
+    setCorpoSecao(_secHead('Cotar agora',
+        souTrab ? 'Preço buscado no Painel do Corretor na hora, pela sua sessão.'
+                : 'Preço buscado na hora pelo computador que cota para a equipe.') +
       '<div class="job-cot-wrap">' +
       '<div class="job-sem-analise job-vazio-bloco" style="text-align:left">' +
         '<div class="job-sem-analise-t">Não consegui buscar o preço</div>' +
         '<div class="job-sem-analise-txt" style="max-width:none;margin-left:0;margin-right:0">' +
-          _cotMotivo(motivo) + '</div>' +
+          _cotMotivo(motivo, souTrab) + '</div>' +
       '</div>' +
-      (_COT_PRECISA_PAINEL.some((x) => String(motivo || '').indexOf(x) === 0)
+      ((souTrab && _cotPedeOPainel(motivo))
         // UM CLIQUE, não uma instrução. Mandar "vá na aba do Painel" obriga o
         // consultor a saber o endereço, abrir e achar — no meio do
         // atendimento, com o cliente esperando.
@@ -6792,11 +6834,11 @@
     const bp = document.getElementById('job-cot-abrir-painel');
     if (bp) bp.addEventListener('click', async () => {
       bp.disabled = true; const r0 = bp.textContent; bp.textContent = 'Abrindo…';
-      const r = await _safeSendMessage({ type: 'painel_abrir' }).catch(() => null);
+      const ra = await _safeSendMessage({ type: 'painel_abrir' }).catch(() => null);
       // Diz o que aconteceu: focar uma aba que já existia e abrir uma nova são
       // coisas diferentes, e o consultor precisa saber em qual ele está.
-      bp.textContent = (r && r.ok)
-        ? (r.tinha ? 'Painel em foco — volte aqui depois' : 'Painel aberto — faça o login')
+      bp.textContent = (ra && ra.ok)
+        ? (ra.tinha ? 'Painel em foco — volte aqui depois' : 'Painel aberto — faça o login')
         : r0;
       setTimeout(() => { bp.textContent = r0; bp.disabled = false; }, 3200);
     });

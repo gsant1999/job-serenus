@@ -1560,7 +1560,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // existe, ele tem que saber o endereço, abrir e logar — no meio de um
   // atendimento, com o cliente esperando. Um clique resolve: se a aba existe,
   // foca; se não, abre.
+  // QUEM PERGUNTA E A TELA, PRA NAO OFERECER O QUE NAO PODE.
+  //
+  // So o aparelho marcado como trabalhador tem acesso ao Painel. A tela de
+  // erro precisa saber disso ANTES de desenhar: oferecer "Abrir o Painel do
+  // Corretor" pra quem nao tem acesso e ensinar a burlar o desenho.
+  if (msg && msg.type === 'sou_trabalhador') {
+    sendResponse({ ok: true, sou: !!_souTrabalhador });
+    return false;
+  }
   if (msg && msg.type === 'painel_abrir') {
+    // A TRANCA DE VERDADE E AQUI, NAO NA TELA.
+    //
+    // Um desenho pode ser burlado; esta recusa nao. Numa maquina que nao e a
+    // trabalhadora, a extensao nao abre nem foca o Painel do Corretor — e a
+    // regra de nao reativar acesso de quem nao deve ter.
+    if (!_souTrabalhador) {
+      sendResponse({ ok: false, motivo: 'aparelho_nao_cota_no_painel' });
+      return false;
+    }
     chrome.tabs.query({ url: 'https://*.paineldocorretor.com.br/*' }, (abas) => {
       const viva = (abas || [])[0];
       if (viva) {
