@@ -1048,7 +1048,6 @@ def init_db():
                 copiado BOOLEAN DEFAULT FALSE,
                 feedback TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
             """CREATE TABLE IF NOT EXISTS score_heartbeat (
                 id SERIAL PRIMARY KEY,
