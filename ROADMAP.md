@@ -224,6 +224,109 @@ Metade do trabalho pode ser só aplicar o que já existe.
 - [ ] Enviar mensagem automática por mudança de etapa do CRM — depende de decidir regras (qual etapa dispara qual mensagem) e ter a chave API de produção
 - [ ] Sincronizar atendente responsável (JOB responsavel_id → BotConversa manager) — só faz sentido pras 3 consultoras que usam BootConversa (Prisciele/Juliana/Jenifer), ver [[canais-whatsapp-por-consultor]]
 
+## HANDOFF — Cotação, segurança e wa-js (17/08 18h → 18/08 11h25)
+
+Sessão paralela à de baixo (não a mesma). Escopo: o bug do Danilo na cotação,
+a auditoria de segurança das 8 regras do roadmap de cotação, e a atualização da
+wa-js depois do canário acusar quebra. **Sem incidente em produção** — pode ler
+depois do handoff da tarde, que é o urgente.
+
+### Histórico da sessão, em ordem
+
+| Quando | Duração aprox. | O que |
+|---|---|---|
+| 17/08 ~17h45–18:02 | ~15 min | Diagnóstico e correção do bug do Danilo: `cotador_precos_paralelos` fora da lista de tipos aceitos pela fila — preço nunca chegava a ser pedido, caía como `painel_fechado` |
+| 17/08 18:02 | — | Deploy `13aa4fa`, confirmado no ar |
+| 18/08 00:01–00:22 | ~35 min | Auditoria completa das 8 regras (workflow, 38 agentes): 34 achados, 17 refutados. Correções em 6 commits — credencial, vazamento de sessão do fornecedor, textos que ensinavam a abrir o Painel, motivo real da falha, ciclo de vida da fila, relógios |
+| 18/08 00:22–00:52 | ~30 min | Cobrança do Guilherme sobre vazamento do nome do fornecedor → varredura e correção em 40 pontos (`b858b26`); descoberta e correção do bug da acomodação vazia (`cc040a1`) |
+| 18/08 00:52–01:37 | ~45 min | Segunda rodada da acomodação (causa raiz completa, `4169ba6`); estudo somente-leitura das 3 cotações vazias por clique (workflow, 6 agentes) — decisão do Guilherme: deixar parado; registro no ROADMAP |
+| *(gap — sessão ociosa; outras sessões trabalharam no projeto nesse intervalo)* | | |
+| 18/08 ~11h00–11:25 | ~25 min | Canário da extensão acusa quebra (`achar_msg`, `conta`). Diagnóstico: não fomos nós — wa-js 4.6.0 corrige exatamente a área. Baixado do release oficial, SHA256 conferido, contrato de API testado, deploy. Decisão da busca de cidade registrada como encerrada |
+
+**Tempo de trabalho ativo estimado: ~2h30min**, espalhado por ~17h de relógio
+(o Guilherme dormiu no meio). Não inclui o tempo dos workflows em si rodando em
+segundo plano (~40 min de agentes, paralelos ao resto).
+
+### O que foi corrigido (29 de 34 achados da auditoria)
+
+- **Crítico:** senha do Postgres em texto puro em 2 scripts do repositório
+  (`check_railway_db.py`, `import_propostas_from_sqlite.py`) — removida do
+  código, mas **a senha antiga só perde validade quando for trocada no
+  Supabase** (ver pendências).
+- **Crítico:** em erro, a extensão mandava a árvore de sessão do Painel
+  (`next-router-state-tree`) pro nosso servidor, gravada em
+  `cotacao_fila.resultado_json`. Barrado em duas camadas (extensão e
+  servidor) para não depender de todo mundo estar na versão nova.
+- **Crítico → depois achado maior:** a interface ensinava a consultora a
+  abrir o Painel do fornecedor ("faça o login"), em 3 lugares. Corrigido, e
+  depois de cobrança, varrido em **40 pontos** — inclusive comentários dentro
+  de `<script>` inline, que são servidos no HTML e aparecem em "ver
+  código-fonte". Travado em `testes/testar_blindagem_fonte_preco.py`.
+- **Alto:** a tela de cotação do site respondia da tabela salva sem tentar o
+  Painel ao vivo, e preço de tabela era gravado como se fosse ao vivo — com a
+  data renovada, então o alerta de preço desatualizado nunca disparava.
+- **Alto → dois bugs, não um:** a linha "Acomodação" saía em branco no
+  documento do cliente. Causa: comparação `is True`/`is False` não pegava
+  valores `1`/`0` vindos de JSON. Não era regressão desta sessão isolada — o
+  bug nasceu em `621bbd7` (17/08 à tarde) — mas **minha própria mudança
+  (`b0ddc3e`) expôs o bug**, ao rotear Saúde Beneficência e MedSênior pelo
+  caminho ao vivo (onde o campo falta) em vez do banco (onde é texto e
+  funcionava). Corrigido: aceita `1`/`0`, consulta a base quando falta, e o
+  aprendizado automático parou de chutar `'Enfermaria'` quando não sabe.
+- Motivo real da falha chegando à tela em vez de "tente novamente" genérico;
+  relógio pytz errado em 6 min; posse de pedido da fila; retenção; conexão de
+  banco vazando; ordem dos timeouts da fila estava invertida.
+- **wa-js 4.5.0 → 4.6.0** (depois virou 4.6.0 dentro da extensão 4.97.1, hoje
+  carregada por trás da 4.98.0 de outra sessão — o bundle não foi tocado por
+  ela). Baixado do release oficial, SHA256 conferido byte a byte, contrato de
+  API testado (`testes/testar_wajs_contrato.py`).
+
+Tudo travado em teste: `testar_auditoria_seguranca.py`,
+`testar_blindagem_fonte_preco.py`, `testar_acomodacao_documento.py`,
+`testar_documento_acomodacao.py`, `testar_wajs_contrato.py`, mais o
+`testar_cotacao_e_catalogo.py` que estava quebrado desde antes e foi
+consertado no caminho.
+
+### O que aprendemos
+
+1. **Sintoma genérico esconde causa específica.** "Tente novamente" e
+   "Painel fechado" cobriam ~5 causas diferentes, 3 delas impossíveis de
+   resolver tentando de novo. Isso adiou o diagnóstico do Danilo e teria
+   adiado outros.
+2. **Minha primeira recomendação para as cotações vazias estava errada.** Eu
+   ia sugerir uma cotação compartilhada entre as 3 frentes paralelas — o
+   estudo mostrou que isso reintroduziria um bug já corrigido em `4b4f01c`
+   (preço colado no plano errado, em silêncio). Só a leitura funda evitou
+   entregar uma correção pior que o problema.
+3. **"Não é regressão de hoje" precisa ser checado, não afirmado.** Eu disse
+   isso sobre a acomodação e estava certo sobre a origem do bug, mas errado
+   sobre o efeito — minha própria mudança de horas antes foi o que expôs o
+   bug antigo na prática. Corrigi publicamente quando o Guilherme perguntou.
+4. **Blindagem do nome do fornecedor tem armadilha em comentário.** Código
+   dentro de `<script>` inline nos templates Jinja é servido no HTML — um
+   comentário meu, escrito para explicar a correção, vazou o próprio domínio
+   que eu estava tirando.
+5. **Trabalho em paralelo é a realidade agora.** Múltiplas sessões mexem no
+   mesmo repositório ao mesmo tempo. Antes de reportar estado ou subir
+   qualquer coisa, sincronizar com `origin/main` primeiro — encontrei
+   commits novos duas vezes nesta sessão sem esperar por eles.
+
+### PENDENTE
+
+- [ ] **Rotacionar a senha do Postgres no Supabase** · só o Guilherme pode
+  fazer · **~5 min** · a única ação que continua exposta até ser feita.
+- [ ] **Testar a wa-js 4.6.0 contra o WhatsApp real** · aguardando
+  confirmação — não recebi retorno se o canário voltou ao verde depois do F5
+  · **~5 min** de teste, quando o Guilherme puder.
+- [~] **3 cotações vazias por clique no Painel** · decisão: parado até dar
+  pra testar com o Painel aberto · **~20–30 min** quando houver a janela ·
+  ver análise completa na seção Cotação acima (NÃO fazer cotação
+  compartilhada — está escrito lá o porquê).
+- [ ] **`gunicorn -w 1`: reciclo trava o site inteiro por alguns segundos,
+  várias vezes por dia** · precisa tirar `_FILA_ESCUTAS_ATIVAS` da memória do
+  processo antes de poder subir pra `-w 2` · sem prazo definido, é infra ·
+  estimativa grosseira não medida, ~1–2h.
+
 ## Inteligência de Vendas, leitura de conversa e falha silenciosa (18/08/2026)
 
 Sessão longa que começou em "arruma a página de Inteligência de Vendas" e virou
