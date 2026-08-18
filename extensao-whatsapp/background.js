@@ -185,8 +185,28 @@ function _trabalhadorTick() {
 // Se nao houver Painel aqui, devolve ERRO em vez de ficar quieto: a maquina
 // marcada como trabalhadora sem Painel aberto e um defeito de configuracao, e
 // quem esta esperando precisa saber disso em vez de esperar pra sempre.
+// O DETALHE DE ERRO NAO SOBE PRO SERVIDOR.
+//
+// `passo` anexa {enviei, responderam, arvore} quando o Painel devolve erro
+// (cotador-painel.js). Isso e ouro pra depurar NA MAQUINA que executou e nao
+// pode existir em lugar nenhum alem dela: `arvore` e a next-router-state-tree
+// da sessao do Painel, e `responderam` e o corpo cru da resposta deles, que
+// num 403 costuma trazer identificacao de sessao. Indo pro /pronto, isso era
+// gravado em cotacao_fila.resultado_json e ficava no Postgres.
+//
+// O `motivo` sobrevive inteiro — e ele que a tela precisa. So o anexo cai.
+function _semDetalheDeSessao(v) {
+  if (Array.isArray(v)) return v.map(_semDetalheDeSessao);
+  if (!v || typeof v !== 'object') return v;
+  const fora = { detalhe: 1, arvore: 1, responderam: 1, enviei: 1 };
+  const limpo = {};
+  Object.keys(v).forEach((k) => { if (!fora[k]) limpo[k] = _semDetalheDeSessao(v[k]); });
+  return limpo;
+}
+
 function _trabalhadorExecutar(id, pedido) {
   const terminar = (corpo) => {
+    corpo = _semDetalheDeSessao(corpo);
     // A transição no servidor é condicional e, por isso, repetir é seguro. Se
     // a resposta HTTP se perder depois do UPDATE, a segunda tentativa recebe
     // conflito sem ressuscitar nem duplicar o pedido.

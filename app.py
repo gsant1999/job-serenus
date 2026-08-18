@@ -28346,6 +28346,31 @@ def api_wa_cotacao_fila_etapa(cid):
     return _wa_cors(jsonify({"ok": True}))
 
 
+# SEGUNDA TRANCA CONTRA A ARVORE DE SESSAO DO PAINEL.
+#
+# A extensao ja tira {detalhe, arvore, responderam, enviei} antes de mandar
+# (background.js, `_semDetalheDeSessao`). Esta funcao existe porque a versao
+# que roda na maquina do consultor nao e escolhida por nos: uma extensao velha,
+# ou uma que nao atualizou, continuaria gravando a next-router-state-tree da
+# sessao do Painel dentro de cotacao_fila.resultado_json — em texto puro, no
+# Postgres de producao.
+#
+# Denylist e nao whitelist de proposito: o formato do resultado varia por tipo
+# de pedido, e uma lista fechada quebraria os tipos novos em silencio.
+_FILA_CHAVES_PROIBIDAS = {'detalhe', 'arvore', 'responderam', 'enviei'}
+
+
+def _fila_sem_detalhe_de_sessao(v, prof=0):
+    if prof > 12:
+        return None
+    if isinstance(v, list):
+        return [_fila_sem_detalhe_de_sessao(x, prof + 1) for x in v]
+    if isinstance(v, dict):
+        return {k: _fila_sem_detalhe_de_sessao(x, prof + 1)
+                for k, x in v.items() if k not in _FILA_CHAVES_PROIBIDAS}
+    return v
+
+
 @app.route('/api/whatsapp/cotacao/fila/<int:cid>/pronto', methods=['POST', 'OPTIONS'])
 @chave_ou_login_ou_extensao('cotacao:ler')
 def api_wa_cotacao_fila_pronto(cid):
@@ -28366,7 +28391,7 @@ def api_wa_cotacao_fila_pronto(cid):
             WHERE id=? AND estado='rodando' AND trabalhador_sessao=?
         """, (erro, agora_txt, cid, sid))
     else:
-        resultado = req.get('resultado')
+        resultado = _fila_sem_detalhe_de_sessao(req.get('resultado'))
         if not isinstance(resultado, str):
             resultado = json.dumps(resultado, ensure_ascii=False)
         if len(resultado.encode('utf-8')) > 2_000_000:

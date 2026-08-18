@@ -7788,7 +7788,10 @@
       cotacao_id: _cot.cotacaoId || null,
       cidade: _cot.cidade || '',
       modalidade: _cotRotulo(_cot.modalidade),
-      idades: String(_cot.idades || ''),
+      // Quantas vidas, nao QUAIS idades. O log de erros nao tem a retencao
+      // nem o controle de acesso das tabelas de cotacao, e a idade exata dos
+      // beneficiarios daquele cliente nao ajuda em nada a achar o defeito.
+      vidas: String(_cot.idades || '').split(/[^0-9]+/).filter(Boolean).length,
       operadora: (_cot.operadoraAtual && _cot.operadoraAtual.nome) || '',
       planos: detalhes,
     }));
