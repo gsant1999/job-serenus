@@ -25196,6 +25196,11 @@ _WA_FILA_GATE_MAX = int(os.environ.get('WA_FILA_GATE_MAX', '45'))
 # passos nao protege nada e faz a ferramenta parecer quebrada.
 _WA_FILA_GATE_MESMO_MIN = int(os.environ.get('WA_FILA_GATE_MESMO_MIN', '3'))
 _WA_FILA_GATE_MESMO_MAX = int(os.environ.get('WA_FILA_GATE_MESMO_MAX', '8'))
+# Teto de validade do item da fila. Passou disso, NAO SAI — ver o bloco
+# grande em /api/whatsapp/fila/proximo. 6h cobre um dia de trabalho
+# (item da manha sai a tarde) e nao cobre 'ontem', que e onde a mensagem
+# comeca a chegar descolada pro cliente.
+_WA_FILA_VALIDADE_HORAS = 6
 _WA_FILA_RECLAIM_MINUTOS = 3
 _WA_FILA_MAX_TENTATIVAS = 3
 
@@ -25321,6 +25326,46 @@ def api_whatsapp_fila_proximo():
     agora = datetime.now(TZ_SP)
     agora_txt = agora.strftime('%Y-%m-%d %H:%M:%S')
     cutoff_reclaim = (agora - timedelta(minutes=_WA_FILA_RECLAIM_MINUTOS)).strftime('%Y-%m-%d %H:%M:%S')
+    # MENSAGEM VELHA NAO SAI. NUNCA. E o servidor que decide isso.
+    #
+    # Em 18/08/2026 isto causou o pior estrago da historia do projeto. A fila
+    # estava morta havia semanas pra quem entrou pelo login novo (a rotina da
+    # extensao exigia a chave antiga), e os itens foram ACUMULANDO no servidor —
+    # 43 deles, o mais velho de 27/07. Quando a rotina foi religada, ela comecou
+    # a drenar o atraso inteiro: cliente de tres semanas atras recebendo
+    # "Oi, vi que voce pediu uma cotacao" do nada, e funil disparando pra quem
+    # ninguem estava atendendo.
+    #
+    # A licao nao e "lembrar de limpar a fila antes de religar" — e que a fila
+    # NAO PODE depender de alguem lembrar. Um item de abertura de lead so faz
+    # sentido perto do momento em que o lead chegou; passado disso, mandar e
+    # pior que nao mandar, porque o cliente ja esfriou e a mensagem chega
+    # descolada. O teto vive aqui, no unico lugar por onde todo envio passa,
+    # entao vale pra qualquer versao de extensao, inclusive as que nao
+    # atualizaram.
+    #
+    # Item vencido nao e apagado: vira 'cancelado_atraso' com o motivo escrito,
+    # pra ficar auditavel e pra ninguem achar que a mensagem saiu.
+    try:
+        corte_velho = (agora - timedelta(hours=_WA_FILA_VALIDADE_HORAS)).strftime('%Y-%m-%d %H:%M:%S')
+        venc = conn.execute("""UPDATE whatsapp_extensao_fila
+            SET status='cancelado_atraso', erro=?
+            WHERE responsavel_id=? AND status IN ('pendente','enviando')
+              AND CAST(criado_em AS TEXT) < ?""",
+            (f'Nao enviado: passou de {_WA_FILA_VALIDADE_HORAS}h na fila. '
+             'Mensagem antiga chegando hoje confunde o cliente, entao o JOB '
+             'prefere nao mandar. Se ainda faz sentido, mande na mao.',
+             usuario_id, corte_velho))
+        n_venc = getattr(venc, 'rowcount', 0) or 0
+        if n_venc:
+            conn.commit()
+            app.logger.warning(f"[WA_FILA] {n_venc} item(ns) vencido(s) cancelado(s) "
+                               f"do consultor {usuario_id} (mais de {_WA_FILA_VALIDADE_HORAS}h na fila)")
+    except Exception as e:
+        app.logger.warning(f"[WA_FILA] vencimento: {e}")
+        try: conn.rollback()
+        except Exception: pass
+
     # liberar_em segura o item até a hora (delay proposital do auto-funil). Item
     # sem liberar_em (envio normal/opener) sai na hora.
     candidato = conn.execute("""
@@ -25328,8 +25373,10 @@ def api_whatsapp_fila_proximo():
         WHERE responsavel_id=? AND (
             status='pendente' OR (status='enviando' AND claim_em < ?)
         ) AND (liberar_em IS NULL OR CAST(liberar_em AS TEXT) <= ?)
+          AND CAST(criado_em AS TEXT) >= ?
         ORDER BY criado_em ASC LIMIT 1
-    """, (usuario_id, cutoff_reclaim, agora_txt)).fetchone()
+    """, (usuario_id, cutoff_reclaim, agora_txt,
+          (agora - timedelta(hours=_WA_FILA_VALIDADE_HORAS)).strftime('%Y-%m-%d %H:%M:%S'))).fetchone()
     if not candidato:
         close_db(conn)
         return _wa_cors(jsonify({"ok": True, "item": None}))
