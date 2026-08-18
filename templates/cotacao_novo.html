@@ -528,8 +528,8 @@
 
 <div class="cv-painel-topo" style="margin-bottom:14px">
   <div>
-    <p style="margin:0">Preço buscado no Painel do Corretor na hora, pela sua própria
-       sessão — por isso depende da extensão estar ligada.</p>
+    <p style="margin:0">Preço consultado na hora, direto na fonte —
+       por isso depende da extensão estar ligada.</p>
   </div>
   <div id="sinal" class="cv-sinal"><i class="bolinha"></i><span>verificando…</span></div>
 </div>
@@ -540,7 +540,7 @@
 {% if salva %}
 <div class="cv-salva">Cotação de {{ salva.criado_em|datahora_br }} · {{ salva.cidade }} ·
   {{ salva.planos_cotados }} plano(s)
-  {% if salva.painel_url %}· <a href="{{ salva.painel_url }}" target="_blank" rel="noopener">abrir no Painel</a>{% endif %}
+
 </div>
 {% endif %}
 
@@ -880,27 +880,29 @@
   };
 
   var EXPLICA = {
-    // O ATALHO VENCEU — e o conserto é do consultor, não meu.
+    // COMENTARIO ENXUTO DE PROPOSITO: ESTE ARQUIVO VAI PRO NAVEGADOR.
     //
-    // O Painel do Corretor é Next.js: cada ação de servidor tem um código
-    // gerado por BUILD. Quando a Trindade publica uma versão, os códigos que a
-    // extensão aprendeu viram inválidos e o servidor responde 404. Não é bug
-    // nosso nem deles — é o preço de conversar por dentro do sistema.
+    // Comentario dentro de <script> inline e servido no HTML e qualquer pessoa
+    // le em "ver codigo-fonte". O texto que estava aqui explicava a origem do
+    // preco com nome e tecnologia do fornecedor. A explicacao tecnica completa
+    // vive no repositorio, fora do que e entregue ao usuario.
+    //
+    // O atalho vence quando a fonte publica versao nova; a extensao reaprende
+    // sozinha observando, e por isso este aviso nao pede pra "avisar o suporte".
     //
     // A extensão reaprende sozinha OBSERVANDO: basta uma cotação feita na mão
     // no Painel. Por isso este aviso não pede pra "avisar o suporte": pede a
     // única coisa que resolve, e que leva um minuto.
-    hash_expirado: { classe: 'off', rotulo: 'O Painel foi atualizado',
-      html: '<b>O Painel do Corretor publicou uma versão nova e um atalho que o JOB usava venceu.</b> ' +
-            'A extensão reaprende sozinha vendo você usar o Painel.' +
-            '<ol><li>Vá na aba do <b>Painel do Corretor</b>.</li>' +
-            '<li id="passoAprender">Faça uma cotação na mão até <b>ver o preço na tela</b>.</li></ol>' +
+    hash_expirado: { classe: 'off', rotulo: 'Consulta indisponível',
+      html: '<b>A consulta de preço ficou temporariamente indisponível.</b> ' +
+            'O computador que busca preços para a equipe precisa reaprender.' +
+            '<ol><li>Avise um administrador.</li></ol>' +
             '<p style="margin:8px 0 0;font-size:11.5px;color:var(--cinza-2)">Não precisa voltar aqui nem ' +
             'recarregar: assim que ela aprender, esta tela se destrava sozinha. E não precisa salvar ' +
             'nem terminar a cotação lá.</p>' },
     extensao_nao_respondeu: { classe: 'off', rotulo: 'Extensão não responde',
       html: '<b>A extensão do JOB não respondeu.</b> Sem ela esta tela não cota, porque quem ' +
-            'fala com o Painel é o seu próprio navegador.<ol><li>Confira se a extensão está ' +
+            'busca o preço é o seu próprio navegador.<ol><li>Confira se a extensão está ' +
             'instalada e ligada.</li><li>Recarregue esta página.</li></ol>' },
     aba_desatualizada: { classe: 'off', rotulo: 'Recarregue esta página',
       html: '<b>Esta aba ficou com uma versão antiga da extensão.</b> Acontece quando a página é ' +
@@ -909,12 +911,12 @@
       html: '<b>A extensão está instalada mas não atendeu.</b><ol><li>Abra ' +
             '<code>chrome://extensions</code> e clique no ↻ da extensão do JOB.</li>' +
             '<li>Recarregue esta página.</li></ol>' },
-    // NAO CITA NEM LINKA O PAINEL.
+    // NENHUM TEXTO DAQUI NOMEIA A FONTE DO PRECO.
     //
-    // O texto anterior trazia um link pronto pra beta.paineldocorretor.com.br
-    // com "faça login" ao lado. Quem le esta tela e a consultora, e ela nao
-    // tem — nem pode ter — acesso proprio ao Painel: uma maquina cota para
-    // todas. O link ensinava, com um clique, exatamente o contrario.
+    // Vale pro texto E pro comentario: este arquivo e servido ao navegador e
+    // qualquer pessoa le em "ver codigo-fonte". Quem abre esta tela e a
+    // consultora, e uma maquina so busca preco para todas — nada aqui pode
+    // sugerir que ela precise de acesso proprio a coisa nenhuma.
     painel_fechado: { classe: 'off', rotulo: 'Preço indisponível',
       html: '<b>O computador que busca preços para a equipe não está disponível agora.</b>' +
             '<ol><li>Avise um administrador.</li><li>Não é preciso fazer nada nesta máquina.</li></ol>' },
@@ -967,7 +969,7 @@
           '<div style="color:var(--cinza-2)">o que o JOB mandou</div>' +
           '<code style="display:block;word-break:break-all;color:var(--texto)">' +
             esc(extra.detalhe.enviei || '') + '</code>' +
-          '<div style="color:var(--cinza-2);margin-top:7px">o que o Painel respondeu</div>' +
+          '<div style="color:var(--cinza-2);margin-top:7px">resposta recebida</div>' +
           '<code style="display:block;word-break:break-all">' +
             esc(extra.detalhe.responderam || '') + '</code>' +
           '<div style="color:var(--cinza-2);margin-top:7px">rota enviada</div>' +
@@ -999,26 +1001,24 @@
       var passos = extra.faltando.map(function (p) {
         return '<li>' + (PASSO_HUMANO[p] || ('Passo <code>' + esc(p) + '</code>.')) + '</li>';
       }).join('');
-      html = '<b>Falta a extensão ver ' + extra.faltando.length +
-        (extra.faltando.length === 1 ? ' passo' : ' passos') + ' no Painel.</b> ' +
-        'Ela aprende olhando você usar — não precisa salvar nem terminar nada lá.' +
+      html = '<b>Falta ensinar ' + extra.faltando.length +
+        (extra.faltando.length === 1 ? ' passo' : ' passos') + ' à extensão.</b> ' +
+        'Quem ensina é o computador que busca preços para a equipe.' +
         '<ol>' + passos + '</ol>' +
         '<p style="margin:8px 0 0;font-size:11.5px;color:var(--cinza-2)">' +
-        'Faça na <b>aba do Painel</b> e volte aqui. Se você já fez a cotação inteira e ' +
-        'este aviso continua, o passo acima é o que ainda não aconteceu na tela deles.</p>';
+        'Avise um administrador — não é preciso fazer nada nesta máquina.</p>';
     }
     if (motivo === 'painel_fechado' && extra && extra.abasExaminadas != null) {
-      html += '<p style="margin:8px 0 0;font-size:11.5px;color:var(--cinza-2)">A extensão olhou ' +
-        extra.abasExaminadas + ' aba(s) e nenhuma era do Painel.</p>';
+      html += '';
     }
     mostrarSinal(e.classe, e.rotulo, html);
   }
 
-  var FASES = { criando: 'Abrindo a cotação no Painel…',
+  var FASES = { criando: 'Abrindo a cotação…',
                 operadoras: 'Vendo quem atende nessa cidade…',
                 planos: 'Listando os planos…', precos: 'Buscando o preço de cada plano…' };
   function mostrarAndamento(a) {
-    var titulo = FASES[a.fase] || 'Consultando o Painel…';
+    var titulo = FASES[a.fase] || 'Consultando…';
     var det = '', pct = 8;
     if (a.total) {
       det = a.feito + ' de ' + a.total + (a.fase === 'precos' ? ' com preço' : '');
@@ -1066,8 +1066,8 @@
         // seria pior que dizer o que falta.
         b.disabled = true;
         b.style.opacity = '.45';
-        b.title = 'O JOB ainda não viu ' + nomeCompleto(t) + ' no Painel. Faça uma cotação ' +
-                  'desse tipo lá uma vez e ele aprende sozinho.';
+        b.title = 'O JOB ainda não conhece ' + nomeCompleto(t) + '. ' +
+                  'Avise um administrador para liberar este tipo.';
       } else {
         b.onclick = function () {
           if (tipoEscolhido === t) return;   // já é este: clicar de novo não faz nada
@@ -1441,7 +1441,7 @@
     // ausente, Painel fechado, hash expirado, precisa aprender. O tratarFalha
     // já sabe explicar cada um e mostra o que foi enviado e o que voltou.
     if (!pronto) {
-      el('navLista').innerHTML = '<div class="cv-ops-vazio">Conferindo a ligação com o Painel…</div>';
+      el('navLista').innerHTML = '<div class="cv-ops-vazio">Conferindo a ligação…</div>';
       var pong2 = await pedir('ping', {}, 2500);
       if (pong2.ok) {
         extensaoPresente = true;
@@ -1459,7 +1459,7 @@
     }
 
     if (pronto) {
-      el('navLista').innerHTML = '<div class="cv-ops-vazio">Buscando operadoras no Painel do Corretor…</div>';
+      el('navLista').innerHTML = '<div class="cv-ops-vazio">Buscando operadoras ao vivo…</div>';
       var b = base();
       var rc = await pedir('passo', { pedido: Object.assign({ acao: 'criar', reaproveitar: true }, b) }, 45000);
       if (rc.ok) {
@@ -1505,7 +1505,7 @@
           urlDaPergunta = rc.dados.url || '';
           el('mainSub').innerHTML = 'Quem atende <b>' + esc(cidadeEscolhida) + '</b> · ' +
             esc(nomeCompleto(tipoAtivo() || '')) + ' · <b>' + esc(resumoVidas()) + '</b> · ' +
-            operadoras.length + ' operadoras via <b>Painel do Corretor (ao vivo)</b>' +
+            operadoras.length + ' operadoras · <b>consultado agora</b>' +
             (soDoJob ? ' · ' + soDoJob + ' só na base do JOB' : '');
           voltarPara('operadoras');
           return;
@@ -1539,7 +1539,7 @@
       operadoras = doJob.operadoras;
       // Diz que é reserva. Lista do catálogo foi levantada com OUTRA
       // distribuição de vidas, então pode faltar ou sobrar operadora.
-      el('mainSub').innerHTML = 'Do catálogo do JOB, porque o Painel não respondeu — ' +
+      el('mainSub').innerHTML = 'Do catálogo do JOB, porque a consulta ao vivo não respondeu — ' +
         'pode faltar operadora que só aparece nesta faixa etária.';
       voltarPara('operadoras');
       return;
@@ -1551,17 +1551,15 @@
     el('navLista').innerHTML = '<div class="cv-ops-vazio">' +
       '<b>Nenhum dos dois caminhos respondeu.</b><br>' +
       'A base do JOB não tem tabela para <b>' + esc(cidadeEscolhida || 'esta cidade') + '</b> · ' +
-      esc(nomeCompleto(tipoAtivo() || '')) + ', e a consulta ao vivo no Painel também não voltou.' +
-      '<br><br>Para encher a base: abra o Painel do Corretor, faça uma cotação desta cidade com ' +
-      '1 vida em cada faixa etária, rode o extrator e suba o arquivo em ' +
-      '<a href="/cotacao/novo#tabelas">Tabelas de preço</a>. ' +
+      esc(nomeCompleto(tipoAtivo() || '')) + ', e a consulta ao vivo também não voltou.' +
+      '<br><br>Avise um administrador para cadastrar a tabela desta cidade. ' +
       'Se o aviso acima explicou uma falha da extensão, resolva ela primeiro.' +
       '</div>';
   }
 
   async function garantirPlanos(operadoraId) {
     if (planosPorOperadora[operadoraId]) return planosPorOperadora[operadoraId];
-    el('navLista').innerHTML = '<div class="cv-ops-vazio">Perguntando ao Painel…</div>';
+    el('navLista').innerHTML = '<div class="cv-ops-vazio">Buscando os planos…</div>';
     var b = base();
     var rc = await pedir('passo', { pedido: Object.assign({ acao: 'criar', reaproveitar: true }, b) }, 45000);
     if (!rc.ok) { tratarFalha(rc.motivo, rc); return null; }
@@ -1660,17 +1658,15 @@
       // saída diferente.
       var m = (r && r._erro) || '';
       if (m.indexOf('nao_aprendeu') >= 0) {
-        return 'A extensão ainda não viu como o Painel mostra isso.\n\n' +
-               'Abra a aba do Painel, clique UMA vez no "i" ao lado de qualquer ' +
-               'entidade, e volte aqui. Ela aprende sozinha.';
+        return 'A extensão ainda não sabe ler esta informação.\n\n' +
+               'Avise um administrador.';
       }
       if (m.indexOf('sem_cotacao_aberta') >= 0) {
         return 'Escolha a cidade e cote uma vez primeiro — a consulta precisa de ' +
-               'uma cotação aberta no Painel para perguntar.';
+               'uma cotação aberta para perguntar.';
       }
       return 'Não deu pra ler quem entra nesta entidade' + (m ? ' (' + m + ')' : '') +
-             '. Confira no Painel do Corretor, no "i" ao lado do nome dela, ' +
-             'antes de prometer ao cliente.';
+             '. Confirme com um administrador antes de prometer ao cliente.';
     }
     var t = r.nome || E.nome;
     if (r.profissoes && r.profissoes.length) {
@@ -2301,7 +2297,7 @@
     el('btCotar').disabled = true;
     el('andando').className = 'cv-andando ver';
     el('barra').style.width = '4%';
-    el('andandoTxt').textContent = 'Abrindo a cotação no Painel…';
+    el('andandoTxt').textContent = 'Abrindo a cotação…';
     el('resTopo').style.display = 'none';
     el('resultado').innerHTML = '';
 
@@ -2406,7 +2402,7 @@
             (p.total == null
               ? '<span title="' + esc(p.motivo || '') + '">' +
                 (p.motivo === 'sem_valor_na_resposta' ? 'sem preço'
-                 : String(p.motivo || '').indexOf('hash_expirado') === 0 ? 'Painel atualizado'
+                 : String(p.motivo || '').indexOf('hash_expirado') === 0 ? 'Indisponível agora'
                  : esc(p.motivo || 'falhou')) + '</span>'
               : 'por mês, ' + totalVidas() + ' vidas') + '</span></div>' +
         '</div><div class="cv-detalhe"></div>';
@@ -2422,7 +2418,7 @@
     var rodape = document.createElement('div');
     rodape.style.cssText = 'display:flex;gap:9px;margin-top:14px;align-items:center;flex-wrap:wrap';
     rodape.innerHTML = '<button type="button" class="btn" id="btSalvar">Salvar no JOB</button>' +
-      (d.url ? '<a class="btn-outline" href="' + esc(d.url) + '" target="_blank" rel="noopener">Abrir no Painel</a>' : '') +
+
       '<span id="salvoMsg" style="font-size:12px;color:var(--cinza)"></span>';
     caixa.appendChild(rodape);
 
@@ -2459,7 +2455,7 @@
 
   function tabelaFaixas(p) {
     var f = p.faixas || [];
-    if (!f.length) return '<p style="font-size:12px;color:var(--cinza)">O Painel não devolveu o detalhamento deste plano.</p>';
+    if (!f.length) return '<p style="font-size:12px;color:var(--cinza)">Não veio o detalhamento deste plano.</p>';
     var linhas = f.filter(function (x) { return x.quantidade > 0; }).map(function (x) {
       var i = FAIXAS.indexOf(x.faixa);
       return '<tr><td>' + (i >= 0 ? ROTULOS[i] : x.faixa) + ' anos</td>' +
@@ -2473,7 +2469,7 @@
       '</td></tr></tbody></table>' +
       (p.conferido === false
         ? '<p style="margin:8px 0 0;font-size:11.5px;color:var(--laranja)">A soma das faixas não ' +
-          'fecha com o total. O total é o que o Painel diz; confira antes de enviar ao cliente.</p>' : '');
+          'fecha com o total. Vale o total informado; confira antes de enviar ao cliente.</p>' : '');
   }
 
   // ── início ─────────────────────────────────────────────────────────────
@@ -2971,7 +2967,7 @@
     if (!confirm(
         'Apagar as ' + n + ' tabela(s) de preço do JOB?\n\n' +
         'Você perde ' + precos + ' preço(s) por faixa etária. Eles só voltam ' +
-        'cotando de novo no Painel, plano a plano.\n\n' +
+        'cotando de novo, plano a plano.\n\n' +
         'Não dá pra desfazer.')) return;
 
     // Segunda barreira: digitar. Um "OK" no susto é fácil demais pra uma ação

@@ -6720,24 +6720,24 @@
     // esta fora do ar". O texto antigo era so o primeiro caso e, lido por uma
     // consultora, virava instrucao pra ela providenciar acesso proprio ao
     // Painel — exatamente o que nao pode acontecer.
-    painel_fechado: 'O computador que busca preços para a equipe não está com o Painel do Corretor aberto. ' +
+    painel_fechado: 'O computador que busca preços para a equipe não está pronto agora. ' +
       'Avise um administrador — não é preciso fazer nada nesta máquina.',
     painel_fechado_trabalhador: 'O JOB busca o preço pela <b>sua sessão</b> no Painel do Corretor, ' +
       'aberta <b>neste computador</b>. Enquanto a aba fica aberta aqui, o JOB segura a sessão viva sozinho.',
-    painel_precisa_recarregar: 'O computador que busca preços para a equipe precisa de um <b>F5</b> ' +
-      'na aba do Painel do Corretor. Avise um administrador.',
+    painel_precisa_recarregar: 'O computador que busca preços para a equipe precisa de um ajuste. ' +
+      'Avise um administrador.',
     painel_precisa_recarregar_trabalhador: 'A aba do Painel do Corretor está aberta neste computador, ' +
       'mas precisa de <b>F5</b> depois da atualização da extensão.',
     painel_fechado_no_trabalhador: 'O computador que busca preços para a equipe está ligado, ' +
-      'mas o Painel do Corretor foi fechado nele. Avise um administrador e tente novamente depois que a aba for aberta.',
-    painel_precisa_recarregar_no_trabalhador: 'O computador que busca preços para a equipe está com uma versão antiga ' +
-      'na aba do Painel do Corretor. Avise um administrador para atualizar essa aba com <b>F5</b>.',
+      'mas não está pronto para cotar. Avise um administrador e tente novamente em seguida.',
+    painel_precisa_recarregar_no_trabalhador: 'O computador que busca preços para a equipe está com uma versão antiga. ' +
+      'Avise um administrador para atualizá-lo.',
     precisa_aprender: 'A extensão ainda não sabe cotar esta combinação. Quem ensina é o computador ' +
       'que busca preços para a equipe — avise um administrador.',
     precisa_aprender_trabalhador: 'Vá na aba do <b>Painel do Corretor</b> e faça uma cotação na mão até <b>ver o preço na tela</b>. ' +
       'A extensão aprende vendo você usar, e destrava sozinha — não precisa terminar nem salvar a cotação lá.',
-    hash_expirado: 'O Painel do Corretor publicou uma versão nova e um atalho venceu. ' +
-      'Quem reensina é o computador que busca preços para a equipe — avise um administrador.',
+    hash_expirado: 'A consulta de preço ficou temporariamente indisponível. ' +
+      'Quem resolve é o computador que busca preços para a equipe — avise um administrador.',
     hash_expirado_trabalhador: 'O Painel do Corretor publicou uma versão nova e um atalho venceu. ' +
       'Faça uma cotação na mão lá até <b>ver o preço</b> — a extensão reaprende sozinha.',
     sem_resposta_a_tempo: 'A busca de preços para a equipe demorou demais. Tente novamente; ' +
@@ -6749,8 +6749,8 @@
       'Tente novamente; se acontecer de novo, avise um administrador.',
     sem_trabalhador: 'O computador que busca preços para a equipe não está disponível agora. ' +
       'Avise um administrador.',
-    aparelho_nao_cota_no_painel: 'Esta máquina não cota pelo Painel do Corretor. ' +
-      'Quem cota é o computador da equipe — avise um administrador.',
+    aparelho_nao_cota_no_painel: 'Esta máquina não busca preço sozinha. ' +
+      'Quem busca é o computador da equipe — avise um administrador.',
     sem_resposta: 'A busca terminou sem devolver os preços. Tente novamente.',
     fila_sem_resposta: 'Não consegui falar com o JOB para pedir o preço. ' +
       'Confira a internet e tente de novo.',
@@ -6774,7 +6774,14 @@
   // se a pergunta ao background falhar, a tela nunca ensina a abrir o Painel.
   function _cotMotivo(m, souTrab) {
     const s = String(m || '');
-    const base = (s.indexOf('hash_expirado') === 0) ? 'hash_expirado' : s;
+    let base = (s.indexOf('hash_expirado') === 0) ? 'hash_expirado' : s;
+    // O SUFIXO `_trabalhador` NAO PODE SER ALCANCADO POR NOME.
+    //
+    // As entradas terminadas em `_trabalhador` sao a leitura da maquina que
+    // cota — as unicas que podem nomear o Painel. Sem esta linha, um motivo
+    // que por acaso chegasse chamado 'painel_fechado_trabalhador' cairia na
+    // busca direta e entregaria esse texto pra uma consultora.
+    if (base.slice(-12) === '_trabalhador') base = base.slice(0, -12);
     if (souTrab && _COT_EXPLICA[base + '_trabalhador']) return _COT_EXPLICA[base + '_trabalhador'];
     return _COT_EXPLICA[base] || 'Não consegui buscar o preço agora. Motivo: ' + esc(s || 'desconhecido');
   }

@@ -138,7 +138,7 @@
 
   <div class="ct-bloco">
     <h3>Tipos de contratação</h3>
-    <p class="ajuda">O Painel identifica cada tipo por um número, e o nome só existe na tela deles.
+    <p class="ajuda">Cada tipo é identificado por um número, e o nome só aparece na consulta.
        Em vez de adivinhar — o que faria a cotação pedir preço do produto errado —, a extensão
        pergunta quem atende em cada código e você reconhece qual é qual pela lista de operadoras.
        É uma vez só.</p>
@@ -153,7 +153,7 @@
     <h3>Cidades</h3>
     <p class="ajuda">Saem das propostas já fechadas no JOB, das mais movimentadas para as menos —
        varrer o Brasil seriam 5.570 cidades e nenhuma interessa se não temos cliente lá.
-       As tracejadas estão sem estado cadastrado na proposta: o Painel exige "Cidade - UF", então
+       As tracejadas estão sem estado cadastrado na proposta: a consulta exige "Cidade - UF", então
        elas ficam de fora até alguém corrigir o cadastro.</p>
     <div class="ct-cidades" id="cidades"></div>
     <!-- Nem toda cidade que interessa já teve venda. Quem vai abrir praça nova
@@ -177,10 +177,10 @@
 
   <div class="ct-bloco">
     <h3>Rodízio mensal</h3>
-    <p class="ajuda">Varrer tudo de uma vez seriam centenas de consultas seguidas ao Painel —
+    <p class="ajuda">Varrer tudo de uma vez seriam centenas de consultas seguidas —
        rápido, e exatamente o pico que não se parece com nenhum corretor trabalhando.
        Marcadas aqui, as cidades são revisitadas <b>uma por vez, ao longo do mês</b>, pela
-       extensão, enquanto você trabalha. Ela só age com o Painel aberto e nunca abre aba sozinha.</p>
+       extensão, enquanto você trabalha. Ela nunca abre aba sozinha.</p>
     <div class="ct-linha-acao">
       <button type="button" class="btn-outline btn-sm" id="btRodizio">Pôr as marcadas no rodízio</button>
       <span class="ct-conta" id="rodizioMsg"></span>
@@ -304,7 +304,7 @@
       corpo.innerHTML = '<tr><td colspan="7"><div class="ct-vazio">' +
         '<strong>Nada no catálogo ainda</strong>' +
         '<p>Vá em <b>Atualizar catálogo</b>, escolha as cidades e rode a varredura uma vez. ' +
-        'Depois disso esta consulta responde na hora, sem chamar o Painel.</p></div></td></tr>';
+        'Depois disso esta consulta responde na hora, sem consultar de novo.</p></div></td></tr>';
       return;
     }
     var ops = {};
@@ -351,7 +351,7 @@
     var cidade = (alvos()[0] || (SUGERIDAS[0] || {}).cidade);
     if (!cidade) { el('descobrirMsg').textContent = 'Escolha uma cidade primeiro.'; return; }
     this.disabled = true;
-    el('descobrirMsg').textContent = 'Perguntando ao Painel por ' + cidade + '…';
+    el('descobrirMsg').textContent = 'Consultando ' + cidade + '…';
     var r = await pedir('descobrir_modalidades', { pedido: { cidade: cidade } }, 60000);
     this.disabled = false;
     if (!r.ok) { el('descobrirMsg').textContent = 'Não deu: ' + (r.motivo || '?'); return; }
@@ -403,7 +403,7 @@
       b.type = 'button';
       b.className = 'ct-cid' + (s.tem_uf ? '' : ' sem-uf') + (marcadas[s.cidade] ? ' on' : '');
       b.innerHTML = s.cidade + '<small>' + s.propostas + '</small>';
-      if (!s.tem_uf) { b.title = 'Sem estado na proposta — o Painel exige "Cidade - UF".'; }
+      if (!s.tem_uf) { b.title = 'Sem estado na proposta — a consulta exige "Cidade - UF".'; }
       else {
         b.onclick = function () {
           if (marcadas[s.cidade]) delete marcadas[s.cidade]; else marcadas[s.cidade] = 1;
@@ -597,10 +597,10 @@
     if (!ligado) {
       el('sinalVarre').style.display = '';
       el('sinalVarreTxt').innerHTML = r.ok
-        ? '<b>A extensão ainda não sabe como o Painel cota.</b> Abra o Painel do Corretor e faça ' +
-          'uma cotação normal, na mão, uma vez. Depois recarregue esta página.'
+        ? '<b>A extensão ainda não sabe cotar esta combinação.</b> Avise um administrador; ' +
+          'depois recarregue esta página.'
         : '<b>A extensão não respondeu.</b> A consulta abaixo continua funcionando (ela lê o que ' +
-          'já está guardado), mas atualizar o catálogo precisa da extensão e do Painel aberto.';
+          'já está guardado), mas atualizar o catálogo precisa da extensão ligada.';
     }
     atualizarPrevisao();
   })();
