@@ -36471,6 +36471,35 @@ def _copart_texto(tb):
     return 'Com'
 
 
+def _acomodacao_da_base(conn, operadora, plano, modalidade):
+    """Ultima tentativa antes de desistir: a palavra que a base ja tem gravada.
+
+    Existe porque CHUTAR E PIOR QUE NAO SABER. O codigo antigo devolvia
+    'Enfermaria' pra tudo que nao fosse claramente apartamento — e escrevia
+    'Enfermaria' num plano Ambulatorial, no documento que vai pro cliente.
+    621bbd7 tirou o chute e passou a devolver vazio, o que sumiu com a linha
+    inteira da apresentacao. Nenhum dos dois e aceitavel: o certo e perguntar.
+    """
+    if not operadora or not plano:
+        return ''
+    try:
+        q = ("SELECT acomodacao FROM cotacao_tabela "
+             "WHERE LOWER(operadora)=LOWER(?) AND LOWER(plano)=LOWER(?) "
+             "AND COALESCE(acomodacao,'') <> ''")
+        par = [str(operadora).strip(), str(plano).strip()]
+        if modalidade:
+            q += " AND LOWER(modalidade)=LOWER(?)"
+            par.append(str(modalidade).strip())
+        # Sem desempate: se a mesma dupla operadora+plano tiver acomodacoes
+        # diferentes, nao da pra saber qual e a desta cotacao — e ai vazio e a
+        # resposta honesta.
+        achados = {str(r['acomodacao']).strip()
+                   for r in conn.execute(q + " LIMIT 20", par).fetchall()}
+        return achados.pop() if len(achados) == 1 else ''
+    except Exception:
+        return ''
+
+
 def _viva_para_apresentacao(d):
     """Traduz a cotacao ao vivo pro formato que o documento do cliente ja usa.
 
@@ -36479,6 +36508,7 @@ def _viva_para_apresentacao(d):
     `cotacao_salva`. Fazer a tela nova gravar tambem nesse formato entrega toda
     essa experiencia de uma vez, e sem duplicar regra de apresentacao."""
     planos, total_geral, cont_faixa = [], 0.0, {}
+    _conn_acom = [None]        # so abre se algum plano vier sem acomodacao
     for p in (d.get('planos') or []):
         if p.get('total') is None:
             continue          # plano sem preco nao vai pra proposta do cliente
@@ -36505,12 +36535,28 @@ def _viva_para_apresentacao(d):
             acomodacao_bruta = pl.get('acomodacao')
         if isinstance(acomodacao_bruta, str):
             acomodacao = acomodacao_bruta.strip()
-        elif acomodacao_bruta is True:
-            acomodacao = 'Apartamento'
-        elif acomodacao_bruta is False:
-            acomodacao = 'Enfermaria'
+        elif isinstance(acomodacao_bruta, bool):
+            acomodacao = 'Apartamento' if acomodacao_bruta else 'Enfermaria'
+        elif isinstance(acomodacao_bruta, (int, float)):
+            # `is True` / `is False` NAO SERVE AQUI.
+            #
+            # A comparacao era por identidade com o singleton do Python, entao
+            # so um bool de verdade passava. JSON com 1/0 — que e o que veio
+            # nesta cotacao — caia no ramo final e virava vazio. O documento do
+            # cliente saiu com a linha "Acomodacao" em branco nos tres planos.
+            acomodacao = 'Apartamento' if acomodacao_bruta else 'Enfermaria'
         else:
             acomodacao = ''
+        if not acomodacao:
+            # Nao sabemos pelo que veio; a base pode saber. Conexao aberta so
+            # aqui, e uma vez por cotacao — o caminho normal nem chega neste if.
+            if _conn_acom[0] is None:
+                _conn_acom[0] = db()
+            acomodacao = _acomodacao_da_base(
+                _conn_acom[0],
+                (p.get('operadora') or {}).get('nome'),
+                pl.get('nome'),
+                p.get('_tipo'))
         planos.append({
             'operadora': (p.get('operadora') or {}).get('nome') or '',
             'plano': (p.get('plano') or {}).get('nome') or '',
@@ -36522,6 +36568,8 @@ def _viva_para_apresentacao(d):
             'linhas': linhas, 'total': round(total, 2), 'recomendacao': '',
             'elegivel': elegivel,
         })
+    if _conn_acom[0] is not None:
+        close_db(_conn_acom[0])
     return planos, round(total_geral, 2), cont_faixa
 
 
