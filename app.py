@@ -1,6 +1,6 @@
 # HOTFIX 20.06.2026 20:59 — Force rebuild (indentação OK, sintaxe verificada)
 import os, sqlite3, json, hashlib, hmac, secrets, re, threading, time, mimetypes, calendar, math
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort, Response, g, render_template_string
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort, Response, g, render_template_string, has_request_context
 from datetime import datetime, timedelta, date
 from functools import wraps, lru_cache
 from dateutil.relativedelta import relativedelta
@@ -602,22 +602,49 @@ def db():
             url = _build_pg_url(os.environ['DATABASE_URL'])
             raw = psycopg2.connect(url)
             raw.autocommit = False
-            return _ConnCompat(raw)
+            return _lembrar_conexao(_ConnCompat(raw))
         except Exception as e:
             import traceback
             print(f"\n🔴🔴🔴 [DB] FALLBACK SQLITE! Postgres falhou: {e}")
             print(f"[DB] Traceback:\n{traceback.format_exc()}")
             print(f"[DB] SQLite path: {DB}")
-            return _sqlite_conn()
-    return _sqlite_conn()
+            return _lembrar_conexao(_sqlite_conn())
+    return _lembrar_conexao(_sqlite_conn())
 
 def _sqlite_conn():
     conn = sqlite3.connect(DB)
     conn.row_factory = sqlite3.Row
     return conn
 
+
+# REDE DE SEGURANCA PRA CONEXAO ESQUECIDA.
+#
+# Nao ha pool: cada chamada de db() abre uma conexao e a rota fecha na mao. O
+# problema e o caminho de excecao — qualquer erro entre o db() e o close_db()
+# deixava o backend pendurado ate o coletor do Python. Na escuta longa da fila
+# isso e serio: o trabalhador reabre a cada ~500ms, e um Postgres reiniciando
+# vira dezenas de conexoes orfas em segundos, ate estourar max_connections. Ai
+# db() cai no fallback SQLITE — que num container efemero e banco vazio.
+#
+# Isto NAO substitui o close_db() das rotas: ele continua fechando cedo, que e
+# o certo. Isto so garante que nada sobreviva ao fim da requisicao.
+def _lembrar_conexao(conn):
+    if not has_request_context():
+        return conn
+    try:
+        g._conns_abertas = getattr(g, '_conns_abertas', [])
+        g._conns_abertas.append(conn)
+    except Exception:
+        pass
+    return conn
+
 def close_db(conn):
     """Fecha a conexão (cada requisição abre/fecha a sua — sem pool)."""
+    if has_request_context():
+        try:
+            getattr(g, '_conns_abertas', []).remove(conn)
+        except (ValueError, AttributeError):
+            pass
     try:
         if hasattr(conn, '_conn'):
             conn._conn.close()
@@ -6360,6 +6387,25 @@ _SUFIXOS_AFFINITY = (
     '/email-affinity', '/enviar-plataforma', '/enviar-teste',
     '/antecipacao/enviar', '/antecipacao/preview',
 )
+
+
+@app.teardown_request
+def _fechar_conexoes_esquecidas(exc):
+    """Fecha o que a rota nao fechou. Ver `_lembrar_conexao`."""
+    abertas = getattr(g, '_conns_abertas', None)
+    if not abertas:
+        return
+    g._conns_abertas = []
+    for c in abertas:
+        try:
+            if exc is not None:
+                try:
+                    c.rollback()
+                except Exception:
+                    pass
+            close_db(c)
+        except Exception:
+            pass
 
 
 @app.before_request
@@ -28117,9 +28163,16 @@ def api_wa_cotacao_fila():
     agora_txt = agora.strftime('%Y-%m-%d %H:%M:%S')
     cutoff_3m = (agora - timedelta(minutes=3)).strftime('%Y-%m-%d %H:%M:%S')
     
+    # `revogado_em IS NULL` PRECISA ESTAR AQUI TAMBEM.
+    #
+    # A rota /proximo ja exigia isso; esta nao. A assimetria aceitava pedido
+    # de uma sessao revogada que ainda estivesse dentro dos 3 minutos do
+    # ultimo sinal: o pedido entrava na fila e o /proximo daquela sessao
+    # respondia 'trabalhador_indisponivel'. Ninguem pegava, e o cliente so
+    # descobria aos 120 segundos.
     trabalhador = conn.execute("""
         SELECT id FROM extensao_sessao 
-        WHERE trabalhador_cotacao=1 AND trabalhador_sinal >= ?
+        WHERE trabalhador_cotacao=1 AND revogado_em IS NULL AND trabalhador_sinal >= ?
     """, (cutoff_3m,)).fetchone()
     
     if not trabalhador:
@@ -28167,6 +28220,15 @@ def api_wa_cotacao_fila():
     # A criação pode ser repetida quando a resposta HTTP se perde. A chave é
     # gerada pelo aparelho e impede que a repetição deixe dois trabalhos na fila.
     if chave_pedido:
+        # NAO FILTRAR POR ESTADO AQUI E PROPOSITAL.
+        #
+        # A chave nasce nova a cada pedido (`_filaPedir` sorteia um randomUUID),
+        # entao a unica coisa que reusa uma chave e a repeticao automatica do
+        # proprio POST quando a resposta HTTP se perde — mesma tentativa
+        # logica, nao uma nova. Se aquele pedido ja terminou em erro, o erro
+        # DELE e o resultado desta tentativa, e e isso que deve voltar.
+        # Filtrar por estado so faria o INSERT bater no indice unico
+        # (usuario_id, chave_pedido) e cair no ramo de excecao logo abaixo.
         existente = conn.execute(
             "SELECT id FROM cotacao_fila WHERE chave_pedido=? AND usuario_id=?",
             (chave_pedido, uid),
@@ -28249,11 +28311,22 @@ def api_wa_cotacao_fila_proximo():
     
     # 0. Limpeza
     conn.execute("DELETE FROM cotacao_fila WHERE estado IN ('pronto', 'erro', 'cancelado') AND terminado_em < ?", (cutoff_7d,))
+    # PEDIDO QUE NUNCA TERMINOU TAMBEM PRECISA SAIR.
+    #
+    # A limpeza olhava so `terminado_em`, entao um pedido abandonado em
+    # 'esperando' (o cliente fechou a aba antes dos 2 minutos e nunca cancelou)
+    # nao tinha data de termino e ficava no Postgres pra sempre — com o titulo
+    # da cotacao, que carrega o nome do cliente. Corte por criado_em pega esses.
+    conn.execute("DELETE FROM cotacao_fila WHERE terminado_em IS NULL AND criado_em < ?", (cutoff_7d,))
     
     # 1. Recupera pedidos presos em 'rodando' > 3min
+    # Zera etapa/fracao junto: sem isso o pedido voltava pra fila mostrando
+    # "Conferindo precos - 24 de 41" com a barra em 58% enquanto o trabalho
+    # recomecava do zero. Progresso fantasma e pior que nenhum progresso.
     conn.execute("""
         UPDATE cotacao_fila 
-        SET estado='esperando', pegado_em=NULL, trabalhador_sessao=NULL 
+        SET estado='esperando', pegado_em=NULL, trabalhador_sessao=NULL,
+            etapa='', fracao=0
         WHERE estado='rodando' AND pegado_em < ?
     """, (cutoff_3m,))
     conn.commit()
@@ -28282,7 +28355,11 @@ def api_wa_cotacao_fila_proximo():
             candidato = conn.execute("""
                 SELECT id, pedido_json FROM cotacao_fila
                 WHERE estado='esperando'
-                ORDER BY criado_em ASC LIMIT 1
+                -- Desempate por id: `criado_em` tem resolucao de 1 segundo e
+                -- dois pedidos do mesmo segundo sairiam em ordem indefinida no
+                -- Postgres — divergindo da posicao que o cliente ja viu, que e
+                -- contada por id.
+                ORDER BY criado_em ASC, id ASC LIMIT 1
             """).fetchone()
             if candidato or time.monotonic() >= fim_espera:
                 break
@@ -28335,10 +28412,15 @@ def api_wa_cotacao_fila_etapa(cid):
     try: fracao = max(0.0, min(1.0, float(req.get('fracao') or 0.0)))
     except (TypeError, ValueError): fracao = 0.0
 
+    # Renova pegado_em: a garantia de 3 minutos passa a contar do ultimo
+    # PROGRESSO, nao do inicio. Sem isso um multicalculo longo era devolvido
+    # pra fila e executado uma segunda vez contra o Painel do Corretor, com o
+    # resultado da primeira execucao virando 409 descartado.
+    agora_etapa = datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S')
     alterado = conn.execute("""
-        UPDATE cotacao_fila SET etapa=?, fracao=?
+        UPDATE cotacao_fila SET etapa=?, fracao=?, pegado_em=?
         WHERE id=? AND estado='rodando' AND trabalhador_sessao=?
-    """, (etapa, fracao, cid, sid))
+    """, (etapa, fracao, agora_etapa, cid, sid))
     conn.commit()
     close_db(conn)
     if getattr(alterado, 'rowcount', 0) != 1:
@@ -28418,25 +28500,34 @@ def api_wa_cotacao_fila_status(cid):
     conn = db()
     agora = datetime.now(TZ_SP)
     cutoff_3m = (agora - timedelta(minutes=3)).strftime('%Y-%m-%d %H:%M:%S')
-    
-    # Rotina passiva de recuperação
-    conn.execute("""
-        UPDATE cotacao_fila 
-        SET estado='esperando', pegado_em=NULL, trabalhador_sessao=NULL 
-        WHERE estado='rodando' AND pegado_em < ? AND id=?
-    """, (cutoff_3m, cid))
-    conn.commit()
-    
+
+    # LE PRIMEIRO, SO DEPOIS RECUPERA — E SO O QUE E SEU.
+    #
+    # A recuperacao rodava antes da leitura e sem olhar o dono. Quem tivesse a
+    # chave antiga podia varrer id=1..N e, de fora, devolver pra fila pedidos
+    # alheios presos ha 3 minutos: trabalho duplicado contra o Painel de
+    # terceiro, provocado por quem nao pediu nada. O /proximo ja faz a mesma
+    # recuperacao de forma global, entao aqui ela e conveniencia, nao garantia.
     item = conn.execute("SELECT * FROM cotacao_fila WHERE id=?", (cid,)).fetchone()
     if not item:
         close_db(conn)
         return _wa_cors(jsonify({"ok": False, "erro": "nao_encontrado"}))
-        
+
     uid = getattr(g, 'usuario_id', 0)
     is_admin = bool(getattr(g, 'usuario', None) and g.usuario['perfil'] == 'admin')
-    
+
     # Soh quem pediu ou admin pode ver o resultado final, por causa de PII
     pode_ver_resultado = (item['usuario_id'] == uid or is_admin)
+
+    if pode_ver_resultado:
+        conn.execute("""
+            UPDATE cotacao_fila 
+            SET estado='esperando', pegado_em=NULL, trabalhador_sessao=NULL,
+                etapa='', fracao=0
+            WHERE estado='rodando' AND pegado_em < ? AND id=?
+        """, (cutoff_3m, cid))
+        conn.commit()
+        item = conn.execute("SELECT * FROM cotacao_fila WHERE id=?", (cid,)).fetchone()
     
     pos = 0
     if item['estado'] in ('esperando', 'rodando'):
@@ -28447,9 +28538,11 @@ def api_wa_cotacao_fila_status(cid):
         
     close_db(conn)
     
-    # Desempacota etapa
-    etapa_nome = item['etapa'] or ''
-    fracao = item['fracao'] if 'fracao' in item.keys() else 0.0
+    # Etapa conta o que a pessoa esta cotando ("Conferindo precos - 3 de 6",
+    # nome de operadora). Nao e preco nem nome de cliente, mas e atividade
+    # comercial de colega — vai pela mesma porta do resultado.
+    etapa_nome = (item['etapa'] or '') if pode_ver_resultado else ''
+    fracao = (item['fracao'] if 'fracao' in item.keys() else 0.0) if pode_ver_resultado else 0.0
     
     import json
     resultado_obj = None
@@ -28540,9 +28633,8 @@ def api_wa_trabalhador_estado():
         
     conn = db()
     sess = conn.execute("""
-        SELECT trabalhador_sinal FROM extensao_sessao
+        SELECT MAX(trabalhador_sinal) AS trabalhador_sinal FROM extensao_sessao
         WHERE trabalhador_cotacao=1 AND revogado_em IS NULL
-        ORDER BY trabalhador_sinal DESC LIMIT 1
     """).fetchone()
     
     close_db(conn)
@@ -28552,9 +28644,17 @@ def api_wa_trabalhador_estado():
         
     try:
         if isinstance(sess['trabalhador_sinal'], str):
-            ultimo = datetime.strptime(sess['trabalhador_sinal'], '%Y-%m-%d %H:%M:%S').replace(tzinfo=TZ_SP)
+            # `replace(tzinfo=)` COM PYTZ ESTA ERRADO E NAO PARECE ERRADO.
+            #
+            # TZ_SP e um objeto pytz: colado direto ele entrega LMT, o fuso de
+            # Sao Paulo de 1914 (-03:06). Os 6 minutos entravam na conta de
+            # "vivo" e esta rota afirmava que o trabalhador estava de pe por
+            # ate 6 minutos depois de a fila ja estar recusando pedido com
+            # 'sem_trabalhador'. `localize` e a forma certa em pytz.
+            ultimo = TZ_SP.localize(datetime.strptime(sess['trabalhador_sinal'], '%Y-%m-%d %H:%M:%S'))
         else:
-            ultimo = sess['trabalhador_sinal'].replace(tzinfo=TZ_SP)
+            ultimo = (sess['trabalhador_sinal'] if sess['trabalhador_sinal'].tzinfo
+                      else TZ_SP.localize(sess['trabalhador_sinal']))
             
         vivo = (datetime.now(TZ_SP) - ultimo).total_seconds() < 180
         return _wa_cors(jsonify({"vivo": vivo, "ultimo_sinal": ultimo.strftime('%Y-%m-%dT%H:%M:%S')}))
