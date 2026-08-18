@@ -25197,10 +25197,15 @@ _WA_FILA_GATE_MAX = int(os.environ.get('WA_FILA_GATE_MAX', '45'))
 _WA_FILA_GATE_MESMO_MIN = int(os.environ.get('WA_FILA_GATE_MESMO_MIN', '3'))
 _WA_FILA_GATE_MESMO_MAX = int(os.environ.get('WA_FILA_GATE_MESMO_MAX', '8'))
 # Teto de validade do item da fila. Passou disso, NAO SAI — ver o bloco
-# grande em /api/whatsapp/fila/proximo. 6h cobre um dia de trabalho
-# (item da manha sai a tarde) e nao cobre 'ontem', que e onde a mensagem
-# comeca a chegar descolada pro cliente.
-_WA_FILA_VALIDADE_HORAS = 6
+# grande em /api/whatsapp/fila/proximo.
+#
+# 1 HORA, decisao do Guilherme em 18/08/2026. Comecou em 6h no incidente da
+# manha (17 mensagens de ate tres semanas sairam pra cliente quando uma rotina
+# parada voltou), e 6h ainda era generoso demais: mensagem que o consultor
+# mandou de manha chegando de tarde ja chega descolada da conversa, e ele nao
+# esta mais olhando pra saber que saiu. Uma hora e o limite do que ainda faz
+# sentido pro cliente que recebe.
+_WA_FILA_VALIDADE_HORAS = 1
 _WA_FILA_RECLAIM_MINUTOS = 3
 _WA_FILA_MAX_TENTATIVAS = 3
 
