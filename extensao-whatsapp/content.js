@@ -6751,7 +6751,17 @@
       'Avise um administrador.',
     aparelho_nao_cota_no_painel: 'Esta máquina não cota pelo Painel do Corretor. ' +
       'Quem cota é o computador da equipe — avise um administrador.',
-    sem_resposta: 'O Painel terminou a busca sem devolver os preços. Tente novamente.',
+    sem_resposta: 'A busca terminou sem devolver os preços. Tente novamente.',
+    fila_sem_resposta: 'Não consegui falar com o JOB para pedir o preço. ' +
+      'Confira a internet e tente de novo.',
+    falha_no_trabalhador: 'O computador que busca preços para a equipe não conseguiu concluir. ' +
+      'Tente novamente; se acontecer de novo, avise um administrador.',
+    falha_nas_frentes_de_preco: 'A busca de preços falhou no meio. Tente novamente.',
+    outra_cotacao_em_andamento: 'O computador que busca preços para a equipe está no meio de outra ' +
+      'cotação. Espere alguns segundos e tente de novo.',
+    sem_valor_na_resposta: 'Este plano não voltou com preço para os dados informados.',
+    frente_nao_respondeu: 'Uma das buscas de preço não respondeu. Tente novamente.',
+    pedido_invalido: 'O JOB recusou este pedido de preço. Avise um administrador.',
     // As tabelas do JOB nao passam pelo Painel — o erro delas e outro, e a
     // saida tambem. Cair na frase do Painel mandaria ele abrir a aba errada.
     tabelas_do_job: 'Não consegui ler as tabelas do JOB agora. ' +
@@ -8332,13 +8342,31 @@
             '<span class="job-cot-tag' + (e.c ? ' ' + e.c : '') + '">' +
             esc(e.t) + '</span>').join('') + '</span>' : '') +
           (p.total == null
-            ? '<span class="job-cot-porque">Não foi possível calcular este plano.</span>' : '') +
+            // O MOTIVO JA ESTAVA EM MAOS E ERA JOGADO FORA.
+            //
+            // `p.motivo` e preenchido em _cotPrecos e no caminho das tabelas,
+            // e a linha imprimia uma frase fixa por cima. Plano fora da faixa,
+            // Painel deslogado no trabalhador e pedido recusado pelo servidor
+            // viravam a mesma coisa na tela.
+            ? '<span class="job-cot-porque">' +
+                (p.motivo ? _cotMotivo(p.motivo) : 'Não foi possível calcular este plano.') +
+              '</span>' : '') +
         '</div>' +
         '<div class="job-cot-res-v">' +
           (p.total == null ? 'Indisponível' : _cotMoeda(p.total)) +
         '</div>' +
       '</div>';
     }).join('');
+  }
+
+  // Um motivo so vira manchete quando explica TODOS os planos sem preco. Se
+  // as causas divergem, dizer uma delas seria pior que a frase generica.
+  function _cotMotivoDominante(planos) {
+    const ms = (planos || []).filter((p) => p.total == null)
+      .map((p) => String(p.motivo || '')).filter(Boolean);
+    if (!ms.length || ms.length !== (planos || []).filter((p) => p.total == null).length) return '';
+    const primeiro = ms[0];
+    return ms.every((m) => m === primeiro) ? primeiro : '';
   }
 
   function _cotPintarResultado() {
@@ -8397,9 +8425,17 @@
               'Cotar outra operadora</button>' +
           '</div>'
         : '<div class="job-ia-alerta">' +
-            (temTabelaJob
-              ? 'Não foi possível calcular os planos selecionados. Revise as opções disponíveis.'
-              : 'Não foi possível concluir a consulta. Tente novamente.') +
+            // "TENTE NOVAMENTE" SO PODE APARECER QUANDO TENTAR ADIANTA.
+            //
+            // Zero preco tem causas que pedem acoes diferentes: trabalhador
+            // fora do ar, Painel deslogado nele, atalho vencido, plano de fato
+            // sem preco. Todas saiam como a mesma frase, e o consultor repetia
+            // indefinidamente uma acao que nao mudava nada. Quando todos os
+            // planos falharam pelo mesmo motivo, e esse motivo que sai.
+            (_cotMotivoDominante(todos) ? _cotMotivo(_cotMotivoDominante(todos))
+              : (temTabelaJob
+                  ? 'Não foi possível calcular os planos selecionados. Revise as opções disponíveis.'
+                  : 'Não foi possível concluir a consulta. Tente novamente.')) +
           '</div>' +
           '<button class="job-cot-bt-mandar" id="job-cot-revisar" style="width:100%;margin-top:12px" type="button">Revisar planos</button>' +
           '<div class="job-cot-rodape"><button type="button" id="job-cot-mais">Cotar outra operadora</button></div>') +

@@ -103,7 +103,18 @@ function _filaPedir(pedido, cb) {
   chamarJob('/api/whatsapp/cotacao/fila', 'POST',
             { pedido: pedido, chave_pedido: chave }, 15000, null, { repetivel: true })
     .then((r) => {
-      if (!r || !r.ok || !r.id) { cb(null); return; }
+      // O MOTIVO DO SERVIDOR NAO PODE MORRER AQUI.
+      //
+      // `cb(null)` fazia quem chamou responder 'painel_fechado' pra tudo. Era
+      // o diagnostico errado no caso exato que a fila existe pra resolver: o
+      // servidor dizia 'sem_trabalhador' e a consultora lia que precisava
+      // abrir o Painel na maquina dela. cb(null) fica so pra falha de rede,
+      // onde nao ha motivo nenhum pra contar.
+      if (!r || !r.ok || !r.id) {
+        const m = r && (r.motivo || r.erro);
+        cb(m ? { ok: false, motivo: m } : null);
+        return;
+      }
       const id = r.id;
       const t0 = Date.now();
       const perguntar = () => {
@@ -223,7 +234,15 @@ function _trabalhadorExecutar(id, pedido) {
       chamarJob('/api/whatsapp/cotacao/fila/' + id + '/etapa', 'POST',
                 { etapa: 'Conferindo preços — ' + feito + ' de ' + total,
                   fracao: total ? feito / total : 0 }, 8000).catch(() => {});
-    }).then((r) => terminar({ resultado: r }))
+    }).then((r) => terminar(r && r.ok
+        // FALHA TOTAL E ERRO, NAO 'PRONTO'.
+        //
+        // Devolvendo {resultado:{ok:false}} o registro ficava estado='pronto',
+        // erro=NULL: pra quem olha a fila no banco a cotacao "deu certo", e o
+        // motivo real (Painel fechado aqui, outra cotacao em andamento) nao
+        // sobrevivia em lugar nenhum do servidor.
+        ? { resultado: r }
+        : { erro: (r && r.motivo) || 'falha_no_trabalhador' }))
       .catch(() => terminar({ erro: 'falha_nas_frentes_de_preco' }));
     return;
   }
@@ -1420,7 +1439,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         (a) => a.url && a.url.indexOf('paineldocorretor.com.br') >= 0);
       const pedirAoTrabalhador = () => _filaPedir(oQuePedir, (r) => {
         if (r) { sendResponse(r); return; }
-        sendResponse({ ok: false, motivo: 'painel_fechado',
+        // Aqui so chega falha de rede: o servidor nao respondeu nada. Chamar
+        // isso de 'painel_fechado' era o erro de diagnostico que mandava a
+        // consultora abrir uma aba do Painel que nao resolveria nada.
+        sendResponse({ ok: false, motivo: 'fila_sem_resposta',
                        abasExaminadas: (todas || []).length });
       });
 
