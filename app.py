@@ -1457,6 +1457,28 @@ def init_db():
                 detalhe TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            # NOVIDADES. O que mudou no JOB, escrito para quem USA, nao para
+            # quem programa. O commit conta o que foi feito no codigo; isto conta
+            # o que a consultora ganhou. Uma entrada so, lida em dois lugares: a
+            # tela do site (visao do dono, sistema inteiro) e a extensao (so o
+            # que muda a vida dela dentro do WhatsApp).
+            """CREATE TABLE IF NOT EXISTS novidades (
+                id SERIAL PRIMARY KEY,
+                versao TEXT,
+                titulo TEXT NOT NULL,
+                corpo TEXT,
+                tipo TEXT DEFAULT 'melhoria',
+                alvo TEXT DEFAULT 'ambos',
+                autor_id INTEGER,
+                publicado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            # Ate onde CADA pessoa ja leu. Sem isto o "novo" seria global e
+            # apagaria pra todo mundo quando um abrisse — que e o defeito de
+            # aviso de novidade em quase todo sistema.
+            """CREATE TABLE IF NOT EXISTS novidade_leitura (
+                usuario_id INTEGER PRIMARY KEY,
+                lido_em TIMESTAMP
+            )""",
             # A CAIXA-PRETA DA ABA. Quando o Chrome mata o renderizador do
             # WhatsApp ("Codigo de erro: 5"), nao sobra rastro nenhum: crash de
             # renderizador nao dispara window.onerror, entao o erro_log nunca ve.
@@ -2658,6 +2680,20 @@ def init_db():
             usuario_id INTEGER,
             detalhe TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS novidades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            versao TEXT,
+            titulo TEXT NOT NULL,
+            corpo TEXT,
+            tipo TEXT DEFAULT 'melhoria',
+            alvo TEXT DEFAULT 'ambos',
+            autor_id INTEGER,
+            publicado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS novidade_leitura (
+            usuario_id INTEGER PRIMARY KEY,
+            lido_em TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS wa_saude_aba (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26548,6 +26584,114 @@ def api_whatsapp_metrica():
         app.logger.warning(f"[METRICA] {ex}")
     close_db(conn)
     return _wa_cors(jsonify({"ok": True, "gravadas": n}))
+
+
+# ══════════════════ NOVIDADES ══════════════════
+#
+# Guilherme, 18/08/2026, olhando a tela de "Novidades e Atualizacoes" do WaSpeed:
+# "vamos fazer uma tela dessa aqui" — e, quando perguntei se era pras consultoras
+# ou pra ele acompanhar o sistema todo: "QUERO OS DOIS".
+#
+# Entao e UMA fonte lida em dois lugares. A tela do site mostra tudo (sistema e
+# extensao) e e onde ele publica; a extensao puxa so o que muda a vida da
+# consultora dentro do WhatsApp. Duas listas separadas divergiriam na primeira
+# semana — e ninguem ia lembrar de escrever duas vezes.
+_NOV_TIPOS = ('novidade', 'melhoria', 'correcao')
+_NOV_ALVOS = ('ambos', 'sistema', 'extensao')
+
+
+def _nov_lido_em(conn, usuario_id):
+    r = conn.execute("SELECT lido_em FROM novidade_leitura WHERE usuario_id=?",
+                     (usuario_id,)).fetchone()
+    return (r[0] if r else None) or '1970-01-01'
+
+
+@app.route('/novidades')
+@login_required
+def novidades():
+    conn = db()
+    uid = session.get('user_id')
+    lido_em = _nov_lido_em(conn, uid)
+    itens = conn.execute("""SELECT n.*, u.nome AS autor_nome
+                            FROM novidades n LEFT JOIN usuarios u ON u.id = n.autor_id
+                            ORDER BY n.publicado_em DESC, n.id DESC LIMIT 200""").fetchall()
+    itens = [dict(i) for i in itens]
+    for i in itens:
+        i['nova'] = str(i.get('publicado_em') or '') > str(lido_em)
+    # Abrir a tela E ler. Marcar depois de renderizar, pra que o "novo" ainda
+    # apareca NESTA visita — marcar antes apagaria justamente o que a pessoa veio ver.
+    conn.execute("DELETE FROM novidade_leitura WHERE usuario_id=?", (uid,))
+    conn.execute("INSERT INTO novidade_leitura (usuario_id, lido_em) VALUES (?,?)",
+                 (uid, _agora_sp()))
+    conn.commit()
+    close_db(conn)
+    return render_template('novidades.html', itens=itens,
+                           versao_ext=_extensao_versao())
+
+
+@app.route('/novidades/salvar', methods=['POST'])
+@login_required
+@admin_required
+def novidades_salvar():
+    d = request.form
+    titulo = (d.get('titulo') or '').strip()[:160]
+    if not titulo:
+        flash('Escreva o título da novidade.', 'erro')
+        return redirect(url_for('novidades'))
+    tipo = d.get('tipo') if d.get('tipo') in _NOV_TIPOS else 'melhoria'
+    alvo = d.get('alvo') if d.get('alvo') in _NOV_ALVOS else 'ambos'
+    conn = db()
+    conn.execute("""INSERT INTO novidades (versao, titulo, corpo, tipo, alvo, autor_id, publicado_em)
+                    VALUES (?,?,?,?,?,?,?)""",
+                 ((d.get('versao') or '').strip()[:20] or None, titulo,
+                  (d.get('corpo') or '').strip()[:2000] or None,
+                  tipo, alvo, session.get('user_id'), _agora_sp()))
+    conn.commit()
+    close_db(conn)
+    flash('Novidade publicada.', 'ok')
+    return redirect(url_for('novidades'))
+
+
+@app.route('/novidades/excluir/<int:nid>', methods=['POST'])
+@login_required
+@admin_required
+def novidades_excluir(nid):
+    conn = db()
+    conn.execute("DELETE FROM novidades WHERE id=?", (nid,))
+    conn.commit()
+    close_db(conn)
+    flash('Novidade removida.', 'ok')
+    return redirect(url_for('novidades'))
+
+
+@app.route('/api/novidades/nao-lidas')
+@login_required
+def api_novidades_nao_lidas():
+    """Quantas novidades o usuário ainda não viu — alimenta o ponto no topo."""
+    conn = db()
+    lido_em = _nov_lido_em(conn, session.get('user_id'))
+    n = conn.execute("SELECT COUNT(*) FROM novidades WHERE publicado_em > ?",
+                     (lido_em,)).fetchone()[0]
+    close_db(conn)
+    return jsonify({"ok": True, "nao_lidas": int(n or 0)})
+
+
+@app.route('/api/whatsapp/novidades', methods=['GET', 'OPTIONS'])
+@requer('whatsapp:enviar')
+def api_whatsapp_novidades():
+    """A extensão puxa a MESMA lista, filtrada pelo que interessa a ela.
+
+    Nada de 'sistema': a consultora não precisa saber que o motor de comissão
+    mudou enquanto está atendendo. E o corpo vem cru — quem desenha é a
+    extensão, que conhece o espaço que tem."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    conn = db()
+    itens = conn.execute("""SELECT id, versao, titulo, corpo, tipo, publicado_em
+                            FROM novidades WHERE alvo IN ('ambos','extensao')
+                            ORDER BY publicado_em DESC, id DESC LIMIT 40""").fetchall()
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "itens": [dict(i) for i in itens]}))
 
 
 @app.route('/api/whatsapp/saude-aba', methods=['POST', 'OPTIONS'])

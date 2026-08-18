@@ -302,7 +302,27 @@
   .topbar .sub { font-size:11.5px; color:var(--cinza); margin-top:2px; }
 
   /* ═══ SINO DE NOTIFICAÇÕES (na sidebar — nunca sobrepõe conteúdo) ═══ */
-  #sino-wrap { flex-shrink:0; margin-left:auto; }
+  /* NOVIDADES: irmão do sino, então mesmo tamanho, mesma forma e mesma margem —
+     coisa igual se parece igual. A diferença é só o ícone e o fato de ser link. */
+  #nov-btn { position:relative; flex-shrink:0; margin-left:auto; width:32px; height:32px;
+             border-radius:50%; display:flex; align-items:center; justify-content:center;
+             background:rgba(255,255,255,.04); border:1px solid var(--borda);
+             color:var(--cinza); text-decoration:none;
+             transition:color 140ms cubic-bezier(.23,1,.32,1),
+                        border-color 140ms cubic-bezier(.23,1,.32,1),
+                        transform 140ms cubic-bezier(.23,1,.32,1); }
+  #nov-btn:hover { color:var(--texto); border-color:var(--teal); }
+  #nov-btn:active { transform:scale(.97); }
+  #nov-btn svg { width:15px; height:15px; }
+  [data-theme="light"] #nov-btn { background:#fff; border-color:var(--borda-2); color:var(--cinza); }
+  /* Só um ponto, sem número: aqui o que importa é "tem coisa nova", não quantas.
+     O sino ao lado já carrega contagem — dois números competindo viram ruído. */
+  #nov-ponto { position:absolute; top:-1px; right:-1px; width:8px; height:8px; border-radius:50%;
+               background:var(--teal); border:2px solid var(--bg); }
+  [data-theme="light"] #nov-ponto { border-color:#fff; }
+  /* O sino perde o margin-left:auto porque agora quem empurra o par para a
+     direita é o irmão da esquerda. */
+  #sino-wrap { flex-shrink:0; margin-left:8px; }
   #sino-btn { position:relative; width:32px; height:32px; border-radius:50%;
     border:1px solid var(--borda-2); background:var(--panel-2); color:var(--cinza);
     cursor:pointer; display:flex; align-items:center; justify-content:center; transition:.15s; }
@@ -708,6 +728,19 @@
       <div class="perfil">{{ session.perfil }}</div>
     </div>
     {% if session.get('user_id') %}
+    {# NOVIDADES mora ao lado do sino, e NÃO no menu: ele já tem ~25 itens e a
+       regra do projeto é que tela nova não ganha item. O lugar também está
+       certo por outro motivo — é irmão do sino: os dois são "o que aconteceu
+       enquanto você não estava olhando". #}
+    <a id="nov-btn" href="{{ url_for('novidades') }}" aria-label="Novidades" title="Novidades">
+      {# MEGAFONE, e na terceira tentativa. Na bancada o ícone de raios ficou
+         igual a um sol (e o menu tem "Modo Claro" logo abaixo, então lia como
+         alternador de tema); o segundo, cone com ondas, virou ícone de volume.
+         Este é o corpo inclinado com a haste embaixo — a silhueta que só pode
+         ser megafone. Ao lado de um sino, lê como aviso na hora. #}
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
+      <span id="nov-ponto" hidden></span>
+    </a>
     <div id="sino-wrap">
       <button id="sino-btn" onclick="toggleSino(event)" aria-label="Notificações" title="Notificações">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -1471,6 +1504,21 @@ function toggleTema() {
   document.addEventListener('DOMContentLoaded', function(){
     carregarNotificacoes();
     setInterval(carregarNotificacoes, 30000);
+
+    // O ponto de Novidades. Uma consulta barata, e RARA de propósito: novidade
+    // é publicada algumas vezes por semana, não por minuto — pedir de 30 em 30
+    // segundos como o sino seria tráfego sem nada para mostrar.
+    function verNovidades() {
+      fetch('/api/novidades/nao-lidas')
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          var p = document.getElementById('nov-ponto');
+          if (p) p.hidden = !(d && d.nao_lidas > 0);
+        })
+        .catch(function () { /* o ponto some, a tela continua */ });
+    }
+    verNovidades();
+    setInterval(verNovidades, 10 * 60 * 1000);
   });
 })();
 
