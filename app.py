@@ -14745,50 +14745,79 @@ def enviar_conversoes_ads(limite=200, so_simular=False):
 
 
 def _fechados_com_analise(conn):
-    """Clientes FECHADOS (proposta emitida/ativa) cruzados com a última análise
-    de conversa deles E com o lead correspondente no CRM. propostas NÃO tem
-    lead_id — tudo casa por TELEFONE (tel_resp_contrato/negociacao vs
-    whatsapp_analises.telefone_norm / crm_leads.telefone_norm, mesmo critério
-    de _buscar_lead_por_telefone). Retorna a lista de clientes (objeções,
-    followup, score, lead do CRM, dias desde o lead entrar até fechar) —
-    usado pela Inteligência de Vendas e pelo Playbook."""
-    fechados = conn.execute("""
+    """Vendas registradas cruzadas com a última análise de conversa e com o lead
+    do CRM.
+
+    DUAS CORREÇÕES DE BASE, ambas medidas em produção (18/08/2026):
+
+    1) A BASE não é mais status_operacional='Emitida/Ativa'. Esse campo é a
+       esteira de IMPLANTAÇÃO e ninguém a atualiza: das 71 propostas vivas, 45
+       estavam no valor DEFAULT da coluna ('Aguardando Documentos'), 22 em
+       'Em Análise Operadora' e exatamente 1 em 'Emitida/Ativa'. A tela inteira
+       pendurada nesse filtro mostrava 1 cliente e zero insight — media a
+       disciplina de preencher um campo, não a venda. No próprio JOB a fase
+       'Proposta cadastrada' já significa "venda registrada pelo consultor",
+       então a venda é a proposta viva (não excluída, não estornada). O estágio
+       da esteira vira DIMENSÃO na tela, não porta de entrada.
+
+    2) O cruzamento com a análise casa por lead_id, não por telefone. O
+       telefone morreu com o @lid do WhatsApp: 1992 das 2033 análises têm
+       telefone_norm vazio, porque a varredura passou a receber chat_id @lid no
+       lugar do número. Mas 2000 das 2033 têm lead_id. Casando por lead_id, 21
+       propostas ganham análise; por telefone eram 3. O telefone fica como
+       retaguarda pros registros antigos que ainda o têm.
+    """
+    vendas = conn.execute("""
         SELECT p.id, p.razao_social, p.consultor, p.adm_operadora, p.modalidade,
                p.valor, p.total_vidas, p.criado_em,
                p.tel_resp_contrato, p.tel_resp_negociacao,
-               p.lead_id, p.lead_vinculo
+               p.lead_id, p.lead_vinculo,
+               p.status_operacional, p.fase, p.comprovante_boleto
         FROM propostas p
-        WHERE p.status_operacional='Emitida/Ativa' AND p.status <> 'Excluída'
-          AND COALESCE(p.estornada,0)=0
+        WHERE p.status <> 'Excluída' AND COALESCE(p.estornada,0)=0
         ORDER BY p.criado_em DESC
     """).fetchall()
-    analises = {}
+
+    # Última análise por LEAD (chave principal) e por TELEFONE (retaguarda).
+    # Os dois índices saem da mesma varredura pra não pagar duas consultas.
+    por_lead, por_tel = {}, {}
     for a in conn.execute("""
-        SELECT wa.telefone_norm, wa.sugestoes_json, wa.score, wa.score_faixa, wa.id, wa.criado_em
+        SELECT wa.id, wa.lead_id, wa.telefone_norm, wa.sugestoes_json,
+               wa.score, wa.score_faixa, wa.criado_em
         FROM whatsapp_analises wa
-        WHERE wa.telefone_norm IS NOT NULL AND wa.telefone_norm <> ''
-          AND wa.id = (SELECT MAX(wa2.id) FROM whatsapp_analises wa2 WHERE wa2.telefone_norm = wa.telefone_norm)
+        ORDER BY wa.id
     """).fetchall():
-        analises[a['telefone_norm']] = a
+        # ORDER BY id crescente + sobrescrita = fica a mais recente, sem
+        # subconsulta correlacionada por linha.
+        if a['lead_id']:
+            por_lead[a['lead_id']] = a
+        tn = (a['telefone_norm'] or '').strip()
+        if tn:
+            por_tel[tn] = a
+
     clientes = []
-    for r in fechados:
+    for r in vendas:
         wa, lead = None, None
-        # Vínculo gravado tem prioridade: é a chave, não uma adivinhação refeita a
-        # cada consulta. O casamento por telefone continua como retaguarda pros
-        # registros que o backfill não conseguiu ligar (ambíguos, sem lead).
+        # Vínculo gravado tem prioridade: é a chave, não uma adivinhação refeita
+        # a cada consulta.
         if 'lead_id' in r.keys() and r['lead_id']:
             lead = conn.execute("""SELECT id, nome, responsavel_id, etapa, criado_em
                                    FROM crm_leads WHERE id=?""", (r['lead_id'],)).fetchone()
+            wa = por_lead.get(r['lead_id'])
         for tel in (r['tel_resp_contrato'], r['tel_resp_negociacao']):
             tn = _normalizar_telefone(str(tel or ''))
             if not tn:
                 continue
-            if wa is None and tn in analises:
-                wa = analises[tn]
+            if wa is None and tn in por_tel:
+                wa = por_tel[tn]
             if lead is None:
                 lead = _buscar_lead_por_telefone(conn, tn)
+                # Lead achado pelo telefone ainda pode destravar a análise.
+                if lead is not None and wa is None:
+                    wa = por_lead.get(lead['id'])
             if wa is not None and lead is not None:
                 break
+
         extr, diag = {}, {}
         dias = None
         if wa is not None:
@@ -14801,22 +14830,26 @@ def _fechados_com_analise(conn):
             if d1 and d2 and d2 >= d1:
                 dias = (d2 - d1).days
         # KPI mais completo: do LEAD entrar no CRM até a proposta fechar (o
-        # 'dias_para_fechar' acima só cobre da análise em diante — nem todo
-        # fechado teve conversa analisada, mas quase todo teve lead no CRM).
+        # 'dias_para_fechar' acima só cobre da análise em diante).
         dias_lead = None
         if lead is not None:
             d1, d2 = _parse_dt_seguro(lead['criado_em']), _parse_dt_seguro(r['criado_em'])
             if d1 and d2 and d2 >= d1:
                 dias_lead = (d2 - d1).days
+        ia = (diag.get('ia') or {}) if isinstance(diag.get('ia'), dict) else {}
         clientes.append({
             'id': r['id'], 'nome': r['razao_social'], 'consultor': r['consultor'],
             'operadora': r['adm_operadora'], 'modalidade': r['modalidade'],
             'valor': float(r['valor'] or 0), 'vidas': r['total_vidas'],
             'criado_em': r['criado_em'],
+            'esteira': (r['status_operacional'] or 'Aguardando Documentos'),
+            'fase': (r['fase'] or ''),
+            'tem_comprovante': bool(r['comprovante_boleto']),
             'analise_id': (wa['id'] if wa is not None else None),
             'score': (wa['score'] if wa is not None else None),
             'faixa': (wa['score_faixa'] if wa is not None else None),
             'objecoes': extr.get('objecoes') or [], 'cidade': extr.get('cidade'),
+            'resumo_ia': (ia.get('resumo') or '').strip(),
             'followup': (diag.get('followup') or '').strip(),
             'dias_para_fechar': dias,
             'lead_id': (lead['id'] if lead is not None else None),
@@ -14830,12 +14863,42 @@ def _fechados_com_analise(conn):
 @login_required
 @admin_required
 def inteligencia_vendas():
-    """Cataloga os clientes FECHADOS e cruza com a análise de conversa — o que
-    fecha (objeções, operadoras/cidades/consultores, perfil, tempo até fechar)."""
+    """O que fecha, lido das vendas já registradas cruzadas com a análise de
+    conversa: objeções que apareceram, operadoras, cidades, consultores, tempo
+    do lead até a venda — e onde cada venda está parada na esteira."""
     conn = db()
     clientes = _fechados_com_analise(conn)
     close_db(conn)
     from collections import Counter
+
+    # Listas de opção saem da base COMPLETA, senão o filtro se apaga sozinho:
+    # escolher um consultor sumia com os outros nomes do select.
+    opc_consultores = sorted({(c['consultor'] or '').strip() for c in clientes if (c['consultor'] or '').strip()})
+    opc_operadoras = sorted({(c['operadora'] or '').strip() for c in clientes if (c['operadora'] or '').strip()})
+    opc_esteira = sorted({c['esteira'] for c in clientes if c['esteira']})
+
+    # Distribuição da esteira SEMPRE sobre a base completa — é o diagnóstico de
+    # quantas vendas estão paradas, e ele não pode mudar quando o usuário
+    # filtra por consultor.
+    esteira_geral = Counter(c['esteira'] for c in clientes)
+    total_geral = len(clientes)
+
+    f_consultor = (request.args.get('consultor') or '').strip()
+    f_operadora = (request.args.get('operadora') or '').strip()
+    f_esteira = (request.args.get('esteira') or '').strip()
+    f_analise = (request.args.get('analise') or '').strip()
+    if f_consultor:
+        clientes = [c for c in clientes if (c['consultor'] or '').strip() == f_consultor]
+    if f_operadora:
+        clientes = [c for c in clientes if (c['operadora'] or '').strip() == f_operadora]
+    if f_esteira:
+        clientes = [c for c in clientes if c['esteira'] == f_esteira]
+    if f_analise == 'com':
+        clientes = [c for c in clientes if c['analise_id']]
+    elif f_analise == 'sem':
+        clientes = [c for c in clientes if not c['analise_id']]
+    filtrando = bool(f_consultor or f_operadora or f_esteira or f_analise)
+
     total = len(clientes)
     soma_valor = sum(c['valor'] for c in clientes)
     por_operadora, val_operadora = Counter(), {}
@@ -14854,7 +14917,7 @@ def inteligencia_vendas():
         if c['score'] is not None:
             scores.append(c['score'])
         # Prefere o tempo desde o LEAD entrar no CRM (funil completo); só cai
-        # pro tempo desde a análise quando não achou lead casado por telefone.
+        # pro tempo desde a análise quando não achou lead casado.
         dias_c = c['dias_desde_lead'] if c['dias_desde_lead'] is not None else c['dias_para_fechar']
         if dias_c is not None:
             dias_ate_fechar.append(dias_c)
@@ -14862,20 +14925,54 @@ def inteligencia_vendas():
             objecoes[str(o).strip().lower()] += 1
         if c['cidade']:
             cidades[str(c['cidade']).strip().title()] += 1
+
+    # Mediana junto da média: com 71 vendas uma proposta antiga puxa a média
+    # sozinha, e aí o "tempo até fechar" vira número bonito e mentiroso.
+    def _limpo(v):
+        # 19.0 e 19 sao o mesmo numero de dias; mostrar os dois formatos na
+        # mesma metrica, conforme o filtro caia em lista par ou impar, parece
+        # precisao que nao existe.
+        return int(v) if float(v) == int(v) else round(float(v), 1)
+
+    def _mediana(vals):
+        if not vals:
+            return None
+        s = sorted(vals); n = len(s)
+        return _limpo(s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2)
+
     m = {
         'total': total, 'soma_valor': soma_valor,
         'ticket': round(soma_valor / total, 2) if total else 0,
         'com_analise': com_analise, 'com_lead': com_lead,
+        'sem_analise': total - com_analise,
+        'pct_analise': round(com_analise * 100 / total) if total else 0,
         'score_medio': round(sum(scores) / len(scores)) if scores else None,
-        'tempo_medio': round(sum(dias_ate_fechar) / len(dias_ate_fechar), 1) if dias_ate_fechar else None,
+        'tempo_medio': _limpo(sum(dias_ate_fechar) / len(dias_ate_fechar)) if dias_ate_fechar else None,
+        'tempo_mediana': _mediana(dias_ate_fechar),
+        'tempo_base': len(dias_ate_fechar),
     }
     top_operadoras = [{'nome': k, 'qtd': v, 'valor': val_operadora[k]} for k, v in por_operadora.most_common(10)]
     top_consultores = [{'nome': k, 'qtd': v, 'valor': val_consultor[k]} for k, v in por_consultor.most_common(15)]
     top_objecoes = [{'nome': k, 'qtd': v} for k, v in objecoes.most_common(12)]
     top_cidades = [{'nome': k, 'qtd': v} for k, v in cidades.most_common(10)]
+    # Ordem da esteira é a do processo, não a alfabética nem a de volume: a
+    # tela precisa ler como uma fila que anda da esquerda pra direita.
+    ordem_esteira = ['Aguardando Documentos', 'Em Análise Operadora', 'Emitida/Ativa']
+    esteira = [{'nome': n, 'qtd': esteira_geral.get(n, 0),
+                'pct': round(esteira_geral.get(n, 0) * 100 / total_geral) if total_geral else 0}
+               for n in ordem_esteira if esteira_geral.get(n)]
+    for n, q in esteira_geral.items():
+        if n not in ordem_esteira:
+            esteira.append({'nome': n, 'qtd': q,
+                            'pct': round(q * 100 / total_geral) if total_geral else 0})
     return render_template('inteligencia_vendas.html', m=m, clientes=clientes,
                            top_operadoras=top_operadoras, top_consultores=top_consultores,
-                           top_objecoes=top_objecoes, top_cidades=top_cidades)
+                           top_objecoes=top_objecoes, top_cidades=top_cidades,
+                           esteira=esteira, total_geral=total_geral, filtrando=filtrando,
+                           opc_consultores=opc_consultores, opc_operadoras=opc_operadoras,
+                           opc_esteira=opc_esteira,
+                           f_consultor=f_consultor, f_operadora=f_operadora,
+                           f_esteira=f_esteira, f_analise=f_analise)
 
 
 @app.route('/playbook')

@@ -3,21 +3,101 @@
 
 {% block head %}
 <style>
-  .iv-bar-wrap { display:flex; flex-direction:column; gap:9px; }
-  .iv-bar-row { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; }
-  .iv-bar-lbl { font-size:13px; color:var(--texto); }
-  .iv-bar-track { position:relative; height:22px; background:var(--panel-2); border-radius:6px; overflow:hidden; }
-  .iv-bar-fill { position:absolute; inset:0 auto 0 0; border-radius:6px; }
-  .iv-bar-txt { position:absolute; right:8px; top:50%; transform:translateY(-50%); font-size:11.5px; color:var(--texto); font-weight:600; }
-  .iv-grid2 { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
-  @media (max-width:900px){ .iv-grid2 { grid-template-columns:1fr; } }
-  .iv-sec-title { font-size:12px; font-weight:600; color:var(--cinza); text-transform:uppercase; letter-spacing:.6px; margin-bottom:12px; }
-  .iv-obj-help { font-size:12px; color:var(--cinza); margin:-6px 0 14px; line-height:1.5; }
-  table.iv-tab { width:100%; border-collapse:collapse; }
-  table.iv-tab th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza); padding:9px 10px; border-bottom:1px solid var(--borda); white-space:nowrap; }
-  table.iv-tab td { padding:10px; font-size:13px; border-bottom:1px solid var(--borda-2,rgba(255,255,255,.05)); }
-  .iv-obj-tag { display:inline-block; font-size:10.5px; background:rgba(244,63,124,.12); color:#fb8497; border:1px solid rgba(244,63,124,.25); border-radius:20px; padding:1px 8px; margin:1px 2px; white-space:nowrap; }
-  .iv-score { font-variant-numeric:tabular-nums; font-weight:700; }
+  /* Barra de dado: rótulo FORA da barra, em coluna própria. Antes o nome ficava
+     sobreposto ao preenchimento — o contraste do texto mudava conforme o
+     tamanho da barra, e a de consultor chegou a ter cor escura cravada na mão
+     pra sobreviver ao gradiente amarelo. Rótulo fora resolve nos dois temas
+     sem exceção pra nenhuma série. */
+  .iv-bars { display:flex; flex-direction:column; gap:10px; }
+  .iv-bar { display:grid; grid-template-columns:minmax(96px,168px) 1fr minmax(64px,auto);
+            gap:12px; align-items:center; }
+  .iv-bar-lbl { font-size:12.5px; color:var(--texto); overflow:hidden;
+                text-overflow:ellipsis; white-space:nowrap; }
+  .iv-bar-track { height:8px; background:var(--panel-2); border-radius:99px; overflow:hidden; }
+  .iv-bar-fill { height:100%; border-radius:99px; transform-origin:left center;
+                 transform:scaleX(var(--p,0)); }
+  .iv-bar-val { font-size:12px; color:var(--cinza); text-align:right;
+                font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .iv-bar-val b { color:var(--texto); font-weight:600; }
+  /* Entrada das barras: 260ms, dentro do teto de 300ms da régua. Cresce da
+     esquerda porque é a direção da leitura e da própria medida. Só transform,
+     nunca width — width refaz layout a cada frame. */
+  @media (prefers-reduced-motion: no-preference) {
+    .iv-bar-fill { transition: transform 260ms var(--ease-saida); }
+  }
+
+  .iv-sec { font-size:11px; font-weight:600; color:var(--cinza); text-transform:uppercase;
+            letter-spacing:.7px; display:flex; align-items:center; gap:2px; }
+  .iv-sec-sub { font-size:12px; color:var(--cinza); line-height:1.55; margin:6px 0 0;
+                max-width:70ch; }
+  .iv-cab { padding:16px 18px 0; }
+  .iv-corpo { padding:14px 18px 18px; }
+  .iv-grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:900px){
+    .iv-grid2 { grid-template-columns:1fr; }
+    .iv-bar { grid-template-columns:1fr auto; }
+    .iv-bar-track { grid-column:1 / -1; }
+  }
+
+  /* Esteira: uma fila só, que anda da esquerda pra direita. Segmentos
+     proporcionais mostram de imediato onde as vendas empacam. */
+  .iv-esteira { display:flex; height:12px; border-radius:99px; overflow:hidden; gap:2px; }
+  .iv-esteira span { display:block; }
+  .iv-leg { display:flex; flex-wrap:wrap; gap:8px 22px; margin-top:14px; }
+  .iv-leg-i { display:flex; align-items:baseline; gap:8px; font-size:12.5px; }
+  .iv-leg-p { width:8px; height:8px; border-radius:2px; flex:0 0 auto;
+              transform:translateY(-1px); }
+  .iv-leg-n { color:var(--texto); }
+  .iv-leg-q { color:var(--cinza); font-variant-numeric:tabular-nums; }
+
+  .iv-nota { background:var(--panel-2); border:1px solid var(--borda);
+             border-left:3px solid var(--amarelo); border-radius:10px;
+             padding:12px 14px; margin-top:14px; font-size:12.5px;
+             color:var(--texto); line-height:1.6; }
+  .iv-nota b { color:var(--amarelo); }
+
+  .iv-vazio { font-size:13px; color:var(--cinza); line-height:1.6; }
+
+  /* Piso de largura + rolagem no contêiner: espremida, a tabela quebrava
+     "Cliente Sem Lead" em tres linhas e empilhava os tres botoes de acao um
+     sobre o outro, deixando cada linha com uma altura diferente. Rolar na
+     horizontal e melhor do que espremer. */
+  table.iv-tab { width:100%; min-width:900px; border-collapse:collapse; }
+  table.iv-tab th { text-align:left; font-size:10px; text-transform:uppercase;
+                    letter-spacing:.6px; color:var(--cinza); font-weight:600;
+                    padding:0 8px 9px; border-bottom:1px solid var(--borda);
+                    white-space:nowrap; }
+  table.iv-tab td { padding:10px 8px; font-size:13px; border-bottom:1px solid var(--borda);
+                    vertical-align:top; }
+  table.iv-tab tr:last-child td { border-bottom:none; }
+  .iv-num { font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap; }
+  th.iv-num { text-align:right; }
+  .iv-cli { font-weight:600; color:var(--texto); }
+  .iv-cli-sub { font-size:11px; color:var(--cinza); margin-top:2px; }
+  .iv-obj { display:inline-block; font-size:10.5px; background:rgba(244,63,124,.12);
+            color:#fb8497; border:1px solid rgba(244,63,124,.25); border-radius:99px;
+            padding:1px 8px; margin:1px 2px 1px 0; white-space:nowrap; }
+  [data-theme="light"] .iv-obj { background:rgba(224,38,94,.10); color:#be123c;
+                                 border-color:rgba(224,38,94,.28); }
+  .iv-acoes { display:flex; gap:4px; flex-wrap:nowrap; }
+  .iv-acoes a { font-size:11.5px; font-weight:600; text-decoration:none;
+                padding:4px 9px; border-radius:7px; border:1px solid var(--borda-2);
+                color:var(--cinza); white-space:nowrap; }
+  @media (hover: hover) and (pointer: fine) {
+    .iv-acoes a:hover { color:var(--texto); border-color:var(--cinza); }
+  }
+  .iv-acoes a:active { transform:scale(.97); }
+  @media (prefers-reduced-motion: no-preference) {
+    .iv-acoes a { transition: color 140ms var(--ease-saida),
+                              border-color 140ms var(--ease-saida),
+                              transform 140ms var(--ease-saida); }
+  }
+  .iv-tab-cab { display:flex; justify-content:space-between; align-items:center;
+                gap:12px; flex-wrap:wrap; }
+  .iv-busca { padding:7px 11px; border:1px solid var(--borda-2); border-radius:8px;
+              font-size:12.5px; font-family:'Inter',sans-serif;
+              background:var(--panel-2); color:var(--texto); min-width:180px; }
+  .iv-rolagem { overflow-x:auto; margin-top:12px; }
 </style>
 {% endblock %}
 
@@ -25,143 +105,310 @@
 <div class="topbar">
   <div>
     <h1>Inteligência de Vendas</h1>
-    <div class="sub">O que fecha, aprendido com quem já fechou</div>
+    <div class="sub">O que fecha, lido das vendas que já entraram</div>
   </div>
 </div>
 
 <div class="page">
 
-  <div class="metricas m-4" style="margin-bottom:8px;">
-    <div class="metrica verde">
-      <div class="lbl">Clientes fechados</div>
-      <div class="val">{{ m.total }}</div>
-      <div class="sub">propostas emitidas/ativas</div>
-    </div>
-    <div class="metrica">
-      <div class="lbl">Ticket médio</div>
-      <div class="val">R$ {{ m.ticket|numero }}</div>
-      <div class="sub">R$ {{ m.soma_valor|numero }} no total</div>
-    </div>
-    <div class="metrica">
-      <div class="lbl">Score médio</div>
-      <div class="val">{{ m.score_medio if m.score_medio is not none else '—' }}</div>
-      <div class="sub">{{ m.com_analise }} com análise de conversa</div>
-    </div>
-    <div class="metrica">
-      <div class="lbl">Tempo até fechar</div>
-      <div class="val">{{ m.tempo_medio if m.tempo_medio is not none else '—' }}{% if m.tempo_medio is not none %} <span style="font-size:14px;color:var(--cinza);">dias</span>{% endif %}</div>
-      <div class="sub">do lead entrar ao fechamento · {{ m.com_lead }} com lead no CRM</div>
+  <!-- O óbvio dito: a tela declara a própria base antes de mostrar número. -->
+  <div class="card">
+    <div class="iv-cab" style="padding-bottom:16px;">
+      <div class="iv-sec">Base desta tela</div>
+      <p class="iv-sec-sub">
+        Conta <b style="color:var(--texto);">{{ total_geral }} vendas registradas</b> — toda proposta viva no JOB,
+        sem as excluídas e sem as estornadas. No sistema, uma proposta cadastrada já é uma venda
+        registrada pelo consultor; a esteira abaixo diz em que ponto da implantação cada uma está.
+      </p>
     </div>
   </div>
 
-  <!-- Objeções em quem FECHOU: o insight central -->
-  <div class="card" style="margin-bottom:18px;">
-    <div class="iv-sec-title">Objeções que apareceram em quem FECHOU</div>
-    <div class="iv-obj-help">São as objeções que a conversa registrou nos clientes que mesmo assim fecharam — ou seja, dá pra contornar. Use como argumento pronto no follow-up.</div>
-    {% if top_objecoes %}
-    <div class="iv-bar-wrap">
-      {% set maxobj = top_objecoes[0].qtd %}
-      {% for o in top_objecoes %}
-      <div class="iv-bar-row">
-        <div class="iv-bar-track">
-          <div class="iv-bar-fill" style="width:{{ (o.qtd / maxobj * 100)|round(0,'floor') }}%; background:linear-gradient(90deg,#f43f7c,#fb923c);"></div>
-          <span class="iv-bar-txt" style="left:8px;right:auto;">{{ o.nome }}</span>
-        </div>
-        <div style="font-size:12.5px;color:var(--cinza);min-width:52px;text-align:right;">{{ o.qtd }}x</div>
+  <!-- Esteira: sempre sobre a base COMPLETA. Se ela mudasse com o filtro,
+       deixaria de ser diagnóstico e viraria mais um recorte. -->
+  <div class="card">
+    <div class="iv-cab">
+      <div class="iv-sec">
+        Onde as vendas estão na esteira
+        <i class="ajuda-i" title="Esteira de implantação: o caminho da venda até a apólice ficar valendo. 'Aguardando Documentos' é o valor inicial de toda proposta nova; 'Emitida/Ativa' é a apólice implantada, e é o status que destrava as parcelas de comissão.">i</i>
       </div>
-      {% endfor %}
+      <p class="iv-sec-sub">Sobre as {{ total_geral }} vendas, sem filtro — é o retrato da fila, não do recorte.</p>
     </div>
-    {% else %}
-    <div style="font-size:13px;color:var(--cinza);">Ainda sem objeções mapeadas nos fechados (as vendas fechadas precisam ter uma análise de conversa vinculada).</div>
-    {% endif %}
-  </div>
-
-  <div class="iv-grid2" style="margin-bottom:18px;">
-    <div class="card">
-      <div class="iv-sec-title">Operadoras que mais fecham</div>
-      <div class="iv-bar-wrap">
-        {% set maxop = (top_operadoras[0].qtd if top_operadoras else 1) %}
-        {% for o in top_operadoras %}
-        <div class="iv-bar-row">
-          <div class="iv-bar-track">
-            <div class="iv-bar-fill" style="width:{{ (o.qtd / maxop * 100)|round(0,'floor') }}%; background:linear-gradient(90deg,#1fd8a4,#3b82f6);"></div>
-            <span class="iv-bar-txt" style="left:8px;right:auto;">{{ o.nome }}</span>
-          </div>
-          <div style="font-size:12.5px;color:var(--cinza);min-width:120px;text-align:right;">{{ o.qtd }} · R$ {{ o.valor|numero }}</div>
+    <div class="iv-corpo">
+      {% if esteira %}
+      {% set cores = {'Aguardando Documentos':'var(--laranja)','Em Análise Operadora':'var(--azul)','Emitida/Ativa':'var(--verde)'} %}
+      <div class="iv-esteira">
+        {% for e in esteira %}
+        <span style="width:{{ e.pct }}%; background:{{ cores.get(e.nome,'var(--roxo)') }};" title="{{ e.nome }}: {{ e.qtd }}"></span>
+        {% endfor %}
+      </div>
+      <div class="iv-leg">
+        {% for e in esteira %}
+        <div class="iv-leg-i">
+          <span class="iv-leg-p" style="background:{{ cores.get(e.nome,'var(--roxo)') }};"></span>
+          <span class="iv-leg-n">{{ e.nome }}</span>
+          <span class="iv-leg-q">{{ e.qtd }} · {{ e.pct }}%</span>
         </div>
         {% endfor %}
       </div>
-    </div>
-    <div class="card">
-      <div class="iv-sec-title">Cidades que mais fecham</div>
-      {% if top_cidades %}
-      <div class="iv-bar-wrap">
-        {% set maxc = top_cidades[0].qtd %}
-        {% for c in top_cidades %}
-        <div class="iv-bar-row">
-          <div class="iv-bar-track">
-            <div class="iv-bar-fill" style="width:{{ (c.qtd / maxc * 100)|round(0,'floor') }}%; background:linear-gradient(90deg,#8b5cf6,#3b82f6);"></div>
-            <span class="iv-bar-txt" style="left:8px;right:auto;">{{ c.nome }}</span>
-          </div>
-          <div style="font-size:12.5px;color:var(--cinza);min-width:52px;text-align:right;">{{ c.qtd }}</div>
-        </div>
-        {% endfor %}
+      {% set parado = (esteira | selectattr('nome','equalto','Aguardando Documentos') | list | first) %}
+      {% if parado and parado.pct >= 40 %}
+      <div class="iv-nota">
+        <b>{{ parado.qtd }} das {{ total_geral }} vendas nunca saíram de "Aguardando Documentos"</b> —
+        esse é o valor inicial da coluna, então provavelmente a esteira não vem sendo atualizada,
+        e não que as {{ parado.qtd }} estejam de fato travadas. Enquanto elas não chegam em
+        "Emitida/Ativa", as parcelas de comissão delas seguem bloqueadas.
+        <a href="/admin/auditoria" style="color:var(--amarelo); font-weight:600;">Abrir a esteira</a>
       </div>
+      {% endif %}
       {% else %}
-      <div style="font-size:13px;color:var(--cinza);">Sem cidade mapeada nos fechados ainda.</div>
+      <div class="iv-vazio">Nenhuma venda registrada ainda.</div>
       {% endif %}
     </div>
   </div>
 
-  <div class="card" style="margin-bottom:18px;">
-    <div class="iv-sec-title">Fechamentos por consultor</div>
-    <div class="iv-bar-wrap">
-      {% set maxcon = (top_consultores[0].qtd if top_consultores else 1) %}
-      {% for c in top_consultores %}
-      <div class="iv-bar-row">
-        <div class="iv-bar-track">
-          <div class="iv-bar-fill" style="width:{{ (c.qtd / maxcon * 100)|round(0,'floor') }}%; background:linear-gradient(90deg,#facc15,#fb923c);"></div>
-          <span class="iv-bar-txt" style="left:8px;right:auto;color:#1c1c24;">{{ c.nome }}</span>
-        </div>
-        <div style="font-size:12.5px;color:var(--cinza);min-width:120px;text-align:right;">{{ c.qtd }} · R$ {{ c.valor|numero }}</div>
+  <form class="toolbar" method="get" action="/inteligencia-vendas">
+    <select name="consultor">
+      <option value="">Todos os consultores</option>
+      {% for o in opc_consultores %}<option value="{{ o }}" {% if o==f_consultor %}selected{% endif %}>{{ o }}</option>{% endfor %}
+    </select>
+    <select name="operadora">
+      <option value="">Todas as operadoras</option>
+      {% for o in opc_operadoras %}<option value="{{ o }}" {% if o==f_operadora %}selected{% endif %}>{{ o }}</option>{% endfor %}
+    </select>
+    <select name="esteira">
+      <option value="">Toda a esteira</option>
+      {% for o in opc_esteira %}<option value="{{ o }}" {% if o==f_esteira %}selected{% endif %}>{{ o }}</option>{% endfor %}
+    </select>
+    <select name="analise">
+      <option value="">Com e sem análise de conversa</option>
+      <option value="com" {% if f_analise=='com' %}selected{% endif %}>Só com análise de conversa</option>
+      <option value="sem" {% if f_analise=='sem' %}selected{% endif %}>Só sem análise de conversa</option>
+    </select>
+    <button class="btn" type="submit">Aplicar filtros</button>
+    {% if filtrando %}<a href="/inteligencia-vendas" class="btn-ghost">Limpar</a>{% endif %}
+  </form>
+
+  <div class="metricas m-4">
+    <div class="metrica verde">
+      <div class="lbl">Vendas{% if filtrando %} no filtro{% endif %}</div>
+      <div class="val">{{ m.total }}</div>
+      <div class="sub">{% if filtrando %}de {{ total_geral }} no total{% else %}propostas vivas no JOB{% endif %}</div>
+    </div>
+    <div class="metrica">
+      <div class="lbl">Ticket médio</div>
+      <div class="val">R$ {{ m.ticket|numero }}</div>
+      <div class="sub">R$ {{ m.soma_valor|numero }} somados</div>
+    </div>
+    <div class="metrica">
+      <div class="lbl">Tempo até fechar</div>
+      <div class="val">{% if m.tempo_mediana is not none %}{{ m.tempo_mediana }} <span style="font-size:13px;color:var(--cinza);">dias</span>{% else %}—{% endif %}</div>
+      <div class="sub">{% if m.tempo_mediana is not none %}mediana de {{ m.tempo_base }} venda{{ 's' if m.tempo_base != 1 }} com lead no CRM · média {{ m.tempo_medio }}{% else %}nenhuma venda ligada a um lead do CRM{% endif %}</div>
+    </div>
+    <div class="metrica info">
+      <div class="lbl">Conversas analisadas</div>
+      <div class="val">{{ m.pct_analise }}%</div>
+      <div class="sub">{{ m.com_analise }} de {{ m.total }} vendas · o resto não tem conversa lida</div>
+    </div>
+  </div>
+
+  <!-- Insight central da tela. -->
+  <div class="card">
+    <div class="iv-cab">
+      <div class="iv-sec">
+        Objeções que apareceram em quem comprou
+        <i class="ajuda-i" title="Objeção é a dúvida ou a resistência que o cliente levantou durante a conversa: preço, carência, rede de atendimento, coparticipação. Aqui só entram as que apareceram em conversas de gente que comprou mesmo assim.">i</i>
       </div>
-      {% endfor %}
+      <p class="iv-sec-sub">
+        Se apareceu aqui, é objeção que já foi contornada numa venda de verdade — use como argumento pronto.
+        {% if m.com_analise %}Lido de {{ m.com_analise }} das {{ m.total }} vendas: só entram as que têm conversa analisada.{% endif %}
+      </p>
+    </div>
+    <div class="iv-corpo">
+      {% if top_objecoes %}
+      {% set maxo = top_objecoes[0].qtd %}
+      <div class="iv-bars">
+        {% for o in top_objecoes %}
+        <div class="iv-bar">
+          <div class="iv-bar-lbl" title="{{ o.nome }}">{{ o.nome }}</div>
+          <div class="iv-bar-track"><div class="iv-bar-fill" style="--p:{{ (o.qtd / maxo)|round(3) }}; background:linear-gradient(90deg,var(--rosa),var(--laranja));"></div></div>
+          <div class="iv-bar-val"><b>{{ o.qtd }}</b> vendas</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% elif m.com_analise %}
+      <div class="iv-vazio">As {{ m.com_analise }} conversas analisadas destas vendas não registraram nenhuma objeção.</div>
+      {% else %}
+      <div class="iv-vazio">
+        Nenhuma destas vendas tem conversa analisada, então não há objeção pra ler.
+        A análise entra pela varredura de conversas do WhatsApp e se liga à venda pelo lead do CRM.
+        <a href="/crm" style="color:var(--info); font-weight:600;">Abrir o CRM</a>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="iv-grid2" style="margin-bottom:16px;">
+    <div class="card" style="margin-bottom:0;">
+      <div class="iv-cab"><div class="iv-sec">Operadoras que mais vendem</div></div>
+      <div class="iv-corpo">
+        {% if top_operadoras %}
+        {% set maxop = top_operadoras[0].qtd %}
+        <div class="iv-bars">
+          {% for o in top_operadoras %}
+          <div class="iv-bar">
+            <div class="iv-bar-lbl" title="{{ o.nome }}">{{ o.nome }}</div>
+            <div class="iv-bar-track"><div class="iv-bar-fill" style="--p:{{ (o.qtd / maxop)|round(3) }}; background:linear-gradient(90deg,var(--teal),var(--azul));"></div></div>
+            <div class="iv-bar-val"><b>{{ o.qtd }}</b> · R$ {{ o.valor|numero }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}<div class="iv-vazio">Nenhuma venda no filtro atual.</div>{% endif %}
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:0;">
+      <div class="iv-cab">
+        <div class="iv-sec">
+          Cidades que mais compram
+          <i class="ajuda-i" title="A cidade não vem do cadastro da proposta: ela é lida da conversa analisada. Por isso só aparecem as vendas que têm conversa lida.">i</i>
+        </div>
+      </div>
+      <div class="iv-corpo">
+        {% if top_cidades %}
+        {% set maxc = top_cidades[0].qtd %}
+        <div class="iv-bars">
+          {% for c in top_cidades %}
+          <div class="iv-bar">
+            <div class="iv-bar-lbl" title="{{ c.nome }}">{{ c.nome }}</div>
+            <div class="iv-bar-track"><div class="iv-bar-fill" style="--p:{{ (c.qtd / maxc)|round(3) }}; background:linear-gradient(90deg,var(--roxo),var(--azul));"></div></div>
+            <div class="iv-bar-val"><b>{{ c.qtd }}</b></div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="iv-vazio">A cidade vem da conversa analisada, e nenhuma destas vendas tem uma.</div>
+        {% endif %}
+      </div>
     </div>
   </div>
 
   <div class="card">
-    <div class="iv-sec-title">Clientes fechados ({{ clientes|length }})</div>
-    <div style="overflow-x:auto;">
-      <table class="iv-tab">
-        <thead>
-          <tr>
-            <th>Cliente</th><th>Consultor</th><th>Operadora</th><th>Modalidade</th>
-            <th>Vidas</th><th>Valor</th><th>Score</th><th>Objeções</th><th>Data</th><th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for c in clientes %}
-          <tr>
-            <td><strong>{{ c.nome }}</strong>{% if c.cidade %}<div style="font-size:11px;color:var(--cinza);">{{ c.cidade }}</div>{% endif %}</td>
-            <td>{{ c.consultor or '—' }}</td>
-            <td>{{ c.operadora or '—' }}</td>
-            <td><span class="tag tag-verde">{{ c.modalidade }}</span></td>
-            <td class="td-mono">{{ c.vidas }}</td>
-            <td class="td-mono">{{ c.valor|moeda }}</td>
-            <td>{% if c.score is not none %}<span class="iv-score">{{ c.score }}</span>{% else %}<span style="color:var(--cinza-2);">—</span>{% endif %}</td>
-            <td style="max-width:240px;">{% for o in c.objecoes[:4] %}<span class="iv-obj-tag">{{ o }}</span>{% endfor %}{% if c.objecoes|length > 4 %}<span style="font-size:11px;color:var(--cinza);"> +{{ c.objecoes|length - 4 }}</span>{% endif %}</td>
-            <td style="font-size:12px;color:var(--cinza);white-space:nowrap;">{{ c.criado_em|data_br }}</td>
-            <td style="white-space:nowrap;">
-              <a href="/proposta/{{ c.id }}" class="btn-ghost" style="font-size:12px;">Proposta</a>
-              {% if c.lead_id %}<a href="/crm/lead/{{ c.lead_id }}" class="btn-ghost" style="font-size:12px;color:var(--sucesso,#1fd8a4);">Lead CRM</a>{% endif %}
-              {% if c.analise_id %}<a href="/whatsapp-analises/{{ c.analise_id }}/conversa" class="btn-ghost" style="font-size:12px;color:var(--info);">Análise</a>{% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <div class="iv-cab"><div class="iv-sec">Vendas por consultor</div></div>
+    <div class="iv-corpo">
+      {% if top_consultores %}
+      {% set maxcon = top_consultores[0].qtd %}
+      <div class="iv-bars">
+        {% for c in top_consultores %}
+        <div class="iv-bar">
+          <div class="iv-bar-lbl" title="{{ c.nome }}">{{ c.nome }}</div>
+          <div class="iv-bar-track"><div class="iv-bar-fill" style="--p:{{ (c.qtd / maxcon)|round(3) }}; background:linear-gradient(90deg,var(--teal),var(--roxo));"></div></div>
+          <div class="iv-bar-val"><b>{{ c.qtd }}</b> · R$ {{ c.valor|numero }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}<div class="iv-vazio">Nenhuma venda no filtro atual.</div>{% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="iv-cab">
+      <div class="iv-tab-cab">
+        <div>
+          <div class="iv-sec">
+            As vendas, uma a uma
+            <i class="ajuda-i" title="Score é a nota de 0 a 1000 que a leitura da conversa deu ao cliente: quanto mais alto, mais qualificado ele estava. Só existe para as vendas que têm conversa analisada.">i</i>
+          </div>
+          <p class="iv-sec-sub" id="iv-conta">{{ clientes|length }} venda{{ 's' if clientes|length != 1 }}{% if filtrando %} no filtro{% endif %}</p>
+        </div>
+        <input class="iv-busca" id="iv-busca" type="search" placeholder="Buscar pelo nome do cliente"
+               aria-label="Buscar pelo nome do cliente" autocomplete="off">
+      </div>
+    </div>
+    <div class="iv-corpo" style="padding-top:0;">
+      {% if clientes %}
+      <div class="iv-rolagem">
+        <table class="iv-tab">
+          <thead>
+            <tr>
+              <th>Cliente</th><th>Consultor</th><th>Operadora</th><th>Esteira</th>
+              <th class="iv-num">Vidas</th><th class="iv-num">Valor</th>
+              <th class="iv-num">Score</th><th>Objeções</th><th class="iv-num">Data</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="iv-corpo-tab">
+            {% for c in clientes %}
+            <tr data-nome="{{ (c.nome or '')|lower }}">
+              <td style="min-width:172px;">
+                <div class="iv-cli">{{ c.nome }}</div>
+                <div class="iv-cli-sub">{{ c.modalidade }}{% if c.cidade %} · {{ c.cidade }}{% endif %}</div>
+              </td>
+              <td>{{ c.consultor or '—' }}</td>
+              <td>{{ c.operadora or '—' }}</td>
+              <td>
+                {% if c.esteira == 'Emitida/Ativa' %}<span class="tag tag-verde">Emitida/Ativa</span>
+                {% elif c.esteira == 'Em Análise Operadora' %}<span class="tag tag-info">Em análise</span>
+                {% else %}<span class="tag tag-am">{{ c.esteira }}</span>{% endif %}
+              </td>
+              <td class="iv-num">{{ c.vidas }}</td>
+              <td class="iv-num">{{ c.valor|moeda }}</td>
+              <td class="iv-num">{% if c.score is not none %}{{ c.score }}{% else %}<span style="color:var(--cinza-2);">—</span>{% endif %}</td>
+              <td style="max-width:200px; white-space:normal;">
+                {% if c.objecoes %}
+                  {% for o in c.objecoes[:3] %}<span class="iv-obj">{{ o }}</span>{% endfor %}
+                  {% if c.objecoes|length > 3 %}<span style="font-size:11px;color:var(--cinza);">+{{ c.objecoes|length - 3 }}</span>{% endif %}
+                {% elif c.analise_id %}<span style="font-size:11.5px;color:var(--cinza-2);">nenhuma</span>
+                {% else %}<span style="font-size:11.5px;color:var(--cinza-2);">sem conversa lida</span>{% endif %}
+              </td>
+              <td class="iv-num" style="font-size:12px;color:var(--cinza);">{{ c.criado_em|data_br }}</td>
+              <td>
+                <div class="iv-acoes">
+                  <a href="/proposta/{{ c.id }}">Proposta</a>
+                  {% if c.lead_id %}<a href="/crm/lead/{{ c.lead_id }}">Lead</a>{% endif %}
+                  {% if c.analise_id %}<a href="/whatsapp-analises/{{ c.analise_id }}/conversa">Conversa</a>{% endif %}
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="iv-vazio" id="iv-sem-busca" style="display:none; padding-top:14px;">
+        Nenhum cliente com esse nome nas vendas do filtro atual.
+      </div>
+      {% else %}
+      <div class="iv-vazio" style="padding-top:14px;">
+        Nenhuma venda com esses filtros. <a href="/inteligencia-vendas" style="color:var(--info); font-weight:600;">Limpar os filtros</a>
+      </div>
+      {% endif %}
     </div>
   </div>
 
 </div>
+
+<script>
+// Busca por nome: filtra as linhas que já estão na tela, sem ida ao servidor.
+// Os filtros de análise moram na barra acima porque mudam os números do topo;
+// este só esconde linha, então pode ser local.
+(function () {
+  var busca = document.getElementById('iv-busca');
+  if (!busca) return;
+  var corpo = document.getElementById('iv-corpo-tab');
+  var conta = document.getElementById('iv-conta');
+  var vazio = document.getElementById('iv-sem-busca');
+  var total = corpo ? corpo.rows.length : 0;
+  busca.addEventListener('input', function () {
+    var t = busca.value.trim().toLowerCase();
+    var n = 0;
+    for (var i = 0; i < corpo.rows.length; i++) {
+      var linha = corpo.rows[i];
+      var bate = !t || (linha.getAttribute('data-nome') || '').indexOf(t) !== -1;
+      linha.style.display = bate ? '' : 'none';
+      if (bate) n++;
+    }
+    vazio.style.display = n ? 'none' : '';
+    conta.textContent = t ? (n + ' de ' + total + ' venda' + (total !== 1 ? 's' : '')
+                                + ' com "' + busca.value.trim() + '"')
+                          : (total + ' venda' + (total !== 1 ? 's' : ''));
+  });
+})();
+</script>
 {% endblock %}
