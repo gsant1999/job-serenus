@@ -408,3 +408,173 @@ decisão de comportamento, não um bug óbvio.
 5. **Tela que afirma sem ter olhado é pior que tela vazia.** "Nenhum lead
    esperando" a partir de lista nunca buscada; "Pode rodar" em verde para quem a
    fila recusa.
+
+---
+
+## HANDOFF — 18/08/2026, fim da tarde (ler isto primeiro)
+
+Continuação da seção acima. A sessão seguiu depois do registro anterior e
+**causou um incidente em produção**. Quem pegar o trabalho daqui: leia o
+incidente antes de tocar em qualquer coisa que fale com cliente.
+
+### Histórico da sessão, em ordem
+
+| Quando | O que |
+|---|---|
+| Manhã | Inteligência de Vendas: 1 venda → 71. Cruzamento por `lead_id` no lugar de telefone |
+| Manhã | Guilherme corta o status da proposta da página; entra "O perfil de quem contrata" |
+| Manhã | `/ebook-vendas` no ar; fila obrigatória de leitura das vendas |
+| Meio-dia | Descoberto o apagão de 7 dias na varredura (causa: `pode_rodar=False` cravado) |
+| Meio-dia | Pendências no sino + tela "Está rodando agora?" |
+| Tarde | Auditoria em 2 rodadas (29 agentes). Achado: 4 rotinas da extensão mortas pelo `extKey` |
+| Tarde | Religo as 4 rotinas → **INCIDENTE**: fila drena 3 semanas de mensagens atrasadas |
+| Tarde | Sangramento contido, trava de validade de 6h no ar |
+
+### O INCIDENTE (18/08, ~14h) — causa, estrago e correção
+
+**Causa:** a fila de envio estava morta havia semanas para quem entrou pelo login
+novo (a rotina da extensão exigia a chave antiga `extKey`, que o login por
+e-mail/senha não grava). Os itens foram **acumulando no servidor**: 43, o mais
+velho de 27/07. Religuei a rotina **sem medir o que estava represado**. A fila
+começou a drenar o atraso inteiro.
+
+**Estrago que consumou (não dá para desfazer):** 17 mensagens atrasadas saíram
+para clientes — 7 criadas em 13/08, 5 em 14/08, 3 em 12/08, 2 em 17/08. Eram
+aberturas de lead pago ("Oi, vi que você pediu uma cotação") e 2 apresentações.
+
+**Estrago evitado:** 43 itens marcados `cancelado_atraso` com o motivo gravado
+(não apagados, para ficar auditável). Incluía leads de 27, 28 e 30 de julho.
+
+**Correção no ar** (`7d37a87`): `_WA_FILA_VALIDADE_HORAS = 6` em
+`/api/whatsapp/fila/proximo`. Item mais velho que 6h não é entregue — vence no
+lugar. Mora ali porque é o único ponto por onde todo envio passa: vale para
+qualquer versão de extensão e não depende de ninguém lembrar de limpar nada.
+
+**Como conferir se voltou a acontecer:**
+```sql
+select count(*) from whatsapp_extensao_fila
+where status in ('pendente','enviando') and criado_em < now() - interval '6 hours';
+-- tem que ser 0, sempre
+```
+
+### Estado de produção ao fechar a sessão
+
+- `main` em `7d37a87`, deploy Online
+- Fila de envio: 5 pendentes + 4 enviando (todos das últimas 6h, legítimos), 43 cancelados por atraso
+- **A varredura VOLTOU:** última análise 18/08 14:05. Total 2.033 → **2.261** (228 lidas hoje)
+- **Vendas com conversa lida: 21 → 41 de 71.** A Inteligência de Vendas está enchendo sozinha
+- 3 pendências abertas no sino
+- Extensão: Danilo já na 4.98.0; Aline e Guilherme na 4.97.0; Juliana e Karen sem versão reportada
+
+### DECISÃO NOVA — não publicar na Chrome Web Store
+
+Guilherme, 18/08: **não publicar a extensão na loja.** A entrega termina no
+repositório; a atualização acontece por ↻ em `chrome://extensions` + F5 no
+WhatsApp. Não escrever "publique na loja" como pendência, e **não desenhar
+correção que só funcione depois de todos atualizarem** — ver a regra de versão
+na seção anterior.
+
+### PENDENTE — em ordem de ataque, com tempo estimado
+
+Tempo = trabalho de código + teste local. Não inclui deploy (~3 min) nem
+verificação em produção.
+
+#### Prioridade 1 — a máquina de envio (mesma que causou o incidente)
+
+Fazer os três juntos, na mesma leva, porque mexem na mesma engrenagem. **Medir o
+que está represado ANTES de mexer**, e mostrar o número ao Guilherme.
+
+- [ ] **`app.py:11535` — lead pago marcado como atendido ANTES do envio sair** ·
+  **~45 min** · GRAVIDADE ALTA. Se o envio falhar, ninguém atende e a métrica diz
+  que atendeu. Conserto: mover a marcação para
+  `/api/whatsapp/fila/<id>/confirmar` (ramo de sucesso) e abrir pendência na
+  falha terminal (3 tentativas). Terceiro detector em `_pendencias_reconciliar`
+  para o caso "extensão offline" (lead pago esperando >15 min em horário
+  comercial), que é o cenário mais provável e hoje é mudo.
+- [ ] **`app.py:45652` — funil avança de passo mesmo com envio falhando** ·
+  **~90 min** · GRAVIDADE ALTA. Sem token do WhatsApp, a inscrição percorre tudo
+  e termina "concluída" com zero mensagens entregues. `fluxo_envio_log` é
+  write-only (nenhuma tela lê). Conserto: `_fluxo_executar_passo` passa a devolver
+  se a falha é permanente; temporária repete 3× usando o próprio log como
+  contador; e alguma tela precisa ler a tabela, senão o conserto é invisível.
+- [ ] **`app.py:41854` — lembrete da agenda marcado como enviado antes de tentar
+  enviar** · **~20 min** · MÉDIA. Nada devolve `lembrete_enviado` para 0.
+
+#### Prioridade 2 — entrada de leads (dinheiro na porta)
+
+- [ ] **`app.py:48733` — planilha inacessível vira lista vazia e conta como
+  sucesso** · **~40 min** · ALTA. Os dois leitores só olham exceção; não checam
+  status HTTP nem Content-Type. Planilha que virou tela de login = leads param de
+  entrar sem um log. Conserto: checar status/Content-Type e abrir pendência.
+- [ ] **`app.py:45181` — lead que falha ao gravar some sem log e sem contador** ·
+  **~25 min** · ALTA. `except Exception:` sem `as e`. Rodada com zero leads tem a
+  mesma assinatura de sucesso. Conserto: contar, logar e abrir pendência se a
+  rodada inteira falhar.
+- [ ] **`app.py:48764` — guarda de marca desliga a importação com `return` mudo** ·
+  **~15 min** · MÉDIA.
+
+#### Prioridade 3 — dinheiro que entra e o JOB não sabe
+
+- [ ] **`app.py:8263` — webhook do Asaas com token inválido responde 200 e não
+  grava nada** · **~30 min** · ALTA. O Asaas não reenvia: pagamento confirmado
+  que o JOB nunca soube. Conserto: 401 + registrar a tentativa em `webhook_log`.
+  Atenção: mexer em webhook de pagamento pede teste cuidadoso.
+
+#### Prioridade 4 — negativas cravadas (irmãs do bug do apagão)
+
+- [ ] **`app.py:28846` e `29067` — `"gestor": False` cravado** em dois endpoints
+  da biblioteca · **~30 min** os dois · o modo gestor nunca liga para ninguém.
+- [ ] **`app.py:28843` — `"pode_editar": True` cravado** desenha Excluir em
+  modelo que o servidor recusa · **~15 min**.
+- [ ] **`app.py:32841` — variável local cravada em True** bloqueia
+  `/comissoes/regra-gestor/aplicar-historico` inteira · **~20 min**.
+- [ ] **`app.py:24579` — `/api/whatsapp/presenca` responde 200 com `{"ok": False}`**
+  sem motivo e sem log · **~15 min**.
+
+#### Prioridade 5 — unificar a política de versão
+
+- [ ] **`app.py:24684` + `_EXT_VERSAO_MIN_DISPARO`** · **~40 min** · MÉDIA. O
+  disparo tira o consultor da roleta por versão e **o consultor não é avisado**
+  (só o admin vê em `/campanhas`). Deveria degradar + abrir pendência, como a
+  varredura já faz. O literal está fora de `EXT_VERSAO` — unificar.
+- [ ] **`_MIN_VARREDURA` na rota** ainda é literal em vez de ler
+  `EXT_VERSAO['bloqueia_abaixo']` · **~10 min**. Duas fontes da verdade com o
+  mesmo valor hoje; a próxima pessoa que mexer num só cria divergência.
+
+#### Pendências operacionais (não é código)
+
+- [ ] Juliana e Karen aparecem **sem versão reportada** — conferir se a extensão
+  delas está atualizada e rodando. A tela "Está rodando agora?" em
+  `/configuracoes` mostra o motivo de cada uma. · **~10 min**
+- [ ] Decidir o que fazer com os leads que apareceram de uma vez no inbox quando
+  a rotina religou — muitos já esfriaram. Guilherme não respondeu ainda. **(?)**
+- [ ] Índices em `notificacoes` (`chave`, `resolvida_em`) e política de retenção
+  para avisos antigos · **~20 min**. A tabela não tem um índice e nunca é podada;
+  a reconciliação de pendência roda no pulso da extensão, que é frequente.
+
+### O que NÃO fazer (aprendido do jeito caro)
+
+1. **Nunca religar rotina que fala com cliente sem medir o represado.** Consertar
+   uma falha silenciosa pode LIBERAR um estrago que o silêncio estava segurando.
+   Foi exatamente isso hoje. Uma consulta de dez segundos ao banco evitaria.
+2. **Não desenhar correção que só funciona na versão nova.** Versão velha degrada
+   e abre pendência; nunca para de trabalhar.
+3. **Não confiar em dedução onde cabe medição.** Eu errei o diagnóstico do apagão
+   apontando crashes de JS; a causa era uma linha cravada no servidor.
+4. **Não tratar tela vazia como estado positivo.** "Nenhum lead esperando" a
+   partir de lista nunca buscada; "Pode rodar" verde para quem a fila recusa.
+5. **Não confiar em `except` silencioso nem para o próprio conserto.** Um
+   `KeyError` engolido deixou um detector de pendência mudo — foi o teste que
+   pegou, não o log.
+
+### Aviso sobre trabalhar em vários chats ao mesmo tempo
+
+Não existe coordenação automática entre chats. Cada um trabalha numa cópia
+separada (havia 11 abertas em 18/08) e **nenhum vê o trabalho não enviado do
+outro**. O git obriga quem envia depois a integrar — nada se perde, mas nada se
+amarra sozinho.
+
+**O risco concreto:** dois chats mexendo na mesma engrenagem (fila, funil,
+disparo) podem produzir consertos que interagem de um jeito que nenhum dos dois
+previu. Antes de mexer na máquina de envio, conferir `git log origin/main` e
+`git worktree list` para ver o que andou.
