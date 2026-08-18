@@ -1772,6 +1772,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }, 8000).then(sendResponse).catch(() => sendResponse({ ok: false }));
     return true;
   }
+  if (msg && msg.type === 'aba_morreu') {
+    // A aba anterior morreu sem se despedir. O retrato que chega aqui é a foto
+    // da memória no instante da morte — a única prova que existe do crash.
+    // Best-effort, como o erro_log: reportar a morte não pode virar outra falha.
+    const r = msg.retrato || {};
+    chrome.storage.local.get(['usuarioId']).then(({ usuarioId }) => {
+      chamarJob('/api/whatsapp/saude-aba', 'POST', {
+        evento: 'morte', usuario_id: usuarioId || null,
+        sessao: r.sessao, versao: r.versao, aberta_ms: r.aberta_ms,
+        heap_usado: r.heap_usado, heap_teto: r.heap_teto, nos_dom: r.nos_dom,
+        loops: r.loops, copias_ponte: r.copias_ponte, operacao: r.operacao,
+        caches: r.caches, oculta: r.oculta, motivo: r.motivo || '',
+      }, 8000).then(sendResponse).catch(() => sendResponse({ ok: false }));
+    }).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
   if (msg && msg.type === 'notificar') {
     // Aviso local do sistema operacional — só isso, nada é enviado pra fora.
     // Sem isso, minimizar o painel ou trocar de conversa fazia o consultor
@@ -1915,8 +1931,41 @@ async function _reinjetarNasAbasAbertas(motivo) {
 
 // Atualização da extensão e recarga do service worker são os dois momentos em
 // que as abas ficam órfãs.
-chrome.runtime.onInstalled.addListener((d) => _reinjetarNasAbasAbertas(d && d.reason));
-chrome.runtime.onStartup.addListener(() => _reinjetarNasAbasAbertas('startup'));
+// CAIXA-PRETA: os dois falsos positivos que a ABA não tem como tratar sozinha.
+//
+// Quando a extensão é atualizada, o `chrome.*` das abas abertas morre na hora:
+// elas não conseguem mais gravar o `limpo:true` do pagehide, e o retrato delas
+// ficaria para trás parecendo crash. Mesma coisa quando o navegador é fechado e
+// reaberto. Quem sabe que isso aconteceu é o service worker, e é aqui que ele
+// desarma a acusação — antes de reinjetar, para não competir com a aba nova.
+async function _cxMarcarRetratosComo(motivo) {
+  try {
+    const tudo = await chrome.storage.local.get(null);
+    const grav = {};
+    for (const chave of Object.keys(tudo || {})) {
+      if (chave.indexOf('jobRetrato:') !== 0) continue;
+      const r = tudo[chave];
+      if (!r || typeof r !== 'object' || r.limpo) continue;
+      // `limpo` porque não foi morte; `motivo` porque o dado tem que dizer por
+      // que foi encerrado, e não só sumir sem explicação.
+      grav[chave] = Object.assign({}, r, { limpo: true, motivo });
+    }
+    if (Object.keys(grav).length) await chrome.storage.local.set(grav);
+  } catch (e) { /* medir nunca pode atrapalhar */ }
+}
+
+chrome.runtime.onInstalled.addListener(async (d) => {
+  const razao = d && d.reason;
+  if (razao === 'update' || razao === 'install') await _cxMarcarRetratosComo('extensao_atualizada');
+  _reinjetarNasAbasAbertas(razao);
+});
+chrome.runtime.onStartup.addListener(async () => {
+  // O Chrome normalmente dispara pagehide ao fechar, então um retrato sujo aqui
+  // é ambíguo: pode ter sido queda do navegador inteiro. Marca como encerrado,
+  // mas com motivo próprio — dado inconclusivo é aceitável, dado mentiroso não.
+  await _cxMarcarRetratosComo('navegador_reiniciou');
+  _reinjetarNasAbasAbertas('startup');
+});
 
 
 // Busca a imagem ja pronta da cotacao. 404 aqui nao e erro: quer dizer que

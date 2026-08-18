@@ -1457,6 +1457,30 @@ def init_db():
                 detalhe TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            # A CAIXA-PRETA DA ABA. Quando o Chrome mata o renderizador do
+            # WhatsApp ("Codigo de erro: 5"), nao sobra rastro nenhum: crash de
+            # renderizador nao dispara window.onerror, entao o erro_log nunca ve.
+            # Aqui chega o ultimo retrato que a aba gravou antes de morrer — a
+            # memoria no instante da morte, o que ela estava fazendo, e o tamanho
+            # de cada cache. Sem isto, "foi a extensao?" continua sendo opiniao.
+            """CREATE TABLE IF NOT EXISTS wa_saude_aba (
+                id SERIAL PRIMARY KEY,
+                evento TEXT NOT NULL,
+                sessao TEXT,
+                usuario_id INTEGER,
+                versao TEXT,
+                aberta_ms BIGINT,
+                heap_usado BIGINT,
+                heap_teto BIGINT,
+                nos_dom INTEGER,
+                loops INTEGER,
+                copias_ponte TEXT,
+                operacao TEXT,
+                caches TEXT,
+                oculta INTEGER,
+                motivo TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
                         """CREATE TABLE IF NOT EXISTS wa_conversa_estado (
                 chat_id TEXT PRIMARY KEY,
                 telefone_norm TEXT,
@@ -2633,6 +2657,24 @@ def init_db():
             ok INTEGER DEFAULT 1,
             usuario_id INTEGER,
             detalhe TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS wa_saude_aba (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            evento TEXT NOT NULL,
+            sessao TEXT,
+            usuario_id INTEGER,
+            versao TEXT,
+            aberta_ms BIGINT,
+            heap_usado BIGINT,
+            heap_teto BIGINT,
+            nos_dom INTEGER,
+            loops INTEGER,
+            copias_ponte TEXT,
+            operacao TEXT,
+            caches TEXT,
+            oculta INTEGER,
+            motivo TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS wa_conversa_estado (
@@ -26506,6 +26548,74 @@ def api_whatsapp_metrica():
         app.logger.warning(f"[METRICA] {ex}")
     close_db(conn)
     return _wa_cors(jsonify({"ok": True, "gravadas": n}))
+
+
+@app.route('/api/whatsapp/saude-aba', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
+def api_whatsapp_saude_aba():
+    """A caixa-preta da aba do WhatsApp.
+
+    Guilherme, 18/08/2026: "CARA ISSO TEM QUE PARAR DE ACONTECER. TEMOS QUE
+    MENSURAR AS FALHAS." A aba estava morrendo com "Codigo de erro: 5" e nao
+    sobrava prova nenhuma — crash de renderizador nao dispara window.onerror,
+    entao o /api/whatsapp/erro nunca ficava sabendo. A falha mais grave era a
+    unica invisivel.
+
+    O que chega aqui e o ULTIMO retrato que a aba gravou antes de morrer:
+    memoria usada contra o teto, ha quanto tempo estava aberta, quantos nos de
+    DOM, o tamanho de cada cache e o que ela estava fazendo. Com isso, "a aba
+    morreu" vira "morreu com 3,1 GB de 4, depois de 7 horas, com 340 imagens de
+    cotacao em memoria" — que ja diz onde mexer.
+
+    Sem conteudo de conversa e sem dado de cliente: so contador."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    d = request.get_json(silent=True) or {}
+    evento = str(d.get('evento') or '').strip()[:20]
+    if evento not in ('morte', 'retrato'):
+        return _wa_cors(jsonify({"ok": False, "erro": "evento"})), 400
+
+    def _int(v, teto=None):
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            return None
+        if n < 0:
+            return None
+        return min(n, teto) if teto is not None else n
+
+    try:
+        uid = int(d.get('usuario_id')) if d.get('usuario_id') else None
+    except (TypeError, ValueError):
+        uid = None
+    caches = d.get('caches')
+    if isinstance(caches, dict):
+        caches = json.dumps(caches)[:500]
+    else:
+        caches = None
+    conn = db()
+    try:
+        conn.execute("""INSERT INTO wa_saude_aba
+            (evento, sessao, usuario_id, versao, aberta_ms, heap_usado, heap_teto,
+             nos_dom, loops, copias_ponte, operacao, caches, oculta, motivo, criado_em)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (evento, str(d.get('sessao') or '')[:40] or None, uid,
+             str(d.get('versao') or '')[:20] or None,
+             _int(d.get('aberta_ms'), 7 * 24 * 3600 * 1000),
+             _int(d.get('heap_usado')), _int(d.get('heap_teto')),
+             _int(d.get('nos_dom'), 50_000_000), _int(d.get('loops'), 100_000),
+             str(d.get('copias_ponte') or '')[:8] or None,
+             str(d.get('operacao') or '')[:40] or None,
+             caches, 1 if d.get('oculta') else 0,
+             str(d.get('motivo') or '')[:40] or None,
+             _agora_sp()))
+        conn.commit()
+    except Exception as ex:
+        try: conn.rollback()
+        except Exception: pass
+        app.logger.warning(f"[SAUDE-ABA] {ex}")
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True}))
 
 
 @app.route('/api/whatsapp/documentos/tipo', methods=['POST', 'OPTIONS'])

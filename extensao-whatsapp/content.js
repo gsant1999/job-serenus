@@ -424,6 +424,222 @@
     catch (e) { if (_ehContextoInvalidado(e)) { _marcarContextoMorto(); return null; } throw e; }
   }
 
+  // ── CAIXA-PRETA DA ABA ────────────────────────────────────────────────────
+  //
+  // POR QUE EXISTE: quando o renderizador do Chrome é morto ("Ah, não! Código
+  // de erro: 5"), TUDO que estava na memória desta aba morre junto — variável,
+  // lote de métrica ainda não enviado, pilha de erro. E crash de renderizador
+  // NÃO dispara window.onerror: `_reportarErro` nunca chega a rodar. Ou seja, a
+  // falha mais grave que a extensão tem é a única que não deixa rastro nenhum.
+  // Até aqui, "foi a extensão?" era opinião — a minha inclusive.
+  //
+  // ONDE GRAVAR: `chrome.storage.local` pertence à EXTENSÃO, não à página. Ele
+  // sobrevive à morte da aba, e o service worker (outro processo) continua
+  // podendo ler. Guardar em variável, em `sessionStorage` ou no lote de métrica
+  // não serve: tudo isso mora dentro do processo que morre.
+  //
+  // COMO SE SABE QUE MORREU: cada aba escreve um retrato a cada 30s com
+  // `limpo:false`, e escreve `limpo:true` no `pagehide`. Um retrato que ficou
+  // para trás com `limpo:false` E com o último sinal velho quer dizer que a aba
+  // que o escreveu foi embora sem se despedir. Ela não fechou — ela MORREU. E
+  // esse último retrato é a foto da memória no instante da morte.
+  //
+  // OS FALSOS POSITIVOS, e por que cada um está resolvido:
+  //   F5 e fechar a aba      → o Chrome dispara `pagehide`, grava limpo:true.
+  //   fechar o navegador     → idem, `pagehide` dispara em cada aba.
+  //   extensão atualizada    → aqui o `chrome.*` desta aba já morreu e não dá
+  //                            para gravar nada; quem resolve é o service
+  //                            worker, que marca tudo como limpo no
+  //                            `onInstalled` (background.js) antes de reinjetar.
+  //   navegador reiniciado   → o SW marca `motivo:'navegador_reiniciou'` no
+  //                            `onStartup`; vira registro INCERTO, não morte.
+  //   várias abas abertas    → a chave tem o id da sessão desta aba, e só conta
+  //                            como morta a que está com o sinal velho. Aba viva
+  //                            em outra janela continua atualizando o sinal dela.
+  // Onde não dá para ter certeza, o registro sai marcado como incerto — o dado
+  // pode ser inconclusivo, mas não pode ser mentiroso.
+  const _CX_PERIODO = 30000;         // 30s: barato, e o suficiente pra ver a curva subir
+  const _CX_NASCEU = Date.now();
+  const _CX_SESSAO = 's' + _CX_NASCEU.toString(36) + Math.random().toString(36).slice(2, 7);
+  const _CX_CHAVE = 'jobRetrato:' + _CX_SESSAO;
+  let _cxOperacao = '';              // o que a extensão estava fazendo por último
+  let _cxNosDom = null;              // caro de contar: só amostrado de 10 em 10 tiques
+  let _cxTique = 0;
+  let _cxAvisou = false;
+
+  function _cxMarcarOperacao(nome) { _cxOperacao = String(nome || '').slice(0, 40); }
+
+  // Tamanho de cada cache. Cada leitura é isolada: um cache que ainda não
+  // existe (o boot ainda não chegou nele) não pode derrubar o retrato inteiro.
+  function _cxCaches() {
+    const c = {};
+    const por = (nome, fn) => { try { const v = fn(); if (typeof v === 'number') c[nome] = v; } catch (e) {} };
+    por('transcricoes', () => TR.cache.size);
+    por('documentos', () => DOC.estado.size);
+    por('cronometros_doc', () => _docCrono.size);
+    por('analises', () => _analises.size);
+    por('imagens_cotacao', () => _cvCache.size);
+    por('logos', () => Object.keys(_cotLogos).length);
+    por('envios_recentes', () => _enviosRecentes.size);
+    por('chats_vistos', () => _chatsVistos.size);
+    return c;
+  }
+
+  function _cxRetrato(limpo, motivo) {
+    const m = (window.performance && window.performance.memory) || null;
+    return {
+      sessao: _CX_SESSAO,
+      versao: (chrome.runtime.getManifest() || {}).version || '',
+      aberta_ms: Date.now() - _CX_NASCEU,
+      ultimo_sinal: Date.now(),
+      heap_usado: m ? (m.usedJSHeapSize || 0) : null,
+      heap_teto: m ? (m.jsHeapSizeLimit || 0) : null,
+      nos_dom: _cxNosDom,
+      loops: _idsLoops.length,
+      copias_ponte: String(_copiasWpp()),
+      operacao: _cxOperacao,
+      caches: _cxCaches(),
+      oculta: document.hidden ? 1 : 0,
+      limpo: !!limpo,
+      motivo: motivo || '',
+    };
+  }
+
+  function _cxGravar(limpo, motivo) {
+    try { _safeStorageSet({ [_CX_CHAVE]: _cxRetrato(limpo, motivo) }); } catch (e) { /* medir nunca atrapalha */ }
+  }
+
+  function _cxBater() {
+    try {
+      // Contar nó de DOM percorre a árvore inteira do WhatsApp Web, que é enorme.
+      // A cada 10 tiques (5 min) é o bastante pra ver tendência sem pagar caro.
+      if ((_cxTique++ % 10) === 0) {
+        try { _cxNosDom = document.getElementsByTagName('*').length; } catch (e) { _cxNosDom = null; }
+      }
+      _cxGravar(false, '');
+      _cxConferirTeto();
+    } catch (e) { /* medir nunca atrapalha */ }
+  }
+
+  // AVISO ANTES DE MORRER. O Chrome dá um teto de memória por aba; ao encostar
+  // nele, mata a aba sem avisar e sem log. Em 75% ainda dá tempo de a consultora
+  // terminar o que está fazendo e atualizar por vontade própria — em vez de
+  // perder o que estava escrevendo no meio de um atendimento.
+  function _cxConferirTeto() {
+    if (_cxAvisou || document.hidden) return;
+    const m = (window.performance && window.performance.memory) || null;
+    if (!m || !m.jsHeapSizeLimit) return;
+    if ((m.usedJSHeapSize || 0) <= m.jsHeapSizeLimit * 0.75) return;
+    _cxAvisou = true;
+    _metrica('aba_perto_do_teto', Date.now() - _CX_NASCEU, true,
+             Math.round((m.usedJSHeapSize || 0) / 1048576) + 'MB');
+    _cxMostrarAviso();
+  }
+
+  function _cxMostrarAviso() {
+    try {
+      if (document.getElementById('job-aviso-memoria')) return;
+      const d = document.createElement('div');
+      d.id = 'job-aviso-memoria';
+      // Âmbar, não vermelho: isto é um aviso com tempo de sobra, não uma quebra.
+      // O vermelho já é do aviso de "extensão atualizada", que é bloqueante.
+      d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483646;' +
+        'background:#b45309;color:#fff;padding:9px 14px;font:13px -apple-system,sans-serif;' +
+        'text-align:center;box-shadow:0 2px 12px rgba(0,0,0,.35);' +
+        'opacity:0;transform:translateY(-100%);' +
+        'transition:opacity 200ms cubic-bezier(.23,1,.32,1),transform 200ms cubic-bezier(.23,1,.32,1)';
+      // Diz o que aconteceu, o que fazer, e o que NÃO se perde (que é a dúvida
+      // real de quem está no meio de um atendimento).
+      d.innerHTML =
+        '<span>Esta aba está pesada e pode fechar sozinha. Atualize quando puder — nenhuma conversa se perde.</span>' +
+        '<button type="button" id="job-mem-i" title="Por que isto aparece" aria-label="Por que isto aparece" ' +
+        'style="margin-left:8px;width:18px;height:18px;border-radius:50%;border:1px solid rgba(255,255,255,.82);' +
+        'background:transparent;color:#fff;font:700 11px -apple-system,sans-serif;cursor:pointer;padding:0;' +
+        'line-height:16px;vertical-align:middle">i</button>' +
+        '<button type="button" id="job-mem-reload" ' +
+        'style="margin-left:12px;background:#fff;color:#92400e;border:none;border-radius:6px;padding:5px 12px;' +
+        'font-weight:700;cursor:pointer;transition:transform 140ms cubic-bezier(.23,1,.32,1)">Atualizar agora</button>' +
+        '<button type="button" id="job-mem-fechar" aria-label="Dispensar aviso" ' +
+        'style="margin-left:8px;background:transparent;color:#fff;border:none;font-size:15px;cursor:pointer;' +
+        'padding:2px 6px">&times;</button>' +
+        // Sem opacidade: a 12px sobre o âmbar ela derrubava o contraste para
+        // 4,50:1, exatamente em cima do mínimo. A hierarquia aqui se faz por
+        // tamanho (12 contra 13) e não por cinza — regra da régua do JOB.
+        '<div id="job-mem-expl" hidden style="max-width:640px;margin:8px auto 2px;font-size:12px;' +
+        'line-height:1.5;text-align:left">' +
+        'O navegador reserva uma quantidade de memória para cada aba. O WhatsApp aberto o dia inteiro vai ' +
+        'enchendo essa reserva e, quando ela lota, o Chrome fecha a aba sozinho e mostra a tela de erro. ' +
+        'Atualizar a página esvazia a reserva e recomeça do zero. Suas conversas ficam no WhatsApp, não aqui.' +
+        '</div>';
+      document.body.appendChild(d);
+      // Nasce deslocado e entra: nada aparece do nada, e só transform/opacity
+      // se movem (as duas que rodam na GPU e não refazem layout).
+      const suave = !window.matchMedia || !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      requestAnimationFrame(() => {
+        d.style.opacity = '1';
+        d.style.transform = suave ? 'translateY(0)' : 'none';
+      });
+      const btnI = d.querySelector('#job-mem-i');
+      const expl = d.querySelector('#job-mem-expl');
+      if (btnI && expl) _ouvir(btnI, 'click', () => { expl.hidden = !expl.hidden; });
+      const rec = d.querySelector('#job-mem-reload');
+      if (rec) {
+        _ouvir(rec, 'click', () => { _cxGravar(true, 'recarga_pedida_no_aviso'); location.reload(); });
+        _ouvir(rec, 'pointerdown', () => { rec.style.transform = 'scale(.97)'; });
+        _ouvir(rec, 'pointerup', () => { rec.style.transform = 'none'; });
+        _ouvir(rec, 'pointerleave', () => { rec.style.transform = 'none'; });
+      }
+      const fec = d.querySelector('#job-mem-fechar');
+      if (fec) _ouvir(fec, 'click', () => { try { d.remove(); } catch (e) {} });
+    } catch (e) { /* o aviso nunca pode virar outro erro */ }
+  }
+
+  // Varre os retratos que ficaram para trás e reporta as abas que morreram.
+  // Roda uma vez, no boot: é o único momento em que dá pra saber que a aba
+  // anterior nunca se despediu.
+  async function _cxVarrerMortes() {
+    try {
+      const tudo = await _safeStorageGet(null);
+      if (!tudo) return;
+      const agora = Date.now();
+      const apagar = [];
+      const mortes = [];
+      for (const chave of Object.keys(tudo)) {
+        if (chave.indexOf('jobRetrato:') !== 0 || chave === _CX_CHAVE) continue;
+        const r = tudo[chave];
+        if (!r || typeof r !== 'object') { apagar.push(chave); continue; }
+        if (r.limpo) { apagar.push(chave); continue; }          // se despediu: nada a relatar
+        // Sinal recente = a aba dona deste retrato ESTÁ VIVA agora, em outra
+        // janela. Não é morte, e mexer nela seria inventar uma.
+        if (agora - (r.ultimo_sinal || 0) < _CX_PERIODO * 3) continue;
+        mortes.push(r);
+        apagar.push(chave);
+      }
+      if (apagar.length) { try { chrome.storage.local.remove(apagar); } catch (e) {} }
+      for (const r of mortes) {
+        await _safeSendMessage({ type: 'aba_morreu', retrato: r });
+      }
+    } catch (e) { /* medir nunca atrapalha */ }
+  }
+
+  function _cxIniciar() {
+    try {
+      // pagehide é o evento que o Chrome dispara em F5, fechar aba e fechar
+      // navegador — e o ÚNICO que ele NÃO dispara quando mata o renderizador.
+      // É exatamente essa ausência que vira a prova do crash.
+      _ouvir(window, 'pagehide', () => { _cxGravar(true, 'saida_limpa'); });
+      // Ao esconder a aba, grava na hora: se ela morrer em segundo plano, o
+      // último retrato é deste instante e não de até 30s atrás.
+      _ouvir(document, 'visibilitychange', () => { if (document.hidden) _cxGravar(false, 'escondeu'); });
+      _cxBater();
+      // Sem _soComAbaVisivel de propósito: a aba também morre em segundo plano,
+      // e é justamente aí que ninguém vê acontecer. O tique custa uma leitura de
+      // contador e uma escrita pequena.
+      _registrarLoop(setInterval(_cxBater, _CX_PERIODO));
+      _cxVarrerMortes();
+    } catch (e) { /* medir nunca atrapalha */ }
+  }
+
   // ── Descobre o container rolável das mensagens (o WhatsApp muda as classes,
   //    então detectamos pelo comportamento: dentro do #main, o elemento que
   //    realmente rola verticalmente). ──
@@ -13355,6 +13571,10 @@
   const _MET = [];
   function _metrica(operacao, ms, ok, detalhe) {
     try {
+      // A caixa-preta guarda a ÚLTIMA operação junto do retrato. Se a aba morrer,
+      // é isto que responde "morreu fazendo o quê" — sem precisar instrumentar
+      // cada chamada de novo: toda operação já passa por aqui.
+      _cxMarcarOperacao(operacao);
       _MET.push({ operacao, ms: Math.round(ms), ok: ok !== false, detalhe: detalhe || '' });
       if (_MET.length >= 12) _enviarMetricas();
     } catch (e) { /* medir nunca pode atrapalhar */ }
@@ -13846,6 +14066,9 @@
     document.body.setAttribute('data-job-tema', tema === 'claro' ? 'claro' : 'escuro');
   }
   chrome.storage.local.get(['tema']).then((c) => aplicarTema(c && c.tema)).catch(() => {});
+
+  // Caixa-preta por último: todos os caches que ela mede já existem neste ponto.
+  _cxIniciar();
 
   } // fim de _bootJobSerenus
 })();
