@@ -46691,7 +46691,12 @@ def crm_importar_zapvoice():
                     mid = id_modelo.get(passo.get('itemId'))
                     if not mid:
                         continue
-                    delay = _funil_num(passo.get('delayBeforeSend'), 0, 0, 3600)
+                    # O ZapVoice grava o intervalo em MILISSEGUNDOS; aqui a coluna
+                    # é em SEGUNDOS. Sem converter, um passo de 5s virava 5000s
+                    # (83 min) e tudo acima de 3600 ainda era achatado no teto —
+                    # ou seja, todo funil importado saía inutilizável.
+                    delay_ms = _funil_num(passo.get('delayBeforeSend'), 0, 0, 3600 * 1000)
+                    delay = int(round(delay_ms / 1000))
                     passos.append((mid, delay))
                 if not passos:
                     contagem['pulados'] += 1
