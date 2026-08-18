@@ -50236,15 +50236,38 @@ if __name__ == '__main__':
     app.run(debug=False, host='0.0.0.0', port=port)
 
 # ─── DEBUG INFO PARA PRODUÇÃO ────────────────────────────────────────────
-# CÓDIGO MORTO EM PRODUÇÃO: está depois do app.run() acima, que bloqueia. Estes
-# prints nunca saem no Railway (só se algum dia o start virar gunicorn, como no
-# Procfile). Mantidos como estavam — mas NÃO adicione nada aqui embaixo achando
-# que roda no deploy.
-print(f"\n[STARTUP] DATABASE_URL: {os.environ.get('DATABASE_URL', 'NÃO ENCONTRADA')[:80]}")
+# ATENÇÃO: este trecho NÃO é código morto. O app.run() acima só bloqueia sob
+# `python3 app.py`; em produção o start é gunicorn (`app:app`), que importa o
+# módulo — então tudo aqui embaixo roda no deploy e vai parar no log da Railway.
+def _mascarar_url_bd(url):
+    """Esconde a senha antes de imprimir. O log da Railway é lido por gente que
+    não precisa (nem deveria) ver a credencial do banco — e por muito tempo ele
+    saiu inteiro, com senha em texto puro, a cada boot.
+
+    Mexe só no trecho de autenticação (entre '://' e a primeira '/' depois
+    dele), senão uma senha com '@' ou um '@' na query bagunçam o recorte."""
+    if not url:
+        return 'NÃO ENCONTRADA'
+    marca = url.find('://')
+    if marca == -1:
+        return url
+    ini = marca + 3
+    fim = url.find('/', ini)
+    if fim == -1:
+        fim = len(url)
+    autoridade = url[ini:fim]
+    if '@' not in autoridade:
+        return url  # sem credencial embutida, nada a esconder
+    credencial, _, host = autoridade.rpartition('@')
+    usuario = credencial.split(':', 1)[0]
+    return f"{url[:ini]}{usuario}:***@{host}{url[fim:]}"
+
+
+print(f"\n[STARTUP] DATABASE_URL: {_mascarar_url_bd(os.environ.get('DATABASE_URL'))[:80]}")
 print(f"[STARTUP] HAS_POSTGRES: {HAS_POSTGRES}")
 print(f"[STARTUP] Modo BD selecionado: {DB_MODE.upper()}")
 if DB_MODE == 'postgres':
     db_url = os.environ.get('DATABASE_URL', '')
-    print(f"[STARTUP] PostgreSQL: {db_url[:60]}..." if db_url else "[STARTUP] PostgreSQL: NÃO CONFIGURADO")
+    print(f"[STARTUP] PostgreSQL: {_mascarar_url_bd(db_url)[:60]}..." if db_url else "[STARTUP] PostgreSQL: NÃO CONFIGURADO")
 else:
     print(f"[STARTUP] SQLite: {DB}")
