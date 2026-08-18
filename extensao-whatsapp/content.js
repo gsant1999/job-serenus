@@ -4677,16 +4677,40 @@
   // Por isso este gate: quem quiser tocar a wa-js tenta pegar; se outra rotina
   // já está com ele, desiste dessa vez e tenta de novo daqui a pouco — nunca
   // duas ao mesmo tempo.
-  const _JOB_GATE = { ocupado: false, por: '' };
+  // ENVIO NÃO ESPERA VARREDURA. A PRIORIDADE É DESIGUAL DE PROPÓSITO.
+  //
+  // A trava sozinha resolvia o travamento e criava outro problema: a varredura
+  // é uma rotina LONGA (uma conversa por vez, com pausa, dezenas por rodada) e
+  // o envio é curto e urgente. Enquanto ela rodava, a mensagem esperava —
+  // e em 18/08/2026 isso custou caro: quatro aberturas de lead pago ficaram
+  // paradas desde as 11h da manhã, com a varredura correndo atrás de 7 dias
+  // de atraso. Cliente que pediu cotação e não recebeu a primeira mensagem.
+  //
+  // Regra nova: quem quer a vez PEDE, e a varredura cede entre uma conversa e
+  // outra. Ela é trabalho de fundo, pode ser interrompida e continua depois;
+  // o lead pago esperando resposta, não. O teto de espera do envio deixa de
+  // ser "o tempo que a varredura levar" e passa a ser "uma conversa".
+  const _JOB_GATE = { ocupado: false, por: '', querPassar: 0 };
+  // Quem tem passe de urgência: tudo que é mensagem indo pro cliente.
+  const _JOB_GATE_URGENTE = ['envio', 'envio_direto'];
   function _jobGateTentar(quem) {
-    if (_JOB_GATE.ocupado) return false;
+    if (_JOB_GATE.ocupado) {
+      // Não conseguiu agora, mas registra que está esperando: a rotina longa
+      // olha isto entre uma conversa e outra e sai da frente.
+      if (_JOB_GATE_URGENTE.indexOf(quem) >= 0) _JOB_GATE.querPassar += 1;
+      return false;
+    }
     _JOB_GATE.ocupado = true;
     _JOB_GATE.por = quem;
     return true;
   }
+  // A rotina longa chama isto no meio do trabalho. `true` = alguém urgente
+  // está esperando, então pare aqui e devolva a vez.
+  function _jobGateCederam() { return _JOB_GATE.querPassar > 0; }
   function _jobGateSoltar() {
     _JOB_GATE.ocupado = false;
     _JOB_GATE.por = '';
+    _JOB_GATE.querPassar = 0;
   }
 
   // ═══════════════ Varredura diária das conversas ═══════════════
@@ -4765,6 +4789,25 @@
 
       for (const alvo of fila) {
         if (!VAR.ligada && !manual) break;
+        // SAI DA FRENTE DE QUEM TEM PRESSA.
+        //
+        // Mensagem pro cliente esperando é mais urgente que ler conversa. A
+        // varredura para aqui, no limite entre uma conversa e outra (nunca no
+        // meio de uma), devolve a vez e continua na próxima rodada de onde
+        // parou — o servidor sabe o que já foi lido, então nada se perde.
+        if (_jobGateCederam()) {
+          VAR.placar.cedeu = (VAR.placar.cedeu || 0) + 1;
+          _agendarFila(1);            // acorda o envio agora, sem esperar o tique
+          // CEDER NÃO PODE CUSTAR MEIA HORA DE VARREDURA.
+          //
+          // `ultimaRodada` foi carimbada no começo desta rodada, então sem
+          // isto a varredura só voltaria no intervalo cheio (30 min) por ter
+          // parado pra deixar UMA mensagem passar. Recuando o carimbo, o tique
+          // de 5 em 5 minutos a retoma de onde parou — o servidor sabe o que
+          // já foi lido, então ela não relê nada.
+          VAR.ultimaRodada = Date.now() - VAR.INTERVALO_MS;
+          break;
+        }
         try {
           await varreduraUmaConversa(alvo, porId[alvo.chat_id] || {});
           VAR.placar.analisadas += 1;
