@@ -14,6 +14,7 @@ Legenda: [ ] pendente · [~] em andamento · [x] feito · (?) aguardando decisã
   - **(A) a saudação não funciona** — problema de copy. Como medir: abrir 8-10 das conversas disparadas no WhatsApp e ver se o contato leu e ignorou. Se leu e ignorou em massa, é a mensagem.
   - **(B) a detecção de resposta não pega** — problema técnico, e mais provável de passar despercebido. Marcar "respondeu" depende da extensão estar aberta na aba do WhatsApp do consultor (`checarInbound` em `extensao-whatsapp/wpp-bridge.js` → `campanha_contato.respondeu_em`). Consultor que fechou o WhatsApp Web recebe a resposta no celular e o JOB nunca fica sabendo. Como medir: comparar `respondeu_em` com as conversas reais, e conferir se os 5 consultores estavam "Aptos" na janela do disparo.
   - **Por que importa:** se for (B), a taxa de resposta de **todas** as campanhas está subestimada, e qualquer decisão de copy tomada em cima desse número foi tomada em cima de dado errado.
+  - **ATUALIZAÇÃO 18/08/2026 — a hipótese (B) ganhou um suspeito concreto.** A auditoria achou que `checarCampanhaAguardando()` (a rotina que reporta resposta de lead ao JOB) estava **desligada** para quem entrou pelo login de e-mail/senha: ela exigia a chave antiga `extKey`, que o login novo nunca grava. Mesma trava matava o batimento de presença, então o consultor ainda contava como offline na roleta. Corrigido na extensão **4.98.0** — mas **o número só volta a ser confiável depois que todos atualizarem**. Não tomar decisão de copy com dado anterior a isso. Ver a seção de 18/08 no fim deste arquivo.
 
 ## CRM (feedback Danilo — checklist atualizado 03/07/2026)
 
@@ -222,3 +223,188 @@ Metade do trabalho pode ser só aplicar o que já existe.
 - [~] Botão na ficha do lead pra abrir a conversa do BotConversa em popup (URL+ID do lead/subscriber) — pedido 04/07/2026, em construção
 - [ ] Enviar mensagem automática por mudança de etapa do CRM — depende de decidir regras (qual etapa dispara qual mensagem) e ter a chave API de produção
 - [ ] Sincronizar atendente responsável (JOB responsavel_id → BotConversa manager) — só faz sentido pras 3 consultoras que usam BootConversa (Prisciele/Juliana/Jenifer), ver [[canais-whatsapp-por-consultor]]
+
+## Inteligência de Vendas, leitura de conversa e falha silenciosa (18/08/2026)
+
+Sessão longa que começou em "arruma a página de Inteligência de Vendas" e virou
+uma caçada a uma classe de defeito: **o sistema parar de funcionar sem ninguém
+ficar sabendo**. Sete commits no ar. Tudo abaixo foi medido contra o banco de
+produção, não deduzido.
+
+### O que foi feito
+
+- [x] **Inteligência de Vendas mostrava 1 venda; passou a mostrar 71.** A página
+  contava `status_operacional='Emitida/Ativa'`. Das 71 propostas vivas, 48
+  estavam no valor DEFAULT da coluna e 1 em Emitida/Ativa — a tela media a
+  disciplina de preencher a esteira, não a venda. Base agora é toda proposta
+  viva (não excluída, não estornada), que é o que "Proposta cadastrada" já
+  significa no próprio JOB.
+- [x] **O cruzamento com a análise de conversa casava por telefone, e o telefone
+  morreu com o @lid.** 1992 das 2033 análises têm `telefone_norm` vazio; 2000
+  têm `lead_id`. Trocando a chave, 21 vendas ganham análise (por telefone eram
+  3). Objeções, cidade, score e tempo até fechar eram painel vazio por
+  construção.
+- [x] **A página deixou de olhar o andamento da proposta** (decisão do Guilherme,
+  18/08: "essa parte de status é desnecessária, não temos usabilidade"). No
+  lugar entrou **"O perfil de quem contrata"**: fatores lidos do CADASTRO da
+  proposta, que existem para as 71 e não só para as 21 com conversa — vidas,
+  idade do titular na data da venda, valor mensal, acomodação, coparticipação,
+  modalidade. Cada painel declara sobre quantas vendas conseguiu medir.
+- [x] **`/ebook-vendas`** — o material de treino montado na hora das vendas
+  reais, em 4 capítulos, com `@media print` próprio (o navegador é o gerador de
+  PDF; biblioteca nova no Railway seria custo sem ganho).
+- [x] **Fila obrigatória de leitura das vendas fechadas.** Toda proposta nova já
+  nasce enfileirada; lote com prioridade passa na frente da varredura
+  exploratória; idempotente. Reusa o protocolo que a extensão já tem — zero
+  código novo nela.
+- [x] **Pendências no sino** — notificação que só sai quando o problema acaba.
+  Tem `chave` (identidade do problema), `como_resolver` escrito junto, e não
+  tem botão de dispensar de propósito. Marcar como lida NÃO tira do sino nem do
+  contador. Dois detectores ligados: extensão abaixo do mínimo (em duas
+  gravidades) e leitura de conversa calada 6h+ em horário comercial.
+- [x] **Tela "Está rodando agora?"** em Configurações: por pessoa, último sinal,
+  versão, quantas leu hoje e o MOTIVO REAL de não estar rodando. Fecha dizendo
+  onde cada coisa mora (conversa → análise → mensuração → inteligência).
+- [x] Barra de filtro do `.toolbar` endireitada no `base.html` (a regra global
+  dava largura total a todo `<select>`; qualquer tela com filtro de select
+  virava uma pilha).
+- [x] Tabela de log do Ghostwriter: `criado_em` estava escrita duas vezes no
+  CREATE do PostgreSQL. Em produção era só barulho (a tabela já existia), mas
+  num banco NOVO ela nunca seria criada — e isso importa com a venda para outras
+  corretoras.
+
+### O apagão de 7 dias, e a causa raiz
+
+A varredura automática **parou em 11/08 às 17:17 e ficou até 18/08 sem ler uma
+única conversa**, com a tela de configuração mostrando tudo ligado e 5
+consultores marcados. Ninguém percebeu.
+
+Causa: `/api/whatsapp/config-remota` respondia `pode_rodar=False,
+motivo='nao_autenticado'` **cravado**, para todo mundo, para sempre. A decisão
+por consultor tinha saído dali por um motivo correto (a rota é pública e a
+decisão por usuário deixava enumerar quem existe) — mas nada colocou ela de
+volta. `rodar_agora` era derivado do mesmo motivo cravado: o botão "Rodar agora"
+apertado em 12/08 não fez nada.
+
+Custo real da leitura, para dimensionar: **1.922 análises em agosto por US$ 4,40**
+(US$ 0,0023 por conversa). Custo nunca foi a restrição.
+
+### A regra que ficou (inegociável)
+
+**Versão nova melhora; versão velha NÃO PARA O TRABALHO.**
+
+O primeiro conserto do apagão exigiu uma rota que só a 4.96 conhece — e com isso
+toda extensão anterior parou de ler conversa. Guilherme cortou: *"as novas
+versões devem sempre melhorar a usabilidade, mas não podem impedir o trabalho no
+dia a dia; temos que extrair o mínimo possível, ou notificar que aquele usuário
+está abaixo do mínimo aceitável"*.
+
+Implementado em `EXT_VERSAO` (app.py):
+
+- `bloqueia_abaixo` (3.27.0) — **único** caso em que bloquear vence rodar, porque
+  abaixo disso a leitura grava dado errado (1 mensagem por conversa, sem dono) e
+  o estrago é permanente e silencioso.
+- `ideal` — abaixo disso trabalha reduzido e **abre pendência**. Nunca bloqueia.
+
+E as duas gravidades têm textos diferentes de propósito: a travada diz que
+parou, a atrasada diz que continua trabalhando. Pintar as duas de vermelho
+ensina a ignorar as duas.
+
+### O que a auditoria encontrou (2 rodadas, 29 agentes)
+
+A primeira rodada morreu no limite de sessão (12 de 17 agentes); a segunda
+terminou inteira. **O achado mais caro não estava na varredura:**
+
+- [x] **Quatro rotinas de fundo da extensão estavam mortas para quem entrou pelo
+  login novo.** Elas exigiam a chave ANTIGA (`extKey`), e o login por e-mail e
+  senha — que o portão OBRIGA — grava `extToken` e nunca `extKey`. Fila de envio
+  (mensagens ficavam "na fila" e nunca saíam), inbox de leads, vigília de
+  campanha (resposta de lead nunca reportada: a campanha parecia ruim, era a
+  extensão muda) e o batimento de presença (o consultor contava como OFFLINE e
+  saía do rodízio de disparo). Todas saíam por um `return` mudo.
+  **Isto pode explicar a taxa de resposta 0% do disparo registrada em 03/08 —
+  ver o item da hipótese (B) mais acima.**
+- [x] E o inbox não ficava só vazio: **afirmava "Nenhum lead esperando"** a
+  partir de uma lista que nunca foi buscada. Agora são três estados.
+- [x] O vigia da ponte desistia após 1 minuto em silêncio absoluto, e o motivo da
+  falha do injetor chegava e era descartado.
+
+### Pendente — gravidade ALTA (confirmado por verificação cética, NÃO corrigido)
+
+Cada um mexe em dinheiro ou em lead. Não foram atacados porque cada um é uma
+decisão de comportamento, não um bug óbvio.
+
+- [ ] **`app.py:8263` — webhook do Asaas com token inválido responde 200 e não
+  grava nada em `webhook_log`.** O Asaas não reenvia: pagamento confirmado que o
+  JOB nunca soube. Conserto: responder 401 e registrar a tentativa.
+- [ ] **`app.py:48733` — planilha inacessível vira lista vazia e conta como
+  sucesso.** Os dois leitores só olham exceção; não checam status HTTP nem
+  Content-Type. Planilha que virou tela de login = leads param de entrar sem um
+  log.
+- [ ] **`app.py:45181` — cada lead que falha ao gravar some sem log e sem
+  contador** (`except Exception:` sem `as e`). Rodada com zero leads tem a mesma
+  assinatura de sucesso.
+- [ ] **`app.py:11535` — lead pago é marcado como atendido ANTES do envio
+  acontecer**, e o consultor é avisado de um envio que ainda não saiu. Se
+  falhar, ninguém atende e a métrica diz que atendeu. Conserto proposto: marcar
+  em `/api/whatsapp/fila/<id>/confirmar`, e abrir pendência na falha terminal.
+- [ ] **`app.py:45652` — o funil avança de passo mesmo com o envio falhando**, e
+  `fluxo_envio_log` é write-only (nenhuma tela lê). Sem token do WhatsApp, a
+  inscrição percorre tudo e termina "concluída" com zero mensagens entregues.
+  Conserto proposto: separar falha permanente de temporária, repetir a
+  temporária 3× usando o próprio log como contador, e fazer alguma tela ler a
+  tabela.
+
+### Pendente — gravidade MÉDIA
+
+- [ ] `app.py:24684` — disparo: versão abaixo de 2.21.0 (ou desconhecida) tira o
+  consultor da roleta, e **o consultor não recebe aviso nenhum** (só o admin vê
+  em `/campanhas`). Mesma classe da regra acima: deveria degradar + notificar.
+  O literal `_EXT_VERSAO_MIN_DISPARO` está fora de `EXT_VERSAO` — unificar.
+- [ ] `app.py:41854` — lembrete da agenda é marcado como enviado e comitado ANTES
+  de tentar enviar; nada devolve `lembrete_enviado` para 0.
+- [ ] `app.py:48764` — guarda de marca desliga a importação de leads inteira com
+  um `return` mudo.
+- [ ] `app.py:28846` e `29067` — `"gestor": False` cravado em dois endpoints da
+  biblioteca (irmãos diretos do bug do `config-remota`); `"pode_editar": True`
+  cravado desenha Excluir em modelo que o servidor recusa.
+- [ ] `app.py:32841` — variável local cravada em True bloqueia
+  `/comissoes/regra-gestor/aplicar-historico` inteira.
+- [ ] `app.py:24579` — `/api/whatsapp/presenca` responde 200 com `{"ok": False}`
+  sem motivo e sem log.
+
+### Descartado na verificação
+
+- Faxina e resgate da fila de cotação só rodam com trabalhador vivo — **não é
+  defeito**: a fila não cresce sem trabalhador (a porta de entrada recusa), e o
+  resgate está posicionado onde tem efeito. Resíduo menor: o DELETE de 7 dias
+  também depende do `/proximo`, então dados podem ficar além da política se
+  ninguém voltar por semanas.
+
+### Ação obrigatória do Guilherme
+
+- [ ] **Publicar a extensão 4.98.0 na Chrome Web Store.** Nada do que foi
+  consertado na extensão chega a ninguém antes disso — e são quatro rotinas
+  religadas, não melhorias.
+- [ ] Abrir `/inteligencia-vendas` e clicar em "Mandar ler as conversas prontas"
+  (eram 33 na última medição). Depois disso não precisa mais: proposta nova já
+  nasce enfileirada.
+
+### Lições que valem para o próximo trabalho
+
+1. **Medir antes de opinar, sempre.** Eu errei um diagnóstico nesta sessão:
+   apontei crashes de JS da extensão como causa do apagão. A causa era uma linha
+   cravada no servidor. O que separou o palpite do fato foi consultar o banco de
+   produção.
+2. **Silêncio não é sinal de saúde.** Toda negativa precisa deixar rastro: quem,
+   quando, qual versão, qual motivo. Um `return` mudo numa rotina de fundo custa
+   dias.
+3. **Uma correção de segurança pode desligar uma funcionalidade inteira.** Tirar
+   a decisão da rota pública estava certo; não recolocá-la em lugar nenhum não
+   foi percebido por sete dias.
+4. **Política escrita em comentário não é política.** `EXT_VERSAO` existia
+   documentando a regra enquanto o ponto que de fato bloqueava usava um número
+   solto — mexer na política não mudava nada.
+5. **Tela que afirma sem ter olhado é pior que tela vazia.** "Nenhum lead
+   esperando" a partir de lista nunca buscada; "Pode rodar" em verde para quem a
+   fila recusa.
