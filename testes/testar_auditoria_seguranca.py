@@ -80,13 +80,15 @@ checa('botão do Painel só na máquina que cota', '(souTrab && _cotPedeOPainel(
 checa('background recusa abrir fora do trabalhador', 'aparelho_nao_cota_no_painel' in BG)
 checa('motivo testado por igualdade, não por prefixo',
       '_COT_PRECISA_PAINEL.some' not in CT and 'function _cotPedeOPainel' in CT)
-checa('site não linka o Painel',
-      'href="https://beta.paineldocorretor' not in TP)
+checa('site não linka a fonte do preço',
+      'paineldocorretor' not in TP)
 
 
 print('\n— Regras 7 e 8: ao vivo primeiro, e cache não se renova sozinho')
+# Ancora pela ORDEM das duas buscas, com os textos ja blindados: o rotulo da
+# consulta ao vivo nao pode mais nomear a fonte (ver testar_blindagem_fonte_preco).
 checa('ao vivo é tentado antes do banco',
-      TP.index('Buscando operadoras no Painel') < TP.index('Consultando planos no banco do JOB'))
+      TP.index('Buscando operadoras ao vivo') < TP.index('Consultando planos no banco do JOB'))
 checa('as duas fontes somam (operadoras só do JOB sobrevivem)', 'só na base do JOB' in TP)
 checa('quando cai pro banco, a tela diz que é base salva',
       'base salva do JOB</b>, não consultado agora' in TP)
