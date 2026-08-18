@@ -46465,14 +46465,17 @@ def crm_importar_zapvoice():
             cur = conn.cursor()
             cur.execute("INSERT INTO pastas (nome,parent_id,consultor_id) VALUES (?,NULL,?)", (nome_raiz, dono))
             raiz_id = _last_insert_id(cur)
+        # Backup grande sobe em vários pedaços no mesmo dia (upload em partes) —
+        # todos devem cair na MESMA pasta, não uma pasta nova por pedaço.
         pasta_nome = 'Importado do ZapVoice ' + datetime.now(TZ_SP).strftime('%d-%m-%Y')
-        base_pasta = pasta_nome
-        n_pasta = 2
-        while conn.execute("SELECT id FROM pastas WHERE parent_id=? AND nome=?", (raiz_id, pasta_nome)).fetchone():
-            pasta_nome = f'{base_pasta} ({n_pasta})'; n_pasta += 1
-        cur = conn.cursor()
-        cur.execute("INSERT INTO pastas (nome,parent_id,consultor_id) VALUES (?,?,NULL)", (pasta_nome, raiz_id))
-        pasta_id = _last_insert_id(cur)
+        existente = conn.execute("SELECT id FROM pastas WHERE parent_id=? AND nome=?",
+                                  (raiz_id, pasta_nome)).fetchone()
+        if existente:
+            pasta_id = existente['id']
+        else:
+            cur = conn.cursor()
+            cur.execute("INSERT INTO pastas (nome,parent_id,consultor_id) VALUES (?,?,NULL)", (pasta_nome, raiz_id))
+            pasta_id = _last_insert_id(cur)
 
         nomes = {r['nome'] for r in conn.execute("""SELECT nome FROM modelos_conteudo
             WHERE tipo='whatsapp' AND COALESCE(dono_consultor_id,0)=COALESCE(?,0)""", (dono,)).fetchall()}
