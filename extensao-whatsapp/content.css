@@ -1892,26 +1892,95 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-fb-cancelar:hover, .job-fb-fechar:hover { background: var(--job-bg3-hover); }
 
 /* Aviso de versão nova da extensão (balão fixo no canto) */
-#job-aviso-versao, #job-aviso-limpeza { position: fixed; right: 18px; width: 300px; z-index: 2147483200;
-  background: var(--job-bg1b); color: var(--job-txt); border: 1px solid var(--job-bg3-hover); border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(0,0,0,.45); font-family: 'NunitoJOB', -apple-system, "Segoe UI", sans-serif;
+/* MATERIAL, NAO CAIXA OPACA.
+   Este aviso flutua sobre a tela de OUTRO aplicativo. Superficie translucida
+   com desfoque diz "estou por cima, temporario" sem cortar um retangulo cego
+   no meio do WhatsApp. E painel paralelo, nao tarefa modal: sem cortina
+   atras, porque nao interrompe o que a pessoa esta fazendo.
+   Borda superior clara e a luz batendo no material. */
+#job-aviso-versao, #job-aviso-limpeza { position: fixed; right: 18px; width: 296px; z-index: 2147483200;
+  background: color-mix(in srgb, var(--job-bg1b) 82%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  color: var(--job-txt); border: 1px solid var(--job-bg3-hover);
+  border-top-color: color-mix(in srgb, var(--job-txt) 12%, transparent);
+  border-radius: 16px;
+  box-shadow: 0 16px 40px rgba(0,0,0,.42), 0 2px 8px rgba(0,0,0,.24);
+  font-family: 'NunitoJOB', -apple-system, "Segoe UI", sans-serif;
   overflow: hidden; }
-#job-aviso-versao { bottom: 18px; }
+
+/* MATERIALIZA, NAO PISCA. Nasce menor e um pouco abaixo — do canto onde ele
+   mora — e assenta. So transform e opacity: as duas que a GPU compoe sem
+   refazer layout a cada quadro. Curva de saida (comeca rapido), 220ms, que e
+   a faixa de folha/painel da regua do JOB. */
+#job-aviso-versao { bottom: 18px; opacity: 0; transform: translateY(10px) scale(.96);
+  transition: opacity 220ms cubic-bezier(.23,1,.32,1),
+              transform 220ms cubic-bezier(.23,1,.32,1); }
+#job-aviso-versao.job-aviso-versao-on { opacity: 1; transform: translateY(0) scale(1); }
+
+/* As tres preferencias, tratadas de verdade — cada uma muda uma coisa
+   diferente, e nenhuma delas quer dizer "sem retorno nenhum". */
+@media (prefers-reduced-motion: reduce) {
+  #job-aviso-versao { transform: none; transition: opacity 180ms ease; }
+  #job-aviso-versao.job-aviso-versao-on { transform: none; }
+  .job-aviso-versao-bt, .job-aviso-versao-depois, .job-aviso-versao-x { transition: none; }
+  .job-aviso-versao-bt:active, .job-aviso-versao-depois:active,
+  .job-aviso-versao-x:active { transform: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  #job-aviso-versao, #job-aviso-limpeza { background: var(--job-bg1b);
+    -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (prefers-contrast: more) {
+  #job-aviso-versao, #job-aviso-limpeza { background: var(--job-bg1b);
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+    border-color: var(--job-txt-fraco); }
+  .job-aviso-versao-nota { color: var(--job-txt); }
+}
 #job-aviso-limpeza { bottom: 18px; }
 /* se os dois aparecerem juntos, empilha a limpeza acima da versão */
 #job-aviso-versao ~ #job-aviso-limpeza { bottom: 190px; }
 .job-aviso-limpeza-topo { background: rgba(244,63,94,.14) !important; }
 #job-aviso-versao.job-painel-doc-esquerda, .job-esquerda #job-aviso-versao { right: auto; left: 18px; }
+/* O TOPO E LEGENDA, NAO MANCHETE.
+   Tinha faixa verde e texto na cor de acento, competindo com a acao — dois
+   elementos gritando num aviso que o proprio texto diz ser opcional. Agora
+   recua: caixa alta pequena, peso medio, cor fraca. Diz de quem e o aviso e
+   sai da frente. */
 .job-aviso-versao-topo { display: flex; align-items: center; justify-content: space-between;
-  padding: 11px 14px; background: rgba(31,216,164,.1); border-bottom: 1px solid var(--job-bg3); }
-.job-aviso-versao-topo b { font-size: 13px; color: var(--job-acento); }
-.job-aviso-versao-x { background: none; border: none; color: var(--job-txt-fraco); font-size: 20px; line-height: 1;
-  cursor: pointer; padding: 0 2px; }
-.job-aviso-versao-x:hover { color: var(--job-txt); }
-.job-aviso-versao-corpo { padding: 12px 14px 14px; font-size: 12.5px; line-height: 1.5; }
+  padding: 12px 15px 0; }
+.job-aviso-versao-topo span { font-size: 10.5px; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--job-txt-fraco2); }
+.job-aviso-versao-x { background: none; border: none; color: var(--job-txt-fraco2); font-size: 19px;
+  line-height: 1; cursor: pointer; padding: 0 2px; border-radius: 6px;
+  transition: color 140ms var(--job-ease-saida, cubic-bezier(.23,1,.32,1)); }
+.job-aviso-versao-x:active { transform: scale(.94); }
+.job-aviso-versao-corpo { padding: 6px 15px 15px; font-size: 12.5px; line-height: 1.5; }
 .job-aviso-versao-corpo ol { margin: 8px 0 0; padding-left: 18px; }
 .job-aviso-versao-corpo li { margin: 4px 0; }
-.job-aviso-versao-nota { margin-top: 10px; font-size: 11px; color: var(--job-txt-fraco); }
+
+/* O SALTO DE VERSAO E O DADO. Fica sozinho e grande, com tracking negativo
+   como todo numero grande pede, e o destino em peso maximo — e pra ele que o
+   olho vai primeiro. A origem fica fraca porque ja e passado. */
+.job-aviso-versao-salto { display: flex; align-items: baseline; gap: 7px;
+  margin: 2px 0 8px; font-family: var(--job-ui); }
+.job-aviso-versao-de { font-size: 15px; font-weight: 600; color: var(--job-txt-fraco2);
+  letter-spacing: -.01em; }
+.job-aviso-versao-seta { font-size: 13px; color: var(--job-txt-fraco2); }
+.job-aviso-versao-para { font-size: 20px; font-weight: 800; color: var(--job-txt);
+  letter-spacing: -.02em; }
+
+.job-aviso-versao-nota { font-size: 11.5px; line-height: 1.5; color: var(--job-txt-fraco); }
+
+/* UMA ACAO PRINCIPAL, E ELA TEM O TAMANHO DO QUE E.
+   "Depois" ao lado, em texto, porque sair tem que ser tao facil quanto entrar
+   — e porque um X sozinho no canto nao e uma saida obvia pra todo mundo. */
+.job-aviso-versao-acoes { display: flex; align-items: center; gap: 8px; margin-top: 13px; }
+.job-aviso-versao-depois { background: none; border: none; cursor: pointer;
+  font-family: var(--job-ui); font-size: 12px; font-weight: 600;
+  color: var(--job-txt-fraco); padding: 9px 10px; border-radius: 9px;
+  transition: color 140ms var(--job-ease-saida, cubic-bezier(.23,1,.32,1)); }
+.job-aviso-versao-depois:active { transform: scale(.97); }
 
 /* Card flutuante pra pedir o número quando o WhatsApp não expõe (business/@lid).
    NÃO é modal — sem fundo escuro cobrindo a tela, o consultor continua livre pra
@@ -4054,11 +4123,20 @@ body[data-job-tema="claro"] .job-cot-prev-txt { color-scheme: light; }
 /* O botao que leva pra pagina de instalacao. A extensao e distribuida por
    LINK, nao pela loja: sem este caminho o aviso dizia "atualize" e nao dizia
    como, e a pessoa ficava com a versao velha achando que tinha atualizado. */
-.job-aviso-versao-bt { display: block; margin-top: 10px; padding: 9px 12px;
-  border-radius: 10px; text-align: center; text-decoration: none;
+.job-aviso-versao-bt { display: inline-block; padding: 9px 16px;
+  border-radius: 9px; text-align: center; text-decoration: none;
   background: var(--job-acento); color: #06131a;
-  font-family: var(--job-ui); font-size: 12.5px; font-weight: 700; }
-.job-aviso-versao-bt:hover { filter: brightness(1.06); }
+  font-family: var(--job-ui); font-size: 12.5px; font-weight: 700; letter-spacing: -.005em;
+  transition: filter 140ms var(--job-ease-saida, cubic-bezier(.23,1,.32,1)),
+              transform 140ms var(--job-ease-saida, cubic-bezier(.23,1,.32,1)); }
+/* Hover so onde existe mouse: no toque ele dispara no tap e gruda. */
+@media (hover: hover) and (pointer: fine) {
+  .job-aviso-versao-bt:hover { filter: brightness(1.06); }
+  .job-aviso-versao-x:hover { color: var(--job-txt); }
+  .job-aviso-versao-depois:hover { color: var(--job-txt); }
+}
+/* Responde ao dedo no PRESSIONAR, nao no soltar. */
+.job-aviso-versao-bt:active { transform: scale(.97); }
 
 
 /* ── PROCEDENCIA DO DADO ───────────────────────────────────────────────────

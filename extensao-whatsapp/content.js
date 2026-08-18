@@ -13464,10 +13464,20 @@
     if (document.getElementById('job-aviso-versao')) return;
     const box = document.createElement('div');
     box.id = 'job-aviso-versao';
+    // O DADO É A VERSÃO, NÃO A FRASE SOBRE ELA.
+    //
+    // Estava tudo com o mesmo peso: título, frase, ressalva e um botão verde
+    // gritando por uma ação que o próprio texto diz ser opcional. Quem bate o
+    // olho não sabia o que ler primeiro, e a cor cheia prometia urgência que
+    // não existe.
+    //
+    // Agora a hierarquia é: o salto de versão (o dado), a consequência (não
+    // trava nada), e a ação — proporcional ao que ela é. O rótulo do topo é
+    // legenda, então some pro fundo em vez de disputar.
     box.innerHTML =
       '<div class="job-aviso-versao-topo">' +
-        '<b>Atualização da extensão JOB</b>' +
-        '<button class="job-aviso-versao-x" title="Depois">×</button>' +
+        '<span>Extensão JOB</span>' +
+        '<button class="job-aviso-versao-x" title="Depois" aria-label="Fechar">×</button>' +
       '</div>' +
       '<div class="job-aviso-versao-corpo">' +
         // A INSTRUCAO ANTIGA ERA MENTIRA NESTE MODELO DE DISTRIBUICAO.
@@ -13478,7 +13488,13 @@
         // atualiza sozinho, e fechar aba nao muda nada — a pessoa fazia os dois
         // passos, via a versao velha de novo, e concluia que o aviso estava
         // quebrado.
-        'Saiu a versão <b>' + nova + '</b> e você está na <b>' + minha + '</b>.' +
+        // O SALTO DE VERSAO E A INFORMACAO. Ele fica sozinho, grande, com o
+        // numero novo em destaque — em vez de escondido no meio de uma frase.
+        '<div class="job-aviso-versao-salto">' +
+          '<span class="job-aviso-versao-de">' + esc(minha) + '</span>' +
+          '<span class="job-aviso-versao-seta">→</span>' +
+          '<b class="job-aviso-versao-para">' + esc(nova) + '</b>' +
+        '</div>' +
         // A SUA VERSAO CONTINUA FUNCIONANDO.
         //
         // Com melhoria saindo toda hora e sem loja pra empurrar, cada consultora
@@ -13486,13 +13502,29 @@
         // "voce esta obsoleto" — quando alguma coisa de fato parar de funcionar
         // numa versao, o aviso tera outras palavras.
         '<div class="job-aviso-versao-nota">' +
-          'A sua versão <b>continua funcionando</b> — atualizar é ganho, não obrigação.' +
+          'A sua continua funcionando. Atualizar leva cerca de um minuto.' +
         '</div>' +
-        '<a class="job-aviso-versao-bt" href="' + esc(_SITE_BASE_URL_EXT + '/extensao/instalar') + '" ' +
-          'target="_blank" rel="noopener">Atualizar extensão agora (leva um minuto)</a>' +
+        '<div class="job-aviso-versao-acoes">' +
+          '<a class="job-aviso-versao-bt" href="' + esc(_SITE_BASE_URL_EXT + '/extensao/instalar') + '" ' +
+            'target="_blank" rel="noopener">Atualizar agora</a>' +
+          '<button type="button" class="job-aviso-versao-depois">Depois</button>' +
+        '</div>' +
       '</div>';
     document.body.appendChild(box);
-    box.querySelector('.job-aviso-versao-x').addEventListener('click', () => box.remove());
+    // ENTRA COMO MATERIAL, NAO COMO PISCADA.
+    //
+    // Nasce um pouco menor e deslocado pra baixo, e assenta. Nada nasce do
+    // nada; e o deslocamento vem do canto onde ele mora, entao o movimento
+    // aponta de onde a coisa veio. Duas propriedades so — transform e opacity
+    // — que sao as que a GPU compoe sem refazer layout.
+    requestAnimationFrame(() => box.classList.add('job-aviso-versao-on'));
+    const sair = () => {
+      // Sai pelo mesmo caminho que entrou, e so entao some do DOM.
+      box.classList.remove('job-aviso-versao-on');
+      setTimeout(() => box.remove(), 220);
+    };
+    box.querySelector('.job-aviso-versao-x').addEventListener('click', sair);
+    box.querySelector('.job-aviso-versao-depois').addEventListener('click', sair);
   }
 
   // ── Detecta troca de conversa (o WhatsApp Web é uma SPA — não navega, só
