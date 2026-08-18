@@ -340,6 +340,16 @@
   .sino-item .si-quando { margin-left:auto; font-size:10.5px; color:var(--cinza-2); white-space:nowrap; }
   .sino-item .si-desc { font-size:12px; color:var(--cinza); line-height:1.4; padding-left:14px; }
   .sino-vazio { padding:30px 16px; text-align:center; color:var(--cinza-2); font-size:12.5px; }
+  /* Pendencia: separada dos avisos por um titulo de secao e por uma barra na
+     lateral. Marcar como lida NAO tira ela dali — o que tira e o problema ser
+     resolvido —, entao ela nunca recebe o esmaecido de 'ja vi'. */
+  .sino-sec { padding:9px 16px 6px; font-size:9.5px; font-weight:700; letter-spacing:.7px;
+              text-transform:uppercase; color:var(--cinza-2); background:var(--panel-2);
+              border-bottom:1px solid var(--borda); }
+  .sino-item.sino-pend { border-left:3px solid var(--amarelo); }
+  .sino-item.sino-pend.sev-erro { border-left-color:var(--erro); }
+  .sino-item.sino-pend .si-resolver { font-size:11.5px; color:var(--texto); line-height:1.5;
+              padding-left:14px; margin-top:5px; opacity:.9; }
 
   /* ═══ BUTTONS ═══ */
   .btn { background:var(--grad-frio); color:#fff; text-decoration:none; padding:0 18px;
@@ -1390,8 +1400,32 @@ function toggleTema() {
       if (n > 0) { badge.textContent = n > 99 ? '99+' : n; badge.style.display='flex'; btn.classList.add('tem-nova'); }
       else { badge.style.display='none'; btn.classList.remove('tem-nova'); }
       var lista = document.getElementById('sino-lista');
-      if (!d.itens || !d.itens.length) { lista.innerHTML = '<div class="sino-vazio">Nenhuma notificação ainda.</div>'; return; }
-      lista.innerHTML = d.itens.map(function(it){
+      var pend = d.pendencias || [];
+      // PENDENCIA NAO E AVISO. Aviso conta o que aconteceu e some quando lido;
+      // pendencia e trabalho a fazer e SO some quando o problema acabar. Por
+      // isso ela vem sempre no topo, com o que fazer escrito junto, e nao tem
+      // botao de dispensar: quem fecha e a realidade, nao o clique.
+      var htmlPend = '';
+      if (pend.length) {
+        htmlPend = '<div class="sino-sec">Pendências · ' + pend.length + '</div>' +
+          pend.map(function(p){
+            var onclick = p.link ? (' onclick="location.href=\'' + p.link + '\'"') : '';
+            return '<div class="sino-item sino-pend ' + (p.severidade === 'erro' ? 'sev-erro' : 'sev-atencao') + '"' + onclick + '>' +
+              '<div class="si-top"><span class="si-dot" style="background:' +
+                (p.severidade === 'erro' ? 'var(--erro)' : 'var(--amarelo)') + '"></span>' +
+              '<span class="si-titulo">' + escapeHtml(p.titulo) + '</span>' +
+              '<span class="si-quando">' + escapeHtml(p.quando) + '</span></div>' +
+              (p.descricao ? '<div class="si-desc">' + escapeHtml(p.descricao) + '</div>' : '') +
+              (p.como_resolver ? '<div class="si-resolver">' + escapeHtml(p.como_resolver) + '</div>' : '') +
+              '</div>';
+          }).join('');
+      }
+      if (!pend.length && (!d.itens || !d.itens.length)) {
+        lista.innerHTML = '<div class="sino-vazio">Nada pendente e nenhuma notificação.</div>'; return;
+      }
+      if (!d.itens || !d.itens.length) { lista.innerHTML = htmlPend; return; }
+      lista.innerHTML = htmlPend + (pend.length ? '<div class="sino-sec">Avisos</div>' : '') +
+        d.itens.map(function(it){
         var cor = CORES[it.tipo] || CORES.sistema;
         var cls = it.lida ? 'sino-item' : 'sino-item nao-lida';
         var onclick = it.link ? (' onclick="location.href=\'' + it.link + '\'"') : '';
@@ -1415,8 +1449,10 @@ function toggleTema() {
       // marca como lidas após abrir (tira o badge), mas mantém destaque visual na lista atual
       setTimeout(function(){
         fetch('/api/notificacoes/marcar-lidas', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
-          .then(function(){ var b=document.getElementById('sino-badge'); if(b) b.style.display='none';
-            var btn=document.getElementById('sino-btn'); if(btn) btn.classList.remove('tem-nova'); });
+          // RECARREGA em vez de apagar o badge na marra: pendencia aberta segue
+          // contando mesmo depois de lida, e esconder o badge aqui faria o sino
+          // mentir ate a proxima consulta. Quem decide o numero e o servidor.
+          .then(function(){ carregarNotificacoes(); });
       }, 1200);
     }
   };

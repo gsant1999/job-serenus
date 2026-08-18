@@ -3550,6 +3550,14 @@ def init_db():
         ("usuarios", "varr_versao", "TEXT"),
         ("usuarios", "varr_pode", "INTEGER DEFAULT 0"),
         ("usuarios", "varr_motivo", "TEXT"),
+        # PENDENCIA: notificacao que NAO sai do sino quando lida — so quando o
+        # problema for resolvido de verdade. 'chave' e a identidade do problema
+        # (uma por assunto+pessoa), pra checagem repetida nao encher o sino de
+        # copias da mesma coisa.
+        ("notificacoes", "chave", "TEXT"),
+        ("notificacoes", "resolvida_em", "TEXT"),
+        ("notificacoes", "severidade", "TEXT"),
+        ("notificacoes", "como_resolver", "TEXT"),
         # Qualificação do lead (aba na ficha existia só no front — nunca teve rota nem coluna)
         ("crm_leads", "qual_tipo_plano", "TEXT"),
         ("crm_leads", "qual_idade", "TEXT"),
@@ -4289,6 +4297,10 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_propostas_lead ON propostas(lead_id)",
         "CREATE INDEX IF NOT EXISTS idx_ads_status ON google_ads_conversoes(status)",
         "CREATE INDEX IF NOT EXISTS idx_conv_estado_tel ON wa_conversa_estado(telefone_norm)",
+        # A reconciliacao de pendencia roda no pulso da extensao (frequente) e
+        # procura por chave numa tabela que so cresce e nunca foi indexada.
+        "CREATE INDEX IF NOT EXISTS idx_notif_chave ON notificacoes(chave)",
+        "CREATE INDEX IF NOT EXISTS idx_notif_usuario ON notificacoes(usuario_id, id)",
         "CREATE INDEX IF NOT EXISTS idx_transcr_filehash ON whatsapp_transcricoes_cache(filehash)",
         "CREATE INDEX IF NOT EXISTS idx_wa_metrica_op ON wa_metrica(operacao, criado_em)",
         "CREATE INDEX IF NOT EXISTS idx_extrato_item ON comissao_extrato_item(extrato_id)",
@@ -14813,7 +14825,172 @@ def _perfil_da_venda(clientes):
     return perfil
 
 
-_VARR_VERSAO_MINIMA = '4.96.0'
+def _pendencia_abrir(conn, chave, titulo, descricao='', link='', como_resolver='',
+                     severidade='atencao', usuario_id=None):
+    """Abre (ou mantem) uma PENDENCIA no sino.
+
+    Diferenca pro aviso comum: aviso some quando lido, pendencia so some quando
+    RESOLVIDA. Ler nao resolve nada — foi por isso que a leitura de conversa
+    ficou 7 dias parada: mesmo que houvesse um aviso, ele teria sido lido,
+    dispensado e esquecido, com o problema de pe.
+
+    Idempotente por `chave`: a checagem roda o tempo todo e nao pode encher o
+    sino de copias do mesmo problema. Enquanto a pendencia estiver aberta, esta
+    funcao so atualiza o texto (o motivo pode mudar sem o problema sumir).
+    """
+    try:
+        ja = conn.execute("""SELECT id FROM notificacoes
+                              WHERE chave=? AND resolvida_em IS NULL
+                              ORDER BY id DESC LIMIT 1""", (chave,)).fetchone()
+        if ja:
+            conn.execute("""UPDATE notificacoes SET titulo=?, descricao=?, link=?,
+                            como_resolver=?, severidade=? WHERE id=?""",
+                         (titulo, descricao, link, como_resolver, severidade, ja['id']))
+            return False
+        conn.execute("""INSERT INTO notificacoes
+            (usuario_id, tipo, titulo, descricao, link, criado_em, chave,
+             severidade, como_resolver)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
+            (usuario_id, 'pendencia', titulo, descricao, link, _agora_sp(),
+             chave, severidade, como_resolver))
+        return True
+    except Exception as e:
+        app.logger.warning(f"[PENDENCIA] abrir {chave}: {e}")
+        return False
+
+
+def _pendencia_resolver(conn, chave):
+    """Fecha a pendencia porque o problema ACABOU — nao porque alguem clicou.
+
+    Quem resolve e a realidade: a extensao atualizou, a leitura voltou a rodar.
+    A tela nao tem botao de 'dispensar' de proposito.
+    """
+    try:
+        cur = conn.execute("""UPDATE notificacoes SET resolvida_em=?, lida=1
+                              WHERE chave=? AND resolvida_em IS NULL""",
+                           (_agora_sp(), chave))
+        return (getattr(cur, 'rowcount', 0) or 0) > 0
+    except Exception as e:
+        app.logger.warning(f"[PENDENCIA] resolver {chave}: {e}")
+        return False
+
+
+def _pendencias_reconciliar(conn):
+    """Passa os detectores e deixa o sino igual a realidade: abre o que esta
+    quebrado, fecha sozinho o que consertou.
+
+    Roda barato (duas consultas) e e chamada de onde ja se sabe o estado: no
+    pulso da extensao e ao abrir a tela de Configuracoes.
+    """
+    abertas, fechadas = 0, 0
+    agora = datetime.now(TZ_SP)
+
+    # 1) EXTENSAO ABAIXO DO IDEAL — por pessoa. Nao bloqueia o trabalho dela;
+    #    so avisa que esta rodando reduzida, e some sozinha quando atualizar.
+    try:
+        for u in conn.execute("""SELECT id, nome, varr_versao FROM usuarios
+                                  WHERE ativo=1 AND COALESCE(varredura_ativa,0)=1""").fetchall():
+            chave = f'ext_versao:{u["id"]}'
+            v = (u['varr_versao'] or '').strip()
+            primeiro = (u['nome'] or '').split()[0]
+            # DUAS GRAVIDADES, e a diferenca entre elas nao pode ser inventada
+            # pelo texto: abaixo do piso a pessoa esta PARADA; entre o piso e o
+            # ideal ela esta trabalhando reduzida. Dizer "continua lendo" pra
+            # quem esta travado seria a tela mentindo com boa intencao.
+            if v and not _versao_ge(v, EXT_VERSAO['bloqueia_abaixo']):
+                if _pendencia_abrir(
+                    conn, chave,
+                    f'{primeiro} está sem ler conversa: extensão muito antiga',
+                    f'A versão {v} lê a conversa errado (uma mensagem só, sem dono), '
+                    f'então o JOB prefere não ler a gravar dado errado. Nada do que '
+                    f'{primeiro} conversa está virando inteligência de venda.',
+                    '/configuracoes',
+                    f'Só volta a funcionar atualizando a extensão para a {EXT_VERSAO["ideal"]}: '
+                    'chrome://extensions, botão de atualizar, e F5 no WhatsApp Web.',
+                    'erro', None):
+                    abertas += 1
+            elif v and not _versao_ge(v, EXT_VERSAO['ideal']):
+                if _pendencia_abrir(
+                    conn, chave,
+                    f'Extensão de {primeiro} está desatualizada',
+                    f'Está na {v} e o recomendado é a {EXT_VERSAO["ideal"]}. '
+                    f'Ela continua lendo conversa normalmente, só sem a parte nova — '
+                    f'o JOB não consegue confirmar por que ela roda ou para.',
+                    '/configuracoes',
+                    'Peça para essa pessoa abrir chrome://extensions, clicar em atualizar, '
+                    'e dar F5 no WhatsApp Web. A pendência some sozinha quando a versão subir.',
+                    'atencao', None):
+                    abertas += 1
+            elif v:
+                if _pendencia_resolver(conn, chave):
+                    fechadas += 1
+    except Exception as e:
+        app.logger.warning(f"[PENDENCIA] versoes: {e}")
+
+    # 2) LEITURA CALADA EM HORARIO COMERCIAL. E o alarme que faltava: sem ele,
+    #    um apagao so aparece quando alguem for procurar. Com ele, aparece no
+    #    sino no mesmo dia.
+    try:
+        cfg = varredura_cfg(conn)
+        chave = 'varredura_calada'
+        ult = _parse_dt_seguro(conn.execute(
+            "SELECT MAX(criado_em) u FROM whatsapp_analises").fetchone()['u'])
+        if ult is not None and ult.tzinfo is None:
+            ult = TZ_SP.localize(ult)
+        horas = int((agora - ult).total_seconds() // 3600) if ult else None
+        dentro = (int(cfg.get('hora_inicio', 8)) <= agora.hour < int(cfg.get('hora_fim', 20))
+                  and agora.weekday() < 5)
+        # So acusa DENTRO do expediente: 12h de silencio de madrugada e o
+        # esperado, e alarme que toca quando esta tudo bem ensina a ignorar.
+        if cfg.get('ativa') and dentro and (horas is None or horas >= 6):
+            quanto = 'nunca rodou' if horas is None else (
+                f'há {horas // 24} dia(s)' if horas >= 24 else f'há {horas}h')
+            if _pendencia_abrir(
+                conn, chave,
+                'A leitura de conversas parou',
+                f'Nenhuma conversa foi lida {quanto}, e a leitura automática está ligada. '
+                f'Enquanto isso, nenhuma venda nova ganha objeção, score ou material de treino.',
+                '/configuracoes',
+                'Abra Configurações e veja "Está rodando agora?": ela diz o motivo de cada '
+                'pessoa — extensão velha, WhatsApp Web fechado ou fora do horário.',
+                'erro', None):
+                abertas += 1
+        elif horas is not None and horas < 6:
+            if _pendencia_resolver(conn, chave):
+                fechadas += 1
+    except Exception as e:
+        app.logger.warning(f"[PENDENCIA] varredura calada: {e}")
+
+    if abertas or fechadas:
+        try:
+            conn.commit()
+        except Exception:
+            pass
+    return {'abertas': abertas, 'fechadas': fechadas}
+
+
+# ═══════════ POLITICA DE VERSAO DA EXTENSAO ═══════════
+#
+# REGRA DA CASA: versao nova melhora, versao velha NAO PARA O TRABALHO.
+#
+# Quem nao atualizou tem que continuar produzindo o minimo aceitavel. O sistema
+# so bloqueia quando rodar seria PIOR que nao rodar — quando a versao antiga
+# grava dado errado, e aí o estrago passa a ser permanente e silencioso. Fora
+# esse caso, degrada e ABRE PENDENCIA: o trabalho segue e alguem fica sabendo.
+#
+# Por que a regra existe: a decisao da varredura passou a exigir uma rota que so
+# a 4.96 conhece, e com isso TODA extensao anterior parou de ler conversa. Isso
+# e exatamente o que nao pode: a versao nova melhorou pra quem atualizou e
+# apagou o trabalho de quem nao atualizou.
+EXT_VERSAO = {
+    # Abaixo disto a leitura grava analise ERRADA (1 mensagem por conversa, sem
+    # dono). Aqui sim bloqueia — e o unico caso.
+    'bloqueia_abaixo': '3.27.0',
+    # Abaixo disto funciona, porem sem a decisao autenticada e sem o pulso.
+    # Nunca bloqueia: abre pendencia no sino e segue trabalhando.
+    'ideal': '4.97.0',
+}
+_VARR_VERSAO_MINIMA = EXT_VERSAO['ideal']
 
 
 def _versao_ge(v, minimo):
@@ -14877,12 +15054,21 @@ def _varredura_saude(conn):
                 visto = TZ_SP.localize(visto)
             min_visto = int((agora - visto).total_seconds() // 60)
         versao = (r['varr_versao'] or '').strip()
-        atrasada = bool(versao) and not _versao_ge(versao, _VARR_VERSAO_MINIMA)
+        atrasada = bool(versao) and not _versao_ge(versao, EXT_VERSAO['ideal'])
+        travada = bool(versao) and not _versao_ge(versao, EXT_VERSAO['bloqueia_abaixo'])
         motivo = (r['varr_motivo'] or '').strip()
         # Versão velha é o motivo que MANDA: ela explica todos os outros, e sem
         # dizer isso a pessoa fica caçando configuração que já está certa.
-        if atrasada:
-            texto, cor = f'Extensão {versao} está velha — precisa atualizar para {_VARR_VERSAO_MINIMA}', 'erro'
+        # As duas gravidades da politica, com o texto batendo com a realidade:
+        # abaixo do piso a pessoa esta PARADA; entre o piso e o ideal ela
+        # trabalha reduzida. Pintar as duas de vermelho ensinaria a ignorar as
+        # duas.
+        if travada:
+            texto, cor = (f'Extensão {versao} não lê conversa — precisa atualizar '
+                          f'para a {EXT_VERSAO["ideal"]}'), 'erro'
+        elif atrasada:
+            texto, cor = (f'Extensão {versao} funciona, mas está atrás da '
+                          f'{EXT_VERSAO["ideal"]}'), 'atencao'
         elif not min_visto and not motivo:
             texto, cor = 'A extensão desta pessoa nunca perguntou se pode rodar', 'erro'
         elif min_visto is not None and min_visto > 120:
@@ -24200,18 +24386,31 @@ def api_whatsapp_config_remota():
     conn2 = db()
     cfg = varredura_cfg(conn2)
     close_db(conn2)
-    # A DECISAO NAO MORA MAIS AQUI, e a resposta diz isso em vez de fingir.
-    # 'nao_autenticado' cravado fazia a extensao entender "nao pode rodar" e
-    # desistir em silencio. Agora ela sabe que precisa perguntar na rota
-    # autenticada (/api/whatsapp/varredura/pode) — e uma extensao antiga, que
-    # nao conhece essa rota, cai no motivo abaixo e aparece na tela de saude
-    # como versao velha, em vez de sumir sem explicacao.
+    # DECISAO GENERICA AQUI; A INDIVIDUAL NA ROTA AUTENTICADA.
+    #
+    # Esta rota e publica (canal de conserto remoto), entao ela nao pode
+    # responder nada que dependa de QUEM pergunta — foi assim que se descobriu
+    # que dava pra enumerar usuario: uid valido dizia 'ok', uid inexistente
+    # dizia 'consultor_fora'.
+    #
+    # A correcao daquilo tinha cravado pode_rodar=False pra todo mundo, e o
+    # remendo seguinte (mandar perguntar noutra rota) BLOQUEOU toda extensao
+    # anterior a 4.96 — versao nova melhorando pra uns e apagando o trabalho de
+    # outros, exatamente o que nao pode acontecer.
+    #
+    # Agora ela devolve a decisao GERAL (ligada? dentro do horario? dia util?),
+    # que e IGUAL pra qualquer um e portanto nao revela nada de ninguem. Com
+    # isso a extensao antiga volta a ler conversa. Quem e a pessoa e se ela
+    # participa fica pra /api/whatsapp/conversas/pendentes, que e autenticada e
+    # TODA versao ja chama — e la o servidor simplesmente nao entrega conversa
+    # pra quem nao devia ler. Trabalho reduzido, nunca trabalho zerado.
+    pode, motivo = varredura_pode_agora(cfg, None, None)
     varr = {k: cfg.get(k) for k in ('horas', 'max_rodada', 'intervalo_min',
                                     'hora_inicio', 'hora_fim', 'dias_uteis')}
-    varr['pode_rodar'] = False
-    varr['motivo'] = 'decisao_em_outra_rota'
-    varr['decisao_em'] = '/api/whatsapp/varredura/pode'
-    varr['rodar_agora'] = False
+    varr['pode_rodar'] = pode
+    varr['motivo'] = motivo
+    varr['decisao_individual_em'] = '/api/whatsapp/varredura/pode'
+    varr['rodar_agora'] = (motivo == 'rodar_agora')
     return _wa_cors(jsonify({"ok": True, "seletores": seletores, "flags": flags,
                              "varredura": varr,
                              "marca": BRAND['nome_curto'], "marca_nome": BRAND['nome']}))
@@ -24257,6 +24456,15 @@ def api_whatsapp_varredura_pode():
         conn.commit()
     except Exception as e:
         app.logger.info(f"[VARREDURA_PULSO] {uid}: {e}")
+        try: conn.rollback()
+        except Exception: pass
+    # Reconcilia aqui tambem: a extensao pergunta a cada rodada, entao a
+    # pendencia de versao velha abre (ou fecha) minutos depois do fato, sem
+    # depender de alguem abrir uma tela.
+    try:
+        _pendencias_reconciliar(conn)
+    except Exception as e:
+        app.logger.info(f"[PENDENCIA] no pulso: {e}")
         try: conn.rollback()
         except Exception: pass
     close_db(conn)
@@ -27046,23 +27254,36 @@ def api_whatsapp_varredura_proximo():
     # a analise sem dono — 29 leituras pagas e inuteis. Se uma aba ficou com a
     # versao antiga, ela torraria a fila de novo em silencio, e o estrago so
     # apareceria depois. O servidor recusa e diz o que fazer; a fila espera.
-    def _versao_maior_ou_igual(v, minimo):
-        def _t(x):
-            p = [int(n) for n in str(x).split('.') if n.isdigit()]
-            return tuple(p + [0] * (3 - len(p)))[:3]
-        try:
-            return _t(v) >= _t(minimo)
-        except Exception:
-            return False
+    # Comparador de versao e um so: _versao_ge, junto da politica EXT_VERSAO.
     # 3.22.0: as versoes 3.20 e 3.21 tem um defeito MEU — eu pus openChatBottom
     # na leitura achando que ele carregava a conversa sem mexer na tela, e ele
     # NAVEGA (abrirChat usa exatamente esse metodo pra abrir conversa). Numa
     # varredura isso faz a tela do consultor pular de conversa em conversa.
     # 3.22 reverte. Abaixo disso a fila nao anda: e melhor a varredura parar e
     # dizer o motivo do que rodar mexendo na tela de quem esta trabalhando.
-    _MIN_VARREDURA = '3.27.0'
+    # O MINIMO VEM DA POLITICA, nao de um numero solto aqui.
+    # Antes este literal era a unica fonte da verdade que de fato bloqueava,
+    # enquanto EXT_VERSAO['bloqueia_abaixo'] existia so pra documentar — mexer
+    # na politica nao mudava nada, e os dois ja tinham comecado a divergir do
+    # comentario que os explicava.
+    _MIN_VARREDURA = EXT_VERSAO['bloqueia_abaixo']
     versao = (request.args.get('versao') or '').strip()
-    if not _versao_maior_ou_igual(versao, _MIN_VARREDURA):
+    if not _versao_ge(versao, _MIN_VARREDURA):
+        # BLOQUEIO TEM QUE DEIXAR RASTRO. Antes isto devolvia 200 com item:null
+        # e a extensao descartava 'bloqueado' e 'motivo', voltando a perguntar
+        # a cada 2 min pra sempre: o consultor via 'sem fila', o admin nao via
+        # nada, e a fila ficava parada sem explicacao. Agora o motivo fica
+        # gravado na pessoa e vira pendencia no sino.
+        try:
+            conn_b = db()
+            conn_b.execute("""UPDATE usuarios SET varr_visto_em=?, varr_versao=?,
+                              varr_pode=0, varr_motivo='versao_bloqueada' WHERE id=?""",
+                           (_agora_sp(), versao[:20], uid))
+            conn_b.commit()
+            _pendencias_reconciliar(conn_b)
+            close_db(conn_b)
+        except Exception as e:
+            app.logger.warning(f'[VARREDURA] bloqueio por versao {versao} (uid {uid}): {e}')
         return _wa_cors(jsonify({
             "ok": True, "item": None, "bloqueado": True,
             "motivo": f"Extensão {versao or 'antiga'} — a varredura exige {_MIN_VARREDURA}. "
@@ -27373,6 +27594,36 @@ def api_whatsapp_conversas_pendentes():
         return _wa_cors(jsonify({"ok": False, "erro": "Formato inválido"})), 400
     convs = convs[:300]
     conn = db()
+
+    # A TRAVA POR PESSOA MORA AQUI, e o pulso tambem.
+    #
+    # Aqui porque esta rota e autenticada (sabe quem e sem precisar perguntar) e
+    # porque TODA versao da extensao ja passa por ela — inclusive as antigas,
+    # que nao conhecem a rota de decisao nova. Resultado: a extensao velha
+    # continua trabalhando, mas nunca recebe conversa de quem nao devia ser
+    # lido, e ainda assim aparece na tela de saude com versao e motivo.
+    _uid_varr = getattr(g, 'usuario_id', None)
+    _versao_ext = (request.headers.get('X-Ext-Versao') or
+                   (request.get_json(silent=True) or {}).get('versao') or '').strip()[:20]
+    try:
+        _cfgv = varredura_cfg(conn)
+        _pode, _motivo = varredura_pode_agora(_cfgv, _uid_varr, conn)
+        if _uid_varr:
+            conn.execute("""UPDATE usuarios SET varr_visto_em=?, varr_pode=?, varr_motivo=?,
+                            varr_versao=COALESCE(NULLIF(?,''), varr_versao) WHERE id=?""",
+                         (_agora_sp(), 1 if _pode else 0, _motivo, _versao_ext, _uid_varr))
+            conn.commit()
+        if not _pode:
+            close_db(conn)
+            # 200 com lista vazia, nao erro: a extensao nao fez nada errado, so
+            # nao ha o que ela deva ler agora. E o motivo vai junto pra tela.
+            return _wa_cors(jsonify({"ok": True, "analisar": [], "pular": [],
+                                     "motivo": _motivo}))
+    except Exception as e:
+        app.logger.warning(f"[VARREDURA] trava por usuario: {e}")
+        try: conn.rollback()
+        except Exception: pass
+
     estados = {}
     ids = [str((c or {}).get('chat_id') or '') for c in convs if (c or {}).get('chat_id')]
     if ids:
@@ -40948,14 +41199,25 @@ def api_notificacoes():
     conn = db()
     som_row = conn.execute("SELECT som_notificacao FROM usuarios WHERE id=?", (uid,)).fetchone()
     som_pref = (dict(som_row).get('som_notificacao') if som_row else None) or 'thriller'
+    # O sino e o lugar onde o admin descobre que algo parou, entao a conferencia
+    # roda aqui: e barata e acontece exatamente quando alguem esta olhando.
     if eh_admin:
-        rows = conn.execute(
-            "SELECT * FROM notificacoes WHERE usuario_id=? OR usuario_id IS NULL ORDER BY id DESC LIMIT 30",
-            (uid,)).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM notificacoes WHERE usuario_id=? ORDER BY id DESC LIMIT 30",
-            (uid,)).fetchall()
+        try:
+            _pendencias_reconciliar(conn)
+        except Exception as e:
+            app.logger.info(f'[PENDENCIA] reconciliar no sino: {e}')
+            try: conn.rollback()
+            except Exception: pass
+    dono = ('(usuario_id=? OR usuario_id IS NULL)' if eh_admin else 'usuario_id=?')
+    # PENDENCIAS ABERTAS VEM TODAS, sem teto e sem depender de terem sido lidas:
+    # sao trabalho a fazer, nao historico. O limite de 30 vale so pros avisos.
+    pend_rows = conn.execute(
+        f'SELECT * FROM notificacoes WHERE {dono} AND tipo=? AND resolvida_em IS NULL '
+        f'ORDER BY CASE WHEN severidade=? THEN 0 ELSE 1 END, id DESC',
+        (uid, 'pendencia', 'erro')).fetchall()
+    rows = conn.execute(
+        f'SELECT * FROM notificacoes WHERE {dono} AND (tipo IS NULL OR tipo<>?) '
+        f'ORDER BY id DESC LIMIT 30', (uid, 'pendencia')).fetchall()
     close_db(conn)
     itens = []
     nao_lidas = 0
@@ -40968,7 +41230,19 @@ def api_notificacoes():
             'descricao': d.get('descricao') or '', 'link': d.get('link') or '',
             'lida': bool(d.get('lida')), 'quando': _tempo_relativo(d.get('criado_em')),
         })
-    return jsonify({'nao_lidas': nao_lidas, 'itens': itens, 'som': som_pref})
+    pendencias = [{
+        'id': dict(r)['id'], 'titulo': dict(r).get('titulo') or '',
+        'descricao': dict(r).get('descricao') or '',
+        'como_resolver': dict(r).get('como_resolver') or '',
+        'severidade': dict(r).get('severidade') or 'atencao',
+        'link': dict(r).get('link') or '',
+        'quando': _tempo_relativo(dict(r).get('criado_em')),
+    } for r in pend_rows]
+    # A pendencia conta no contador do sino mesmo depois de lida: enquanto o
+    # problema existir, o sino tem que continuar chamando. Marcar como lida
+    # nao pode ser jeito de fazer sumir.
+    return jsonify({'nao_lidas': nao_lidas + len(pendencias), 'itens': itens,
+                    'pendencias': pendencias, 'som': som_pref})
 
 
 @app.route('/api/notificacoes/marcar-lidas', methods=['POST'])
@@ -47938,6 +48212,20 @@ def _auto_pull_leads_throttled():
         if not _AUTO_PULL_LOCK.acquire(blocking=False):
             return
         _ULTIMO_AUTO_PULL = agora
+        # A TRAVA SO PODE SER SOLTA PELA THREAD SE A THREAD NASCER.
+        #
+        # O `finally` que devolve a trava mora dentro de _run. Se
+        # Thread(...).start() falhasse — RuntimeError por esgotamento de
+        # thread, que e justamente o que acontece sob pressao no Railway — a
+        # excecao caia no `except Exception: pass` la de baixo e a trava ficava
+        # presa PARA SEMPRE naquele worker. Dali em diante toda requisicao saia
+        # na linha do acquire sem fazer nada, e a rede de seguranca que existe
+        # porque o APScheduler morre em restart ficava desligada em silencio:
+        # importacao de leads, lembretes, fluxos, fixo e conversoes parando
+        # juntos, sem uma linha de log. Descobrir isso levaria horas.
+        #
+        # Agora o start() tem try proprio: se a thread nao nascer, a trava
+        # volta na hora e o erro aparece como erro.
         def _run():
             try:
                 _importar_leads_automatico()
@@ -47972,9 +48260,17 @@ def _auto_pull_leads_throttled():
             finally:
                 try: _AUTO_PULL_LOCK.release()
                 except Exception: pass
-        threading.Thread(target=_run, daemon=True).start()
-    except Exception:
-        pass
+        try:
+            threading.Thread(target=_run, daemon=True).start()
+        except Exception as e:
+            # A trava so seria solta la dentro do _run; sem a thread, ninguem
+            # solta. Devolve aqui e grita — trava presa desliga a rede de
+            # seguranca inteira sem deixar rastro.
+            try: _AUTO_PULL_LOCK.release()
+            except Exception: pass
+            app.logger.error(f"[AUTO_PULL] thread nao nasceu, trava devolvida: {e}")
+    except Exception as e:
+        app.logger.error(f"[AUTO_PULL] falhou: {e}")
 
 
 def _iniciar_scheduler_backup():

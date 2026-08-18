@@ -9625,6 +9625,25 @@
         .catch(() => null);
       const item = r && r.ok && r.item;
       if (!item) {
+        // BLOQUEADO NAO E FILA VAZIA, e tratar os dois igual foi o defeito.
+        //
+        // Quando o servidor recusa por versao antiga ele manda `bloqueado` e um
+        // `motivo` com o conserto escrito ("recarregue em chrome://extensions e
+        // de F5"). Isso era descartado aqui: a extensao voltava a perguntar a
+        // cada 2 min pra sempre e o consultor via um nada — nem fila, nem erro,
+        // nem instrucao. Agora o motivo aparece pra quem pode consertar.
+        if (r && r.bloqueado && r.motivo) {
+          FILA.motivo = r.motivo;
+          // Entra na saude da extensao, que ja e o canal de "algo quebrou":
+          // pinta o pino de alerta no botao do JOB e o motivo vira o title.
+          // Defeito vence aviso, entao ele aparece mesmo com notificacao nova.
+          _saudePor('varredura_versao', false, r.motivo);
+          // Espera mais: atualizar extensao leva minutos, nao segundos.
+          FILA.proximaEm = Date.now() + 600000;
+          return;
+        }
+        FILA.motivo = '';
+        _saudePor('varredura_versao', true, '');
         // Sem fila: nao adianta perguntar de novo em seguida.
         FILA.proximaEm = Date.now() + 120000;
         return;
