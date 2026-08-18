@@ -1,0 +1,240 @@
+{% extends 'base.html' %}
+{% block title %}O que faz a Serenus vender{% endblock %}
+
+{% block head %}
+<style>
+  /* Documento de LEITURA, não painel: coluna estreita, texto grande, número
+     dentro da frase. O consultor novo lê isto de ponta a ponta; ele não está
+     investigando, está aprendendo. */
+  .eb { max-width:780px; margin:0 auto; }
+  .eb-capa { background:var(--panel); border:1px solid var(--borda); border-radius:14px;
+             padding:38px 40px; margin-bottom:22px; }
+  .eb-sup { font-size:11px; font-weight:600; letter-spacing:1px; text-transform:uppercase;
+            color:var(--cinza); }
+  .eb-tit { font-family:'Sora',sans-serif; font-size:31px; font-weight:700; color:var(--texto);
+            line-height:1.15; letter-spacing:-.02em; margin:10px 0 12px; }
+  .eb-lead { font-size:14.5px; color:var(--cinza); line-height:1.65; max-width:60ch; }
+  .eb-nums { display:flex; gap:26px; flex-wrap:wrap; margin-top:24px;
+             padding-top:20px; border-top:1px solid var(--borda); }
+  .eb-num b { display:block; font-family:'Sora',sans-serif; font-size:22px; font-weight:700;
+              color:var(--texto); line-height:1.1; }
+  .eb-num span { font-size:11.5px; color:var(--cinza); }
+
+  .eb-sec { background:var(--panel); border:1px solid var(--borda); border-radius:14px;
+            padding:28px 34px; margin-bottom:18px; }
+  .eb-cap { font-family:'Sora',sans-serif; font-size:12px; font-weight:700; letter-spacing:1.2px;
+            text-transform:uppercase; color:var(--teal); margin-bottom:6px; }
+  .eb-h2 { font-family:'Sora',sans-serif; font-size:21px; font-weight:700; color:var(--texto);
+           letter-spacing:-.015em; margin:0 0 14px; line-height:1.25; }
+  .eb-h3 { font-family:'Sora',sans-serif; font-size:15px; font-weight:600; color:var(--texto);
+           margin:26px 0 8px; }
+  .eb-p { font-size:14px; color:var(--texto); line-height:1.75; margin:0 0 13px; max-width:62ch; }
+  .eb-p.sec { color:var(--cinza); font-size:13px; }
+  .eb-p b { font-weight:600; }
+
+  .eb-fatos { display:grid; grid-template-columns:1fr 1fr; gap:10px 22px; margin:16px 0 4px; }
+  @media (max-width:640px){ .eb-fatos { grid-template-columns:1fr; } }
+  .eb-fato { display:grid; grid-template-columns:1fr auto; gap:3px 10px;
+             padding-bottom:9px; border-bottom:1px solid var(--borda); }
+  .eb-fato-n { font-size:13px; color:var(--texto); }
+  .eb-fato-p { font-size:13px; font-weight:700; color:var(--texto);
+               font-variant-numeric:tabular-nums; }
+  .eb-fato-t { grid-column:1 / -1; height:4px; background:var(--panel-2); border-radius:99px;
+               overflow:hidden; }
+  .eb-fato-f { height:100%; border-radius:99px; transform-origin:left center;
+               transform:scaleX(var(--p,0)); background:var(--teal); }
+
+  .eb-obj { border-left:3px solid var(--rosa); padding:2px 0 2px 18px; margin:0 0 26px; }
+  .eb-obj-t { font-family:'Sora',sans-serif; font-size:16px; font-weight:700; color:var(--texto); }
+  .eb-obj-q { font-size:12px; color:var(--cinza); margin:3px 0 10px; }
+  .eb-caso { font-size:12.5px; color:var(--cinza); line-height:1.6; padding:7px 0;
+             border-bottom:1px solid var(--borda); }
+  .eb-caso:last-child { border-bottom:none; }
+  .eb-caso b { color:var(--texto); font-weight:600; }
+  .eb-caso a { color:var(--info); text-decoration:none; }
+
+  .eb-msg { background:var(--panel-2); border:1px solid var(--borda); border-radius:10px;
+            padding:14px 16px; margin-bottom:11px; }
+  .eb-msg-txt { font-size:13.5px; color:var(--texto); line-height:1.65; }
+  .eb-msg-fonte { font-size:11.5px; color:var(--cinza); margin-top:8px; }
+
+  .eb-barra { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:18px; }
+  .eb-aviso { font-size:12.5px; color:var(--cinza); line-height:1.6; background:var(--panel-2);
+              border:1px solid var(--borda); border-left:3px solid var(--amarelo);
+              border-radius:10px; padding:12px 14px; margin-top:18px; }
+
+  /* Impressao: o navegador vira o gerador de PDF. Sem menu, sem botao, sem
+     fundo escuro — e quebra de pagina onde o capitulo comeca. */
+  @media print {
+    .sidebar, .topbar, .eb-barra, .no-print { display:none !important; }
+    body, .page { background:#fff !important; margin:0 !important; padding:0 !important; }
+    .eb { max-width:100%; }
+    .eb-capa, .eb-sec { background:#fff !important; border:none !important;
+                        page-break-inside:avoid; padding:0 0 18px !important; }
+    .eb-sec { page-break-before:always; }
+    .eb-capa { page-break-after:always; }
+    .eb-p, .eb-fato-n, .eb-caso, .eb-msg-txt, .eb-tit, .eb-h2, .eb-obj-t { color:#111 !important; }
+    .eb-msg { background:#f6f6f6 !important; }
+    .eb-obj { page-break-inside:avoid; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>O que faz a Serenus vender</h1>
+    <div class="sub">Material de treino montado com as vendas que já aconteceram</div>
+  </div>
+</div>
+
+<div class="page">
+ <div class="eb">
+
+  <div class="eb-barra no-print">
+    <button class="btn" onclick="window.print()">Salvar como PDF ou imprimir</button>
+    <a href="/inteligencia-vendas" class="btn-ghost">Voltar para a Inteligência de Vendas</a>
+    <span style="font-size:12px;color:var(--cinza);">Gera pela impressão do navegador — escolha "Salvar em PDF" no destino.</span>
+  </div>
+
+  <div class="eb-capa">
+    <div class="eb-sup">Serenus Corretora de Saúde</div>
+    <div class="eb-tit">O que faz a Serenus vender</div>
+    <p class="eb-lead">
+      Este documento não foi escrito: ele foi medido. Cada número aqui saiu das vendas que a
+      equipe já fechou{% if resumo.de and resumo.ate %}, entre {{ resumo.de.strftime('%d/%m/%Y') }} e
+      {{ resumo.ate.strftime('%d/%m/%Y') }}{% endif %}. Serve para quem está começando entender quem
+      é o cliente da casa, o que ele pergunta antes de comprar e o que já funcionou para responder.
+    </p>
+    <div class="eb-nums">
+      <div class="eb-num"><b>{{ resumo.total }}</b><span>vendas lidas</span></div>
+      <div class="eb-num"><b>R$ {{ resumo.ticket|numero }}</b><span>ticket médio</span></div>
+      {% if resumo.mediana_dias is not none %}
+      <div class="eb-num"><b>{{ resumo.mediana_dias }} dias</b><span>do primeiro contato à venda</span></div>
+      {% endif %}
+      <div class="eb-num"><b>{{ resumo.com_analise }}</b><span>com a conversa analisada</span></div>
+    </div>
+  </div>
+
+  <div class="eb-sec">
+    <div class="eb-cap">Capítulo 1</div>
+    <h2 class="eb-h2">Quem compra da Serenus</h2>
+    {% set fv = (perfil | selectattr('chave','equalto','faixa_vidas') | list | first) %}
+    {% set fi = (perfil | selectattr('chave','equalto','faixa_idade') | list | first) %}
+    {% set fval = (perfil | selectattr('chave','equalto','faixa_valor') | list | first) %}
+    {% set fac = (perfil | selectattr('chave','equalto','acomodacao') | list | first) %}
+    {% set fcp = (perfil | selectattr('chave','equalto','copart') | list | first) %}
+    <p class="eb-p">
+      Antes de decorar produto, entenda o cliente que aparece.
+      {% if fv %}De cada 10 vendas, cerca de {{ (fv.topo.pct / 10)|round(0,'floor')|int }} são de
+      <b>{{ fv.topo.nome|lower }}</b>.{% endif %}
+      {% if fi %} A idade mais comum do titular está na faixa <b>{{ fi.topo.nome|lower }}</b>
+      ({{ fi.topo.pct }}% das vendas).{% endif %}
+      {% if fval %} O valor mensal mais frequente fica em <b>{{ fval.topo.nome }}</b>.{% endif %}
+    </p>
+    {% if fac and fcp %}
+    <p class="eb-p">
+      Na hora de montar a proposta, o padrão da casa é claro: <b>{{ fac.topo.pct }}% escolhem
+      {{ fac.topo.nome|lower }}</b> e <b>{{ fcp.topo.pct }}% fecham {{ fcp.topo.nome|lower }}</b>.
+      Comece por aí quando não souber o que oferecer — é o que a maioria compra.
+    </p>
+    {% endif %}
+    {% for f in perfil %}
+    <h3 class="eb-h3">{{ f.titulo }}</h3>
+    <div class="eb-fatos">
+      {% for i in f.itens %}
+      <div class="eb-fato">
+        <div class="eb-fato-n">{{ i.nome }}</div>
+        <div class="eb-fato-p">{{ i.pct }}%</div>
+        <div class="eb-fato-t"><div class="eb-fato-f" style="--p:{{ (i.pct / 100)|round(3) }};"></div></div>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="eb-p sec">Medido em {{ f.base }} das {{ resumo.total }} vendas.</p>
+    {% endfor %}
+  </div>
+
+  <div class="eb-sec">
+    <div class="eb-cap">Capítulo 2</div>
+    <h2 class="eb-h2">O que o cliente pergunta antes de comprar</h2>
+    {% if objecoes %}
+    <p class="eb-p">
+      Toda objeção abaixo apareceu na conversa de alguém que <b>comprou assim mesmo</b>. Isso é o que
+      as torna úteis: não são motivos de perda, são passagens obrigatórias. Quando ouvir uma delas,
+      você já sabe que ela tem saída — e pode abrir o caso real para ver como foi.
+    </p>
+    {% for o in objecoes %}
+    <div class="eb-obj">
+      <div class="eb-obj-t">{{ o.nome|capitalize }}</div>
+      <div class="eb-obj-q">Apareceu em {{ o.qtd }} venda{{ 's' if o.qtd != 1 }} fechada{{ 's' if o.qtd != 1 }}</div>
+      {% for c in o.casos %}
+      <div class="eb-caso">
+        <b>{{ c.nome }}</b> — {{ c.operadora or 'operadora não informada' }}, {{ c.modalidade }},
+        {{ c.vidas }} vida{{ 's' if c.vidas != 1 }}, {{ c.valor|moeda }}{% if c.cidade %}, {{ c.cidade }}{% endif %}.
+        {% if c.resumo_ia %}<br>{{ c.resumo_ia }}{% endif %}
+        {% if c.analise_id %}<br><a href="/whatsapp-analises/{{ c.analise_id }}/conversa" class="no-print">Ler a conversa inteira</a>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <p class="eb-p">
+      Ainda não há objeção registrada: este capítulo se escreve sozinho conforme as conversas das
+      vendas forem lidas. Hoje {{ resumo.com_analise }} das {{ resumo.total }} vendas têm conversa
+      analisada.
+    </p>
+    <p class="eb-p sec no-print">
+      Para preencher, abra a Inteligência de Vendas e use "Mandar ler as conversas prontas".
+    </p>
+    {% endif %}
+  </div>
+
+  {% if followups %}
+  <div class="eb-sec">
+    <div class="eb-cap">Capítulo 3</div>
+    <h2 class="eb-h2">Mensagens que destravaram a conversa</h2>
+    <p class="eb-p">
+      Retomadas usadas em conversas que terminaram em venda. Não copie ao pé da letra — troque o
+      nome, o plano e o ponto que o seu cliente levantou. O que vale aqui é a estrutura: retomar o
+      assunto, oferecer uma comparação objetiva e propor o próximo passo na mesma mensagem.
+    </p>
+    {% for c in followups %}
+    <div class="eb-msg">
+      <div class="eb-msg-txt">{{ c.followup }}</div>
+      <div class="eb-msg-fonte">
+        {{ c.nome }} · {{ c.operadora or 'sem operadora' }} · {{ c.valor|moeda }}{% if c.objecoes %} · tinha levantado: {{ c.objecoes|join(', ') }}{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="eb-sec">
+    <div class="eb-cap">Capítulo {{ 4 if followups else 3 }}</div>
+    <h2 class="eb-h2">Onde a Serenus vende</h2>
+    {% if operadoras %}
+    <h3 class="eb-h3">Operadoras</h3>
+    <p class="eb-p">
+      {% for nome, qtd in operadoras %}<b>{{ nome }}</b> ({{ qtd }}){% if not loop.last %} · {% endif %}{% endfor %}
+    </p>
+    {% endif %}
+    {% if cidades %}
+    <h3 class="eb-h3">Cidades</h3>
+    <p class="eb-p">
+      {% for nome, qtd in cidades %}<b>{{ nome }}</b> ({{ qtd }}){% if not loop.last %} · {% endif %}{% endfor %}
+    </p>
+    <p class="eb-p sec">
+      A cidade só existe quando o cadastro da proposta a traz, ou quando a conversa a mencionou —
+      então esta lista cobre menos vendas que as outras contas deste documento.
+    </p>
+    {% endif %}
+    <div class="eb-aviso">
+      Este documento é gerado na hora, a partir das vendas que existem no JOB agora. Ele muda
+      sozinho conforme a equipe vende e conforme as conversas vão sendo lidas — não precisa ser
+      reescrito. Gerado em {{ gerado_em.strftime('%d/%m/%Y às %H:%M') }}.
+    </div>
+  </div>
+
+ </div>
+</div>
+{% endblock %}
