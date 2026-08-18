@@ -93,8 +93,8 @@ async function sair() {
 }
 
 async function carregar() {
-  const { jobUrl, extKey, usuarioId, railSide, tema, extensaoAtiva, extUsuario, extApelido } =
-    await chrome.storage.local.get(['jobUrl', 'extKey', 'usuarioId', 'railSide', 'tema',
+  const { jobUrl, extKey, extToken, usuarioId, railSide, tema, extensaoAtiva, extUsuario, extApelido } =
+    await chrome.storage.local.get(['jobUrl', 'extKey', 'extToken', 'usuarioId', 'railSide', 'tema',
                                     'extensaoAtiva', 'extUsuario', 'extApelido']);
   pintarQuem(extUsuario, extApelido);
   if (extApelido) $('loginApelido').value = extApelido;
@@ -130,7 +130,21 @@ async function carregar() {
   $('railSide').value = railSide === 'esquerda' ? 'esquerda' : 'direita';
   $('tema').value = tema === 'claro' ? 'claro' : 'escuro';
   $('extensaoAtiva').checked = extensaoAtiva !== false; // default ligada
-  if (extKey) await carregarUsuarios(usuarioId);
+  // GATEADO SO NO extKey, O LOGIN NOVO NUNCA CARREGAVA A LISTA.
+  //
+  // `entrar()` (e-mail + senha) nunca chama `carregarUsuarios` — so o botao
+  // "Testar conexao" chamava. Quem loga pelo jeito novo e nao clica em testar
+  // abre o popup com o combo de usuario vazio pra sempre: nada pra selecionar,
+  // mesmo estando conectado. E a extensao inteira barra em cima disso — enviar
+  // mensagem, disparar funil e salvar cotacao todos leem `usuarioId` do
+  // storage e recusam com "Selecione seu usuario no popup" se estiver vazio.
+  // A dica da mensagem virava um beco sem saida: o campo que ela manda abrir
+  // nunca tinha o que escolher.
+  //
+  // `usuarios` (background.js) ja aceita as duas formas de entrar, igual toda
+  // chamada que passa por `chamarJob` — o gate aqui nunca teve motivo pra ser
+  // so extKey.
+  if (extKey || extToken) await carregarUsuarios(usuarioId);
   else atualizarAvisoUsuario();
 }
 

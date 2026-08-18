@@ -37542,13 +37542,26 @@ def _viva_para_apresentacao(d):
         if not acomodacao:
             # Nao sabemos pelo que veio; a base pode saber. Conexao aberta so
             # aqui, e uma vez por cotacao — o caminho normal nem chega neste if.
-            if _conn_acom[0] is None:
-                _conn_acom[0] = db()
-            acomodacao = _acomodacao_da_base(
-                _conn_acom[0],
-                (p.get('operadora') or {}).get('nome'),
-                pl.get('nome'),
-                p.get('_tipo'))
+            #
+            # `db()` SEM GUARDA DERRUBAVA O SALVAMENTO INTEIRO.
+            #
+            # Uma soletrada no Postgres (pico de conexoes, restart) nesta linha
+            # jogava a excecao pra fora de _viva_para_apresentacao sem ser
+            # pega em lugar nenhum, e o consultor via "Nao foi possivel salvar
+            # a cotacao" — pra um problema que nao tinha nada a ver com o
+            # preco ou o plano dele. Acomodacao desconhecida e so isso: '' e
+            # sempre uma resposta aceitavel aqui, nunca motivo pra falhar a
+            # cotacao inteira.
+            try:
+                if _conn_acom[0] is None:
+                    _conn_acom[0] = db()
+                acomodacao = _acomodacao_da_base(
+                    _conn_acom[0],
+                    (p.get('operadora') or {}).get('nome'),
+                    pl.get('nome'),
+                    p.get('_tipo'))
+            except Exception:
+                acomodacao = ''
         planos.append({
             'operadora': (p.get('operadora') or {}).get('nome') or '',
             'plano': (p.get('plano') or {}).get('nome') or '',
