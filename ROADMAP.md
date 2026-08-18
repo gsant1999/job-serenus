@@ -224,7 +224,7 @@ Metade do trabalho pode ser só aplicar o que já existe.
 - [ ] Enviar mensagem automática por mudança de etapa do CRM — depende de decidir regras (qual etapa dispara qual mensagem) e ter a chave API de produção
 - [ ] Sincronizar atendente responsável (JOB responsavel_id → BotConversa manager) — só faz sentido pras 3 consultoras que usam BootConversa (Prisciele/Juliana/Jenifer), ver [[canais-whatsapp-por-consultor]]
 
-## HANDOFF — Cotação, segurança e wa-js (17/08 18h → 18/08 11h25)
+## HANDOFF — Cotação, segurança, wa-js e a máquina de envio (17/08 18h → 18/08 17h20)
 
 Sessão paralela à de baixo (não a mesma). Escopo: o bug do Danilo na cotação,
 a auditoria de segurança das 8 regras do roadmap de cotação, e a atualização da
@@ -311,6 +311,70 @@ consertado no caminho.
    qualquer coisa, sincronizar com `origin/main` primeiro — encontrei
    commits novos duas vezes nesta sessão sem esperar por eles.
 
+### Segunda parte da sessão (18/08, tarde) — máquina de envio
+
+Continuou depois do handoff acima. O gatilho foi o Danilo não conseguir enviar
+mensagem, funil nem salvar cotação — e a investigação abriu uma frente inteira
+na máquina de envio.
+
+| Quando | O que |
+|---|---|
+| ~15h20 | Danilo travado. Causa: o popup só carregava a lista de nomes com a chave ANTIGA; quem entra por e-mail e senha nunca tinha o que selecionar, e enviar/funil/salvar cotação todos barram nisso (`690b1cc`) |
+| ~15h35 | Acomodação em branco na imagem da extensão enquanto o site mostrava certo: duas cópias da mesma regra, só a do servidor tinha sido corrigida. Corrigidas as duas + o salvamento passou a devolver o que gravou (`59e2e9e`) |
+| ~15h35 | Cancelador de envio: dá para desistir de uma mensagem que ainda não saiu (`59e2e9e`) |
+| ~15h40 | Teto da fila 6h → 1h, decisão do Guilherme (`77c784c`) |
+| ~16h10 | Tela da fila de envio em Configurações — medir antes de religar deixou de depender de SQL que ninguém rodava (`5c93114`) |
+| ~16h40 | Envio passou a furar a fila da varredura (`bc50322`) |
+| ~17h00 | Prazo por tipo + pendência no sino a cada vencimento (`3e43e76`) |
+| ~17h20 | Aviso de atualização da extensão refeito (`ea8cd9f`) |
+
+**O incidente que isso explica.** Medido no banco de produção às 16h: 5 mensagens
+esperando, 4 já vencidas, a mais antiga de 7h39 — **todas de abertura de lead
+pago**. Quatro pessoas pediram cotação e nunca receberam a primeira mensagem. A
+causa foi a trava: enquanto a varredura corria atrás de 7 dias de atraso, o envio
+esperava atrás dela. Decisão do Guilherme sobre essas quatro: **deixar vencer, o
+que passou passou** — o esforço vai para as próximas não caírem no mesmo buraco.
+
+**As cinco peças que fecham o ciclo** (nenhuma resolve sozinha):
+
+1. **Envio fura a fila da varredura.** Quem tem pressa pede a vez; a varredura
+   cede entre uma conversa e outra, nunca no meio de uma, e retoma em até 5 min
+   em vez do intervalo cheio. Só mensagem indo pro cliente tem esse passe —
+   rotina de fundo não interrompe rotina de fundo, senão a trava perde o sentido.
+2. **Prazo por tipo.** Abertura de lead pago vence em 20 min (a pressa é o
+   produto: a pessoa acabou de preencher o formulário); mensagem do consultor e
+   passo de funil, 1h (o contexto é a conversa, que não muda). Um teto só para
+   tudo tratava como iguais coisas com pressas diferentes.
+3. **Pendência no vencimento.** É o conserto de verdade. Antes o item virava
+   `cancelado_atraso` e morria calado — o consultor achava que tinha mandado, o
+   cliente nunca recebeu, ninguém descobria. Agora abre pendência no sino do
+   dono, com o telefone de quem ficou sem resposta; lead pago abre como erro,
+   que é a severidade que vai atrás da pessoa. **A mensagem pode não sair;
+   ninguém fica sem saber que não saiu.**
+4. **Cancelador.** O consultor desiste de uma mensagem que ainda não saiu, e
+   fechar a janela cancela. A rota só subtrai: não existe caminho nela que faça
+   uma mensagem sair.
+5. **A tela.** `/configuracoes` mostra quantas esperando, quantas não vão sair, a
+   mais antiga e o prazo de cada uma — dá para medir antes de religar qualquer
+   coisa, que era a lição que estava escrita e não dava para cumprir.
+
+**Aviso de atualização refeito.** Estava sem hierarquia e com um bloco verde
+gritando por uma ação que o próprio texto diz ser opcional. Agora o salto de
+versão é o dado, o topo recua para legenda, a ação tem o tamanho do que é, e a
+superfície é material translúcido — ele flutua sobre a tela de outro aplicativo.
+As três preferências de acessibilidade tratadas (movimento, transparência,
+contraste).
+
+**Testes novos desta parte:** `testar_fila_validade.py` (prazo por tipo e
+pendência), `testar_fila_cancelar.py` (15 casos, inclusive tentativas de burlar),
+`testar_prioridade_envio.js` (14 casos), `testar_popup_usuarios.js`,
+`testar_acomodacao_extensao.js`. Bateria toda verde.
+
+**Ficou registrado como armadilha de processo:** `git push` NÃO atualiza a
+extensão dele. O Chrome lê da pasta do repositório principal, que precisa de
+`git merge --ff-only origin/main` — eu falhei nisso uma vez e ele viu a versão
+velha depois de eu dizer que estava no ar.
+
 ### PENDENTE
 
 - [ ] **Rotacionar a senha do Postgres no Supabase** · só o Guilherme pode
@@ -318,6 +382,14 @@ consertado no caminho.
 - [ ] **Testar a wa-js 4.6.0 contra o WhatsApp real** · aguardando
   confirmação — não recebi retorno se o canário voltou ao verde depois do F5
   · **~5 min** de teste, quando o Guilherme puder.
+- [ ] **Medir a fila amanhã e decidir o teto com dado** · a tela já existe ·
+  **~5 min de leitura**. Se nada aparecer esperando mais que minutos, a trava
+  era mesmo a causa e o teto está bom. Se aparecer, o número volta à mesa —
+  mas com a causa nova identificada, não no escuro.
+- [ ] **`_WA_FILA_MAX_TENTATIVAS` e o funil que avança com envio falhando** ·
+  ver Prioridade 1 do handoff da tarde (`app.py:11535`, `45652`, `41854`) ·
+  são da mesma engrenagem que mexi hoje, então quem pegar deve ler as cinco
+  peças acima antes.
 - [~] **3 cotações vazias por clique no Painel** · decisão: parado até dar
   pra testar com o Painel aberto · **~20–30 min** quando houver a janela ·
   ver análise completa na seção Cotação acima (NÃO fazer cotação
