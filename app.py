@@ -25446,6 +25446,77 @@ def api_whatsapp_fila_confirmar(fid):
     return _wa_cors(jsonify({"ok": True}))
 
 
+@app.route('/api/whatsapp/fila/<int:fid>/cancelar', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
+def api_whatsapp_fila_cancelar(fid):
+    """Desiste de uma mensagem que ainda NAO saiu. Só tira da fila, nunca manda.
+
+    ESTA ROTA EXISTE POR CAUSA DE UM ESTRAGO REAL.
+
+    O consultor clica em enviar, o servidor responde "o WhatsApp libera este
+    envio em cerca de 27 s" e a mensagem fica na fila. Até 18/08/2026 não havia
+    como desistir dela: fechar a janela não cancelava nada, e a rotina de fundo
+    mandava assim que o intervalo abrisse. Quem achou que não tinha enviado
+    mandava de novo na mão — e o cliente recebia duas vezes, a segunda sem
+    ninguém esperando.
+
+    Na escala grande foi o incidente de 18/08: 17 mensagens de até três semanas
+    atrás saíram para clientes quando uma rotina parada voltou. O teto de
+    validade de 6h impede a repetição daquele caso; isto aqui resolve o caso
+    pequeno, o de todo dia, que é o consultor querer voltar atrás nos segundos
+    em que a mensagem está esperando.
+
+    SÓ SUBTRAI. Não existe caminho aqui que faça uma mensagem sair — o pior que
+    pode acontecer é uma mensagem não ser enviada, que é exatamente o pedido.
+    """
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    d = request.get_json(silent=True) or {}
+    try:
+        uid = int(d.get('usuario_id') or 0)
+    except (TypeError, ValueError):
+        uid = 0
+    conn = db()
+    item = conn.execute("SELECT * FROM whatsapp_extensao_fila WHERE id=?", (fid,)).fetchone()
+    if not item:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "nao_encontrado"})), 404
+    it = dict(item)
+    # Mensagem é de quem a criou. Sem esta checagem, uma extensão em laço podia
+    # cancelar o envio das colegas — o oposto do problema, e igualmente ruim.
+    if uid and it.get('responsavel_id') and int(it['responsavel_id']) != uid:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "de_outro_consultor"})), 403
+    # JÁ SAIU? ENTÃO NÃO MINTA DIZENDO QUE CANCELOU.
+    #
+    # 'enviado' é irreversível — a mensagem está no celular do cliente. Dizer
+    # "cancelado" aqui seria o mesmo tipo de mentira de tela que fez o consultor
+    # confiar num "enviado" que nunca saiu, só na direção contrária.
+    if it.get('status') not in ('pendente', 'enviando'):
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "ja_encerrada",
+                                 "status": it.get('status')})), 409
+    motivo = str(d.get('motivo') or '').strip()[:200] or 'Cancelado pelo consultor antes de sair.'
+    alterado = conn.execute("""UPDATE whatsapp_extensao_fila
+        SET status='cancelado', erro=?
+        WHERE id=? AND status IN ('pendente','enviando')""", (motivo, fid))
+    # A campanha precisa saber, senão o contato fica 'na fila' para sempre e o
+    # placar da campanha conta uma mensagem que ninguém vai mandar.
+    if it.get('origem') == 'campanha':
+        try:
+            conn.execute("UPDATE campanha_contato SET status='cancelado' WHERE fila_id=?", (fid,))
+        except Exception as e:
+            app.logger.warning(f"[WA_FILA] cancelar campanha_contato {fid}: {e}")
+    conn.commit()
+    close_db(conn)
+    if getattr(alterado, 'rowcount', 1) == 0:
+        # Alguém entregou entre o SELECT e o UPDATE. Corrida real: a rotina de
+        # fundo roda em paralelo com o clique do consultor.
+        return _wa_cors(jsonify({"ok": False, "erro": "saiu_antes_de_cancelar"})), 409
+    app.logger.info(f"[WA_FILA] item {fid} cancelado pelo consultor {uid or '?'}: {motivo}")
+    return _wa_cors(jsonify({"ok": True}))
+
+
 @app.route('/api/whatsapp/fila/<int:fid>/enviar-agora', methods=['POST', 'OPTIONS'])
 @requer('whatsapp:enviar')
 def api_whatsapp_fila_enviar_agora(fid):
@@ -28363,7 +28434,23 @@ def api_whatsapp_cotacao_salvar():
         close_db(conn)
 
         url = f"{_SITE_BASE_URL.rstrip('/')}/c/{token}"
-        return _wa_cors(jsonify({"ok": True, "id": cid, "token": token, "url": url}))
+        # DEVOLVE O QUE FOI GRAVADO, pra imagem e documento nao discordarem.
+        #
+        # A extensao desenha a imagem da cotacao no proprio navegador, com a
+        # copia dela das regras. Quando as duas copias divergiram — a do
+        # servidor sabia ler acomodacao 1/0 e a da extensao nao — o consultor
+        # abria o documento com "Enfermaria" e mandava pro cliente uma imagem
+        # com a linha em branco, da MESMA cotacao. Duas fontes da verdade pro
+        # mesmo papel do cliente e sempre um jeito de errar.
+        #
+        # So o essencial pra identificar o plano e o que estava faltando: nao e
+        # pra extensao redesenhar tudo daqui, e sim pra ela poder corrigir o
+        # que ela nao soube resolver sozinha.
+        resolvidos = [{'operadora': p.get('operadora') or '',
+                       'plano': p.get('plano') or '',
+                       'acomodacao': p.get('acomodacao') or ''} for p in planos]
+        return _wa_cors(jsonify({"ok": True, "id": cid, "token": token, "url": url,
+                                 "planos_resolvidos": resolvidos}))
 
     except Exception as e:
         conn.rollback()

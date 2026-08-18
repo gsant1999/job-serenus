@@ -6606,6 +6606,16 @@
     }
     if (v === true) return 'Apartamento';
     if (v === false) return 'Enfermaria';
+    // 1 E 0 NAO SAO true E false PRA COMPARACAO ESTRITA.
+    //
+    // Esta era a MESMA falha que o servidor tinha em `_acomodacao_do_payload`
+    // e que deixou a linha "Acomodacao" em branco no documento do cliente. La
+    // foi corrigida em 18/08; aqui ficou, e por isso o site mostrava
+    // "Enfermaria/Enfermaria/Apartamento" enquanto a imagem desenhada pela
+    // extensao — que usa ESTA funcao, nao o servidor — saia com a linha vazia
+    // na mesma cotacao. Duas copias da mesma regra, uma consertada e a outra
+    // nao: o consultor mandava pro cliente a versao muda.
+    if (typeof v === 'number') return v ? 'Apartamento' : 'Enfermaria';
     return '';
   }
 
@@ -8868,6 +8878,37 @@
           : 'Não consegui salvar agora. Os preços continuam aqui — tente de novo.');
       return;
     }
+    // A IMAGEM PASSA A DIZER O MESMO QUE O DOCUMENTO.
+    //
+    // A imagem é desenhada aqui, no navegador, com a cópia que a extensão tem
+    // das regras — e o documento é montado no servidor, com a dele. Quando as
+    // duas divergiram, o consultor abria o documento com "Enfermaria" e
+    // mandava pro cliente uma imagem com a linha em branco, da MESMA cotação.
+    //
+    // O servidor agora devolve o que gravou. Onde ele soube preencher e a
+    // extensão não, o valor dele vence: ele tem a base do JOB pra consultar,
+    // que aqui não existe. Casamento por operadora+plano, que é o que
+    // identifica a linha na tela do cliente.
+    try {
+      const resolvidos = (r && r.planos_resolvidos) || [];
+      if (resolvidos.length) {
+        const chave = (op, pl) => _cotNomeNormalizado(op) + '|' + _cotNomeNormalizado(pl);
+        const mapa = {};
+        resolvidos.forEach((x) => {
+          if (x && x.acomodacao) mapa[chave(x.operadora, x.plano)] = x.acomodacao;
+        });
+        lista.forEach((p) => {
+          const pl = p.plano || {};
+          if (_cotAcomod(pl)) return;               // a extensão já sabia: mantém
+          const nome = (p._jobOperadoraNome
+                        || (p.operadora && p.operadora.nome)
+                        || (_cot.operadoraAtual && _cot.operadoraAtual.nome) || '');
+          const vindo = mapa[chave(nome, _cotNomePlano(p))];
+          if (vindo) { p.plano = Object.assign({}, pl, { acomodacaoTxt: vindo }); }
+        });
+      }
+    } catch (e) { /* imagem com uma linha a menos nunca derruba o salvamento */ }
+
     // A lista de cotações do cliente muda a partir de agora.
     _cotCache = { chave: '', dados: null };
     btn.textContent = 'Salvo no JOB';
@@ -11092,12 +11133,69 @@
     document.body.appendChild(ov);
     const ta = document.getElementById('job-preview-texto');
     if (ta) { ta.value = modelo.texto || ''; }
-    const fechar = () => ov.remove();
+    // FECHAR COM MENSAGEM NA FILA CANCELA O ENVIO.
+    //
+    // Enquanto a mensagem espera o intervalo do WhatsApp, ela vive no servidor
+    // e sai sozinha quando o tempo abre — mesmo com esta janela fechada. Quem
+    // fechava achando que tinha desistido mandava de novo na mao, e o cliente
+    // recebia duas vezes. Fechar agora quer dizer desistir, e a tela diz isso
+    // com todas as letras antes.
+    const fechar = () => {
+      const p = ov._jobFilaPendente;
+      if (p && !p.encerrado) {
+        p.encerrado = true;
+        _safeSendMessage({ type: 'fila_cancelar', fila_id: p.id, usuario_id: p.usuarioId,
+                           motivo: 'A janela de envio foi fechada antes de a mensagem sair.' })
+          .catch(() => { /* o teto de validade do servidor ainda segura */ });
+      }
+      ov.remove();
+    };
     ov.addEventListener('click', (e) => { if (e.target === ov) fechar(); });
     document.getElementById('job-preview-x').addEventListener('click', fechar);
     document.getElementById('job-preview-cancelar').addEventListener('click', fechar);
     document.getElementById('job-preview-enviar').addEventListener('click', () => confirmarEnvioPreview(ov, modeloId, midiaTipo));
     if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+  }
+
+  // A ESPERA VIRA UMA TELA COM SAIDA, em vez de um aviso sem volta.
+  //
+  // O WhatsApp bloqueia numero que dispara em cadencia de robo, entao o
+  // servidor segura a proxima mensagem por alguns segundos. Ate 18/08/2026 a
+  // tela so informava a espera: nao dava pra desistir, e fechar a janela nao
+  // cancelava nada. Agora o consultor tem as duas saidas escritas — esperar ou
+  // desistir — e o padrao de fechar e desistir, que e o lado seguro.
+  function _filaPendenteDeCancelar(ov, filaId, usuarioId, espera, st) {
+    ov._jobFilaPendente = { id: filaId, usuarioId: usuarioId, encerrado: false };
+    const bEnviar = document.getElementById('job-preview-enviar');
+    const bCancelar = document.getElementById('job-preview-cancelar');
+    if (bEnviar) { bEnviar.disabled = true; bEnviar.textContent = 'Na fila…'; }
+    if (bCancelar) bCancelar.textContent = 'Cancelar envio';
+
+    let restam = espera;
+    const pintar = () => {
+      if (!st) return;
+      const p = ov._jobFilaPendente;
+      if (p && p.encerrado) return;
+      st.textContent = restam > 0
+        ? ('O WhatsApp libera este envio em cerca de ' + restam + ' s. '
+           + 'Se fechar esta janela, o envio é cancelado.')
+        : 'Enviando…';
+    };
+    pintar();
+    const relogio = setInterval(() => {
+      restam -= 1;
+      if (restam < 0) { clearInterval(relogio); return; }
+      pintar();
+    }, 1000);
+    // O relogio nao pode sobreviver a janela: sem isto ele fica pintando um
+    // elemento que ja saiu do DOM ate a aba ser recarregada.
+    const limpar = () => clearInterval(relogio);
+    ov.addEventListener('job-preview-fim', limpar);
+    _aoLimpar(limpar);
+    const obs = new MutationObserver(() => {
+      if (!document.body.contains(ov)) { limpar(); obs.disconnect(); }
+    });
+    try { obs.observe(document.body, { childList: true }); } catch (e) { /* sem observer, o _aoLimpar cobre */ }
   }
 
   async function _enviarItemDaFila(item) {
@@ -11159,7 +11257,14 @@
         const item = pronto && pronto.ok && pronto.item;
         if (!item) {
           const espera = Math.max(1, Math.ceil(Number(pronto && pronto.espera_s) || 1));
-          if (st) st.textContent = 'O WhatsApp libera este envio em cerca de ' + espera + ' s. A mensagem ficou na fila.';
+          // ESPERANDO NA FILA PRECISA TER SAIDA.
+          //
+          // Ate 18/08/2026 esta era uma tela sem volta: a mensagem ficava na
+          // fila do servidor e saia sozinha quando o intervalo abrisse, mesmo
+          // que a janela fosse fechada. Quem achava que nao tinha enviado
+          // mandava de novo na mao, e o cliente recebia duas vezes — a segunda
+          // sem ninguem esperando do outro lado.
+          _filaPendenteDeCancelar(ov, resp.id, usuarioId, espera, st);
           _agendarFila(espera);
           return;
         }

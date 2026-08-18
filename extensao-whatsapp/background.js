@@ -1130,6 +1130,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       { usuario_id: msg.usuario_id }, 15000).then(sendResponse);
     return true;
   }
+  // DESISTIR DE UMA MENSAGEM QUE AINDA NAO SAIU.
+  //
+  // `repetivel` porque a chamada so subtrai: cancelar duas vezes da o mesmo
+  // resultado que cancelar uma. Se a resposta se perder na rede, repetir e
+  // seguro — e nao repetir seria pior, porque a mensagem sairia.
+  if (msg && msg.type === 'fila_cancelar') {
+    chamarJob('/api/whatsapp/fila/' + encodeURIComponent(msg.fila_id) + '/cancelar', 'POST',
+      { usuario_id: msg.usuario_id, motivo: msg.motivo || '' }, 15000, null,
+      { repetivel: true }).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'campanha_aguardando') {
     chamarJob('/api/whatsapp/campanha/aguardando?usuario_id=' + encodeURIComponent(msg.usuario_id || ''), 'GET', null, 15000).then(sendResponse);
     return true;
