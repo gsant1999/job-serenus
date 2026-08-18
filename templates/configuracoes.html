@@ -506,9 +506,10 @@ async function akRevogar(id, nome){
               Toda mensagem criada já saiu ou já foi encerrada.
             {% elif fila_saude.vencendo %}
               <b class="vr-erro">{{ fila_saude.vencendo }} de {{ fila_saude.esperando }}
-              não vão mais sair</b> — passaram de {{ fila_saude.validade_h }}h na fila.
-              O servidor cancela por conta própria: mensagem antiga chegando hoje
-              confunde o cliente. Se ainda fizer sentido, mande na mão.
+              não vão mais sair</b> — passaram do prazo do próprio tipo.
+              O servidor cancela por conta própria e <b>abre pendência no sino do
+              consultor</b>, com o telefone de quem ficou sem resposta: mensagem
+              atrasada chega descolada da conversa, mas ninguém pode ficar sem saber.
             {% else %}
               <b class="vr-ok">{{ fila_saude.esperando }} esperando</b>, todas dentro
               do prazo. Elas saem sozinhas assim que o intervalo do WhatsApp abrir.
@@ -532,7 +533,8 @@ async function akRevogar(id, nome){
             <td>{{ i.origem }}{% if i.agendada %} <span class="vr-tag">agendada</span>{% endif %}</td>
             <td>{% if i.idade_min is none %}—
                 {% elif i.idade_min < 60 %}{{ i.idade_min }} min
-                {% else %}{{ i.idade_min // 60 }}h{{ '%02d'|format(i.idade_min % 60) }}{% endif %}</td>
+                {% else %}{{ i.idade_min // 60 }}h{{ '%02d'|format(i.idade_min % 60) }}{% endif %}
+                <span class="vr-tag">prazo {{ i.limite_min }} min</span></td>
             <td class="{{ 'vr-erro' if i.vencida else 'vr-ok' }}">
               {{ 'Não vai sair' if i.vencida else 'Vai sair' }}</td>
           </tr>
@@ -545,8 +547,11 @@ async function akRevogar(id, nome){
         <b>O que este número quer dizer:</b>
         a mensagem nasce aqui no JOB e quem entrega é a extensão, do WhatsApp do
         consultor. Enquanto ele estiver com o WhatsApp Web aberto, ela sai em
-        segundos. <b>Passou de {{ fila_saude.validade_h }}h, o servidor cancela</b> — e
-        aí a mensagem nunca chegou ao cliente, ainda que ninguém tenha errado nada.
+        segundos. <b>O prazo é por tipo:</b> abertura de lead pago vence em 20 minutos,
+        porque a pressa é o valor dela — quem preencheu um formulário está esperando
+        agora. O resto tem {{ fila_saude.validade_h }}h. Vencendo, o servidor cancela
+        <b>e abre pendência no sino do consultor</b>, com o telefone de quem ficou sem
+        resposta — a mensagem pode não sair, mas ninguém fica sem saber.
         Antes de religar qualquer rotina de envio, olhe este bloco: foi pular esse
         passo que fez mensagens de três semanas atrás saírem de uma vez.
         {% if fila_saude.cancelados_atraso %}

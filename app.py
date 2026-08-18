@@ -15078,7 +15078,6 @@ def _fila_envio_saude(conn):
     Agora o número está na tela, ao lado do resto da saúde da extensão.
     """
     agora = datetime.now(TZ_SP)
-    corte = (agora - timedelta(hours=_WA_FILA_VALIDADE_HORAS)).strftime('%Y-%m-%d %H:%M:%S')
     out = {'validade_h': _WA_FILA_VALIDADE_HORAS, 'esperando': 0, 'vencendo': 0,
            'mais_antiga_min': None, 'itens': [], 'cancelados_atraso': 0, 'falhou': 0}
     linhas = conn.execute("""
@@ -15098,11 +15097,17 @@ def _fila_envio_saude(conn):
             idade_min = int((agora - nasceu).total_seconds() // 60)
         # VENCIDA quer dizer NÃO VAI SAIR. É o número que interessa: cada uma
         # dessas é um cliente que a mensagem nunca alcançou.
-        vencida = bool(nasceu and str(d.get('criado_em'))[:19] < corte)
+        #
+        # O prazo é POR TIPO: abertura de lead pago vence em minutos porque a
+        # pressa é o produto dela; o resto tem mais folga. A tela precisa contar
+        # do mesmo jeito que o servidor decide, senão ela promete envio que não
+        # vai acontecer.
+        limite_min = _wa_fila_validade_min(d.get('origem'))
+        vencida = bool(idade_min is not None and idade_min >= limite_min)
         out['itens'].append({
             'id': d['id'], 'consultor': (d.get('consultor') or '?').split()[0],
             'origem': d.get('origem') or '', 'status': d.get('status'),
-            'idade_min': idade_min, 'vencida': vencida,
+            'idade_min': idade_min, 'vencida': vencida, 'limite_min': limite_min,
             'agendada': bool(d.get('liberar_em')),
         })
         out['esperando'] += 1
@@ -25255,16 +25260,34 @@ _WA_FILA_GATE_MAX = int(os.environ.get('WA_FILA_GATE_MAX', '45'))
 # passos nao protege nada e faz a ferramenta parecer quebrada.
 _WA_FILA_GATE_MESMO_MIN = int(os.environ.get('WA_FILA_GATE_MESMO_MIN', '3'))
 _WA_FILA_GATE_MESMO_MAX = int(os.environ.get('WA_FILA_GATE_MESMO_MAX', '8'))
-# Teto de validade do item da fila. Passou disso, NAO SAI — ver o bloco
-# grande em /api/whatsapp/fila/proximo.
+# TETO DE VALIDADE — POR TIPO DE MENSAGEM, porque as pressas sao diferentes.
 #
-# 1 HORA, decisao do Guilherme em 18/08/2026. Comecou em 6h no incidente da
-# manha (17 mensagens de ate tres semanas sairam pra cliente quando uma rotina
-# parada voltou), e 6h ainda era generoso demais: mensagem que o consultor
-# mandou de manha chegando de tarde ja chega descolada da conversa, e ele nao
-# esta mais olhando pra saber que saiu. Uma hora e o limite do que ainda faz
-# sentido pro cliente que recebe.
-_WA_FILA_VALIDADE_HORAS = 1
+# Historia curta: comecou em 6h no incidente de 18/08/2026 (17 mensagens de ate
+# tres semanas sairam pra cliente quando uma rotina parada voltou), foi pra 1h
+# no mesmo dia, e o Guilherme disse que 1h ainda era muito. Ele estava certo, e
+# a resposta nao era escolher um numero menor pra tudo:
+#
+# - Uma ABERTURA DE LEAD PAGO ("oi, vi que voce pediu uma cotacao") so vale
+#   perto do momento em que o lead chegou. A pessoa acabou de preencher um
+#   formulario e esta esperando. Meia hora depois ela ja procurou outro
+#   corretor; uma hora depois, a mensagem chega estranha. Vale 20 minutos.
+# - Uma mensagem que o CONSULTOR DIGITOU ou um passo de FUNIL nao tem essa
+#   pressa: ele escreveu pra aquela conversa, o contexto dura mais. 1 hora.
+#
+# O que resolve de vez NAO e o numero, e a linha de baixo: mensagem que vence
+# ABRE PENDENCIA no sino, com o telefone do cliente. Antes ela virava
+# 'cancelado_atraso' em silencio — o consultor nunca sabia que o cliente dele
+# nao recebeu nada. Falha silenciosa e o inimigo; o teto sozinho era mais uma.
+_WA_FILA_VALIDADE_HORAS = 1                       # padrao, e o que a tela mostra
+_WA_FILA_VALIDADE_MIN_POR_ORIGEM = {
+    'lead_pago': 20,        # abertura de lead pago: a pressa e o produto
+}
+
+
+def _wa_fila_validade_min(origem):
+    """Quantos minutos aquele tipo de mensagem ainda faz sentido pro cliente."""
+    return _WA_FILA_VALIDADE_MIN_POR_ORIGEM.get(
+        str(origem or '').strip(), _WA_FILA_VALIDADE_HORAS * 60)
 _WA_FILA_RECLAIM_MINUTOS = 3
 _WA_FILA_MAX_TENTATIVAS = 3
 
@@ -25411,20 +25434,62 @@ def api_whatsapp_fila_proximo():
     # Item vencido nao e apagado: vira 'cancelado_atraso' com o motivo escrito,
     # pra ficar auditavel e pra ninguem achar que a mensagem saiu.
     try:
-        corte_velho = (agora - timedelta(hours=_WA_FILA_VALIDADE_HORAS)).strftime('%Y-%m-%d %H:%M:%S')
-        venc = conn.execute("""UPDATE whatsapp_extensao_fila
-            SET status='cancelado_atraso', erro=?
-            WHERE responsavel_id=? AND status IN ('pendente','enviando')
-              AND CAST(criado_em AS TEXT) < ?""",
-            (f'Nao enviado: passou de {_WA_FILA_VALIDADE_HORAS}h na fila. '
-             'Mensagem antiga chegando hoje confunde o cliente, entao o JOB '
-             'prefere nao mandar. Se ainda faz sentido, mande na mao.',
-             usuario_id, corte_velho))
-        n_venc = getattr(venc, 'rowcount', 0) or 0
+        # VENCE POR TIPO, E AVISA QUEM PRECISA SABER.
+        #
+        # Antes era um teto so pra tudo, e o item morria calado: virava
+        # 'cancelado_atraso' e ninguem ficava sabendo. O consultor nao tinha
+        # como descobrir que o cliente dele nao recebeu a abertura — ele
+        # achava que tinha mandado. Isso e exatamente a falha silenciosa que
+        # ja custou 7 dias de leitura parada neste projeto.
+        #
+        # Agora cada mensagem vence no prazo que faz sentido PRA ELA, e cada
+        # vencimento vira pendencia no sino com o telefone do cliente. O
+        # consultor pode nao conseguir mandar na hora — mas nunca mais fica
+        # sem saber.
+        vencidos = conn.execute("""SELECT id, origem, telefone, lead_id, criado_em
+            FROM whatsapp_extensao_fila
+            WHERE responsavel_id=? AND status IN ('pendente','enviando')""",
+            (usuario_id,)).fetchall()
+        n_venc = 0
+        for v in [dict(x) for x in vencidos]:
+            limite_min = _wa_fila_validade_min(v.get('origem'))
+            nasceu = _parse_dt_seguro(v.get('criado_em'))
+            if not nasceu:
+                continue
+            if nasceu.tzinfo is None:
+                nasceu = TZ_SP.localize(nasceu)
+            idade_min = (agora - nasceu).total_seconds() / 60.0
+            if idade_min < limite_min:
+                continue
+            conn.execute("""UPDATE whatsapp_extensao_fila SET status='cancelado_atraso', erro=?
+                WHERE id=? AND status IN ('pendente','enviando')""",
+                (f'Nao enviado: passou de {limite_min} min na fila. Mensagem atrasada '
+                 'chega descolada da conversa, entao o JOB prefere nao mandar. '
+                 'Se ainda faz sentido, mande na mao.', v['id']))
+            n_venc += 1
+            try:
+                tel = str(v.get('telefone') or '').strip()
+                eh_abertura = str(v.get('origem') or '') == 'lead_pago'
+                _pendencia_abrir(
+                    conn,
+                    chave=f"wa_fila_venceu:{v['id']}",
+                    titulo=('Lead pago não recebeu a mensagem de abertura'
+                            if eh_abertura else 'Uma mensagem não chegou ao cliente'),
+                    descricao=(f'Ficou {int(idade_min)} min na fila sem sair e venceu '
+                               f'(o limite deste tipo é {limite_min} min). '
+                               f'Telefone: {tel or "sem telefone"}.'),
+                    como_resolver=('Fale com essa pessoa agora, na mão. Ela pediu cotação e '
+                                   'está sem resposta desde então.' if eh_abertura else
+                                   'Se a mensagem ainda faz sentido, mande na mão pela conversa.'),
+                    link=(f'/crm/lead/{v["lead_id"]}' if v.get('lead_id') else '/configuracoes'),
+                    severidade=('erro' if eh_abertura else 'atencao'),
+                    usuario_id=usuario_id)
+            except Exception as e:
+                app.logger.warning(f"[WA_FILA] pendencia do item {v['id']}: {e}")
         if n_venc:
             conn.commit()
-            app.logger.warning(f"[WA_FILA] {n_venc} item(ns) vencido(s) cancelado(s) "
-                               f"do consultor {usuario_id} (mais de {_WA_FILA_VALIDADE_HORAS}h na fila)")
+            app.logger.warning(f"[WA_FILA] {n_venc} item(ns) vencido(s) do consultor "
+                               f"{usuario_id} — pendencia aberta pra cada um")
     except Exception as e:
         app.logger.warning(f"[WA_FILA] vencimento: {e}")
         try: conn.rollback()
