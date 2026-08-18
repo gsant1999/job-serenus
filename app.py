@@ -36009,7 +36009,15 @@ def _aprender_do_vivo(conn, cidade, modalidade, planos):
                 continue
 
             tb = p.get('tabela') or {}
-            acomodacao = 'Apartamento' if (p.get('plano') or {}).get('acomodacao') else 'Enfermaria'
+            # NAO INVENTA A ACOMODACAO QUE O PAINEL NAO MANDOU.
+            #
+            # Esta linha gravava 'Enfermaria' sempre que o campo nao vinha —
+            # e foi assim que uma linha de Saude Beneficencia nasceu com
+            # 'Enfermaria' chutado. O problema piorou quando a apresentacao
+            # passou a CONSULTAR esta base pra preencher o que falta: o chute
+            # voltaria com cara de dado conferido. Vazio aqui significa
+            # "nao sei", e quem le sabe ignorar.
+            acomodacao = _acomodacao_do_payload(p.get('plano') or {})
             copart = _copart_texto(tb)
             
             abrangencia = _texto_painel(p.get('produto'))[:120]
@@ -36925,6 +36933,25 @@ def _copart_texto(tb):
     return 'Com'
 
 
+def _acomodacao_do_payload(pl):
+    """A palavra da acomodacao a partir do que o plano trouxe, sem chutar.
+
+    Devolve '' quando o payload nao diz — e '' aqui significa NAO SEI, nao
+    'Enfermaria'. Quem chama decide se procura noutro lugar.
+    """
+    bruto = (pl or {}).get('acomodacaoTxt')
+    if bruto in (None, ''):
+        bruto = (pl or {}).get('acomodacao')
+    if isinstance(bruto, str):
+        return bruto.strip()
+    if isinstance(bruto, bool):
+        return 'Apartamento' if bruto else 'Enfermaria'
+    if isinstance(bruto, (int, float)):
+        # `is True` / `is False` nao servia: JSON manda 1/0 e o valor sumia.
+        return 'Apartamento' if bruto else 'Enfermaria'
+    return ''
+
+
 def _acomodacao_da_base(conn, operadora, plano, modalidade):
     """Ultima tentativa antes de desistir: a palavra que a base ja tem gravada.
 
@@ -36984,23 +37011,7 @@ def _viva_para_apresentacao(d):
         if elegivel:
             total_geral += total
         pl = p.get('plano') or {}
-        acomodacao_bruta = pl.get('acomodacaoTxt')
-        if acomodacao_bruta in (None, ''):
-            acomodacao_bruta = pl.get('acomodacao')
-        if isinstance(acomodacao_bruta, str):
-            acomodacao = acomodacao_bruta.strip()
-        elif isinstance(acomodacao_bruta, bool):
-            acomodacao = 'Apartamento' if acomodacao_bruta else 'Enfermaria'
-        elif isinstance(acomodacao_bruta, (int, float)):
-            # `is True` / `is False` NAO SERVE AQUI.
-            #
-            # A comparacao era por identidade com o singleton do Python, entao
-            # so um bool de verdade passava. JSON com 1/0 — que e o que veio
-            # nesta cotacao — caia no ramo final e virava vazio. O documento do
-            # cliente saiu com a linha "Acomodacao" em branco nos tres planos.
-            acomodacao = 'Apartamento' if acomodacao_bruta else 'Enfermaria'
-        else:
-            acomodacao = ''
+        acomodacao = _acomodacao_do_payload(pl)
         if not acomodacao:
             # Nao sabemos pelo que veio; a base pode saber. Conexao aberta so
             # aqui, e uma vez por cotacao — o caminho normal nem chega neste if.

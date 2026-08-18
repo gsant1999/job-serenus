@@ -273,7 +273,14 @@
       {% for p in cot.planos %}<td class="val" data-p="{{ loop.index0 }}" style="--c:{{ p.cor }}">{% if p.recomendacao %}<div style="font-size:9px;font-weight:700;letter-spacing:.3px;padding:2px 7px;border-radius:20px;display:inline-block;margin-bottom:3px;background:{% if p.recomendacao=='1ª opção' %}#1fb88a{% elif p.recomendacao=='2ª opção' %}#3b82f6{% else %}#8b5cf6{% endif %};color:#fff;">{{ p.recomendacao }}</div>{% endif %}<div class="pn">{{ p.plano }}</div><div class="po">{{ p.operadora }}</div></td>{% endfor %}
     </tr>
     <tr><td class="lbl">Modalidade</td>{% for p in cot.planos %}<td class="val" data-p="{{ loop.index0 }}" style="--c:{{ p.cor }}">{{ p.modalidade }}</td>{% endfor %}</tr>
-    <tr><td class="lbl">Acomodação</td>{% for p in cot.planos %}<td class="val" data-p="{{ loop.index0 }}" style="--c:{{ p.cor }}">{{ p.acomodacao }}</td>{% endfor %}</tr>
+    {# CELULA MUDA NAO DIZ NADA, E LINHA TODA MUDA E RUIDO.
+       Quando um plano nao tem a acomodacao, a celula dizia nada — e o cliente
+       le isso como erro do documento. Agora ela diz "Não informado". E quando
+       NENHUM plano tem, a linha inteira sai: uma fileira de trecos nao ajuda
+       ninguem a comparar. #}
+    {% if cot.planos | selectattr('acomodacao') | list %}
+    <tr><td class="lbl">Acomodação</td>{% for p in cot.planos %}<td class="val" data-p="{{ loop.index0 }}" style="--c:{{ p.cor }}">{{ p.acomodacao or 'Não informado' }}</td>{% endfor %}</tr>
+    {% endif %}
     <tr><td class="lbl">Coparticipação</td>{% for p in cot.planos %}<td class="val" data-p="{{ loop.index0 }}" style="--c:{{ p.cor }}">{{ p.coparticipacao }}</td>{% endfor %}</tr>
     {% for f in cot.faixas_usadas %}
     <tr class="faixa">
@@ -297,7 +304,9 @@
       </div>
       <div class="publico-plano-meta">
         <div>Modalidade</div><div class="valor">{{ p.modalidade }}</div>
-        <div>Acomodação</div><div class="valor">{{ p.acomodacao }}</div>
+        {% if cot.planos | selectattr('acomodacao') | list %}
+        <div>Acomodação</div><div class="valor">{{ p.acomodacao or 'Não informado' }}</div>
+        {% endif %}
         <div>Coparticipação</div><div class="valor">{{ p.coparticipacao }}</div>
         {% for f in cot.faixas_usadas %}
         <div>{{ f.label }} · {{ f.qtd }}x</div><div class="valor">{{ p.precos_unit[f.faixa]|moeda_doc }}</div>
