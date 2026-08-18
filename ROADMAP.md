@@ -43,6 +43,21 @@ Legenda: [ ] pendente · [~] em andamento · [x] feito · (?) aguardando decisã
 - [x] **Material de apoio — upload não falha mais em silêncio**: se o arquivo não conseguir subir (R2/disco), agora avisa na tela em vez de salvar o item sem o arquivo sem dizer nada
 - [x] **Pastas do material de apoio**: agora dá pra criar pasta vazia dentro de uma operadora (nova ou existente) pra organizar antes de ter conteúdo — igual ao Painel do Corretor. Botão "+ Pasta" na sidebar e dentro de cada operadora; exclui pasta vazia
 - [x] **Link público limpo pro cliente** (Gabriel, PDF 04/07): removidas as ferramentas internas do corretor (Destacar planos, Legenda, Copiar imagem, Baixar, PDF) da view pública — só a view logada do corretor continua com tudo. Adicionados botões "Gostei dessa proposta" / "Me explique mais essa opção" (deixando claro que não é a contratação), clique avisa o corretor e registra na timeline do lead
+### Auditoria de segurança da cotação (17/08/2026)
+
+Varredura das 8 regras do roadmap de cotação. 34 achados confirmados, 17 refutados.
+Corrigidos e travados em `testes/testar_auditoria_seguranca.py` (35 verificações):
+credencial fora do repositório, árvore de sessão do Painel barrada em duas camadas,
+interface parou de ensinar consultora a abrir o Painel, motivo real da falha chegando
+à tela, ao vivo antes do banco na tela do site, cache sem renovar a própria data, e o
+ciclo de vida da fila (relógio pytz, posse, retenção, requeue, conexão vazando).
+
+Ficaram três, cada uma por um motivo:
+
+- [ ] **Cada clique em "Ver preços" cria até 3 cotações vazias no Painel da Trindade** (`extensao-whatsapp/background.js:264`, `_precosParalelosExecutar` abre 3 frentes e cada uma cria a sua cotação). Multiplicado por oito consultores num dia, é um volume de cotações vazias que nenhum corretor humano produz — exatamente o padrão que denuncia máquina. A correção certa é criar UMA cotação por pedido e passá-la como `cotacaoId` para as frentes (o passo `preco` já aceita `cotacaoId` pronto, `cotador-painel.js:1134`). **Não foi feita porque não há como testar sem o Painel real**, e é o caminho de cotação que acabou de voltar a funcionar. Precisa ser feita com o Painel aberto na frente.
+- [ ] **Busca de cidade ainda usa a sessão local do Painel** (`extensao-whatsapp/background.js:1417`) — uma consultora com aba antiga logada bate direto em `paineldocorretor.com.br/api/cidades` com o cookie dela. Isso contradiz a regra "nenhuma sessão além da do trabalhador toca no Painel", mas foi uma **decisão explícita** (commit `7fe675e`, "consulta de cidade é somente leitura e pode usar o Painel local imediatamente") para resolver a latência do heartbeat. (?) Ou a exceção vira regra escrita, ou some e a latência se resolve com cache de cidades no JOB.
+- [ ] **`-w 1` no gunicorn: o reciclo por `--max-requests` para o site inteiro** (`Procfile`). Sem segundo worker, o processo sai e o substituto importa 49 mil linhas antes de responder — "o sistema travou por alguns segundos", sem erro no log, várias vezes por dia. Subir para `-w 2` **não pode ser feito hoje**: `_FILA_ESCUTAS_ATIVAS` é um set em memória de processo, e com dois workers cada um teria o seu — a mesma sessão abriria uma escuta por processo e prenderia 2 threads. A proteção precisa migrar para o banco antes. E o roadmap manda reavaliar infra só depois de 24h de medição.
+
 - [ ] Destaque avançado no documento (correção 03/07: o básico já existe, isto é sobre a versão avançada) — o que falta de fato: escolher manualmente qual linha/coluna destacar (ex: só a acomodação ou só o copart de um plano específico), misturar cores por célula em vez de 1 cor fixa por plano inteiro, e permitir vários destaques simultâneos na mesma coluna
 - [ ] UX da montagem da cotação (Guilherme acha confusa; referência: Painel do Corretor) — sem escopo definido, precisa de conversa
 - [ ] Filtro por região/CEP e cotação com dependentes — confirmado: nenhum dos dois existe hoje em `/cotacao`
