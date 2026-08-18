@@ -4705,9 +4705,31 @@
     return true;
   }
   // A rotina longa chama isto no meio do trabalho. `true` = alguém urgente
-  // está esperando, então pare aqui e devolva a vez.
+  // está esperando (ou já tomou a vez), então pare aqui.
   function _jobGateCederam() { return _JOB_GATE.querPassar > 0; }
-  function _jobGateSoltar() {
+
+  // TOMA A VEZ, não pede. Só o clique explícito do consultor usa isto.
+  //
+  // Pedir educadamente é o certo pra rotina de fundo, que pode esperar. Pro
+  // clique não é: ele já aconteceu, a pessoa está olhando, e "sua mensagem
+  // ficou pronta para enviar em seguida" é a frase que fez o consultor mandar
+  // a mesma coisa duas vezes. Uma mensagem única é uma chamada curta — cabe
+  // por cima de uma varredura sem derrubar a aba.
+  function _jobGateTomar(quem) {
+    _JOB_GATE.ocupado = true;
+    _JOB_GATE.por = quem;
+    // Fica marcado: quem estava segurando vê e para de pegar trabalho novo.
+    _JOB_GATE.querPassar += 1;
+    return true;
+  }
+  // SÓ SOLTA QUEM ESTÁ SEGURANDO.
+  //
+  // Sem o nome aqui havia uma corrida real: o clique TOMA a vez, a varredura
+  // percebe e sai — e o `finally` dela soltava a vez que já era do clique.
+  // A partir daí a trava ficava aberta com o envio ainda em curso, que é
+  // exatamente o estado que ela existe pra impedir.
+  function _jobGateSoltar(quem) {
+    if (quem && _JOB_GATE.por && _JOB_GATE.por !== quem) return;   // já não é meu
     _JOB_GATE.ocupado = false;
     _JOB_GATE.por = '';
     _JOB_GATE.querPassar = 0;
@@ -4823,7 +4845,7 @@
       }
     } finally {
       VAR.rodando = false;
-      _jobGateSoltar();
+      _jobGateSoltar('varredura_auto');
     }
     // A válvula existia apenas na fila manual. A varredura automática também
     // lê histórico pela mesma wa-js e, portanto, precisa da mesma proteção.
@@ -5039,7 +5061,7 @@
         try { await chrome.storage.local.set({ [chave]: Date.now() }); } catch (e) {}
         if (ligados) console.log('[JOB] @lid: ' + ligados + ' conversa(s) ligadas ao lead.');
       } finally {
-        _jobGateSoltar();
+        _jobGateSoltar('sinc_lid_auto');
       }
     } catch (e) { /* silencioso de proposito: e manutencao, nao tarefa do consultor */ }
   }
@@ -9781,7 +9803,7 @@
         // peca quebrada.
         erro = String((e && e.message) || e).slice(0, 180);
       } finally {
-        _jobGateSoltar();
+        _jobGateSoltar('varredura_fila');
       }
       await _safeSendMessage({ type: 'varredura_resultado', item_id: item.item_id,
                                ok: ok, erro: erro }).catch(() => null);
@@ -9858,7 +9880,7 @@
       } catch (e) {
         dica('Não deu: ' + ((e && e.message) || e));
       } finally {
-        _jobGateSoltar();
+        _jobGateSoltar('sinc_lid_manual');
         b.disabled = false; b.textContent = 'Sincronizar @lid de todas as conversas';
       }
     });
@@ -11289,11 +11311,23 @@
       // a chamada; daí a sensação correta de que o botão mentia e demorava.
       // Para um clique explícito, pede o próprio item agora, sem esperar o
       // polling. O servidor continua aplicando o mesmo limite de ritmo.
-      if (!_jobGateTentar('envio_direto')) {
-        if (st) st.textContent = 'Outra tarefa do JOB está terminando. Sua mensagem ficou pronta para enviar em seguida.';
-        _agendarFila(1);
-        return;
-      }
+      // CLIQUE EXPLÍCITO NÃO ESPERA NADA. NUNCA.
+      //
+      // Aqui ficava um `if (!_jobGateTentar(...)) { avisa e desiste }`: se a
+      // varredura estivesse rodando, a mensagem do consultor ia pra fila e
+      // saía "em seguida". O consultor lia "ficou pronta para enviar", achava
+      // que não tinha ido, gravava outro áudio e mandava de novo — e aí saíam
+      // as duas, a segunda sem ninguém esperando do outro lado.
+      //
+      // A trava existe pra impedir três rotinas PESADAS ao mesmo tempo. Uma
+      // mensagem única não é isso: é uma chamada curta. O custo de deixá-la
+      // passar por cima é um instante de concorrência; o custo de segurá-la é
+      // o consultor duvidar do próprio botão — e esse a gente já pagou.
+      //
+      // `_jobGateTomar` avisa quem está segurando que a vez foi tomada. A
+      // varredura vê isso entre uma conversa e outra e para de pegar as
+      // próximas, em vez de disputar.
+      _jobGateTomar('envio_direto');
       try {
         const pronto = await _safeSendMessage({ type: 'fila_enviar_agora',
           fila_id: resp.id, usuario_id: usuarioId });
@@ -11327,7 +11361,7 @@
         _agendarFila(1);
         setTimeout(() => { ov.remove(); }, 800);
       } finally {
-        _jobGateSoltar();
+        _jobGateSoltar('envio_direto');
       }
     } catch (e) {
       if (st) st.textContent = 'Erro: ' + e.message;
@@ -13661,7 +13695,7 @@
         // Mandou uma: tenta a proxima ja. O servidor decide se pode — aqui so
         // deixamos de dormir 20s a toa entre uma e outra.
         _agendarFila(1);
-      } finally { _jobGateSoltar(); }
+      } finally { _jobGateSoltar('envio'); }
     } catch (e) { /* próxima rodada tenta de novo */ }
     finally {
       _filaOcupada = false;

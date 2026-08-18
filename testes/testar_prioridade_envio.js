@@ -30,7 +30,8 @@ const ctx = {};
 vm.createContext(ctx);
 vm.runInContext(
   src.slice(i, j) +
-  '\nthis.g = { tentar: _jobGateTentar, soltar: _jobGateSoltar, cederam: _jobGateCederam, estado: _JOB_GATE };',
+  '\nthis.g = { tentar: _jobGateTentar, tomar: _jobGateTomar, soltar: _jobGateSoltar,' +
+  ' cederam: _jobGateCederam, estado: _JOB_GATE };',
   ctx
 );
 const g = ctx.g;
@@ -86,10 +87,38 @@ g.soltar();
 checa('um soltar zera todos os pedidos', g.cederam() === false);
 checa('e a vez fica livre de verdade', g.tentar('envio') === true);
 
+console.log('\n— CLIQUEI, TEM QUE IR. O clique não espera nada.');
+g.soltar();
+g.tentar('varredura_auto');
+checa('varredura está rodando', g.estado.por === 'varredura_auto');
+g.tomar('envio_direto');
+checa('o clique TOMA a vez, não pede', g.estado.por === 'envio_direto',
+      `quem está com a vez: ${g.estado.por}`);
+checa('e a varredura fica sabendo que perdeu', g.cederam() === true);
+
+console.log('\n— A varredura saindo não pode soltar a vez do clique');
+// A corrida real: a varredura percebe que cedeu e o `finally` dela roda DEPOIS
+// de o clique já ter tomado. Sem dono no soltar, ela abria a trava com o envio
+// ainda em curso — exatamente o estado que a trava existe pra impedir.
+g.soltar('varredura_auto');
+checa('a vez continua sendo do clique', g.estado.por === 'envio_direto',
+      `quem está com a vez: ${g.estado.por || '(ninguém)'}`);
+checa('e a trava continua fechada', g.estado.ocupado === true);
+g.soltar('envio_direto');
+checa('quando o clique termina, aí sim libera', g.estado.ocupado === false);
+
+console.log('\n— Dois cliques seguidos: o segundo também não espera');
+g.soltar();
+g.tomar('envio_direto');
+g.tomar('envio_direto');
+checa('o segundo clique também passa', g.estado.por === 'envio_direto');
+g.soltar('envio_direto');
+checa('e uma soltada basta', g.estado.ocupado === false);
+
 console.log();
 if (falhas.length) {
   console.error(`FALHOU: ${falhas.length}`);
   falhas.forEach((f) => console.error(' -', f));
   process.exit(1);
 }
-console.log('PRIORIDADE DO ENVIO: mensagem pro cliente fura a fila da varredura (14 casos)');
+console.log('PRIORIDADE DO ENVIO: clique manda na hora, e a varredura não rouba a vez de volta (22 casos)');
