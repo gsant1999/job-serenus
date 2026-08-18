@@ -7948,7 +7948,9 @@
         // `unitario` e o nome que o servidor le ao salvar (ele escreve
         // f['unitario']); o motor do JOB chama de `preco`. Sem esta linha a
         // cotacao salva sai com as faixas zeradas no documento do cliente.
-        ? { total: x.total, conferido: true,
+        // `fontePreco` marca de onde o valor veio. O servidor usa isso pra
+        // nao deixar um preco de tabela renovar a data da propria tabela.
+        ? { total: x.total, conferido: true, fontePreco: 'tabela_job',
             faixas: (x.linhas || []).map((l) => Object.assign({ unitario: l.preco }, l)) }
         : { total: null, motivo: motivo[String(p._planoId)] ||
             ((!r || !r.ok) ? ((r && r.erro) || 'banco_indisponivel') : 'sem_valor_na_resposta') });

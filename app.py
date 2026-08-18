@@ -3127,6 +3127,10 @@ def init_db():
     add_col('extensao_sessao', 'trabalhador_sinal', 'TIMESTAMP')
     add_col('cotacao_fila', 'fracao', 'REAL DEFAULT 0.0')
     add_col('cotacao_fila', 'chave_pedido', 'TEXT')
+    # De onde veio o preco de cada linha do historico: 'painel_ao_vivo' ou
+    # 'tabela_job'. Sem isto nao havia como auditar, depois do fato, se uma
+    # cotacao salva foi consulta de verdade ou releitura da base salva.
+    add_col('cotacao_viva_preco', 'fonte_preco', 'TEXT')
     try:
         conn.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS ux_cotacao_fila_usuario_chave
@@ -35434,8 +35438,9 @@ def _cotacao_viva_gravar(conn, d, usuario_id, origem):
             conn.execute(
                 """INSERT INTO cotacao_viva_preco
                      (viva_id, cidade, modalidade, operadora, produto, plano, tabela_nome,
-                      chave, acomodacao, coparticipacao, vidas_assinatura, total, faixas_json, criado_em)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                      chave, acomodacao, coparticipacao, vidas_assinatura, total, faixas_json,
+                      criado_em, fonte_preco)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (vid, cidade, modalidade,
                  str((p.get('operadora') or {}).get('nome') or '')[:120],
                  str((p.get('produto') or {}).get('nome') or '')[:160],
@@ -35449,7 +35454,11 @@ def _cotacao_viva_gravar(conn, d, usuario_id, origem):
                               'quantidade': f.get('quantidade'),
                               'unitario': f.get('unitario')}
                              for f in (p.get('faixas') or [])], ensure_ascii=False),
-                 _agora_sp()))
+                 _agora_sp(),
+                 # 'painel_ao_vivo' quando a extensao marcou; 'tabela_job'
+                 # quando o preco saiu da base salva. Sem a marca fica vazio —
+                 # e o que o log de auditoria mostra como "origem nao declarada".
+                 str(p.get('fontePreco') or '')[:24]))
         except Exception:
             # Uma linha de histórico que falha não pode derrubar a cotação que
             # o consultor acabou de fazer. A rodada em JSON já está salva.
@@ -35526,6 +35535,19 @@ def _aprender_do_vivo(conn, cidade, modalidade, planos):
 
     for p in planos:
         try:
+            # PRECO DE TABELA NAO RENOVA A DATA DA PROPRIA TABELA.
+            #
+            # Era um ciclo fechado: a tela lia o preco de maio da
+            # cotacao_tabela, salvava como cotacao viva, e isto aqui
+            # re-carimbava `atualizado_em = agora` na linha de onde ele
+            # saiu. Em agosto o preco de maio constava como atualizado em
+            # agosto e o alerta de frescor nunca disparava.
+            #
+            # Denylist, nao whitelist: o caminho ao vivo da extensao nem
+            # sempre marca a origem, e exigir a marca faria a base parar de
+            # aprender com quem ainda esta numa versao antiga.
+            if str(p.get('fontePreco') or '') in ('tabela_job', 'banco_job'):
+                continue
             operadora = str((p.get('operadora') or {}).get('nome') or '').strip()[:120]
             plano = str((p.get('plano') or {}).get('nome') or '').strip()[:160]
             faixas = [f for f in (p.get('faixas') or []) if f and f.get('unitario')]

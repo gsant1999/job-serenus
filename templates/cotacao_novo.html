@@ -1368,62 +1368,65 @@
   // O catálogo continua valendo como reserva: quando a extensão não responde,
   // uma lista aproximada é melhor que tela vazia — e aí a tela diz que é
   // aproximada, em vez de deixar parecer certa.
-  async function carregarOperadoras() {
-    var mod = modalidadeAtiva();
-    el('navLista').className = 'cv-grade';
-    el('navLista').innerHTML = '<div class="cv-ops-vazio">Consultando planos no banco do JOB…</div>';
-
+  // Le a base salva do JOB SEM decidir nada. Quem decide e carregarOperadoras.
+  //
+  // Antes isto era o comeco da funcao e ja saia dela com `return`: se a base
+  // tinha qualquer plano da cidade, a tela inteira vinha do banco e o Painel
+  // nunca era consultado. Um reajuste de ontem era apresentado ao cliente com
+  // o Painel aberto e funcionando na aba do lado.
+  async function _lerBaseDoJob() {
     var doJob = await fetch('/cotacao/bloco/planos?cidade=' +
         encodeURIComponent(cidadeEscolhida || '') + '&modalidade=' + encodeURIComponent(tipoAtivo() || ''))
       .then(function (x) { return x.json(); }).catch(function () { return {}; });
+    if (!(doJob && doJob.ok && doJob.planos && doJob.planos.length > 0)) return null;
+    var opsMap = {}, plsMap = {};
+    doJob.planos.forEach(function (p) {
+      var opNome = (p.operadora || '(sem operadora)').trim();
+      if (!opsMap[opNome]) {
+        opsMap[opNome] = { id: opNome, nome: opNome, logotipo: p.logo || '' };
+      }
+      var plObj = {
+        _local: true,
+        _db_id: p.id,
+        key: 'loc_' + p.id,
+        id: 'loc_' + p.id,
+        operadora: opsMap[opNome],
+        produto: { nome: p.produto || p.plano || '(sem produto)' },
+        tabela: {
+          nome: p.linha || p.plano || '',
+          coparticipacao: (p.coparticipacao || '').toLowerCase().indexOf('com') >= 0,
+          coparticipacaoTipo: p.coparticipacao || '',
+          mei: p.mei === true || (p.modalidade || '').toLowerCase() === 'mei',
+          // idade_min é a IDADE a partir da qual a operadora vende (44 na
+          // Medsênior). Não é quantidade de vidas. Estava indo para
+          // qtdVidaMin, e o cartão renderiza "qtdVidaMin–qtdVidaMax vidas":
+          // a Medsênior aparecia como "44–99 vidas" para o corretor, que lê
+          // como "exige no mínimo 44 vidas". Número certo, legenda errada.
+          // A base local não informa mínimo de vidas — então não inventa.
+          idadeMin: p.idade_min || 0,
+          qtdVidaMin: 0,
+          qtdVidaMax: 0
+        },
+        plano: {
+          nome: p.plano || '',
+          acomodacao: (p.acomodacao || '').toLowerCase().indexOf('indiv') >= 0 || (p.acomodacao || '').toLowerCase().indexOf('apart') >= 0
+        },
+        frescor: p.frescor,
+        dias_atualizado: p.dias_atualizado
+      };
+      (plsMap[opNome] = plsMap[opNome] || []).push(plObj);
+    });
+    return { ops: Object.keys(opsMap).sort().map(function (k) { return opsMap[k]; }), pls: plsMap };
+  }
 
-    if (doJob && doJob.ok && doJob.planos && doJob.planos.length > 0) {
-      var opsMap = {}, plsMap = {};
-      doJob.planos.forEach(function (p) {
-        var opNome = (p.operadora || '(sem operadora)').trim();
-        if (!opsMap[opNome]) {
-          opsMap[opNome] = { id: opNome, nome: opNome, logotipo: p.logo || '' };
-        }
-        var plObj = {
-          _local: true,
-          _db_id: p.id,
-          key: 'loc_' + p.id,
-          id: 'loc_' + p.id,
-          operadora: opsMap[opNome],
-          produto: { nome: p.produto || p.plano || '(sem produto)' },
-          tabela: {
-            nome: p.linha || p.plano || '',
-            coparticipacao: (p.coparticipacao || '').toLowerCase().indexOf('com') >= 0,
-            coparticipacaoTipo: p.coparticipacao || '',
-            mei: p.mei === true || (p.modalidade || '').toLowerCase() === 'mei',
-            // idade_min é a IDADE a partir da qual a operadora vende (44 na
-            // Medsênior). Não é quantidade de vidas. Estava indo para
-            // qtdVidaMin, e o cartão renderiza "qtdVidaMin–qtdVidaMax vidas":
-            // a Medsênior aparecia como "44–99 vidas" para o corretor, que lê
-            // como "exige no mínimo 44 vidas". Número certo, legenda errada.
-            // A base local não informa mínimo de vidas — então não inventa.
-            idadeMin: p.idade_min || 0,
-            qtdVidaMin: 0,
-            qtdVidaMax: 0
-          },
-          plano: {
-            nome: p.plano || '',
-            acomodacao: (p.acomodacao || '').toLowerCase().indexOf('indiv') >= 0 || (p.acomodacao || '').toLowerCase().indexOf('apart') >= 0
-          },
-          frescor: p.frescor,
-          dias_atualizado: p.dias_atualizado
-        };
-        (plsMap[opNome] = plsMap[opNome] || []).push(plObj);
-      });
-      operadoras = Object.keys(opsMap).sort().map(function (k) { return opsMap[k]; });
-      planosPorOperadora = plsMap;
-      urlDaPergunta = '';
-      el('mainSub').innerHTML = 'Quem atende <b>' + esc(cidadeEscolhida) + '</b> · ' +
-        esc(nomeCompleto(tipoAtivo() || '')) + ' · <b>' + esc(resumoVidas()) + '</b> · ' +
-        operadoras.length + ' operadoras';
-      voltarPara('operadoras');
-      return;
-    }
+  function _chaveOperadora(n) {
+    return String(n || '').toLowerCase().normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+
+  async function carregarOperadoras() {
+    var mod = modalidadeAtiva();
+    el('navLista').className = 'cv-grade';
 
     // Base local vazia e a tela achando que não dá pra cotar ao vivo.
     //
@@ -1464,6 +1467,27 @@
           { acao: 'operadoras', cotacaoId: rc.dados.cotacaoId }, b) }, 45000);
         if (r.ok) {
           operadoras = (r.dados && r.dados.operadoras) || [];
+          planosPorOperadora = {};
+
+          // AS DUAS FONTES SOMAM; NAO SE SUBSTITUEM.
+          //
+          // MedSenior, Beneficencia Vital e Santa Tereza so existem na base do
+          // JOB — o Painel nao cota nenhuma delas. Se o ao vivo simplesmente
+          // vencesse, essas tres sumiriam da tela. Entao: o Painel manda em
+          // tudo que ele cota, e a base entra so com quem ele nao tem.
+          var doBanco = await _lerBaseDoJob();
+          var soDoJob = 0;
+          if (doBanco) {
+            var vivas = {};
+            operadoras.forEach(function (o) { vivas[_chaveOperadora(o.nome)] = 1; });
+            doBanco.ops.forEach(function (o) {
+              if (vivas[_chaveOperadora(o.nome)]) return;
+              operadoras.push(o);
+              planosPorOperadora[o.id] = doBanco.pls[o.id] || [];
+              soDoJob++;
+            });
+          }
+
           // DIZ EM CIMA DE QUE PERGUNTA a lista foi montada.
           //
           // Quem atende muda com a faixa etária: com 1 vida em 19-23 a
@@ -1481,7 +1505,8 @@
           urlDaPergunta = rc.dados.url || '';
           el('mainSub').innerHTML = 'Quem atende <b>' + esc(cidadeEscolhida) + '</b> · ' +
             esc(nomeCompleto(tipoAtivo() || '')) + ' · <b>' + esc(resumoVidas()) + '</b> · ' +
-            operadoras.length + ' operadoras via <b>Painel do Corretor (ao vivo)</b>';
+            operadoras.length + ' operadoras via <b>Painel do Corretor (ao vivo)</b>' +
+            (soDoJob ? ' · ' + soDoJob + ' só na base do JOB' : '');
           voltarPara('operadoras');
           return;
         } else {
@@ -1490,6 +1515,21 @@
       } else {
         tratarFalha(rc.motivo, rc);
       }
+    }
+
+    // AO VIVO NAO RESPONDEU. So agora a base salva vale como resposta — e a
+    // tela diz que e base salva, em vez de deixar parecer preco de hoje.
+    el('navLista').innerHTML = '<div class="cv-ops-vazio">Consultando planos no banco do JOB…</div>';
+    var reserva = await _lerBaseDoJob();
+    if (reserva) {
+      operadoras = reserva.ops;
+      planosPorOperadora = reserva.pls;
+      urlDaPergunta = '';
+      el('mainSub').innerHTML = 'Quem atende <b>' + esc(cidadeEscolhida) + '</b> · ' +
+        esc(nomeCompleto(tipoAtivo() || '')) + ' · <b>' + esc(resumoVidas()) + '</b> · ' +
+        operadoras.length + ' operadoras · <b>base salva do JOB</b>, não consultado agora';
+      voltarPara('operadoras');
+      return;
     }
 
     var doJob = await fetch('/cotacao/catalogo/operadoras.json?cidade=' +
@@ -2208,7 +2248,15 @@
             unitario: L.preco || L.unitario || 0
           };
         });
-        return Object.assign({}, pl, { total: res.total, faixas: faixasMapped, conferido: true });
+        // A ORIGEM VIAJA COM O PRECO.
+        //
+        // Sem esta marca, o preco lido da tabela do JOB era salvo como se
+        // fosse consulta ao Painel — e o servidor ainda re-carimbava
+        // `atualizado_em = agora` na mesma tabela de onde ele saiu. O ciclo
+        // se fechava: preco de maio passava a constar como atualizado em
+        // agosto, e o alerta de frescor nunca mais disparava.
+        return Object.assign({}, pl, { total: res.total, faixas: faixasMapped,
+                                       conferido: true, fontePreco: 'tabela_job' });
       });
 
       if (aoAndar) aoAndar();
