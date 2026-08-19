@@ -980,7 +980,24 @@
   // Garante um número pro lead, na ordem: (1) wa-js (resolve @lid pelo mapa interno),
   // (2) cache local por chat_id (já resolvido/digitado antes), (3) popup pro corretor.
   // O que for resolvido/digitado é guardado no cache — não pergunta de novo.
+  // GRUPO NAO TEM NUMERO — E NAO E LEAD.
+  //
+  // A extensao tratava todo chat como pessoa: antes de mandar, ia atras do
+  // telefone pra casar com o lead no CRM. Num grupo (@g.us) esse numero nao
+  // existe, entao a busca falhava e o consultor levava o card "Numero nao
+  // identificado" pedindo pra digitar um telefone que nao existe — com o envio
+  // parado atras dele. Foi o que aconteceu no grupo "Plano Vera Cruz OURO".
+  //
+  // O ENVIO NUNCA PRECISOU DO TELEFONE: a wa-js manda pelo chatId, e chatId de
+  // grupo funciona igual ao de pessoa. O telefone servia pro CRM, e grupo nao
+  // vira lead. Entao aqui o grupo devolve vazio na hora, sem popup nenhum, e
+  // quem chama segue com o chatId — que e o unico dado que o envio usa.
+  function _ehGrupo(chatId) {
+    return typeof chatId === 'string' && chatId.endsWith('@g.us');
+  }
+
   async function garantirTelefone(nome, chatId) {
+    if (_ehGrupo(chatId)) return '';
     let tel = '';
     try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
     if (tel) { await _cacheNumeroSalvar(chatId, tel); return tel; }
