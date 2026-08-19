@@ -77,6 +77,14 @@ if ! grep -q '_soComAbaVisivel' content.js || ! grep -q '_agendarFila(60)' conte
   echo "ALERTA: faltam as travas de pausa da aba oculta."
   erro=1
 fi
+# O laco do deck do iPad nasceu depois desse incendio e carrega as travas dele:
+# dorme apos tres falhas e so reaparece pelo alarme de um minuto. Sem isso, o
+# deck vira exatamente o trabalhador de 14/08 com outro nome.
+if ! grep -q 'DECK_FALHAS_ATE_DORMIR' background.js \
+   || ! grep -q "alarms.create('deck_procurar'" background.js; then
+  echo "ALERTA: o laco do deck do iPad perdeu a trava de dormir."
+  erro=1
+fi
 [ $erro -eq 0 ] && echo "segundo plano: polling continuo bloqueado"
 
 

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "JOB — Análise de WhatsApp",
-  "version": "4.99.3",
+  "version": "4.100.0",
   "description": "Painel dentro do WhatsApp Web: analisa o lead, calcula o Score e envia mensagens da biblioteca de modelos.",
   "permissions": [
     "notifications",
@@ -15,7 +15,9 @@
     "https://*.up.railway.app/*",
     "https://job-serenus-production.up.railway.app/*",
     "https://paineldocorretor.com.br/*",
-    "https://*.paineldocorretor.com.br/*"
+    "https://*.paineldocorretor.com.br/*",
+    "http://127.0.0.1:8765/*",
+    "http://localhost:8765/*"
   ],
   "background": {
     "service_worker": "background.js"

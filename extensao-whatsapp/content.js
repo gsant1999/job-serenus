@@ -11273,17 +11273,26 @@
     return pedirEnviarTexto(item.chat_id, item.texto);
   }
 
-  async function confirmarEnvioPreview(ov, modeloId, midiaTipo) {
-    const ta = document.getElementById('job-preview-texto');
-    const st = document.getElementById('job-preview-status');
-    const btn = document.getElementById('job-preview-enviar');
-    const texto = ((ta && ta.value) || '').trim();
+  // O ENVIO DE UMA MENSAGEM, NUM LUGAR SÓ.
+  //
+  // Duas portas chamam este caminho: o preview aqui do painel e o disparo pelo
+  // deck do iPad. Cada porta mostra o andamento do seu jeito — por isso o
+  // `aviso` é uma função, e não um elemento de tela. Antes de 19/08/2026 este
+  // trecho vivia dentro do preview; deixar o deck copiar essas 40 linhas era
+  // garantir que os dois caminhos iam divergir na primeira correção.
+  //
+  // Devolve {ok, erro} ou, quando o servidor segura o ritmo,
+  // {esperando:true, filaId, usuarioId, espera}.
+  async function _enviarMensagemPeloJob(opcoes) {
+    const texto = (opcoes && opcoes.texto) || '';
+    const modeloId = (opcoes && opcoes.modeloId) || null;
+    const midiaTipo = (opcoes && opcoes.midiaTipo) || null;
+    const diga = (opcoes && typeof opcoes.aviso === 'function') ? opcoes.aviso : function () {};
     // Texto puro exige mensagem; mídia pode ir sem legenda.
-    if (!texto && !midiaTipo) { if (st) st.textContent = 'A mensagem está vazia.'; return; }
+    if (!texto && !midiaTipo) return { ok: false, erro: 'A mensagem está vazia.' };
     const { usuarioId } = await _safeStorageGet(['usuarioId']);
-    if (!usuarioId) { if (st) st.textContent = 'Selecione seu usuário no popup da extensão primeiro.'; return; }
-    btn.disabled = true;
-    if (st) st.textContent = 'Enviando…';
+    if (!usuarioId) return { ok: false, erro: 'Selecione seu usuário no popup da extensão primeiro.' };
+    diga('Enviando…');
     let nome = nomeDoContato();
     // chat_id da conversa aberta é o caminho à prova de falha (funciona pra
     // contato salvo e @lid). Telefone é só best-effort, pra casar o lead no CRM.
@@ -11292,81 +11301,79 @@
     let telefone = await garantirTelefone(nome, chatId);
     nome = nomeMaisConfiavel(nome); // depois de garantirTelefone, a wa-js já tentou achar o nome de verdade
     if (!chatId && !telefone) {
-      if (st) st.textContent = 'Não consegui identificar a conversa. Abra a conversa e tente de novo.';
-      btn.disabled = false;
-      return;
+      return { ok: false, erro: 'Não consegui identificar a conversa. Abra a conversa e tente de novo.' };
     }
     try {
       const payload = { telefone, nome, texto, usuario_id: usuarioId };
       if (chatId) payload.chat_id = chatId;
       if (modeloId) payload.modelo_id = modeloId;
       const resp = await chrome.runtime.sendMessage({ type: 'enviar_direto', payload });
-      if (!resp || !resp.ok) {
-        if (st) st.textContent = 'Erro: ' + ((resp && resp.erro) || 'falha ao enviar');
-        btn.disabled = false;
-        return;
-      }
-      // O POST acima só CRIA a mensagem na fila. Antes a tela dizia
-      // "Enviado" nesse ponto, embora o WhatsApp ainda nem tivesse recebido
-      // a chamada; daí a sensação correta de que o botão mentia e demorava.
-      // Para um clique explícito, pede o próprio item agora, sem esperar o
-      // polling. O servidor continua aplicando o mesmo limite de ritmo.
-      // CLIQUE EXPLÍCITO NÃO ESPERA NADA. NUNCA.
+      if (!resp || !resp.ok) return { ok: false, erro: (resp && resp.erro) || 'falha ao enviar' };
+      // O POST acima só CRIA a mensagem na fila. Antes a tela dizia "Enviado"
+      // nesse ponto, embora o WhatsApp ainda nem tivesse recebido a chamada.
       //
-      // Aqui ficava um `if (!_jobGateTentar(...)) { avisa e desiste }`: se a
-      // varredura estivesse rodando, a mensagem do consultor ia pra fila e
-      // saía "em seguida". O consultor lia "ficou pronta para enviar", achava
-      // que não tinha ido, gravava outro áudio e mandava de novo — e aí saíam
-      // as duas, a segunda sem ninguém esperando do outro lado.
-      //
-      // A trava existe pra impedir três rotinas PESADAS ao mesmo tempo. Uma
-      // mensagem única não é isso: é uma chamada curta. O custo de deixá-la
-      // passar por cima é um instante de concorrência; o custo de segurá-la é
-      // o consultor duvidar do próprio botão — e esse a gente já pagou.
-      //
-      // `_jobGateTomar` avisa quem está segurando que a vez foi tomada. A
-      // varredura vê isso entre uma conversa e outra e para de pegar as
-      // próximas, em vez de disputar.
+      // CLIQUE EXPLÍCITO NÃO ESPERA NADA. NUNCA. A trava do `_jobGate` existe
+      // pra impedir três rotinas PESADAS ao mesmo tempo; uma mensagem única não
+      // é isso. Segurá-la custa o consultor duvidar do próprio botão — e esse
+      // preço a gente já pagou.
       _jobGateTomar('envio_direto');
       try {
         const pronto = await _safeSendMessage({ type: 'fila_enviar_agora',
           fila_id: resp.id, usuario_id: usuarioId });
         const item = pronto && pronto.ok && pronto.item;
         if (!item) {
+          // O servidor segurou pelo intervalo anti-bloqueio. Quem chamou decide
+          // o que fazer com a espera — mas ninguém pode dizer "enviado" aqui.
           const espera = Math.max(1, Math.ceil(Number(pronto && pronto.espera_s) || 1));
-          // ESPERANDO NA FILA PRECISA TER SAIDA.
-          //
-          // Ate 18/08/2026 esta era uma tela sem volta: a mensagem ficava na
-          // fila do servidor e saia sozinha quando o intervalo abrisse, mesmo
-          // que a janela fosse fechada. Quem achava que nao tinha enviado
-          // mandava de novo na mao, e o cliente recebia duas vezes — a segunda
-          // sem ninguem esperando do outro lado.
-          _filaPendenteDeCancelar(ov, resp.id, usuarioId, espera, st);
-          _agendarFila(espera);
-          return;
+          return { ok: false, esperando: true, filaId: resp.id, usuarioId, espera };
         }
-        if (st) st.textContent = 'Enviando pelo WhatsApp…';
+        diga('Enviando pelo WhatsApp…');
         const envio = await _enviarItemDaFila(item);
         await _safeSendMessage({ type: 'fila_confirmar', fila_id: item.id,
           ok: !!(envio && envio.ok), erro: (envio && envio.erro) || null,
           wpp_msg_id: (envio && envio.wpp_msg_id) || null });
         if (!envio || !envio.ok) {
-          if (st) st.textContent = 'Não consegui enviar: ' + ((envio && envio.erro) || 'falha no WhatsApp') + '. Tente novamente.';
-          btn.disabled = false;
           _agendarFila(1);
-          return;
+          return { ok: false, erro: (envio && envio.erro) || 'falha no WhatsApp' };
         }
         _registrarEnvio(chatId || telefone, midiaTipo || 'texto', texto, modeloId);
-        if (st) st.textContent = 'Enviado pelo WhatsApp.';
         _agendarFila(1);
-        setTimeout(() => { ov.remove(); }, 800);
+        return { ok: true, nome, chatId, telefone };
       } finally {
         _jobGateSoltar('envio_direto');
       }
     } catch (e) {
-      if (st) st.textContent = 'Erro: ' + e.message;
-      btn.disabled = false;
+      return { ok: false, erro: e.message };
     }
+  }
+
+  async function confirmarEnvioPreview(ov, modeloId, midiaTipo) {
+    const ta = document.getElementById('job-preview-texto');
+    const st = document.getElementById('job-preview-status');
+    const btn = document.getElementById('job-preview-enviar');
+    const texto = ((ta && ta.value) || '').trim();
+    if (!texto && !midiaTipo) { if (st) st.textContent = 'A mensagem está vazia.'; return; }
+    btn.disabled = true;
+    const r = await _enviarMensagemPeloJob({ texto, modeloId, midiaTipo,
+      aviso: function (t) { if (st) st.textContent = t; } });
+    // ESPERANDO NA FILA PRECISA TER SAIDA.
+    //
+    // Ate 18/08/2026 esta era uma tela sem volta: a mensagem ficava na fila do
+    // servidor e saia sozinha quando o intervalo abrisse, mesmo que a janela
+    // fosse fechada. Quem achava que nao tinha enviado mandava de novo na mao,
+    // e o cliente recebia duas vezes.
+    if (r.esperando) {
+      _filaPendenteDeCancelar(ov, r.filaId, r.usuarioId, r.espera, st);
+      _agendarFila(r.espera);
+      return;
+    }
+    if (!r.ok) {
+      if (st) st.textContent = 'Não consegui enviar: ' + r.erro + '. Tente novamente.';
+      btn.disabled = false;
+      return;
+    }
+    if (st) st.textContent = 'Enviado pelo WhatsApp.';
+    setTimeout(() => { ov.remove(); }, 800);
   }
 
   async function abrirSecaoMensagens() {
@@ -12287,26 +12294,34 @@
   //    DIFERENTES rodam em paralelo (não se atrapalham). Dois jobs pro MESMO
   //    contato enfileiram — o segundo só começa quando o primeiro terminar,
   //    pra nunca intercalar mensagens de dois funis na mesma conversa. ──
-  async function dispararFunil(funilId) {
+  // `opcoes.semPergunta` existe pro deck do iPad: lá a confirmação já aconteceu
+  // na mão do consultor, na tela do iPad. Perguntar de novo aqui abriria uma
+  // caixa no Mac que ninguém está olhando — e o funil ficaria parado esperando
+  // um clique que não vem. Devolve {ok} pra quem precisa reportar o resultado.
+  async function dispararFunil(funilId, opcoes) {
+    const semPergunta = !!(opcoes && opcoes.semPergunta);
+    // Erro do painel vai pro rodapé; erro do deck volta pra quem chamou, que o
+    // mostra no iPad. Mensagem em lugar nenhum é o que faz falha virar mistério.
+    const falhar = (msg) => { if (!semPergunta) _dizerNoRodape(msg); return { ok: false, erro: msg }; };
     const res = await buscarFunis(false);
     // Três casos DIFERENTES, três mensagens — misturar tudo em "não tem passos"
     // já mascarou um bug real de cache.
-    if (!res || !res.ok) { _dizerNoRodape('Não consegui carregar o funil. Tente de novo.'); return; }
+    if (!res || !res.ok) return falhar('Não consegui carregar o funil. Tente de novo.');
     const funil = (res.funis || []).find((f) => String(f.id) === String(funilId));
-    if (!funil) { _dizerNoRodape('Funil não encontrado. Abra a aba Funis novamente.'); return; }
-    if (!(funil.passos || []).length) { _dizerNoRodape('Esse funil está vazio. Edite e adicione a primeira mensagem.'); return; }
+    if (!funil) return falhar('Funil não encontrado. Abra a aba Funis novamente.');
+    if (!(funil.passos || []).length) return falhar('Esse funil está vazio. Edite e adicione a primeira mensagem.');
     const { usuarioId } = await _safeStorageGet(['usuarioId']);
-    if (!usuarioId) { _dizerNoRodape('Entre no popup do JOB antes de disparar.'); return; }
+    if (!usuarioId) return falhar('Entre no popup do JOB antes de disparar.');
     let chatId = '';
     try { chatId = await pedirChatId(); } catch (e) { chatId = ''; }
-    if (!chatId) { _dizerNoRodape('Abra a conversa do cliente antes de disparar.'); return; }
+    if (!chatId) return falhar('Abra a conversa do cliente antes de disparar.');
     const nome = nomeDoContato() || 'este contato';
     const totalS = funil.passos.reduce((s, p) => s + (Number(p.delay_segundos) || 0), 0);
-    if (!await _confirmar({
+    if (!semPergunta && !await _confirmar({
       titulo: 'Disparar "' + funil.nome + '"?',
       texto: funil.passos.length + ' ' + (funil.passos.length === 1 ? 'mensagem' : 'mensagens') +
            ' para ' + nome + (totalS ? ', ao longo de aproximadamente ' + fmtQuando(totalS).replace('após ', '') : ', começando agora') + '.',
-      ok: 'Disparar agora' })) return;
+      ok: 'Disparar agora' })) return { ok: false, erro: 'cancelado' };
     let telefone = await garantirTelefone(nome, chatId);
 
     const job = {
@@ -12318,6 +12333,8 @@
     if (podeComecar) { _chatsOcupados.add(chatId); job.status = 'rodando'; }
     renderBubble();
     if (podeComecar) executarJob(job);
+    return { ok: true, nome, passos: funil.passos.length, funil: funil.nome,
+             comecaAgora: podeComecar, totalSegundos: totalS };
   }
 
   async function executarJob(job) {
@@ -14125,6 +14142,122 @@
     document.body.setAttribute('data-job-tema', tema === 'claro' ? 'claro' : 'escuro');
   }
   chrome.storage.local.get(['tema']).then((c) => aplicarTema(c && c.tema)).catch(() => {});
+
+  // ═══════════════ Deck do iPad ═══════════════
+  //
+  // O consultor toca um botão no iPad e a mensagem sai AQUI, na conversa que
+  // está aberta neste WhatsApp Web. Esta aba não fica perguntando nada ao deck:
+  // quem pergunta é o service worker (timer de aba escondida é estrangulado
+  // pelo Chrome). Daqui saem duas coisas: o que ele precisa saber (qual
+  // conversa, qual biblioteca) e a execução do que o iPad pediu.
+
+  async function _deckInfo(comCatalogo) {
+    const info = { chat: null, catalogo: null };
+    try {
+      const chatId = await pedirChatId();
+      if (chatId) info.chat = { chatId, nome: nomeDoContato() || '' };
+    } catch (e) { /* nenhuma conversa aberta é estado normal, não é erro */ }
+    if (comCatalogo) {
+      try {
+        const modelos = await buscarModelos(false);
+        const res = await buscarFunis(false);
+        info.catalogo = {
+          modelos: (modelos || []).map((m) => ({
+            id: m.id, titulo: m.titulo || '', texto: m.texto || '',
+            midia_tipo: m.midia_tipo || null, categoria: m.categoria || '', pasta: m.pasta || '',
+          })),
+          funis: (((res && res.funis) || [])).map((f) => ({
+            id: f.id, nome: f.nome || '',
+            passos: (f.passos || []).map((s) => ({
+              tipo: s.tipo || 'texto', delay_segundos: Number(s.delay_segundos) || 0,
+            })),
+          })),
+        };
+      } catch (e) { /* biblioteca fora do ar não pode derrubar a batida */ }
+    }
+    return info;
+  }
+
+  async function _deckExecutar(cmd) {
+    if (!cmd || !cmd.tipo) return { ok: false, mensagem: 'Comando sem tipo.' };
+    // A CONVERSA TEM QUE SER A MESMA.
+    //
+    // Entre o toque no iPad e a execução aqui cabe uma troca de conversa (ou
+    // uma segunda aba do WhatsApp Web aberta noutra pessoa). Mandar a mensagem
+    // do cliente A para o cliente B é o pior erro que este projeto pode
+    // cometer, e não tem desfazer. Confere antes de qualquer envio.
+    let chatId = '';
+    try { chatId = await pedirChatId(); } catch (e) { chatId = ''; }
+    if (!chatId) return { ok: false, mensagem: 'Nenhuma conversa aberta no WhatsApp Web. Não enviei nada.' };
+    if (cmd.chatId && String(cmd.chatId) !== String(chatId)) {
+      return { ok: false, mensagem: 'A conversa aberta no Mac mudou depois do toque. Não enviei nada.' };
+    }
+    const nome = nomeDoContato() || 'este contato';
+
+    if (cmd.tipo === 'funil') {
+      const r = await dispararFunil(cmd.funilId, { semPergunta: true });
+      if (r && r.ok) {
+        return { ok: true, estado: 'rodando', mensagem: r.comecaAgora
+          ? ('Disparando: ' + r.passos + (r.passos === 1 ? ' mensagem' : ' mensagens') + ' para ' + r.nome + '.')
+          : ('Na fila: começa assim que o funil anterior terminar em ' + r.nome + '.') };
+      }
+      return { ok: false, mensagem: (r && r.erro) || 'Não consegui disparar o funil.' };
+    }
+
+    if (cmd.tipo === 'modelo') {
+      let modelos;
+      try { modelos = await buscarModelos(false); } catch (e) {
+        return { ok: false, mensagem: 'Recarregue a aba do WhatsApp Web no Mac: a extensão foi atualizada.' };
+      }
+      const m = (modelos || []).find((x) => String(x.id) === String(cmd.modeloId));
+      if (!m) return { ok: false, mensagem: 'Esse modelo não está mais na biblioteca.' };
+      const r = await _enviarMensagemPeloJob({ texto: m.texto || '', modeloId: m.id,
+        midiaTipo: m.midia_tipo || null });
+      return _deckResultado(r, nome);
+    }
+
+    if (cmd.tipo === 'texto') {
+      const r = await _enviarMensagemPeloJob({ texto: String(cmd.texto || '') });
+      return _deckResultado(r, nome);
+    }
+
+    return { ok: false, mensagem: 'Comando que a extensão não conhece.' };
+  }
+
+  function _deckResultado(r, nome) {
+    if (r && r.ok) return { ok: true, mensagem: 'Enviado para ' + nome + ' pelo WhatsApp.' };
+    if (r && r.esperando) {
+      // O servidor segurou pelo intervalo anti-bloqueio. A mensagem SAI sozinha
+      // quando o tempo abrir: dizer "enviado" seria mentira, e dizer "falhou"
+      // faria o consultor tocar de novo e o cliente receber duas vezes.
+      _agendarFila(r.espera);
+      return { ok: true, estado: 'esperando',
+        mensagem: 'Na fila do WhatsApp: sai sozinha em cerca de ' + r.espera + 's. Não toque de novo.' };
+    }
+    return { ok: false, mensagem: (r && r.erro) || 'Não consegui enviar.' };
+  }
+
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (!msg || !msg.type) return undefined;
+    if (msg.type === 'deck_info') { _deckInfo(!!msg.comCatalogo).then(sendResponse); return true; }
+    if (msg.type === 'deck_executar') { _deckExecutar(msg.cmd).then(sendResponse); return true; }
+    return undefined;
+  });
+
+  // NADA DE RELÓGIO DE FUNDO AQUI.
+  //
+  // Esta aba não pergunta nada ao deck sozinha. Ela só avisa, em dois momentos
+  // de gente — quando carrega e quando o consultor volta pra ela —, que vale a
+  // pena procurar o deck agora em vez de esperar a virada do minuto. Foi timer
+  // de fundo em aba oculta que estourou a memória do renderer em 14/08/2026.
+  function _deckAvisarQueChegou() {
+    try { chrome.runtime.sendMessage({ type: 'deck_procurar_agora' }, () => { void chrome.runtime.lastError; }); }
+    catch (e) { /* aba órfã de extensão atualizada: o alarme do minuto resolve */ }
+  }
+  _deckAvisarQueChegou();
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) _deckAvisarQueChegou();
+  });
 
   } // fim de _bootJobSerenus
 })();
