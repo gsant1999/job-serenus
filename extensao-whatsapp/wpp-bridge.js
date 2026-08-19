@@ -405,14 +405,56 @@
 
   // Lê UMA conversa (não precisa ser a aberta), opcionalmente só o que veio
   // DEPOIS de uma mensagem — é o incremental que evita reanalisar o histórico.
+  // COLECAO JA CARREGADA, SEM HIDRATAR — a versao segura do truque deles.
+  //
+  // WaSpeed tem um `disabledAwaitHydrate` pra pedir mensagem sem obrigar o
+  // WhatsApp a hidratar historico. O nosso equivalente honesto: se a marca
+  // d'agua JA esta na colecao que o WhatsApp tem em memoria, entao a faixa que
+  // interessa esta toda ali e nao ha o que carregar.
+  //
+  // A trava e a marca estar presente. Sem ela isto viraria o erro de 03/08 —
+  // usar a colecao as cegas devolveu 28 conversas com UMA mensagem cada e
+  // score de lixo. Com a marca dentro, a colecao e prova de si mesma.
+  function _janelaJaCarregada(chatId, desdeMsgId) {
+    if (!desdeMsgId) return null;
+    try {
+      const W = window.WPP.whatsapp;
+      const chat = W && W.ChatStore && W.ChatStore.get ? W.ChatStore.get(chatId) : null;
+      const models = chat && chat.msgs && chat.msgs.getModelsArray ? (chat.msgs.getModelsArray() || []) : [];
+      if (models.length < 2) return null;
+      const i = models.findIndex((m) => m.id && m.id._serialized === desdeMsgId);
+      if (i < 0) return null;
+      return models;
+    } catch (e) { return null; }
+  }
+
   async function lerConversaDe(chatId, desdeMsgId, limite) {
     if (!window.WPP || !window.WPP.chat) return { erro: 'wpp_ausente' };
-    let msgs = await _mensagensDoChat(chatId, Math.max(50, limite || 400));
+    const pedido = Math.max(12, limite || 150);
+    let msgs = _janelaJaCarregada(chatId, desdeMsgId);
+    let deCache = !!msgs;
+    if (!msgs) msgs = await _mensagensDoChat(chatId, pedido);
     if (!msgs.length) return { erro: 'falha_mensagens' };
     msgs = _dedupPorId(msgs);
     let corte = -1;
     if (desdeMsgId) {
       corte = msgs.findIndex((m) => m.id && m.id._serialized === desdeMsgId);
+      // A MARCA NAO ESTAVA NA JANELA: aumenta em vez de desistir.
+      //
+      // Pedir pouco e a regra; pagar caro no caso raro e o preco de a regra ser
+      // barata. Sem esta escada, uma janela curta cairia no "manda tudo" logo
+      // abaixo e mandaria mensagem repetida pro servidor — trocaria memoria por
+      // retrabalho, que nao e troca nenhuma.
+      if (corte < 0 && !deCache) {
+        for (const maior of [200, 400]) {
+          if (maior <= pedido) continue;
+          const m2 = _dedupPorId(await _mensagensDoChat(chatId, maior));
+          if (!m2.length) break;
+          const i2 = m2.findIndex((m) => m.id && m.id._serialized === desdeMsgId);
+          msgs = m2;
+          if (i2 >= 0) { corte = i2; break; }
+        }
+      }
     }
     // Só o que veio DEPOIS da última analisada. Se não achou a marca (mensagem
     // apagada, histórico truncado), manda tudo — perder contexto é pior que
@@ -428,7 +470,8 @@
       }
     }
     const ultima = msgs.length ? msgs[msgs.length - 1].id._serialized : (desdeMsgId || '');
-    return { mensagens, audios, ultima_msg_id: ultima, total_janela: janela.length };
+    return { mensagens, audios, ultima_msg_id: ultima, total_janela: janela.length,
+             carregadas: msgs.length, sem_hidratar: deCache };
   }
 
   // Lista os áudios da conversa SEM baixar nada. É o que permite consultar o

@@ -493,6 +493,14 @@
     }
     return [...vistos];
   }
+  // Número de comportamento vindo da config remota. Existe pelo mesmo motivo do
+  // `_flag`: se um teto de leitura ficar apertado demais pra alguma conta, dá
+  // pra corrigir sem publicar versão nova e sem ninguém reinstalar nada.
+  function _num(nome, padrao) {
+    const v = _flagsRemotas && _flagsRemotas[nome];
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : padrao;
+  }
   // Flag de comportamento remota (default true se o servidor não respondeu).
   function _flag(nome, padrao) {
     if (_flagsRemotas && Object.prototype.hasOwnProperty.call(_flagsRemotas, nome)) return !!_flagsRemotas[nome];
@@ -5304,7 +5312,25 @@
     // vez que este chat é lido) mantém 400, porque aí é a única chance de
     // pegar o histórico. Não é micro-otimização: é o que evita que ler uma
     // fila de 70+ leads acumule o histórico inteiro de todos eles na aba.
-    const teto = alvo.desde_msg_id ? 120 : 400;
+    // OS NUMEROS VIERAM DE LER O CODIGO DE QUEM NAO TRAVA A ABA.
+    //
+    // WaSpeed pede `quant: 20` (50 no caso especial de "primeira mensagem do
+    // cliente"); ZapVoice usa `count || 20`. A gente pedia 120 com marca
+    // d'agua e 400 sem — vinte vezes mais, e em rotina automatica, que eles nem
+    // tem. Medido na aba do Guilherme em 19/08/2026: 41.203 mensagens
+    // carregadas, ~1,2 GB de heap, que e a nossa varredura de alguns dias
+    // empilhada na memoria do WhatsApp.
+    //
+    // 40 com marca d'agua: e o que chegou desde a ultima leitura, quase sempre
+    // um punhado. Se a marca nao estiver nessa janela, a ponte AUMENTA sozinha
+    // (ver lerConversaDe) — paga caro so no caso raro, em vez de sempre.
+    //
+    // 150 na primeira leitura tem troca declarada: e a unica vez que a gente
+    // pega historico, entao conversa com mais de 150 mensagens perde o que e
+    // mais antigo. Aceitavel porque as 150 ULTIMAS dizem mais sobre o lead que
+    // as de meses atras, e porque o teto e ajustavel pela config remota se a
+    // analise piorar — `leitura_primeira` e `leitura_marca`.
+    const teto = alvo.desde_msg_id ? _num('leitura_marca', 40) : _num('leitura_primeira', 150);
     const conv = await _pedirPonte('ler_conversa_de',
       { chatId: alvo.chat_id, desdeMsgId: alvo.desde_msg_id, limite: teto }, 60000);
     if (!conv || conv.erro) throw new Error(conv && conv.erro || 'falha_leitura');
