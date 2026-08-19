@@ -4203,66 +4203,67 @@ body[data-job-tema="claro"] .job-cot-prev-txt { color-scheme: light; }
 .job-sit-det:hover { color: var(--job-txt); border-color: var(--job-borda-forte, var(--job-borda)); }
 
 /* ══════════════════════════════════════════════════════════════════════
-   BARRA DE MENSAGEM — atalho colado no campo de digitar
+   BARRA DE ITENS — o atalho do ZapVoice
 
-   Mora acima do rodapé da conversa, alinhada à esquerda. Empurra o histórico
-   em ~34px em vez de flutuar por cima: sobrepor esconderia a última mensagem
-   justamente enquanto a pessoa escreve a resposta a ela.
+   Fica abaixo do campo de mensagem, sempre visível com conversa aberta.
+   Digitar no campo filtra os chips.
 
-   Discreta por decisão: quem olha pra cá está lendo a conversa, não a
-   extensão. Ela ganha presença no hover, não em repouso.
+   Altura fixa de 46px, e o #main encolhe o mesmo tanto por JS: a barra abre
+   espaço em vez de sobrepor. Sobrepor taparia a última mensagem — justamente
+   a que a pessoa está respondendo. É o que o ZapVoice faz
+   (`height: calc(100% - 60px)` no main deles).
+
+   Rola na horizontal quando não cabe, nunca é cortada pela borda: conteúdo
+   cortado foi o defeito que a auditoria encontrou na WaSpeed.
    ══════════════════════════════════════════════════════════════════════ */
-#job-barra-msg {
-  display: flex; align-items: center; gap: 2px;
-  padding: 5px 12px 4px; min-height: 34px;
+#job-itens-bar {
+  display: flex; align-items: center; gap: 6px;
+  height: 46px; box-sizing: border-box; padding: 0 12px;
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
   background: var(--job-bg1); border-top: 1px solid var(--job-borda);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 }
-.job-barra-marca {
-  font-size: 9px; font-weight: 800; letter-spacing: .1em;
-  color: var(--job-txt-fraco2); margin-right: 8px; user-select: none;
+.job-itens-fav {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 8px;
+  background: transparent; border: 1px solid var(--job-borda);
+  color: var(--job-txt-fraco2); cursor: pointer;
+  transition: color .16s ease, border-color .16s ease, background .16s ease, transform .14s ease-out;
 }
-.job-barra-btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 5px 9px; border-radius: 8px;
-  background: transparent; border: none; cursor: pointer;
-  /* Tokens que ACOMPANHAM O TEMA, não os do trilho. O trilho é escuro
-     sempre, então a cor dele é clara sempre; esta barra mora dentro do
-     rodapé do WhatsApp e segue o tema escolhido — usar a cor do trilho aqui
-     daria texto claro sobre fundo claro no tema claro. */
-  color: var(--job-txt-fraco);
-  font-family: inherit; font-size: 11.5px; font-weight: 600; letter-spacing: .01em;
-  /* Nomeada, nunca `all`: `all` animaria layout sem querer e derrubaria frame
-     dentro do WhatsApp, que já é pesado. */
-  transition: color .16s ease, background .16s ease, transform .14s ease-out;
+.job-itens-fav-on { color: var(--job-acento); border-color: var(--job-acento); background: var(--job-bg3-hover); }
+.job-itens-fav:active { transform: scale(.97); }
+.job-itens-chip {
+  flex: none; display: inline-flex; align-items: center; gap: 6px;
+  max-width: 250px; padding: 6px 11px; border-radius: 999px;
+  background: var(--job-bg2); border: 1px solid var(--job-borda);
+  color: var(--job-txt); cursor: pointer;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  /* Nomeada, nunca `all`: dentro do WhatsApp `all` animaria layout sem querer
+     e derrubaria frame enquanto a pessoa digita. */
+  transition: border-color .16s ease, background .16s ease, transform .14s ease-out;
 }
-/* Hover só onde existe mouse: no toque ele dispara no tap e gruda. */
 @media (hover: hover) and (pointer: fine) {
-  .job-barra-btn:hover { color: var(--job-txt); background: var(--job-bg3-hover); }
+  .job-itens-chip:hover { border-color: var(--job-acento); background: var(--job-bg3-hover); }
+  .job-itens-fav:hover { color: var(--job-txt); }
 }
-.job-barra-btn:focus-visible {
+.job-itens-chip:focus-visible, .job-itens-fav:focus-visible {
   outline: 2px solid var(--job-acento); outline-offset: 1px;
-  color: var(--job-txt);
 }
-/* Responde ao dedo, como qualquer coisa pressionável no JOB. */
-.job-barra-btn:active { transform: scale(.97); }
-.job-barra-ico { display: inline-flex; width: 14px; height: 14px; }
-.job-barra-ico svg { width: 100%; height: 100%; }
-/* ENCOLHE PELO ESPAÇO QUE ELA TEM, NÃO PELO TAMANHO DA JANELA.
-   A largura que importa é a da coluna da conversa, que muda quando o painel
-   docado abre — a janela pode estar em 1600px e a coluna em 500px. Media query
-   media a janela e errava os dois casos: escondia o texto em janela pequena com
-   coluna larga, e deixava a barra ser cortada em janela grande com o painel
-   aberto. Foi exatamente o defeito que a auditoria encontrou na WaSpeed:
-   conteúdo cortado pela borda em vez de refluir. */
-#job-barra-msg { container-type: inline-size; }
-@container (max-width: 560px) {
-  .job-barra-txt { display: none; }
-  .job-barra-btn { padding: 5px 7px; }
+.job-itens-chip:active { transform: scale(.97); }
+.job-itens-ico { display: inline-flex; width: 13px; height: 13px; flex: none; color: var(--job-acento); }
+.job-itens-ico svg, .job-itens-fav svg { width: 100%; height: 100%; }
+.job-itens-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Quantos passos o funil tem: a diferença entre mandar uma mensagem e mandar
+   seis precisa estar visível ANTES do clique. */
+.job-itens-n {
+  flex: none; min-width: 16px; padding: 1px 5px; border-radius: 999px;
+  background: var(--job-bg3); color: var(--job-txt-fraco);
+  font-size: 10px; font-weight: 700; text-align: center;
 }
-/* Navegador sem suporte a container query mostra tudo e deixa o flex apertar,
-   que degrada melhor do que sumir com os rótulos. */
+/* Estado vazio DIZ o que fazer — some com a barra seria pior: o consultor
+   acharia que a extensão quebrou. */
+.job-itens-vazio { font-size: 11.5px; color: var(--job-txt-fraco2); white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) {
-  .job-barra-btn { transition: color .16s linear, background .16s linear; }
-  .job-barra-btn:active { transform: none; }
+  .job-itens-chip, .job-itens-fav { transition: border-color .16s linear, background .16s linear; }
+  .job-itens-chip:active, .job-itens-fav:active { transform: none; }
 }

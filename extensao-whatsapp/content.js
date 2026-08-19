@@ -1337,94 +1337,215 @@
   }
 
   // ══════════════════════════════════════════════════════════════════════
-  //  BARRA DE MENSAGEM — atalho colado no campo de digitar
+  //  BARRA DE ITENS — o atalho do ZapVoice
   //
-  //  POR QUE EXISTE, SE JÁ TEM O TRILHO
-  //  O trilho fica na borda da tela. Quem está com a mão no teclado
-  //  respondendo cliente precisa tirar o olho do campo e ir até a lateral pra
-  //  buscar um áudio salvo. É a distância que o consultor paga dezenas de
-  //  vezes por dia. Padrão observado na WaSpeed, que o Guilherme pediu.
+  //  Fica sempre visível abaixo do campo de mensagem, com os funis e modelos
+  //  em chips. Digitar no campo do WhatsApp FILTRA a barra: escrever "VERA"
+  //  deixa só "PRIMEIRO CONTATO VERA CRUZ" e companhia. O consultor não abre
+  //  painel, não lembra pasta, não tira a mão do teclado.
   //
-  //  UMA SUPERFÍCIE SÓ. Estes botões abrem o MESMO painel docado do trilho,
-  //  na mesma seção. A crítica central à WaSpeed foi justamente esta: os
-  //  ícones dela abrem três coisas diferentes (menu flutuante, painel
-  //  encaixado, modal central), e o usuário nunca aprende onde as coisas vão
-  //  aparecer. Aqui o atalho muda o CAMINHO, nunca o destino.
+  //  LIDO DO CÓDIGO DELES, NÃO CHUTADO (chunk-DX_eIfAb.js, ZVWithItemsBar):
+  //   - onkeyup no campo + debounce de 400ms sobre textContent;
+  //   - MutationObserver no rodapé pra RELIGAR quando o WhatsApp recria o
+  //     campo (`e && !e.onkeyup && m(e)`) — sem isso o filtro morre na
+  //     primeira troca de conversa;
+  //   - WPP.ev "chat.active_chat" pra reagir à troca de conversa;
+  //   - e o detalhe que muda tudo: eles ENCOLHEM o #main
+  //     (`height: calc(100% - 60px)`) pra abrir espaço, em vez de sobrepor.
+  //     Sobrepor esconderia a última mensagem justo enquanto se responde a ela.
   //
-  //  COMO SOBREVIVE À ATUALIZAÇÃO DO WHATSAPP
-  //  A WaSpeed se pendura em classe gerada pelo Meta (`x1n2onr6`) e em
-  //  `nth-child(6)` — quebra a cada release, e foi o que a auditoria mostrou
-  //  (leva ~8s pra aparecer, às vezes não aparece). Aqui a âncora passa pelo
-  //  _qsRemoto: lista de seletores com alternativa, corrigível pelo site sem
-  //  deploy nem loja. E se nenhum casar, a barra simplesmente não nasce — o
-  //  trilho continua ali, e o WhatsApp não quebra.
-  const _BARRA_ID = 'job-barra-msg';
-  const _BARRA_ITENS = [
-    { secao: 'mensagens', ico: _ICO_MENSAGENS, rotulo: 'Modelos salvos' },
-    { secao: 'funis', ico: _ICO_FUNIS, rotulo: 'Funis' },
-    { secao: 'ficha', ico: _ICO_CRM, rotulo: 'Ficha do lead' },
-    { secao: 'cotacao', ico: _ICO_COTACAO, rotulo: 'Cotação' },
-  ];
+  //  Minha primeira versão fazia a barra aparecer só ao digitar. Errado: nas
+  //  telas do Guilherme os chips estão lá com o campo vazio — digitar filtra,
+  //  não invoca.
+  const _ITENS_ID = 'job-itens-bar';
+  const _ITENS_ALTURA = 46;          // px reservados no #main, como eles fazem
+  const _ITENS_DEBOUNCE = 400;       // igual ao deles: 180ms buscava a cada letra
+  const _ITENS_TETO = 40;
+  let _itensTermo = '';
+  let _itensSoFav = false;
+  let _itensDebounce = null;
+  let _itensObs = null;
 
-  function _barraAncora() {
-    // O rodapé da conversa. Só existe com conversa aberta — é o que faz a
-    // barra aparecer e sumir junto com o campo de digitar, sem código extra.
+  function _itensCampo() {
+    return _qsRemoto('campoMensagem',
+      ['#main footer div[contenteditable="true"]', 'footer div[contenteditable="true"]']);
+  }
+  function _itensRodape() {
     return _qsRemoto('rodapeConversa', ['#main footer', 'footer.copyable-area', '#main > footer']);
   }
-
-  function montarBarraMensagem() {
-    try {
-      const ancora = _barraAncora();
-      if (!ancora) { const v = document.getElementById(_BARRA_ID); if (v) v.remove(); return; }
-      const ja = document.getElementById(_BARRA_ID);
-      // Se já está no lugar certo, não recria: recriar a cada mutação do
-      // WhatsApp piscaria a barra na cara de quem está digitando.
-      if (ja && ja.parentElement === ancora.parentElement && ja.nextElementSibling === ancora) return;
-      if (ja) ja.remove();
-
-      const barra = document.createElement('div');
-      barra.id = _BARRA_ID;
-      barra.className = 'job-barra';
-      barra.setAttribute('role', 'toolbar');
-      barra.setAttribute('aria-label', 'Atalhos do JOB');
-      barra.innerHTML =
-        '<span class="job-barra-marca" aria-hidden="true">JOB</span>' +
-        _BARRA_ITENS.map((i) =>
-          '<button type="button" class="job-barra-btn" data-secao="' + i.secao + '" ' +
-            'title="' + i.rotulo + '" aria-label="' + i.rotulo + '">' +
-            '<span class="job-barra-ico" aria-hidden="true">' + i.ico + '</span>' +
-            '<span class="job-barra-txt">' + i.rotulo + '</span>' +
-          '</button>').join('');
-
-      barra.addEventListener('click', (ev) => {
-        const b = ev.target && ev.target.closest && ev.target.closest('.job-barra-btn');
-        if (!b) return;
-        ev.preventDefault();
-        ev.stopPropagation();
-        try { abrirSecao(b.dataset.secao); } catch (e) { _falhaTecnica('barra de mensagem', e); }
-      });
-
-      // ANTES do rodapé, não dentro: dentro, o WhatsApp reescreve o rodapé
-      // inteiro ao trocar de conversa e leva a barra junto.
-      ancora.parentElement.insertBefore(barra, ancora);
-    } catch (e) { /* a barra é conveniência: nunca pode derrubar a extensão */ }
+  function _itensMain() {
+    return _qsRemoto('mainContainer', ['#main']);
+  }
+  function _itensNorm(t) {
+    return String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
   }
 
-  function iniciarBarraMensagem() {
-    montarBarraMensagem();
-    // O WhatsApp recria o rodapé ao trocar de conversa. Observar o container
-    // e remontar é o que faz a barra não sumir depois da primeira troca.
-    try {
-      const alvo = _qsRemoto('mainContainer', ['#main']) || document.body;
-      const obs = new MutationObserver(() => {
-        clearTimeout(_barraDebounce);
-        _barraDebounce = setTimeout(montarBarraMensagem, 250);
-      });
-      obs.observe(alvo, { childList: true, subtree: true });
-      _aoLimpar(() => { try { obs.disconnect(); } catch (e) {} clearTimeout(_barraDebounce); });
-    } catch (e) { /* sem observer a barra ainda funciona na conversa atual */ }
+  // Reserva a faixa encolhendo o #main, como o ZapVoice. Sobrepor tapa a
+  // última mensagem — que é justamente a que a pessoa está respondendo.
+  function _itensReservar(ligado) {
+    const main = _itensMain();
+    if (!main) return;
+    if (ligado) main.style.setProperty('height', 'calc(100% - ' + _ITENS_ALTURA + 'px)', 'important');
+    else main.style.removeProperty('height');
   }
-  let _barraDebounce = null;
+
+  async function _itensCarregar() {
+    const out = [];
+    try {
+      const rf = await buscarFunis(false);
+      for (const f of (rf && rf.funis) || []) {
+        out.push({ tipo: 'funil', id: f.id, nome: f.nome || '', fav: !!f.favorito,
+                   passos: (f.passos || []).length });
+      }
+    } catch (e) { /* segue com modelos */ }
+    try {
+      for (const m of (await buscarModelos(false)) || []) {
+        out.push({ tipo: 'modelo', id: m.id, nome: m.nome || '', fav: !!m.favorito, modelo: m });
+      }
+    } catch (e) { /* segue */ }
+    return out;
+  }
+
+  function _itensFiltrar(todos) {
+    const alvo = _itensNorm(_itensTermo);
+    return todos
+      .filter((i) => (!_itensSoFav || i.fav) && (!alvo || _itensNorm(i.nome).includes(alvo)))
+      .slice(0, _ITENS_TETO);
+  }
+
+  async function _itensDesenhar() {
+    try {
+      const rodape = _itensRodape();
+      if (!rodape || !rodape.parentElement) { _itensSumir(); return; }
+      const lista = _itensFiltrar(await _itensCarregar());
+      let cx = document.getElementById(_ITENS_ID);
+      if (!cx) {
+        cx = document.createElement('div');
+        cx.id = _ITENS_ID;
+        cx.setAttribute('role', 'toolbar');
+        cx.setAttribute('aria-label', 'Funis e modelos do JOB');
+        cx.addEventListener('mousedown', _itensClique);
+        rodape.parentElement.insertBefore(cx, rodape.nextSibling);
+        _itensReservar(true);
+      } else if (cx.previousElementSibling !== rodape) {
+        rodape.parentElement.insertBefore(cx, rodape.nextSibling);
+      }
+      cx._itens = lista;
+      const favOn = _itensSoFav ? ' job-itens-fav-on' : '';
+      cx.innerHTML =
+        '<button type="button" class="job-itens-fav' + favOn + '" data-acao="fav" ' +
+          'aria-pressed="' + (_itensSoFav ? 'true' : 'false') + '" title="Apenas favoritos">' +
+          _svgIco('estrela', 13) + '</button>' +
+        (lista.length
+          ? lista.map((i, n) =>
+              '<button type="button" class="job-itens-chip" data-n="' + n + '" ' +
+                'title="' + esc(i.nome) + (i.tipo === 'funil' ? ' — ' + i.passos + ' passo(s)' : '') + '">' +
+                '<span class="job-itens-ico" aria-hidden="true">' +
+                  (i.tipo === 'funil' ? _ICO_FUNIS : _ICO_MENSAGENS) + '</span>' +
+                '<span class="job-itens-txt">' + esc(i.nome) + '</span>' +
+                (i.tipo === 'funil' ? '<span class="job-itens-n">' + i.passos + '</span>' : '') +
+              '</button>').join('')
+          : '<span class="job-itens-vazio">' +
+              (_itensTermo
+                ? 'Nada com "' + esc(_itensTermo) + '". Apague pra ver tudo.'
+                : 'Nenhum item ainda. Cadastre em Modelos, no site do JOB.') +
+            '</span>');
+    } catch (e) { /* a barra é conveniência: nunca derruba a digitação */ }
+  }
+
+  function _itensClique(ev) {
+    // mousedown e não click: o campo perde o foco no clique, o WhatsApp
+    // reescreve o rodapé e o chip morre antes do click disparar.
+    const alvo = ev.target && ev.target.closest ? ev.target.closest('button') : null;
+    if (!alvo) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (alvo.dataset.acao === 'fav') {
+      _itensSoFav = !_itensSoFav;
+      try { chrome.storage.local.set({ jobItensSoFav: _itensSoFav }); } catch (e) {}
+      _itensDesenhar();
+      return;
+    }
+    const cx = document.getElementById(_ITENS_ID);
+    const item = cx && cx._itens && cx._itens[Number(alvo.dataset.n)];
+    if (!item) return;
+    try {
+      // NUNCA DISPARA DIRETO. Abre a confirmação que já existe: um chip que
+      // envia no primeiro toque, colado no campo, manda a campanha errada pro
+      // cliente errado — e isso não tem desfazer.
+      if (item.tipo === 'funil') dispararFunil(item.id);
+      else abrirPreviewEnvio(item.modelo);
+    } catch (e) { _falhaTecnica('barra de itens: abrir', e); }
+  }
+
+  function _itensSumir() {
+    const v = document.getElementById(_ITENS_ID);
+    if (v) v.remove();
+    _itensReservar(false);
+  }
+
+  // Religa o onkeyup quando o WhatsApp recria o campo — é o `!e.onkeyup` deles.
+  function _itensLigarCampo() {
+    const campo = _itensCampo();
+    if (!campo || campo._jobLigado) return;
+    campo._jobLigado = true;
+    campo.addEventListener('keyup', () => {
+      clearTimeout(_itensDebounce);
+      _itensDebounce = setTimeout(() => {
+        const t = (_itensCampo() || {}).textContent || '';
+        if (t.trim() === _itensTermo) return;
+        _itensTermo = t.trim();
+        _itensDesenhar();
+      }, _ITENS_DEBOUNCE);
+    });
+  }
+
+  async function _itensSincronizar() {
+    let ativo = null;
+    try { ativo = window.WPP && WPP.chat && WPP.chat.getActiveChat && WPP.chat.getActiveChat(); }
+    catch (e) { ativo = null; }
+    if (!ativo || !_itensRodape()) { _itensSumir(); return; }
+    _itensTermo = '';
+    _itensLigarCampo();
+    await _itensDesenhar();
+  }
+
+  function iniciarBarraItens() {
+    try { chrome.storage.local.get(['jobItensSoFav'], (c) => { _itensSoFav = !!(c && c.jobItensSoFav); }); }
+    catch (e) {}
+    _itensSincronizar();
+    // Observa o rodapé: é onde o WhatsApp recria o campo. Mesma ideia do
+    // MutationObserver deles, e é o que faz o filtro sobreviver à troca de
+    // conversa.
+    try {
+      const alvo = _itensMain() || document.body;
+      _itensObs = new MutationObserver(() => { _itensLigarCampo(); _itensSincronizarLeve(); });
+      _itensObs.observe(alvo, { childList: true, subtree: true });
+    } catch (e) {}
+    try {
+      const onChat = () => { _itensSincronizar(); };
+      if (window.WPP && WPP.ev && WPP.ev.addListener) {
+        WPP.ev.addListener('chat.active_chat', onChat);
+        _aoLimpar(() => { try { WPP.ev.removeListener('chat.active_chat', onChat); } catch (e) {} });
+      }
+    } catch (e) {}
+    _aoLimpar(() => {
+      try { if (_itensObs) _itensObs.disconnect(); } catch (e) {}
+      clearTimeout(_itensDebounce);
+      _itensSumir();
+    });
+  }
+
+  // Versão barata pro observer: só recoloca a barra se ela sumiu, sem refazer
+  // a lista a cada mutação do WhatsApp (que são muitas por segundo).
+  let _itensLeveDeb = null;
+  function _itensSincronizarLeve() {
+    clearTimeout(_itensLeveDeb);
+    _itensLeveDeb = setTimeout(() => {
+      if (!_itensRodape()) { _itensSumir(); return; }
+      if (!document.getElementById(_ITENS_ID)) _itensDesenhar();
+    }, 300);
+  }
 
   function criarTrilho() {
     if (document.getElementById('job-trilho')) return;
@@ -13573,9 +13694,9 @@
   }).catch(() => {});
   carregarPreferenciaLado().then(() => {
     criarTrilho();
-    // Atalho colado no campo de digitar. Nasce depois do trilho porque abre as
-    // mesmas seções dele — se o trilho falhar, a barra não teria pra onde ir.
-    iniciarBarraMensagem();
+    // Barra de itens: funis e modelos em chips abaixo do campo, filtrados
+    // pelo que o consultor digita. É o atalho do ZapVoice.
+    iniciarBarraItens();
     // O portão é avaliado assim que a barra existe. Sem credencial nenhuma, o
     // WhatsApp fica embaçado até a pessoa entrar (ou desligar a extensão).
     _conferirPortao();
