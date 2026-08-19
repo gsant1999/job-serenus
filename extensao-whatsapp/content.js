@@ -10147,7 +10147,18 @@
   let _lidosNestaSessao = 0;
 
   async function _talvezRecarregarPraLiberarRam() {
-    if (_lidosNestaSessao < _RELOAD_A_CADA) return false;
+    // CONTAR LEAD NAO E MEDIR MEMORIA, e era so isso que a valvula tinha.
+    //
+    // Quinze leads podem custar 200 MB numa conversa curta e 1,5 GB numa cheia
+    // de audio e imagem — a valvula abria tarde numa e cedo na outra. Pior: a
+    // memoria da aba tambem sobe pelo lado do WhatsApp, que a contagem nao ve.
+    // Medido em 19/08/2026, a aba morreu tres vezes em 40 minutos SEM a valvula
+    // nunca ter atingido as quinze leituras.
+    //
+    // Agora abre por qualquer um dos dois: quinze leituras (o que ja valia) ou
+    // a aba passando do teto de memoria. As tres travas de baixo continuam
+    // valendo iguais — e sao elas que fazem isto ser seguro, nao o gatilho.
+    if (_lidosNestaSessao < _RELOAD_A_CADA && !_memoriaApertada()) return false;
     // Aba visível = o consultor está nela. Espera ele sair (a contagem fica
     // acumulada; recarrega no primeiro tick com a aba escondida).
     if (document.visibilityState === 'visible') return false;
@@ -10166,6 +10177,66 @@
     window.location.reload();
     return true;
   }
+
+  // ── QUEDA CONTROLADA EM VEZ DE MORTE ─────────────────────────────────────
+  //
+  // A valvula acima so recarrega com a aba em segundo plano — recarregar na
+  // cara de quem esta digitando perde a mensagem pela metade, e essa trava nao
+  // sai. So que a aba pesada nao espera o consultor sair: o Chrome mata a guia
+  // no meio do atendimento e leva tudo junto, inclusive a fila de envio.
+  //
+  // Entao, quando a memoria passa do ponto e a aba esta na frente, quem decide
+  // a hora e o consultor. Recarregar por escolha custa alguns segundos e nao
+  // perde nada (a leitura e a fila retomam de onde pararam). Ser morto pelo
+  // navegador custa a conversa inteira.
+  const _MEM_CRITICA = 0.72;
+  let _avisoMemoriaNaTela = false;
+  function _conferirMemoriaCritica() {
+    const m = _memoriaDaAba();
+    if (!m || m.fracao < _MEM_CRITICA) return;
+    if (_avisoMemoriaNaTela || document.getElementById('job-aviso-memoria')) return;
+    try {
+      _avisoMemoriaNaTela = true;
+      const d = document.createElement('div');
+      d.id = 'job-aviso-memoria';
+      d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483646;'
+        + 'background:#b45309;color:#fff;padding:9px 14px;'
+        + 'font:13px -apple-system,sans-serif;text-align:center;'
+        + 'box-shadow:0 2px 12px rgba(0,0,0,.35)';
+      d.innerHTML = 'Esta aba do WhatsApp esta pesada e o navegador pode encerra-la. '
+        + 'Recarregar leva alguns segundos e nao perde nada: a leitura e a fila de '
+        + 'envio continuam de onde pararam.'
+        + ' <button id="job-mem-reload" style="margin-left:12px;background:#fff;'
+        + 'color:#92400e;border:none;border-radius:6px;padding:5px 12px;'
+        + 'font-weight:700;cursor:pointer;transition:transform 140ms cubic-bezier(.23,1,.32,1)">'
+        + 'Recarregar agora</button>'
+        + ' <button id="job-mem-depois" style="margin-left:6px;background:transparent;'
+        + 'color:#fff;border:1px solid rgba(255,255,255,.55);border-radius:6px;'
+        + 'padding:5px 12px;cursor:pointer">Agora nao</button>';
+      document.body.appendChild(d);
+      const b = d.querySelector('#job-mem-reload');
+      if (b) {
+        b.addEventListener('mousedown', () => { b.style.transform = 'scale(.97)'; });
+        b.addEventListener('mouseup', () => { b.style.transform = ''; });
+        b.addEventListener('click', () => {
+          b.disabled = true; b.textContent = 'Recarregando...';
+          try { chrome.storage.local.set({ jobReloadMemoria: true, jobUltimoReload: Date.now() }); } catch (e) {}
+          location.reload();
+        });
+      }
+      // "Agora nao" nao pode virar "nunca mais": some por 15 minutos e volta se
+      // a aba continuar pesada. Aviso que o consultor consegue matar pra sempre
+      // e aviso que nao protege ninguem.
+      const fechar = d.querySelector('#job-mem-depois');
+      if (fechar) {
+        fechar.addEventListener('click', () => {
+          try { d.remove(); } catch (e) {}
+          _registrarTimeout(() => { _avisoMemoriaNaTela = false; }, 15 * 60000);
+        });
+      }
+    } catch (e) { _avisoMemoriaNaTela = false; }
+  }
+  _registrarLoop(setInterval(_soComAbaVisivel(_conferirMemoriaCritica), 60000));
 
   async function filaVarreduraTick() {
     if (FILA.rodando || Date.now() < FILA.proximaEm) return;
@@ -14117,6 +14188,30 @@
     } catch (e) { /* perdeu a medida, nao o trabalho */ }
   }
   _registrarLoop(setInterval(_soComAbaVisivel(_enviarMetricas), 120000));
+
+  // A ABA REPORTA O PROPRIO PESO.
+  //
+  // Ate hoje so se descobria que a aba de alguem estava morrendo quando a
+  // pessoa ligava reclamando — e o time inteiro acabou de subir pra versao
+  // nova. Com a medida chegando no servidor da pra ver a aba subindo ANTES de
+  // ela cair, em qualquer maquina, sem depender de ninguem contar.
+  //
+  // De 10 em 10 minutos: e um numero que muda devagar, e medicao que enche
+  // tabela vira a primeira coisa que alguem desliga — com razao.
+  //
+  // `ms` guarda MEGABYTES aqui, nao milissegundos: wa_metrica tem uma coluna
+  // numerica so, e nao vale schema novo por isto. O `detalhe` carrega a unidade
+  // pra ninguem ler errado daqui a seis meses.
+  _registrarLoop(setInterval(_soComAbaVisivel(() => {
+    try {
+      const m = performance && performance.memory;
+      if (!m || !m.jsHeapSizeLimit) return;
+      const usadoMB = Math.round(m.usedJSHeapSize / 1048576);
+      const fracao = m.usedJSHeapSize / m.jsHeapSizeLimit;
+      _metrica('memoria_aba', usadoMB, fracao < _MEM_CRITICA,
+               usadoMB + ' MB, ' + Math.round(fracao * 100) + '% do limite da aba');
+    } catch (e) { /* medir nunca pode atrapalhar */ }
+  }), 10 * 60000));
 
   // ── TEMPO DE RESPOSTA: mede do historico e manda pro JOB ──────────────────
   //
