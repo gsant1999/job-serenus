@@ -493,6 +493,14 @@
     }
     return [...vistos];
   }
+  // Número de comportamento vindo da config remota. Existe pelo mesmo motivo do
+  // `_flag`: se um teto de leitura ficar apertado demais pra alguma conta, dá
+  // pra corrigir sem publicar versão nova e sem ninguém reinstalar nada.
+  function _num(nome, padrao) {
+    const v = _flagsRemotas && _flagsRemotas[nome];
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : padrao;
+  }
   // Flag de comportamento remota (default true se o servidor não respondeu).
   function _flag(nome, padrao) {
     if (_flagsRemotas && Object.prototype.hasOwnProperty.call(_flagsRemotas, nome)) return !!_flagsRemotas[nome];
@@ -972,7 +980,24 @@
   // Garante um número pro lead, na ordem: (1) wa-js (resolve @lid pelo mapa interno),
   // (2) cache local por chat_id (já resolvido/digitado antes), (3) popup pro corretor.
   // O que for resolvido/digitado é guardado no cache — não pergunta de novo.
+  // GRUPO NAO TEM NUMERO — E NAO E LEAD.
+  //
+  // A extensao tratava todo chat como pessoa: antes de mandar, ia atras do
+  // telefone pra casar com o lead no CRM. Num grupo (@g.us) esse numero nao
+  // existe, entao a busca falhava e o consultor levava o card "Numero nao
+  // identificado" pedindo pra digitar um telefone que nao existe — com o envio
+  // parado atras dele. Foi o que aconteceu no grupo "Plano Vera Cruz OURO".
+  //
+  // O ENVIO NUNCA PRECISOU DO TELEFONE: a wa-js manda pelo chatId, e chatId de
+  // grupo funciona igual ao de pessoa. O telefone servia pro CRM, e grupo nao
+  // vira lead. Entao aqui o grupo devolve vazio na hora, sem popup nenhum, e
+  // quem chama segue com o chatId — que e o unico dado que o envio usa.
+  function _ehGrupo(chatId) {
+    return typeof chatId === 'string' && chatId.endsWith('@g.us');
+  }
+
   async function garantirTelefone(nome, chatId) {
+    if (_ehGrupo(chatId)) return '';
     let tel = '';
     try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
     if (tel) { await _cacheNumeroSalvar(chatId, tel); return tel; }
@@ -4310,6 +4335,43 @@
   // nas bolhas novas. Foi o reposicionamento por coordenada que pesou antes.
   let _trTimer = null;
   let _trPend = [];
+  // TETO DE REGISTROS POR DISPARO — e a passada cheia que o substitui.
+  //
+  // Rolar a conversa gera MILHARES de registros de mutacao num unico disparo, e
+  // o caminho antigo subia a arvore (closest) uma ou duas vezes por registro
+  // pra chegar sempre nas mesmas poucas dezenas de linhas da tela. Era trabalho
+  // proporcional ao que o WhatsApp redesenhou, nao ao que a extensao precisa
+  // fazer — e e o que mantinha a CPU da aba entre 80% e 120% sem parar,
+  // medido em 19/08/2026 com a aba morrendo de 12 em 12 minutos.
+  //
+  // Acima do teto sai mais barato revisar a conversa UMA vez: as linhas ja
+  // prontas sao puladas, entao o custo passa a ser proporcional ao que esta na
+  // tela. Abaixo do teto nada muda — o caminho preciso continua valendo, que e
+  // o que mantem o bloco aparecendo mensagem a mensagem.
+  const _TR_REGS_TETO = 150;
+  let _trTimerCheia = null;
+  function trAgendarRevisaoCheia() {
+    if (_trTimerCheia) return;
+    _trTimerCheia = setTimeout(() => {
+      _trTimerCheia = null;
+      // O WhatsApp leva nossos blocos junto quando redesenha o interior de uma
+      // bolha. A linha continua marcada como pronta, e a passada cheia a
+      // pularia — que e exatamente o botao que sumia ao rolar a conversa.
+      // Desmarca so quem DEVIA ter bloco e esta sem, do mesmo jeito que a
+      // revisao que roda quando a ponte responde tarde.
+      try {
+        for (const row of document.querySelectorAll('#main [data-id]')) {
+          if (!row._jobPronta) continue;
+          if (row.querySelector('.job-tr-slot, .job-doc-slot')) continue;
+          let devia = false;
+          try { devia = _trLinhaEhAudio(row) || _docLinhaEhArquivo(row); } catch (e) {}
+          if (devia) row._jobPronta = null;
+        }
+      } catch (e) { /* a passada cheia cobre o que der */ }
+      try { trInjetar(); } catch (e) {}
+    }, 400);
+  }
+
   function trAgendarInjecao(raizes) {
     if (raizes && raizes.length) _trPend.push(...raizes);
     if (_trTimer) return;
@@ -4665,6 +4727,13 @@
         if (_analisePesada > 0) {
           TR.perf.regs += regs.length;
           _trRevisarDepoisAnalise = true;
+          return;
+        }
+        // ENXURRADA: nao caminha registro nenhum (ver _TR_REGS_TETO).
+        if (regs.length > _TR_REGS_TETO) {
+          TR.perf.regs += regs.length;
+          TR.perf.enxurradas = (TR.perf.enxurradas || 0) + 1;
+          trAgendarRevisaoCheia();
           return;
         }
         // Set, nao array: rolar a conversa gera milhares de registros que
@@ -5107,6 +5176,55 @@
     }
   }
 
+  // ── A ABA TEM UM LIMITE, E ELE PRECISA SER RESPEITADO ────────────────────
+  //
+  // Ler uma conversa faz o WhatsApp CARREGAR historico na memoria da aba, e ele
+  // nao devolve depois (o aviso esta em wpp-bridge.js, e ja custou um renderer
+  // de 2,5 GB em 11/08). Numa maquina de 8 GB isso termina do mesmo jeito: a
+  // aba passa de 1,5 GB, o Chrome mata a guia inteira, e o consultor perde o
+  // WhatsApp no meio do atendimento — com a fila de envio junto. Medido em
+  // 19/08/2026: a aba morrendo de 12 em 12 minutos, tres vezes em 40 minutos.
+  //
+  // Isto NAO desliga nada e NAO pula conversa nenhuma. Quando a aba esta
+  // pesada, a leitura espera: o servidor e quem sabe o que ja foi lido, entao a
+  // rodada seguinte continua exatamente de onde parou. Em maquina folgada o
+  // teto nunca e alcancado e nada muda pra ninguem.
+  //
+  // A fracao (e nao um numero de MB cravado) e o que faz isto valer nas duas
+  // pontas: a mesma regra protege a maquina apertada e sai da frente da folgada.
+  // FRACAO SOZINHA NAO SERVE — medido no Mac do Guilherme em 19/08/2026.
+  //
+  // A aba estava com 1.247 MB de heap JS num limite de 4.096 MB: 30%. Pela
+  // fracao, folgadissima. Pelo Chrome, a MESMA aba aparecia com 1 a 2,2 GB e
+  // era morta pelo navegador. A diferenca e que `performance.memory` so enxerga
+  // o heap JS — mídia decodificada, bitmap, DOM e GPU ficam de fora, e no
+  // WhatsApp Web isso e metade da conta.
+  //
+  // Ou seja: um teto de 55% do limite so abriria com 2,2 GB de heap, quando a
+  // guia ja teria morrido ha muito tempo. O numero absoluto e que manda aqui; a
+  // fracao fica como rede pra navegador com limite de heap menor, onde 1.200 MB
+  // nunca seriam alcancados porque o motor estoura antes.
+  const _MEM_TETO_FRACAO = 0.55;
+  const _MEM_TETO_MB = 1200;
+  function _memoriaDaAba() {
+    try {
+      const m = performance && performance.memory;
+      if (!m || !m.jsHeapSizeLimit) return null;
+      return { usadoMB: Math.round(m.usedJSHeapSize / 1048576),
+               fracao: m.usedJSHeapSize / m.jsHeapSizeLimit };
+    } catch (e) { return null; }
+  }
+  // null = nao da pra medir neste navegador. Sem medida nao se inventa limite:
+  // travar leitura por suposicao seria pior que o problema.
+  function _memoriaApertada() {
+    const m = _memoriaDaAba();
+    if (!m) return false;
+    return m.usadoMB >= _MEM_TETO_MB || m.fracao >= _MEM_TETO_FRACAO;
+  }
+  const _MEM_AVISO = 'A leitura de conversas esta em pausa: esta aba do WhatsApp '
+    + 'esta pesada. Ela volta sozinha quando aliviar. Para resolver agora, feche '
+    + 'e reabra a aba do WhatsApp Web — nada se perde, a leitura continua de onde parou.';
+
   async function varreduraRodar(manual) {
     if (VAR.rodando) return VAR.placar;
     const cfg = await varreduraConfig();
@@ -5125,6 +5243,8 @@
     if (!_jobGateTentar('varredura_auto')) return VAR.placar;
     VAR.rodando = true;
     VAR.ultimaRodada = Date.now();
+    // Aviso preso na tela depois que o problema passou ensina a ignorar aviso.
+    if (!_memoriaApertada()) _saudePor('memoria', true, '');
     let leiturasNestaRodada = 0;
     try {
       const lista = await _pedirPonte('listar_conversas_dia', { horas: VAR.HORAS }, 40000);
@@ -5159,6 +5279,17 @@
           // de 5 em 5 minutos a retoma de onde parou — o servidor sabe o que
           // já foi lido, então ela não relê nada.
           VAR.ultimaRodada = Date.now() - VAR.INTERVALO_MS;
+          break;
+        }
+        // ABA PESADA: PARA AQUI, NAO PULA (ver _MEM_TETO_FRACAO).
+        //
+        // Recua o carimbo pra tentar de novo em 2 minutos em vez do intervalo
+        // cheio: a aba costuma aliviar sozinha, e esperar meia hora por uma
+        // pausa de dois minutos seria trocar um problema por outro.
+        if (_memoriaApertada()) {
+          VAR.placar.adiadas = (VAR.placar.adiadas || 0) + 1;
+          VAR.ultimaRodada = Date.now() - VAR.INTERVALO_MS + 120000;
+          _saudePor('memoria', false, _MEM_AVISO);
           break;
         }
         try {
@@ -5198,7 +5329,25 @@
     // vez que este chat é lido) mantém 400, porque aí é a única chance de
     // pegar o histórico. Não é micro-otimização: é o que evita que ler uma
     // fila de 70+ leads acumule o histórico inteiro de todos eles na aba.
-    const teto = alvo.desde_msg_id ? 120 : 400;
+    // OS NUMEROS VIERAM DE LER O CODIGO DE QUEM NAO TRAVA A ABA.
+    //
+    // WaSpeed pede `quant: 20` (50 no caso especial de "primeira mensagem do
+    // cliente"); ZapVoice usa `count || 20`. A gente pedia 120 com marca
+    // d'agua e 400 sem — vinte vezes mais, e em rotina automatica, que eles nem
+    // tem. Medido na aba do Guilherme em 19/08/2026: 41.203 mensagens
+    // carregadas, ~1,2 GB de heap, que e a nossa varredura de alguns dias
+    // empilhada na memoria do WhatsApp.
+    //
+    // 40 com marca d'agua: e o que chegou desde a ultima leitura, quase sempre
+    // um punhado. Se a marca nao estiver nessa janela, a ponte AUMENTA sozinha
+    // (ver lerConversaDe) — paga caro so no caso raro, em vez de sempre.
+    //
+    // 150 na primeira leitura tem troca declarada: e a unica vez que a gente
+    // pega historico, entao conversa com mais de 150 mensagens perde o que e
+    // mais antigo. Aceitavel porque as 150 ULTIMAS dizem mais sobre o lead que
+    // as de meses atras, e porque o teto e ajustavel pela config remota se a
+    // analise piorar — `leitura_primeira` e `leitura_marca`.
+    const teto = alvo.desde_msg_id ? _num('leitura_marca', 40) : _num('leitura_primeira', 150);
     const conv = await _pedirPonte('ler_conversa_de',
       { chatId: alvo.chat_id, desdeMsgId: alvo.desde_msg_id, limite: teto }, 60000);
     if (!conv || conv.erro) throw new Error(conv && conv.erro || 'falha_leitura');
@@ -10055,7 +10204,18 @@
   let _lidosNestaSessao = 0;
 
   async function _talvezRecarregarPraLiberarRam() {
-    if (_lidosNestaSessao < _RELOAD_A_CADA) return false;
+    // CONTAR LEAD NAO E MEDIR MEMORIA, e era so isso que a valvula tinha.
+    //
+    // Quinze leads podem custar 200 MB numa conversa curta e 1,5 GB numa cheia
+    // de audio e imagem — a valvula abria tarde numa e cedo na outra. Pior: a
+    // memoria da aba tambem sobe pelo lado do WhatsApp, que a contagem nao ve.
+    // Medido em 19/08/2026, a aba morreu tres vezes em 40 minutos SEM a valvula
+    // nunca ter atingido as quinze leituras.
+    //
+    // Agora abre por qualquer um dos dois: quinze leituras (o que ja valia) ou
+    // a aba passando do teto de memoria. As tres travas de baixo continuam
+    // valendo iguais — e sao elas que fazem isto ser seguro, nao o gatilho.
+    if (_lidosNestaSessao < _RELOAD_A_CADA && !_memoriaApertada()) return false;
     // Aba visível = o consultor está nela. Espera ele sair (a contagem fica
     // acumulada; recarrega no primeiro tick com a aba escondida).
     if (document.visibilityState === 'visible') return false;
@@ -10075,8 +10235,81 @@
     return true;
   }
 
+  // ── QUEDA CONTROLADA EM VEZ DE MORTE ─────────────────────────────────────
+  //
+  // A valvula acima so recarrega com a aba em segundo plano — recarregar na
+  // cara de quem esta digitando perde a mensagem pela metade, e essa trava nao
+  // sai. So que a aba pesada nao espera o consultor sair: o Chrome mata a guia
+  // no meio do atendimento e leva tudo junto, inclusive a fila de envio.
+  //
+  // Entao, quando a memoria passa do ponto e a aba esta na frente, quem decide
+  // a hora e o consultor. Recarregar por escolha custa alguns segundos e nao
+  // perde nada (a leitura e a fila retomam de onde pararam). Ser morto pelo
+  // navegador custa a conversa inteira.
+  // Mesma correcao do teto de leitura: o numero que vale e o absoluto. 1.500 MB
+  // de heap e onde a aba do Guilherme ja estava perto de 2 GB no Chrome, que e
+  // onde ela morria.
+  const _MEM_CRITICA = 0.72;
+  const _MEM_CRITICA_MB = 1500;
+  let _avisoMemoriaNaTela = false;
+  function _conferirMemoriaCritica() {
+    const m = _memoriaDaAba();
+    if (!m) return;
+    if (m.usadoMB < _MEM_CRITICA_MB && m.fracao < _MEM_CRITICA) return;
+    if (_avisoMemoriaNaTela || document.getElementById('job-aviso-memoria')) return;
+    try {
+      _avisoMemoriaNaTela = true;
+      const d = document.createElement('div');
+      d.id = 'job-aviso-memoria';
+      d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483646;'
+        + 'background:#b45309;color:#fff;padding:9px 14px;'
+        + 'font:13px -apple-system,sans-serif;text-align:center;'
+        + 'box-shadow:0 2px 12px rgba(0,0,0,.35)';
+      d.innerHTML = 'Esta aba do WhatsApp esta pesada e o navegador pode encerra-la. '
+        + 'Recarregar leva alguns segundos e nao perde nada: a leitura e a fila de '
+        + 'envio continuam de onde pararam.'
+        + ' <button id="job-mem-reload" style="margin-left:12px;background:#fff;'
+        + 'color:#92400e;border:none;border-radius:6px;padding:5px 12px;'
+        + 'font-weight:700;cursor:pointer;transition:transform 140ms cubic-bezier(.23,1,.32,1)">'
+        + 'Recarregar agora</button>'
+        + ' <button id="job-mem-depois" style="margin-left:6px;background:transparent;'
+        + 'color:#fff;border:1px solid rgba(255,255,255,.55);border-radius:6px;'
+        + 'padding:5px 12px;cursor:pointer">Agora nao</button>';
+      document.body.appendChild(d);
+      const b = d.querySelector('#job-mem-reload');
+      if (b) {
+        b.addEventListener('mousedown', () => { b.style.transform = 'scale(.97)'; });
+        b.addEventListener('mouseup', () => { b.style.transform = ''; });
+        b.addEventListener('click', () => {
+          b.disabled = true; b.textContent = 'Recarregando...';
+          try { chrome.storage.local.set({ jobReloadMemoria: true, jobUltimoReload: Date.now() }); } catch (e) {}
+          location.reload();
+        });
+      }
+      // "Agora nao" nao pode virar "nunca mais": some por 15 minutos e volta se
+      // a aba continuar pesada. Aviso que o consultor consegue matar pra sempre
+      // e aviso que nao protege ninguem.
+      const fechar = d.querySelector('#job-mem-depois');
+      if (fechar) {
+        fechar.addEventListener('click', () => {
+          try { d.remove(); } catch (e) {}
+          _registrarTimeout(() => { _avisoMemoriaNaTela = false; }, 15 * 60000);
+        });
+      }
+    } catch (e) { _avisoMemoriaNaTela = false; }
+  }
+  _registrarLoop(setInterval(_soComAbaVisivel(_conferirMemoriaCritica), 60000));
+
   async function filaVarreduraTick() {
     if (FILA.rodando || Date.now() < FILA.proximaEm) return;
+    // ABA PESADA: a fila espera junto com a varredura (ver _MEM_TETO_FRACAO).
+    // O item continua no servidor — adiar nao perde nada, e insistir e o que
+    // derruba a guia inteira, levando o envio junto.
+    if (_memoriaApertada()) {
+      FILA.proximaEm = Date.now() + 120000;
+      _saudePor('memoria', false, _MEM_AVISO);
+      return;
+    }
     let usuarioId = null;
     try { ({ usuarioId } = await _safeStorageGet(['usuarioId'])); } catch (e) { return; }
     if (!usuarioId) return;
@@ -13824,6 +14057,27 @@
       if (!document.getElementById('job-trilho')) criarTrilho();
     }));
     obs.observe(document.body, { childList: true, subtree: false });
+    // A RESERVA DE ESPAÇO TAMBÉM PRECISA DE RELIGAMENTO.
+    //
+    // Medido na tela do Guilherme em 19/08/2026: `job-push-esquerda` no <html>
+    // e `job-push-trilho` FORA, com margin-left: 0px. As duas são postas juntas
+    // por `aplicarClassesHtml` e só saem juntas no botão "Desligar o JOB" — que
+    // ele não apertou, senão a outra teria saído também. Ou seja: alguma coisa
+    // fora do nosso alcance mexe no className do <html> (o próprio WhatsApp
+    // escreve lá no tema escuro), e o estado resultante é o pior possível: o
+    // trilho continua desenhado na esquerda e a página não abre espaço pra ele
+    // — o menu senta em cima da lista de conversas.
+    //
+    // Não descobri QUEM tira. Descobrir isso lendo pode levar dias e a tela do
+    // consultor está torta agora. A regra do projeto vale aqui inteira: nunca
+    // remover sem substituir o religamento. Se o trilho existe e a reserva não,
+    // a reserva volta — custa um `contains` a cada 4s e conserta qualquer causa,
+    // inclusive a que eu ainda não achei.
+    _registrarLoop(setInterval(_soComAbaVisivel(() => {
+      if (!document.getElementById('job-trilho')) return;
+      if (document.documentElement.classList.contains('job-push-trilho')) return;
+      try { aplicarClassesHtml(); } catch (e) { /* próxima volta tenta de novo */ }
+    }), 4000));
     // Transcrição colada no áudio. Best-effort: se qualquer coisa aqui falhar, o
     // resto da extensão continua funcionando — transcrição é ganho, não requisito.
     try { trIniciar(); } catch (e) { console.warn('[JOB] transcrição não iniciou:', e); }
@@ -14017,6 +14271,30 @@
     } catch (e) { /* perdeu a medida, nao o trabalho */ }
   }
   _registrarLoop(setInterval(_soComAbaVisivel(_enviarMetricas), 120000));
+
+  // A ABA REPORTA O PROPRIO PESO.
+  //
+  // Ate hoje so se descobria que a aba de alguem estava morrendo quando a
+  // pessoa ligava reclamando — e o time inteiro acabou de subir pra versao
+  // nova. Com a medida chegando no servidor da pra ver a aba subindo ANTES de
+  // ela cair, em qualquer maquina, sem depender de ninguem contar.
+  //
+  // De 10 em 10 minutos: e um numero que muda devagar, e medicao que enche
+  // tabela vira a primeira coisa que alguem desliga — com razao.
+  //
+  // `ms` guarda MEGABYTES aqui, nao milissegundos: wa_metrica tem uma coluna
+  // numerica so, e nao vale schema novo por isto. O `detalhe` carrega a unidade
+  // pra ninguem ler errado daqui a seis meses.
+  _registrarLoop(setInterval(_soComAbaVisivel(() => {
+    try {
+      const m = performance && performance.memory;
+      if (!m || !m.jsHeapSizeLimit) return;
+      const usadoMB = Math.round(m.usedJSHeapSize / 1048576);
+      const fracao = m.usedJSHeapSize / m.jsHeapSizeLimit;
+      _metrica('memoria_aba', usadoMB, usadoMB < _MEM_CRITICA_MB && fracao < _MEM_CRITICA,
+               usadoMB + ' MB, ' + Math.round(fracao * 100) + '% do limite da aba');
+    } catch (e) { /* medir nunca pode atrapalhar */ }
+  }), 10 * 60000));
 
   // ── TEMPO DE RESPOSTA: mede do historico e manda pro JOB ──────────────────
   //
