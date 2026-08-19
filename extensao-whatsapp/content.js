@@ -1384,7 +1384,21 @@
   // roubava o dobro do espaço da conversa. O ZapVoice encolhe porque a barra
   // dele é grande; a nossa é uma tira fina no rodapé, e o layout do próprio
   // WhatsApp já acomoda. Espaço de conversa é do cliente, não da extensão.
-  function _itensReservar() { /* mantido só pra não quebrar chamadas antigas */ }
+  // LIMPA A ALTURA QUE A VERSÃO ANTERIOR PRENDEU NO #main.
+  //
+  // A 4.106.0 fazia `height: calc(100% - 46px) !important` no #main pra abrir
+  // espaço. Recarregar a extensão (↻) NÃO desfaz isso: o estilo é inline, já
+  // está no DOM da aba, e some só com F5. Quem atualizar sem recarregar a
+  // página ficaria com a conversa espremida e sem entender por quê — e ia
+  // culpar a versão nova, que é justamente a que tirou a reserva.
+  //
+  // Por isso a limpeza é ativa, não passiva.
+  function _itensReservar() {
+    try {
+      const main = _itensMain();
+      if (main && main.style && main.style.height) main.style.removeProperty('height');
+    } catch (e) { /* nunca derruba o boot por causa de faxina */ }
+  }
 
   async function _itensCarregar() {
     const out = [];
@@ -1527,6 +1541,9 @@
   }
 
   function iniciarBarraItens() {
+    // Primeiro desfaz a reserva da versão anterior (ver _itensReservar), senão
+    // quem só apertou ↻ continua com a conversa espremida.
+    _itensReservar();
     try { chrome.storage.local.get(['jobItensSoFav'], (c) => { _itensSoFav = !!(c && c.jobItensSoFav); }); }
     catch (e) {}
     _itensSincronizar();
