@@ -32,6 +32,30 @@ ERP em **Flask + PostgreSQL (Railway)** da Serenus Corretora de Saúde. Um arqui
 | Admin/emergency | `/admin/*` (todas com guard admin — decorator ou check inline) | — |
 | Webhook Asaas | `/webhook/asaas` (+ `webhook_log`) | — |
 
+## Onde o projeto mora (leia antes de criar arquivo em massa)
+
+O repositorio fica em `~/Desktop/job-serenus`, e **`~/Desktop` e um link para o iCloud Drive**.
+Tudo que existe aqui e sincronizado na nuvem, arquivo por arquivo.
+
+Em 19/08/2026 isso derrubou a maquina (MacBook Air M2, 8 GB): o iCloud e o Spotlight varrendo
+29.775 arquivos ao mesmo tempo, com 1,1 TB escritos no SSD em 11 h. Das ~2.200 alteracoes que o
+iCloud subiu nas ultimas 24 h, **1.709 eram `.claude/worktrees` e 472 eram `.git`** — 99,8% do
+trafego era ferramenta trabalhando, nao codigo do Guilherme.
+
+**O que ja esta em vigor (nao desfazer):**
+
+- `.claude/worktrees` **nao mora mais aqui**. E um link para `~/Developer/job-serenus-worktrees`,
+  fora do iCloud. O caminho `~/Desktop/job-serenus/.claude/worktrees/...` continua valendo — use
+  normalmente. Nao substitua o link por pasta de verdade.
+- `.claude/worktrees` e `.git` tem `.metadata_never_index` dentro: desliga o Spotlight nessas
+  pastas. Se o arquivo sumir, o Spotlight volta a indexar tudo. Recriar com `touch`.
+- **Apague o worktree quando terminar a tarefa** (`git worktree remove --force <caminho>`). Cada
+  worktree e uma copia de ~70 MB e ~570 arquivos. Doze deles acumulados foi o que estourou a maquina.
+
+**Cuidado ao copiar ou mover o repo:** 11.615 arquivos estao *so na nuvem* (dataless), a maior
+parte em `video-ads/` (1,1 GB). Qualquer `cp`, `ditto` ou `rsync` da pasta inteira forca o download
+de todos e **trava**. Se precisar mover o repo, baixe tudo antes, numa janela de manutencao.
+
 ## Armadilhas conhecidas
 
 - **PG vs SQLite:** `substr()` em timestamp precisa de `CAST(... AS TEXT)`; nunca `datetime.fromisoformat()` direto em valor do banco — usar `_parse_dt_seguro()`; Row do SQLite não passa no `|tojson` (converter p/ dict na rota).
