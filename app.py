@@ -9075,6 +9075,47 @@ def setup_senha(token):
     return render_template('setup_senha.html', usuario=u)
 
 # ─── DASHBOARD ───────────────────────────────────────────────────────────────────
+@app.template_filter('dur_curta')
+def _dur_curta(ms):
+    """Milissegundos -> '3 min', '1h20', '45s'. Vazio vira travessão.
+
+    Corretor não lê milissegundo. E '0' seria pior que travessão: dá a entender
+    que houve medição e o tempo foi zero, quando na verdade não houve medição.
+    """
+    if ms is None or ms == '':
+        return '—'
+    try:
+        seg = int(ms) // 1000
+    except (TypeError, ValueError):
+        return '—'
+    if seg < 60:
+        return f'{seg}s'
+    if seg < 3600:
+        return f'{seg // 60} min'
+    h, m = seg // 3600, (seg % 3600) // 60
+    return f'{h}h{m:02d}' if m else f'{h}h'
+
+
+def _tempo_resposta_do_dia(conn, usuario_id=None):
+    """Le a medicao de hoje. usuario_id=None traz a equipe inteira (visao admin).
+
+    Devolve None quando nao ha medicao: a tela precisa distinguir "hoje ninguem
+    respondeu devagar" de "hoje ninguem mediu". Zero no lugar de vazio seria uma
+    mentira boa de olhar — o consultor com a extensao desligada apareceria como
+    o mais rapido da equipe.
+    """
+    dia = datetime.now(TZ_SP).strftime('%Y-%m-%d')
+    if usuario_id:
+        r = conn.execute("""SELECT * FROM wa_tempo_resposta WHERE usuario_id=? AND dia=?""",
+                         (usuario_id, dia)).fetchone()
+        return dict(r) if r else None
+    linhas = conn.execute("""SELECT t.*, u.nome FROM wa_tempo_resposta t
+        JOIN usuarios u ON u.id = t.usuario_id
+        WHERE t.dia=? AND u.ativo=1
+        ORDER BY (t.mediana_ms IS NULL), t.mediana_ms""", (dia,)).fetchall()
+    return [dict(x) for x in linhas] or None
+
+
 @app.route('/')
 @login_required
 def dashboard():
@@ -9157,10 +9198,11 @@ def dashboard():
         # nao sabia o que fazer AGORA — a informacao mais acionavel da tela.
         fila = _agenda_fila(conn, uid, eh_admin=False, limite=6)
         fila_n = _agenda_resumo(conn, uid, eh_admin=False)
+        tempo_resp = _tempo_resposta_do_dia(conn)
         close_db(conn)
         return render_template('dashboard_admin.html', m=m, ultimas=ultimas,
                                por_operadora=por_operadora, por_consultor=por_consultor,
-                               fila=fila, fila_n=fila_n,
+                               fila=fila, fila_n=fila_n, tempo_resp=tempo_resp,
                                ciclo=ciclo_atual(), f_mes=f_mes, meses_disponiveis=meses_disponiveis)
     else:
         m = {}
@@ -9225,9 +9267,10 @@ def dashboard():
             FROM propostas WHERE usuario_id=? AND status != 'Excluída' GROUP BY adm_operadora ORDER BY valor DESC LIMIT 6""",(uid,)).fetchall()
         fila = _agenda_fila(conn, uid, eh_admin=False, limite=6)
         fila_n = _agenda_resumo(conn, uid, eh_admin=False)
+        tempo_resp = _tempo_resposta_do_dia(conn, uid)
         close_db(conn)
         return render_template('dashboard_consultor.html', m=m, ultimas=ultimas,
-                               fila=fila, fila_n=fila_n,
+                               fila=fila, fila_n=fila_n, tempo_resp=tempo_resp,
                                por_operadora=por_operadora, pendentes_aceite=pendentes_aceite,
                                pendencias_comprovante=pendencias_comprovante)
 

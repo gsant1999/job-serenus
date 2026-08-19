@@ -170,6 +170,49 @@
     {% else %}<div class="empty">Nenhuma proposta cadastrada. <a href="/nova-proposta">Cadastrar primeira →</a></div>{% endif %}
   </div>
 
+  {# TEMPO DE RESPOSTA DA EQUIPE — cada número com o dono ao lado.
+     Quem não aparece aqui é quem não mediu hoje, e isso está dito embaixo:
+     ausência não é "respondeu rápido". #}
+  {% if tempo_resp %}
+  <div class="card">
+    <div class="card-header">
+      <h3>Tempo de resposta hoje</h3>
+      <span style="font-size:11px; color:var(--cinza-2);">medido das conversas de cada consultor</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Consultor</th>
+          <th>Metade responde em até<button type="button" class="job-i" aria-label="O que é este número"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">A mediana: metade das respostas saiu mais rápido, metade mais devagar. Uma conversa esquecida não distorce, diferente da média.</span></button></th>
+          <th>Os mais demorados<button type="button" class="job-i" aria-label="O que é este número"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">O p95: só 1 em cada 20 respostas demorou mais que isso. É onde o cliente sentiu a demora.</span></button></th>
+          <th>Primeira resposta<button type="button" class="job-i" aria-label="O que é este número"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">Quanto demorou o primeiro retorno numa conversa. É o que mais pesa: quem pediu cotação e ficou sem resposta procura outro corretor.</span></button></th>
+          <th>Respostas</th>
+          <th>Esperando agora</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tempo_resp %}
+        <tr>
+          <td><strong>{{ t.nome }}</strong></td>
+          <td class="td-mono">{{ t.mediana_ms|dur_curta }}</td>
+          <td class="td-mono">{{ t.p95_ms|dur_curta }}</td>
+          <td class="td-mono">{{ t.primeira_mediana_ms|dur_curta }}</td>
+          <td class="td-mono">{{ t.respostas }}</td>
+          <td class="td-mono"{% if t.aguardando %} style="color:var(--rosa); font-weight:600;"{% endif %}>
+            {{ t.aguardando }}{% if t.mais_antiga_min %} <span style="font-weight:400; color:var(--cinza-2);">· mais antiga há {{ t.mais_antiga_min }} min</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div style="font-size:11px; color:var(--cinza-2); padding:10px 16px 14px;">
+      Só aparece quem estava com o WhatsApp Web aberto hoje — quem não aparece não foi medido,
+      o que é diferente de ter respondido rápido. Atualiza a cada 20 minutos e conta também o
+      que foi respondido pelo celular.
+    </div>
+  </div>
+  {% endif %}
+
   {% if por_consultor %}
   <div class="card">
     <div class="card-header"><h3>Ranking de consultores</h3></div>
