@@ -1358,9 +1358,7 @@
   //  telas do Guilherme os chips estão lá com o campo vazio — digitar filtra,
   //  não invoca.
   const _ITENS_ID = 'job-itens-bar';
-  const _ITENS_ALTURA = 46;          // px reservados no #main, como eles fazem
   const _ITENS_DEBOUNCE = 400;       // igual ao deles: 180ms buscava a cada letra
-  const _ITENS_TETO = 40;
   let _itensTermo = '';
   let _itensSoFav = false;
   let _itensDebounce = null;
@@ -1380,14 +1378,13 @@
     return String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
   }
 
-  // Reserva a faixa encolhendo o #main, como o ZapVoice. Sobrepor tapa a
-  // última mensagem — que é justamente a que a pessoa está respondendo.
-  function _itensReservar(ligado) {
-    const main = _itensMain();
-    if (!main) return;
-    if (ligado) main.style.setProperty('height', 'calc(100% - ' + _ITENS_ALTURA + 'px)', 'important');
-    else main.style.removeProperty('height');
-  }
+  // NÃO MEXE NA ALTURA DO #main. Ponto.
+  //
+  // A primeira versão encolhia o #main em 46px E inseria uma faixa de 46px:
+  // roubava o dobro do espaço da conversa. O ZapVoice encolhe porque a barra
+  // dele é grande; a nossa é uma tira fina no rodapé, e o layout do próprio
+  // WhatsApp já acomoda. Espaço de conversa é do cliente, não da extensão.
+  function _itensReservar() { /* mantido só pra não quebrar chamadas antigas */ }
 
   async function _itensCarregar() {
     const out = [];
@@ -1406,11 +1403,19 @@
     return out;
   }
 
+  // ORDEM É A DO CADASTRO, NÃO A MINHA.
+  //
+  // Nada de ordenar por favorito, por tipo ou por relevância: o consultor
+  // decorou a ordem em que cadastrou ("o segundo material da Vera Ouro"), e
+  // reordenar quebra essa memória. Filtrar só REMOVE da lista; o que sobra
+  // mantém a posição relativa que veio do servidor.
+  //
+  // Sem teto também: cortar em 40 escondia item sem avisar. Quem tem muitos
+  // itens rola a barra — que agora rola de verdade.
   function _itensFiltrar(todos) {
     const alvo = _itensNorm(_itensTermo);
-    return todos
-      .filter((i) => (!_itensSoFav || i.fav) && (!alvo || _itensNorm(i.nome).includes(alvo)))
-      .slice(0, _ITENS_TETO);
+    return todos.filter((i) =>
+      (!_itensSoFav || i.fav) && (!alvo || _itensNorm(i.nome).includes(alvo)));
   }
 
   async function _itensDesenhar() {
@@ -1425,10 +1430,12 @@
         cx.setAttribute('role', 'toolbar');
         cx.setAttribute('aria-label', 'Funis e modelos do JOB');
         cx.addEventListener('mousedown', _itensClique);
-        rodape.parentElement.insertBefore(cx, rodape.nextSibling);
-        _itensReservar(true);
-      } else if (cx.previousElementSibling !== rodape) {
-        rodape.parentElement.insertBefore(cx, rodape.nextSibling);
+        rodape.parentElement.appendChild(cx);
+      } else if (cx !== rodape.parentElement.lastElementChild) {
+        // ABAIXO DO CAMPO, SEMPRE. Ficou acima na primeira versão porque
+        // `insertBefore(rodape.nextSibling)` depende da ordem dos irmãos, e o
+        // WhatsApp reordena o rodapé. Último filho não tem essa dúvida.
+        rodape.parentElement.appendChild(cx);
       }
       cx._itens = lista;
       const favOn = _itensSoFav ? ' job-itens-fav-on' : '';
