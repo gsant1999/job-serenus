@@ -5167,12 +5167,26 @@
   //
   // A fracao (e nao um numero de MB cravado) e o que faz isto valer nas duas
   // pontas: a mesma regra protege a maquina apertada e sai da frente da folgada.
+  // FRACAO SOZINHA NAO SERVE — medido no Mac do Guilherme em 19/08/2026.
+  //
+  // A aba estava com 1.247 MB de heap JS num limite de 4.096 MB: 30%. Pela
+  // fracao, folgadissima. Pelo Chrome, a MESMA aba aparecia com 1 a 2,2 GB e
+  // era morta pelo navegador. A diferenca e que `performance.memory` so enxerga
+  // o heap JS — mídia decodificada, bitmap, DOM e GPU ficam de fora, e no
+  // WhatsApp Web isso e metade da conta.
+  //
+  // Ou seja: um teto de 55% do limite so abriria com 2,2 GB de heap, quando a
+  // guia ja teria morrido ha muito tempo. O numero absoluto e que manda aqui; a
+  // fracao fica como rede pra navegador com limite de heap menor, onde 1.200 MB
+  // nunca seriam alcancados porque o motor estoura antes.
   const _MEM_TETO_FRACAO = 0.55;
+  const _MEM_TETO_MB = 1200;
   function _memoriaDaAba() {
     try {
       const m = performance && performance.memory;
       if (!m || !m.jsHeapSizeLimit) return null;
-      return { fracao: m.usedJSHeapSize / m.jsHeapSizeLimit };
+      return { usadoMB: Math.round(m.usedJSHeapSize / 1048576),
+               fracao: m.usedJSHeapSize / m.jsHeapSizeLimit };
     } catch (e) { return null; }
   }
   // null = nao da pra medir neste navegador. Sem medida nao se inventa limite:
@@ -5180,7 +5194,7 @@
   function _memoriaApertada() {
     const m = _memoriaDaAba();
     if (!m) return false;
-    return m.fracao >= _MEM_TETO_FRACAO;
+    return m.usadoMB >= _MEM_TETO_MB || m.fracao >= _MEM_TETO_FRACAO;
   }
   const _MEM_AVISO = 'A leitura de conversas esta em pausa: esta aba do WhatsApp '
     + 'esta pesada. Ela volta sozinha quando aliviar. Para resolver agora, feche '
@@ -10189,11 +10203,16 @@
   // a hora e o consultor. Recarregar por escolha custa alguns segundos e nao
   // perde nada (a leitura e a fila retomam de onde pararam). Ser morto pelo
   // navegador custa a conversa inteira.
+  // Mesma correcao do teto de leitura: o numero que vale e o absoluto. 1.500 MB
+  // de heap e onde a aba do Guilherme ja estava perto de 2 GB no Chrome, que e
+  // onde ela morria.
   const _MEM_CRITICA = 0.72;
+  const _MEM_CRITICA_MB = 1500;
   let _avisoMemoriaNaTela = false;
   function _conferirMemoriaCritica() {
     const m = _memoriaDaAba();
-    if (!m || m.fracao < _MEM_CRITICA) return;
+    if (!m) return;
+    if (m.usadoMB < _MEM_CRITICA_MB && m.fracao < _MEM_CRITICA) return;
     if (_avisoMemoriaNaTela || document.getElementById('job-aviso-memoria')) return;
     try {
       _avisoMemoriaNaTela = true;
@@ -14208,7 +14227,7 @@
       if (!m || !m.jsHeapSizeLimit) return;
       const usadoMB = Math.round(m.usedJSHeapSize / 1048576);
       const fracao = m.usedJSHeapSize / m.jsHeapSizeLimit;
-      _metrica('memoria_aba', usadoMB, fracao < _MEM_CRITICA,
+      _metrica('memoria_aba', usadoMB, usadoMB < _MEM_CRITICA_MB && fracao < _MEM_CRITICA,
                usadoMB + ' MB, ' + Math.round(fracao * 100) + '% do limite da aba');
     } catch (e) { /* medir nunca pode atrapalhar */ }
   }), 10 * 60000));
