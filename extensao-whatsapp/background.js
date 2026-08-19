@@ -759,26 +759,23 @@ async function baixarMidiaDataUrl(url) {
 // Uma só: cotar é ação de um consultor por vez, não fila.
 let _abaQuePediuCotacao = null;
 
-const DECK_ENDERECO = 'http://127.0.0.1:8765';
-
-// Devolve SEMPRE um objeto, nunca lanca: quem chama e um laco que roda a cada
-// par de segundos e nao pode quebrar porque o deck esta desligado — que e o
-// estado normal na maior parte do dia.
+// O DECK MUDOU DE ENDERECO: AGORA ELE E UMA TELA DO JOB.
+//
+// Ate 19/08/2026 isto apontava para um servidor rodando no proprio Mac
+// (127.0.0.1:8765), e o consultor tinha que ligar o deck na maquina, descobrir
+// o IP e digitar um PIN no iPad — que ainda por cima mudava a cada partida.
+// Agora quem guarda os comandos e o JOB: o iPad abre /deck com o login normal,
+// de qualquer lugar, inclusive fora do escritorio.
+//
+// Devolve SEMPRE um objeto, nunca lanca: quem chama e um laco e nao pode
+// quebrar porque ninguem abriu o deck hoje — que e o estado normal do dia.
 async function deckPonte(rota, corpo) {
   try {
-    const ctrl = new AbortController();
-    const corta = setTimeout(() => ctrl.abort(), 6000);
-    const r = await fetch(DECK_ENDERECO + rota, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Deck-Extensao': '1' },
-      body: JSON.stringify(corpo || {}),
-      signal: ctrl.signal,
-    });
-    clearTimeout(corta);
-    if (!r.ok) return { ok: false, erro: 'o deck respondeu ' + r.status };
-    return { ok: true, dados: await r.json() };
+    const r = await chamarJob(rota, 'POST', corpo || {}, 8000);
+    if (!r || !r.ok) return { ok: false, erro: (r && r.erro) || 'o JOB nao respondeu' };
+    return { ok: true, dados: r };
   } catch (e) {
-    return { ok: false, erro: 'deck desligado' };
+    return { ok: false, erro: 'o JOB nao respondeu' };
   }
 }
 
@@ -852,7 +849,7 @@ async function _deckBatida() {
   if (!tabId) return 0;                       // sem WhatsApp Web não há o que enviar
   const info = await _deckPerguntarAba(tabId,
     { type: 'deck_info', comCatalogo: _deckPrecisaCatalogo() }, 9000) || {};
-  const r = await deckPonte('/api/extensao/sincronizar',
+  const r = await deckPonte('/api/whatsapp/extensao/deck/sincronizar',
     { chat: info.chat || null, catalogo: info.catalogo || null });
   if (!r.ok) {
     _deckFalhas++;
@@ -864,7 +861,7 @@ async function _deckBatida() {
     // Um comando de cada vez: dois envios simultâneos na mesma conversa é
     // exatamente o jeito de o cliente receber tudo fora de ordem.
     const res = await _deckPerguntarAba(tabId, { type: 'deck_executar', cmd }, 120000);
-    await deckPonte('/api/extensao/resultado', {
+    await deckPonte('/api/whatsapp/extensao/deck/resultado', {
       id: cmd.id,
       ok: !!(res && res.ok),
       estado: (res && res.estado) || '',
@@ -891,11 +888,11 @@ async function _deckLaco() {
   }
 }
 
-// A busca de um minuto em um minuto: um fetch pelado, sem envolver a aba. É o
-// único trabalho de fundo que sobra quando o deck está desligado.
+// A busca de um minuto em um minuto: uma chamada curta, sem envolver a aba. É o
+// único trabalho de fundo que sobra quando ninguém está com o deck aberto.
 async function _deckProcurar() {
   if (_deckLacoVivo) return;
-  const r = await deckPonte('/api/extensao/sincronizar', { chat: null, catalogo: null });
+  const r = await deckPonte('/api/whatsapp/extensao/deck/sincronizar', { chat: null, catalogo: null });
   if (r.ok) _deckLaco();
 }
 

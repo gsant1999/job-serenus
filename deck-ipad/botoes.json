@@ -278,6 +278,16 @@
       "nome": "WhatsApp",
       "botoes": [
         {
+          "id": "abrir_deck_job",
+          "rotulo": "Abrir o deck no JOB",
+          "dica": "Enviar mensagem e funil agora é lá, e funciona de qualquer lugar",
+          "icone": "link",
+          "acao": {
+            "tipo": "abrir",
+            "alvo": "https://job-serenus-production.up.railway.app/deck"
+          }
+        },
+        {
           "id": "abrir_whats",
           "rotulo": "Abrir o WhatsApp Web",
           "dica": "No Chrome, onde a extensão roda",
@@ -319,8 +329,7 @@
             "alvo": "https://job-serenus-production.up.railway.app/crm/painel"
           }
         }
-      ],
-      "tela": "whatsapp"
+      ]
     }
   ]
 }

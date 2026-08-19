@@ -41,35 +41,19 @@ deck de novo.
 Tudo o mais — rodar script, abrir app, abrir site, volume, apagar a tela —
 funciona sem permissão nenhuma.
 
-## Enviar mensagem e funil pelo iPad
+## Enviar mensagem e funil: agora é no JOB
 
-A tela **WhatsApp** do deck não tem botão fixo: ela mostra a biblioteca de
-mensagens e os funis que você tem hoje, e o nome de quem está na conversa aberta
-no WhatsApp Web do Mac. Você toca, confere o texto no preview, confirma — e a
-mensagem sai naquela conversa.
+A tela de envio saiu daqui e virou **uma página do próprio JOB**, em `/deck`.
+No iPad você entra com o login normal, de qualquer lugar — inclusive fora do
+escritório, no 4G. Sem PIN, sem endereço de IP, sem precisar ligar nada no Mac.
 
-Quem envia é a **extensão do JOB**, pelo mesmo caminho do painel dentro do
-WhatsApp: mesma fila, mesmo registro no CRM, mesmo intervalo anti-bloqueio. O
-deck não fala com o WhatsApp; ele só pede.
+Quem envia continua sendo a extensão, na conversa aberta do WhatsApp Web. O que
+mudou é onde o pedido fica guardado: no servidor do JOB, e não numa porta desta
+máquina.
 
-Para funcionar, três coisas ao mesmo tempo:
-
-1. o deck ligado no Mac;
-2. o Chrome aberto com o **WhatsApp Web** e a extensão do JOB instalada;
-3. uma **conversa aberta** lá.
-
-Faltando qualquer uma, a tela do iPad diz qual é e o que fazer — e os cartões
-ficam desligados em vez de fingir que enviam.
-
-### O que protege contra mandar para a pessoa errada
-
-- O comando carrega o identificador da conversa que estava aberta quando você
-  tocou. Antes de enviar, a extensão confere se ainda é a mesma. Mudou? Não
-  envia, e o iPad avisa.
-- Comando que fica **mais de 90 segundos** sem a extensão pegar morre na fila.
-  Mensagem atrasada chega fora de hora — já aconteceu neste projeto.
-- Quando o servidor segura a mensagem pelo intervalo anti-bloqueio, o iPad diz
-  exatamente isso ("sai sozinha em ~8s"), nunca "enviado".
+Este deck local seguiu sendo o que ele é bom: **os botões da máquina**. Rodar o
+CI, validar o app.py, capturar tela, volume, microfone. Para mandar mensagem,
+use o botão "Abrir o deck no JOB".
 
 ### Depois de mexer na extensão
 
@@ -80,20 +64,6 @@ principal. Mudança feita aqui só vale depois de:
 2. `chrome://extensions` > botão de recarregar (↻) na extensão do JOB;
 3. **F5 na aba do WhatsApp Web** — sem isso a aba continua rodando a versão
    velha do content script.
-
-### Como o Chrome e o deck se acham
-
-A extensão procura o deck **uma vez por minuto** enquanto ele está desligado —
-um pedido a `127.0.0.1`, sem envolver a aba do WhatsApp. Achou, passa a
-conversar a cada 2 segundos, e volta a 10 segundos quando o iPad não está com a
-tela do WhatsApp aberta. Três falhas seguidas e ela dorme de novo.
-
-Isso não é capricho: em 14/08/2026 um laço de 2 segundos em segundo plano levou
-o Chrome a 4,4 GB e travou o navegador. A regra virou verificação no
-`scripts/checar_extensao.sh` e vale para este laço também.
-
-Se você acabou de ligar o deck e não quer esperar o minuto, clique uma vez na
-aba do WhatsApp Web: ela avisa a extensão na hora.
 
 ## Mudar os botões
 

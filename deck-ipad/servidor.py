@@ -519,147 +519,6 @@ def botao_ligado(botao: dict) -> bool:
     return valor in ("1", "true", "sim", "ligado", "on")
 
 
-# ------------------------------------------------- ponte com a extensão do WhatsApp
-
-VALIDADE_COMANDO = 90        # segundos: comando não entregue neste prazo morre
-TETO_COMANDOS = 60           # histórico guardado na memória
-
-
-class Extensao:
-    """O que a extensão do Chrome contou na última vez que apareceu.
-
-    Ela é quem manda: o deck nunca fala com o WhatsApp direto. A extensão
-    pergunta "tem comando pra mim?" a cada par de segundos e, de carona,
-    entrega a conversa aberta e a biblioteca que o consultor tem hoje.
-    """
-
-    def __init__(self) -> None:
-        self.visto_em = 0.0
-        self.chat: dict | None = None
-        self.modelos: list[dict] = []
-        self.funis: list[dict] = []
-        # Quando o iPad olhou a tela do WhatsApp pela última vez. É isso que
-        # define o ritmo da extensão: deck ligado e esquecido na mesa não vale
-        # uma batida a cada 2s no Chrome do consultor.
-        self.ipad_olhou_em = 0.0
-        self.intervalo_pedido = 2
-
-    def anotar(self, dados: dict) -> None:
-        self.visto_em = time.time()
-        chat = dados.get("chat") or None
-        self.chat = chat if (chat and chat.get("chatId")) else None
-        catalogo = dados.get("catalogo") or {}
-        if isinstance(catalogo.get("modelos"), list):
-            self.modelos = catalogo["modelos"][:400]
-        if isinstance(catalogo.get("funis"), list):
-            self.funis = catalogo["funis"][:100]
-
-    @property
-    def ligada(self) -> bool:
-        """Duas batidas perdidas contam como sumiço — e a batida muda de ritmo.
-
-        A janela ACOMPANHA o intervalo que o deck pediu. Com valor fixo de 12s,
-        assim que o ritmo caía para o modo ocioso a extensão passava a parecer
-        desligada, e o iPad acusava um problema que não existia.
-        """
-        return (time.time() - self.visto_em) < (self.intervalo_pedido * 2.5 + 5)
-
-    def para_o_ipad(self) -> dict:
-        return {
-            "ligada": self.ligada,
-            "visto_ha": round(time.time() - self.visto_em) if self.visto_em else None,
-            "chat": self.chat,
-            "modelos": self.modelos,
-            "funis": self.funis,
-        }
-
-
-class Comandos:
-    """Fila do iPad para a extensão. Comando velho não sai — morre na fila.
-
-    Religar uma rotina parada já disparou mensagem velha em cliente. Aqui todo
-    comando carrega prazo: se a extensão sumiu e voltou depois, o que estava
-    esperando expira com aviso, em vez de cair na conversa fora de hora.
-    """
-
-    def __init__(self) -> None:
-        self.itens: dict[int, dict] = {}
-        self.proximo = 1
-        self.trava = threading.Lock()
-
-    def criar(self, tipo: str, rotulo: str, dados: dict) -> dict:
-        with self.trava:
-            cid = self.proximo
-            self.proximo += 1
-            item = {
-                "id": cid, "tipo": tipo, "rotulo": rotulo, "dados": dados,
-                "estado": "na_fila", "mensagem": "Esperando a extensão pegar.",
-                "criado_em": time.time(), "atualizado_em": time.time(),
-            }
-            self.itens[cid] = item
-            for velho in sorted(self.itens)[:-TETO_COMANDOS]:
-                self.itens.pop(velho, None)
-        registrar(f"whatsapp: {tipo} '{rotulo}' entrou na fila (#{cid})")
-        return item
-
-    def pendentes(self) -> list[dict]:
-        """Entrega o que ainda vale e mata o que passou do prazo."""
-        agora_s = time.time()
-        saindo = []
-        with self.trava:
-            for item in self.itens.values():
-                if item["estado"] != "na_fila":
-                    continue
-                if agora_s - item["criado_em"] > VALIDADE_COMANDO:
-                    item["estado"] = "expirado"
-                    item["mensagem"] = (
-                        f"Passou de {VALIDADE_COMANDO}s sem a extensão pegar. "
-                        "Não enviei: mensagem atrasada chega fora de hora."
-                    )
-                    item["atualizado_em"] = agora_s
-                    registrar(f"whatsapp: #{item['id']} expirou na fila")
-                    continue
-                item["estado"] = "entregue"
-                item["mensagem"] = "A extensão pegou. Enviando pelo WhatsApp."
-                item["atualizado_em"] = agora_s
-                saindo.append({"id": item["id"], "tipo": item["tipo"], **item["dados"]})
-        return saindo
-
-    def resultado(self, cid: int, ok: bool, mensagem: str, estado: str = "") -> bool:
-        with self.trava:
-            item = self.itens.get(cid)
-            if not item:
-                return False
-            item["estado"] = estado or ("pronto" if ok else "falhou")
-            item["mensagem"] = mensagem or ("Enviado pelo WhatsApp." if ok else "Não consegui enviar.")
-            item["atualizado_em"] = time.time()
-        registrar(f"whatsapp: #{cid} -> {item['estado']} ({item['mensagem']})")
-        return True
-
-    def recentes(self, quantos: int = 12) -> list[dict]:
-        self.pendentes_expirados()
-        with self.trava:
-            ordem = sorted(self.itens.values(), key=lambda i: i["id"], reverse=True)
-        return [{k: v for k, v in i.items() if k != "dados"} for i in ordem[:quantos]]
-
-    def pendentes_expirados(self) -> None:
-        """O iPad também precisa ver o comando morrer, mesmo sem extensão nenhuma."""
-        agora_s = time.time()
-        with self.trava:
-            for item in self.itens.values():
-                if item["estado"] == "na_fila" and agora_s - item["criado_em"] > VALIDADE_COMANDO:
-                    item["estado"] = "expirado"
-                    item["mensagem"] = (
-                        "A extensão não apareceu a tempo. Não enviei nada — abra o "
-                        "WhatsApp Web no Chrome do Mac e toque de novo."
-                    )
-                    item["atualizado_em"] = agora_s
-
-
-EXTENSAO = Extensao()
-COMANDOS = Comandos()
-
-
 # ------------------------------------------------------------------- servidor
 
 class Pareamento:
@@ -774,16 +633,8 @@ class Deck(BaseHTTPRequestHandler):
                                        "Mac — confira o número na janela agora."}, 403)
             return
 
-        if caminho.startswith("/api/extensao/"):
-            self.rota_extensao(caminho, corpo)
-            return
-
         if not self.autorizado():
             self.json_ok({"erro": "nao pareado"}, 401)
-            return
-
-        if caminho == "/api/whatsapp/comando":
-            self.comando_whatsapp(corpo)
             return
 
         if caminho == "/api/recarregar":
@@ -823,13 +674,6 @@ class Deck(BaseHTTPRequestHandler):
         if caminho == "/api/estado":
             self.json_ok(self.estado_geral())
             return
-        if caminho == "/api/whatsapp":
-            EXTENSAO.ipad_olhou_em = time.time()
-            self.json_ok({
-                "extensao": EXTENSAO.para_o_ipad(),
-                "comandos": COMANDOS.recentes(),
-            })
-            return
         self.json_ok({"erro": "rota que nao existe"}, 404)
 
     def disparar(self, botao_id: str, corpo: dict) -> None:
@@ -863,90 +707,6 @@ class Deck(BaseHTTPRequestHandler):
         exe = executar_botao(acao_efetiva, valor)
         print(f"[{agora()}] {botao.get('rotulo', botao_id)}")
         self.json_ok({"execucao": exe.id})
-
-    # ---- ponte com a extensão do WhatsApp
-
-    def rota_extensao(self, caminho: str, corpo: dict) -> None:
-        """Só a extensão, rodando neste Mac, fala por aqui.
-
-        Duas guardas: a chamada tem que vir do próprio computador, e tem que
-        trazer um cabeçalho que página nenhuma da internet consegue mandar sem
-        pedir licença antes (a extensão manda, com a permissão do manifest).
-        """
-        if self.client_address[0] not in ("127.0.0.1", "::1"):
-            self.json_ok({"erro": "a ponte da extensão só atende o próprio Mac"}, 403)
-            return
-        if self.headers.get("X-Deck-Extensao") != "1":
-            self.json_ok({"erro": "chamada sem a marca da extensão"}, 403)
-            return
-
-        if caminho == "/api/extensao/sincronizar":
-            EXTENSAO.anotar(corpo)
-            olhando = (time.time() - EXTENSAO.ipad_olhou_em) < 30
-            EXTENSAO.intervalo_pedido = 2 if olhando else 10
-            self.json_ok({
-                "comandos": COMANDOS.pendentes(),
-                "intervalo": EXTENSAO.intervalo_pedido,
-            })
-            return
-
-        if caminho == "/api/extensao/resultado":
-            try:
-                cid = int(corpo.get("id"))
-            except (TypeError, ValueError):
-                self.json_ok({"erro": "id inválido"}, 400)
-                return
-            achou = COMANDOS.resultado(
-                cid, bool(corpo.get("ok")), str(corpo.get("mensagem", ""))[:400],
-                str(corpo.get("estado", "")),
-            )
-            self.json_ok({"ok": achou})
-            return
-
-        self.json_ok({"erro": "rota que não existe"}, 404)
-
-    def comando_whatsapp(self, corpo: dict) -> None:
-        """O iPad pediu um envio. Quem executa é a extensão, no Mac."""
-        tipo = str(corpo.get("tipo", ""))
-        if tipo not in ("modelo", "funil", "texto"):
-            self.json_ok({"erro": "tipo de envio desconhecido"}, 400)
-            return
-        if not EXTENSAO.ligada:
-            self.json_ok({"erro": "A extensão não está falando com o deck. Abra o "
-                                  "WhatsApp Web no Chrome do Mac."}, 409)
-            return
-        if not EXTENSAO.chat:
-            self.json_ok({"erro": "Nenhuma conversa aberta no WhatsApp Web do Mac."}, 409)
-            return
-
-        dados: dict = {"chatId": EXTENSAO.chat.get("chatId")}
-        if tipo == "modelo":
-            mid = str(corpo.get("id", ""))
-            modelo = next((m for m in EXTENSAO.modelos if str(m.get("id")) == mid), None)
-            if not modelo:
-                self.json_ok({"erro": "Esse modelo não está mais na biblioteca."}, 404)
-                return
-            dados["modeloId"] = mid
-            rotulo = modelo.get("titulo") or "modelo"
-        elif tipo == "funil":
-            fid = str(corpo.get("id", ""))
-            funil = next((f for f in EXTENSAO.funis if str(f.get("id")) == fid), None)
-            if not funil:
-                self.json_ok({"erro": "Esse funil não existe mais."}, 404)
-                return
-            dados["funilId"] = fid
-            rotulo = funil.get("nome") or "funil"
-        else:
-            texto = str(corpo.get("texto", "")).strip()
-            if not texto:
-                self.json_ok({"erro": "A mensagem está vazia."}, 400)
-                return
-            dados["texto"] = texto[:4000]
-            rotulo = texto[:60]
-
-        item = COMANDOS.criar(tipo, rotulo, dados)
-        self.json_ok({"comando": {k: v for k, v in item.items() if k != "dados"},
-                      "para": EXTENSAO.chat.get("nome") or "a conversa aberta"})
 
     def estado_geral(self) -> dict:
         with TRAVA_EXEC:

@@ -138,7 +138,6 @@ function desenharGrade() {
   const pagina = config.paginas.find((p) => p.id === paginaAtual) || config.paginas[0];
   tela.grade.innerHTML = '';
   if (!pagina) return;
-  if (pagina.tela === 'whatsapp') { desenharWhatsapp(pagina); return; }
   tela.grade.className = 'grade';
   pagina.botoes.forEach((botao) => {
     tela.grade.appendChild(
@@ -237,11 +236,10 @@ function botaoDe(botaoId) {
 
 /* --------------------------------------------------------------- folha */
 
-function abrirFolha({ titulo, texto, saida, lista, confirmar, risco }) {
+function abrirFolha({ titulo, texto, saida, confirmar, risco }) {
   tela.folhaTitulo.textContent = titulo;
   tela.folhaTexto.textContent = texto || '';
   tela.folhaTexto.hidden = !texto;
-  desenharListaDaFolha(lista);
   tela.folhaSaida.textContent = saida || '';
   tela.folhaSaida.hidden = !saida;
   tela.folhaAcoes.hidden = !confirmar;
@@ -258,21 +256,6 @@ function abrirFolha({ titulo, texto, saida, lista, confirmar, risco }) {
   if (saida) tela.folhaSaida.scrollTop = tela.folhaSaida.scrollHeight;
 }
 
-// Passos do funil: o consultor precisa ver o que vai sair e quando, antes de
-// mandar. Uma sequência disparada às cegas é a definição de mensagem errada.
-function desenharListaDaFolha(itens) {
-  let ul = document.getElementById('folha-lista');
-  if (!itens || !itens.length) { if (ul) ul.remove(); return; }
-  if (!ul) {
-    ul = document.createElement('ul');
-    ul.id = 'folha-lista';
-    ul.className = 'zap-passos';
-    tela.folhaTexto.insertAdjacentElement('afterend', ul);
-  }
-  ul.innerHTML = itens.map((i) =>
-    `<li><span class="quando">${escapar(i.quando)}</span><span>${escapar(i.texto)}</span></li>`).join('');
-}
-
 function fecharFolha() {
   confirmando = null;
   tela.cortina.classList.remove('aberta');
@@ -287,9 +270,7 @@ tela.cortina.addEventListener('click', fecharFolha);
 tela.folhaConfirmar.addEventListener('click', () => {
   const pedido = confirmando;
   fecharFolha();
-  if (!pedido) return;
-  if (pedido.zap) dispararZap(pedido.zap);
-  else disparar(pedido.botao, pedido.tijolo);
+  if (pedido) disparar(pedido.botao, pedido.tijolo);
 });
 
 function pedirConfirmacao(botao, tijolo) {
@@ -421,286 +402,6 @@ document.addEventListener('visibilitychange', () => {
   acelerarRelogio();
   baterWhatsapp(true);   // voltou pra tela: o nome da conversa não pode estar velho
 });
-
-/* ------------------------------------------------------------- WhatsApp */
-/* Esta tela não tem botão fixo: ela mostra a biblioteca que o consultor tem
-   hoje e a conversa que está aberta no Mac agora. Quem envia é a extensão —
-   o deck só pede. Por isso a tela inteira depende de duas condições, e as
-   duas ficam escritas nela, nunca subentendidas. */
-
-let zap = { consultado: false, ligada: false, chat: null, modelos: [], funis: [], comandos: [] };
-let zapSecao = localStorage.getItem('deck_zap_secao') || 'mensagens';
-let zapBusca = '';
-let zapEsperando = null;   // { id, chave } do comando que este iPad disparou
-
-function desenharWhatsapp(pagina) {
-  tela.grade.className = 'zap';
-  tela.grade.innerHTML = `
-    <div class="zap-topo" id="zap-topo"></div>
-    <div class="zap-secoes" role="tablist">
-      <button class="zap-secao" type="button" role="tab" data-secao="mensagens">Mensagens</button>
-      <button class="zap-secao" type="button" role="tab" data-secao="funis">Funis</button>
-    </div>
-    <input class="zap-busca" id="zap-busca" type="search" autocomplete="off"
-           placeholder="Buscar na biblioteca" aria-label="Buscar na biblioteca">
-    <div class="zap-lista" id="zap-lista"></div>
-    <p class="zap-rot zap-atalhos-rot">Atalhos desta tela</p>
-    <div class="zap-atalhos" id="zap-atalhos"></div>`;
-
-  tela.grade.querySelectorAll('.zap-secao').forEach((b) => {
-    b.addEventListener('click', () => {
-      zapSecao = b.dataset.secao;
-      localStorage.setItem('deck_zap_secao', zapSecao);
-      pintarWhatsapp();
-    });
-  });
-  const busca = document.getElementById('zap-busca');
-  busca.value = zapBusca;
-  busca.addEventListener('input', () => { zapBusca = busca.value.trim().toLowerCase(); pintarLista(); });
-
-  const atalhos = document.getElementById('zap-atalhos');
-  pagina.botoes.forEach((botao) => atalhos.appendChild(montarTijolo(botao)));
-
-  pintarWhatsapp();
-  baterWhatsapp(true);
-}
-
-function pintarWhatsapp() {
-  if (!document.getElementById('zap-topo')) return;
-  tela.grade.querySelectorAll('.zap-secao').forEach((b) => {
-    b.setAttribute('aria-selected', String(b.dataset.secao === zapSecao));
-  });
-  const topo = document.getElementById('zap-topo');
-  const busca0 = document.getElementById('zap-busca');
-  busca0.hidden = (zapSecao === 'funis' ? zap.funis.length : zap.modelos.length) < 8;
-  if (!zap.consultado) {
-    topo.dataset.estado = 'pronto';
-    topo.innerHTML = `<span class="zap-pulso"></span><div>
-        <p class="zap-rot">Procurando a extensão</p>
-        <p class="zap-motivo" style="color:var(--texto-fraco)">Perguntando ao Mac quem está na conversa.</p>
-      </div>`;
-    pintarLista();
-    return;
-  }
-  const parado = motivoDeNaoEnviar();
-  topo.dataset.estado = parado ? 'parado' : 'pronto';
-  topo.innerHTML = parado
-    ? `<span class="zap-pulso"></span><div>
-         <p class="zap-rot">Sem conversa para enviar</p>
-         <p class="zap-motivo">${escapar(parado)}</p>
-       </div>`
-    : `<span class="zap-pulso"></span><div>
-         <p class="zap-rot">Vai para a conversa aberta no Mac</p>
-         <h2 class="zap-nome">${escapar(zap.chat.nome || 'Conversa sem nome salvo')}</h2>
-       </div>`;
-  pintarLista();   // a busca já foi escondida/mostrada acima: buscar em cinco itens é ruído
-}
-
-// A condição que governa a tela, dita com todas as letras — e com o que fazer.
-function motivoDeNaoEnviar() {
-  if (!zap.consultado) return 'Ainda perguntando ao Mac.';
-  if (!zap.ligada) {
-    return 'A extensão do JOB não está falando com o deck. Abra o WhatsApp Web '
-         + 'no Chrome do Mac (e clique na aba uma vez).';
-  }
-  if (!zap.chat) {
-    return 'Nenhuma conversa aberta no WhatsApp Web do Mac. Abra a conversa do '
-         + 'cliente e ela aparece aqui.';
-  }
-  return '';
-}
-
-function pintarLista() {
-  const lista = document.getElementById('zap-lista');
-  if (!lista) return;
-  const travado = Boolean(motivoDeNaoEnviar());
-  const itens = zapSecao === 'funis' ? filtrar(zap.funis, funilBusca) : filtrar(zap.modelos, modeloBusca);
-
-  if (!itens.length) {
-    lista.innerHTML = `<p class="zap-vazio">${escapar(textoDeListaVazia())}</p>`;
-    return;
-  }
-  lista.innerHTML = '';
-  itens.forEach((item) => lista.appendChild(
-    zapSecao === 'funis' ? cartaoFunil(item, travado) : cartaoModelo(item, travado)));
-}
-
-function textoDeListaVazia() {
-  if (zapBusca) return 'Nada com esse nome na biblioteca.';
-  if (!zap.consultado) return 'Carregando a biblioteca deste Mac.';
-  if (!zap.ligada) return 'A biblioteca aparece quando a extensão se conectar ao deck.';
-  return zapSecao === 'funis'
-    ? 'Nenhum funil cadastrado ainda. Monte um em /crm/funis.'
-    : 'Nenhuma mensagem na biblioteca ainda.';
-}
-
-function filtrar(itens, comoBuscar) {
-  if (!zapBusca) return itens;
-  return itens.filter((i) => comoBuscar(i).indexOf(zapBusca) >= 0);
-}
-const modeloBusca = (m) => [m.titulo, m.texto, m.categoria, m.pasta].join(' ').toLowerCase();
-const funilBusca = (f) => String(f.nome || '').toLowerCase();
-
-const ROTULO_MIDIA = { audio: 'Áudio', imagem: 'Imagem', video: 'Vídeo', documento: 'PDF' };
-
-function cartaoModelo(m, travado) {
-  const b = document.createElement('button');
-  b.className = 'zap-card';
-  b.type = 'button';
-  b.dataset.chave = 'modelo:' + m.id;
-  b.disabled = travado;
-  b.innerHTML = `
-    <span class="zap-chip">${escapar(ROTULO_MIDIA[m.midia_tipo] || 'Texto')}</span>
-    <span class="zap-titulo">${escapar(m.titulo || 'Sem título')}</span>
-    <span class="zap-previa">${escapar(m.texto || (m.midia_tipo ? 'Sem legenda' : ''))}</span>`;
-  b.addEventListener('click', () => confirmarModelo(m, b));
-  return b;
-}
-
-function cartaoFunil(f, travado) {
-  const passos = f.passos || [];
-  const total = passos.reduce((s, p) => s + (Number(p.delay_segundos) || 0), 0);
-  const b = document.createElement('button');
-  b.className = 'zap-card';
-  b.type = 'button';
-  b.dataset.chave = 'funil:' + f.id;
-  b.disabled = travado;
-  b.innerHTML = `
-    <span class="zap-chip">${passos.length} ${passos.length === 1 ? 'mensagem' : 'mensagens'}</span>
-    <span class="zap-titulo">${escapar(f.nome || 'Funil sem nome')}</span>
-    <span class="zap-previa">${escapar(total ? 'Termina ' + duracao(total) : 'Tudo de uma vez')}</span>`;
-  b.addEventListener('click', () => confirmarFunil(f, b));
-  return b;
-}
-
-function duracao(seg) {
-  if (seg < 60) return 'em ' + seg + 's';
-  if (seg < 3600) return 'em cerca de ' + Math.round(seg / 60) + ' min';
-  return 'em cerca de ' + (Math.round(seg / 360) / 10).toString().replace('.', ',') + ' h';
-}
-
-function quandoDoPasso(seg, acumulado) {
-  if (!acumulado) return 'na hora';
-  if (acumulado < 60) return acumulado + 's depois';
-  return Math.round(acumulado / 60) + ' min depois';
-}
-
-function confirmarModelo(m, card) {
-  const nome = zap.chat.nome || 'a conversa aberta';
-  confirmando = { zap: { tipo: 'modelo', id: m.id, chave: card.dataset.chave } };
-  abrirFolha({
-    titulo: m.titulo || 'Enviar mensagem',
-    texto: m.texto || (m.midia_tipo ? ROTULO_MIDIA[m.midia_tipo] + ' sem legenda.' : ''),
-    lista: m.midia_tipo ? [{ quando: ROTULO_MIDIA[m.midia_tipo], texto: 'Vai junto com a mensagem' }] : null,
-    confirmar: 'Enviar para ' + nome,
-  });
-}
-
-function confirmarFunil(f, card) {
-  const nome = zap.chat.nome || 'a conversa aberta';
-  const passos = f.passos || [];
-  let acumulado = 0;
-  const lista = passos.map((p, i) => {
-    acumulado += Number(p.delay_segundos) || 0;
-    return { quando: quandoDoPasso(p.delay_segundos, acumulado),
-             texto: (i + 1) + '. ' + (ROTULO_MIDIA[p.tipo] || 'Texto') };
-  });
-  confirmando = { zap: { tipo: 'funil', id: f.id, chave: card.dataset.chave } };
-  abrirFolha({
-    titulo: f.nome || 'Disparar funil',
-    texto: passos.length + (passos.length === 1 ? ' mensagem' : ' mensagens') + ' para ' + nome
-         + (acumulado ? ', ' + duracao(acumulado) + '.' : ', tudo agora.'),
-    lista,
-    confirmar: 'Disparar para ' + nome,
-  });
-}
-
-async function dispararZap(pedido) {
-  const card = tela.grade.querySelector(`[data-chave="${pedido.chave}"]`);
-  if (card) { card.dataset.estado = 'indo'; card.disabled = true; }
-  try {
-    const r = await chamar('/api/whatsapp/comando', {
-      method: 'POST',
-      body: JSON.stringify({ tipo: pedido.tipo, id: pedido.id }),
-    });
-    if (r.erro) { recado(r.erro, 'erro'); soltarCard(pedido.chave); return; }
-    zapEsperando = { id: r.comando.id, chave: pedido.chave };
-    recado('Mandando para ' + r.para + '…', 'espera');
-    baterWhatsapp();
-  } catch {
-    recado('O Mac não respondeu. Confira se o deck continua ligado nele.', 'erro');
-    soltarCard(pedido.chave);
-  }
-}
-
-function soltarCard(chave) {
-  const card = tela.grade.querySelector(`[data-chave="${chave}"]`);
-  if (card) { delete card.dataset.estado; card.disabled = Boolean(motivoDeNaoEnviar()); }
-}
-
-/* O recado do último envio. Some sozinho quando deu certo; fica quando não deu,
-   porque erro que some antes de ser lido é erro que ninguém corrige. */
-let sumicoDoRecado = null;
-function recado(texto, tom) {
-  let caixa = document.getElementById('zap-recado');
-  if (!caixa) {
-    caixa = document.createElement('div');
-    caixa.id = 'zap-recado';
-    caixa.className = 'zap-recado';
-    caixa.setAttribute('role', 'status');
-    caixa.addEventListener('click', () => caixa.classList.remove('aberto'));
-    document.body.appendChild(caixa);
-  }
-  caixa.dataset.tom = tom;
-  caixa.textContent = texto;
-  requestAnimationFrame(() => caixa.classList.add('aberto'));
-  clearTimeout(sumicoDoRecado);
-  if (tom === 'ok') sumicoDoRecado = setTimeout(() => caixa.classList.remove('aberto'), 4200);
-}
-
-// `deVolta` é a primeira batida ao entrar na tela (ou ao voltar pra ela): essa
-// não espera nada. Quem abre o deck tem que ver quem está na conversa AGORA, e
-// não "procurando…" por três segundos.
-async function baterWhatsapp(deVolta) {
-  const pagina = config.paginas.find((p) => p.id === paginaAtual);
-  if (!pagina || pagina.tela !== 'whatsapp') return;   // saiu da tela: para de perguntar
-  if (document.hidden && !deVolta) { setTimeout(baterWhatsapp, 3000); return; }
-  try {
-    const r = await chamar('/api/whatsapp');
-    const antes = JSON.stringify([zap.consultado, zap.ligada, zap.chat,
-      zap.modelos.length, zap.funis.length]);
-    zap = {
-      consultado: true,
-      ligada: r.extensao.ligada,
-      chat: r.extensao.chat,
-      modelos: r.extensao.modelos || [],
-      funis: r.extensao.funis || [],
-      comandos: r.comandos || [],
-    };
-    conferirComando();
-    // Só repinta quando algo mudou: repintar a lista a cada 2,5s mataria o
-    // toque em curso e piscaria a tela na cara do consultor.
-    if (JSON.stringify([zap.consultado, zap.ligada, zap.chat,
-        zap.modelos.length, zap.funis.length]) !== antes) {
-      pintarWhatsapp();
-    }
-    conexao(true);
-  } catch {
-    conexao(false);
-  }
-  setTimeout(baterWhatsapp, 2500);
-}
-
-function conferirComando() {
-  if (!zapEsperando) return;
-  const cmd = zap.comandos.find((c) => c.id === zapEsperando.id);
-  if (!cmd || cmd.estado === 'na_fila' || cmd.estado === 'entregue') return;
-  const tom = (cmd.estado === 'falhou' || cmd.estado === 'expirado') ? 'erro'
-            : (cmd.estado === 'esperando' ? 'espera' : 'ok');
-  recado(cmd.mensagem, tom);
-  soltarCard(zapEsperando.chave);
-  zapEsperando = null;
-}
 
 /* -------------------------------------------------------------- partida */
 
