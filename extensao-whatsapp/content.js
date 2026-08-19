@@ -4310,6 +4310,43 @@
   // nas bolhas novas. Foi o reposicionamento por coordenada que pesou antes.
   let _trTimer = null;
   let _trPend = [];
+  // TETO DE REGISTROS POR DISPARO — e a passada cheia que o substitui.
+  //
+  // Rolar a conversa gera MILHARES de registros de mutacao num unico disparo, e
+  // o caminho antigo subia a arvore (closest) uma ou duas vezes por registro
+  // pra chegar sempre nas mesmas poucas dezenas de linhas da tela. Era trabalho
+  // proporcional ao que o WhatsApp redesenhou, nao ao que a extensao precisa
+  // fazer — e e o que mantinha a CPU da aba entre 80% e 120% sem parar,
+  // medido em 19/08/2026 com a aba morrendo de 12 em 12 minutos.
+  //
+  // Acima do teto sai mais barato revisar a conversa UMA vez: as linhas ja
+  // prontas sao puladas, entao o custo passa a ser proporcional ao que esta na
+  // tela. Abaixo do teto nada muda — o caminho preciso continua valendo, que e
+  // o que mantem o bloco aparecendo mensagem a mensagem.
+  const _TR_REGS_TETO = 150;
+  let _trTimerCheia = null;
+  function trAgendarRevisaoCheia() {
+    if (_trTimerCheia) return;
+    _trTimerCheia = setTimeout(() => {
+      _trTimerCheia = null;
+      // O WhatsApp leva nossos blocos junto quando redesenha o interior de uma
+      // bolha. A linha continua marcada como pronta, e a passada cheia a
+      // pularia — que e exatamente o botao que sumia ao rolar a conversa.
+      // Desmarca so quem DEVIA ter bloco e esta sem, do mesmo jeito que a
+      // revisao que roda quando a ponte responde tarde.
+      try {
+        for (const row of document.querySelectorAll('#main [data-id]')) {
+          if (!row._jobPronta) continue;
+          if (row.querySelector('.job-tr-slot, .job-doc-slot')) continue;
+          let devia = false;
+          try { devia = _trLinhaEhAudio(row) || _docLinhaEhArquivo(row); } catch (e) {}
+          if (devia) row._jobPronta = null;
+        }
+      } catch (e) { /* a passada cheia cobre o que der */ }
+      try { trInjetar(); } catch (e) {}
+    }, 400);
+  }
+
   function trAgendarInjecao(raizes) {
     if (raizes && raizes.length) _trPend.push(...raizes);
     if (_trTimer) return;
@@ -4665,6 +4702,13 @@
         if (_analisePesada > 0) {
           TR.perf.regs += regs.length;
           _trRevisarDepoisAnalise = true;
+          return;
+        }
+        // ENXURRADA: nao caminha registro nenhum (ver _TR_REGS_TETO).
+        if (regs.length > _TR_REGS_TETO) {
+          TR.perf.regs += regs.length;
+          TR.perf.enxurradas = (TR.perf.enxurradas || 0) + 1;
+          trAgendarRevisaoCheia();
           return;
         }
         // Set, nao array: rolar a conversa gera milhares de registros que
@@ -5107,6 +5151,41 @@
     }
   }
 
+  // ── A ABA TEM UM LIMITE, E ELE PRECISA SER RESPEITADO ────────────────────
+  //
+  // Ler uma conversa faz o WhatsApp CARREGAR historico na memoria da aba, e ele
+  // nao devolve depois (o aviso esta em wpp-bridge.js, e ja custou um renderer
+  // de 2,5 GB em 11/08). Numa maquina de 8 GB isso termina do mesmo jeito: a
+  // aba passa de 1,5 GB, o Chrome mata a guia inteira, e o consultor perde o
+  // WhatsApp no meio do atendimento — com a fila de envio junto. Medido em
+  // 19/08/2026: a aba morrendo de 12 em 12 minutos, tres vezes em 40 minutos.
+  //
+  // Isto NAO desliga nada e NAO pula conversa nenhuma. Quando a aba esta
+  // pesada, a leitura espera: o servidor e quem sabe o que ja foi lido, entao a
+  // rodada seguinte continua exatamente de onde parou. Em maquina folgada o
+  // teto nunca e alcancado e nada muda pra ninguem.
+  //
+  // A fracao (e nao um numero de MB cravado) e o que faz isto valer nas duas
+  // pontas: a mesma regra protege a maquina apertada e sai da frente da folgada.
+  const _MEM_TETO_FRACAO = 0.55;
+  function _memoriaDaAba() {
+    try {
+      const m = performance && performance.memory;
+      if (!m || !m.jsHeapSizeLimit) return null;
+      return { fracao: m.usedJSHeapSize / m.jsHeapSizeLimit };
+    } catch (e) { return null; }
+  }
+  // null = nao da pra medir neste navegador. Sem medida nao se inventa limite:
+  // travar leitura por suposicao seria pior que o problema.
+  function _memoriaApertada() {
+    const m = _memoriaDaAba();
+    if (!m) return false;
+    return m.fracao >= _MEM_TETO_FRACAO;
+  }
+  const _MEM_AVISO = 'A leitura de conversas esta em pausa: esta aba do WhatsApp '
+    + 'esta pesada. Ela volta sozinha quando aliviar. Para resolver agora, feche '
+    + 'e reabra a aba do WhatsApp Web — nada se perde, a leitura continua de onde parou.';
+
   async function varreduraRodar(manual) {
     if (VAR.rodando) return VAR.placar;
     const cfg = await varreduraConfig();
@@ -5125,6 +5204,8 @@
     if (!_jobGateTentar('varredura_auto')) return VAR.placar;
     VAR.rodando = true;
     VAR.ultimaRodada = Date.now();
+    // Aviso preso na tela depois que o problema passou ensina a ignorar aviso.
+    if (!_memoriaApertada()) _saudePor('memoria', true, '');
     let leiturasNestaRodada = 0;
     try {
       const lista = await _pedirPonte('listar_conversas_dia', { horas: VAR.HORAS }, 40000);
@@ -5159,6 +5240,17 @@
           // de 5 em 5 minutos a retoma de onde parou — o servidor sabe o que
           // já foi lido, então ela não relê nada.
           VAR.ultimaRodada = Date.now() - VAR.INTERVALO_MS;
+          break;
+        }
+        // ABA PESADA: PARA AQUI, NAO PULA (ver _MEM_TETO_FRACAO).
+        //
+        // Recua o carimbo pra tentar de novo em 2 minutos em vez do intervalo
+        // cheio: a aba costuma aliviar sozinha, e esperar meia hora por uma
+        // pausa de dois minutos seria trocar um problema por outro.
+        if (_memoriaApertada()) {
+          VAR.placar.adiadas = (VAR.placar.adiadas || 0) + 1;
+          VAR.ultimaRodada = Date.now() - VAR.INTERVALO_MS + 120000;
+          _saudePor('memoria', false, _MEM_AVISO);
           break;
         }
         try {
@@ -10077,6 +10169,14 @@
 
   async function filaVarreduraTick() {
     if (FILA.rodando || Date.now() < FILA.proximaEm) return;
+    // ABA PESADA: a fila espera junto com a varredura (ver _MEM_TETO_FRACAO).
+    // O item continua no servidor — adiar nao perde nada, e insistir e o que
+    // derruba a guia inteira, levando o envio junto.
+    if (_memoriaApertada()) {
+      FILA.proximaEm = Date.now() + 120000;
+      _saudePor('memoria', false, _MEM_AVISO);
+      return;
+    }
     let usuarioId = null;
     try { ({ usuarioId } = await _safeStorageGet(['usuarioId'])); } catch (e) { return; }
     if (!usuarioId) return;
