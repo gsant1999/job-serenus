@@ -1070,6 +1070,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       'POST', {}, 15000).then(sendResponse);
     return true;
   }
+  if (msg && msg.type === 'tempo_resposta') {
+    chamarJob('/api/whatsapp/tempo-resposta', 'POST', msg.medicao || {}, 15000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'funil_disparar') {
     // Enfileira o funil INTEIRO no servidor, com horario absoluto por passo.
     // O envio deixou de morar na aba: se o WhatsApp Web fechar no meio, os

@@ -1261,6 +1261,24 @@ def init_db():
                 chave_pedido TEXT
             )""",
             """CREATE INDEX IF NOT EXISTS ix_cotacao_fila_estado ON cotacao_fila(estado, id)""",
+            # TEMPO DE RESPOSTA por consultor e por dia, medido do historico do
+            # WhatsApp (nao de evento ao vivo). Uma linha por consultor/dia: a
+            # extensao reenvia a medicao do dia a cada rodada e sobrescreve.
+            """CREATE TABLE IF NOT EXISTS wa_tempo_resposta (
+                id SERIAL PRIMARY KEY,
+                usuario_id INTEGER NOT NULL,
+                dia TEXT NOT NULL,
+                conversas INTEGER DEFAULT 0,
+                respostas INTEGER DEFAULT 0,
+                mediana_ms INTEGER,
+                p95_ms INTEGER,
+                primeira_mediana_ms INTEGER,
+                primeira_p95_ms INTEGER,
+                aguardando INTEGER DEFAULT 0,
+                mais_antiga_min INTEGER DEFAULT 0,
+                atualizado_em TIMESTAMP,
+                UNIQUE (usuario_id, dia)
+            )""",
             """CREATE TABLE IF NOT EXISTS whatsapp_extensao_fila (
                 id SERIAL PRIMARY KEY,
                 lead_id INTEGER,
@@ -2515,6 +2533,21 @@ def init_db():
             chave_pedido TEXT
         );
         CREATE INDEX IF NOT EXISTS ix_cotacao_fila_estado ON cotacao_fila(estado, id);
+        CREATE TABLE IF NOT EXISTS wa_tempo_resposta (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id INTEGER NOT NULL,
+            dia TEXT NOT NULL,
+            conversas INTEGER DEFAULT 0,
+            respostas INTEGER DEFAULT 0,
+            mediana_ms INTEGER,
+            p95_ms INTEGER,
+            primeira_mediana_ms INTEGER,
+            primeira_p95_ms INTEGER,
+            aguardando INTEGER DEFAULT 0,
+            mais_antiga_min INTEGER DEFAULT 0,
+            atualizado_em TIMESTAMP,
+            UNIQUE (usuario_id, dia)
+        );
         CREATE TABLE IF NOT EXISTS whatsapp_extensao_fila (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             lead_id INTEGER,
@@ -29944,6 +29977,76 @@ def admin_set_trabalhador(sid):
     close_db(conn)
     
     return jsonify({"ok": True})
+
+
+@app.route('/api/whatsapp/tempo-resposta', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:ler')
+def api_whatsapp_tempo_resposta():
+    """Recebe a medicao de tempo de resposta que a extensao fez do historico.
+
+    POR QUE ISTO EXISTE. O JOB so sabia se um lead respondeu quando o
+    `checarInbound` estava rodando — ou seja, com a aba do WhatsApp aberta.
+    Consultor que responde pelo celular, ou depois de fechar o navegador,
+    simplesmente nao entrava na conta. A campanha #4 marcou 0% de resposta e
+    ninguem sabia dizer se a copy era ruim ou se a medicao e que nao via.
+
+    A extensao agora mede do HISTORICO da conversa (par "mensagem do cliente ->
+    proxima minha"), entao a resposta conta tenha ela saido de onde tiver.
+
+    Uma linha por consultor e dia, sobrescrita a cada rodada: a medicao do dia
+    e sempre a mais recente, nao um acumulado que dependeria de nenhuma rodada
+    se perder.
+    """
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    usuario_id = getattr(g, 'usuario_id', None)
+    if not usuario_id:
+        return _wa_cors(jsonify({"ok": False, "erro": "Entre no JOB pelo popup da extensão"})), 401
+    d = request.get_json(silent=True) or {}
+
+    def _num(v, teto=None):
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            return None
+        if n < 0:
+            return None
+        return min(n, teto) if teto else n
+
+    dia = datetime.now(TZ_SP).strftime('%Y-%m-%d')
+    campos = dict(
+        conversas=_num(d.get('conversas')) or 0,
+        respostas=_num(d.get('respostas')) or 0,
+        mediana_ms=_num(d.get('mediana_ms'), 12 * 3600 * 1000),
+        p95_ms=_num(d.get('p95_ms'), 12 * 3600 * 1000),
+        primeira_mediana_ms=_num(d.get('primeira_mediana_ms'), 12 * 3600 * 1000),
+        primeira_p95_ms=_num(d.get('primeira_p95_ms'), 12 * 3600 * 1000),
+        aguardando=_num(d.get('aguardando')) or 0,
+        mais_antiga_min=_num(d.get('mais_antiga_min')) or 0,
+    )
+    conn = db()
+    try:
+        ja = conn.execute("SELECT id FROM wa_tempo_resposta WHERE usuario_id=? AND dia=?",
+                          (usuario_id, dia)).fetchone()
+        if ja:
+            conn.execute("""UPDATE wa_tempo_resposta SET conversas=?, respostas=?, mediana_ms=?,
+                p95_ms=?, primeira_mediana_ms=?, primeira_p95_ms=?, aguardando=?,
+                mais_antiga_min=?, atualizado_em=? WHERE id=?""",
+                (campos['conversas'], campos['respostas'], campos['mediana_ms'], campos['p95_ms'],
+                 campos['primeira_mediana_ms'], campos['primeira_p95_ms'], campos['aguardando'],
+                 campos['mais_antiga_min'], _agora_sp(), ja['id']))
+        else:
+            conn.execute("""INSERT INTO wa_tempo_resposta
+                (usuario_id, dia, conversas, respostas, mediana_ms, p95_ms,
+                 primeira_mediana_ms, primeira_p95_ms, aguardando, mais_antiga_min, atualizado_em)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (usuario_id, dia, campos['conversas'], campos['respostas'], campos['mediana_ms'],
+                 campos['p95_ms'], campos['primeira_mediana_ms'], campos['primeira_p95_ms'],
+                 campos['aguardando'], campos['mais_antiga_min'], _agora_sp()))
+        conn.commit()
+    finally:
+        close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "dia": dia}))
 
 
 @app.route('/api/whatsapp/extensao/funis/<int:fid>/disparar', methods=['POST', 'OPTIONS'])
