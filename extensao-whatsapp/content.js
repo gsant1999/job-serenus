@@ -13684,6 +13684,40 @@
   }
   _registrarLoop(setInterval(_soComAbaVisivel(_enviarMetricas), 120000));
 
+  // ── TEMPO DE RESPOSTA: mede do historico e manda pro JOB ──────────────────
+  //
+  // Roda devagar de proposito (20 min, so com a aba visivel). Nao carrega
+  // nada: le o que o WhatsApp Web ja tem em memoria. O objetivo e ter o numero,
+  // nao te-lo ao vivo — e medicao que custa recurso vira a primeira coisa que
+  // alguem desliga.
+  const _TEMPO_RESP_MS = 20 * 60 * 1000;
+  let _tempoRespTimer = null;
+
+  async function medirEEnviarTempoResposta() {
+    if (_contextoMorto || document.hidden) return;
+    try {
+      const { extKey, extToken, usuarioId } = await _safeStorageGet(['extKey', 'extToken', 'usuarioId']);
+      if ((!extKey && !extToken) || !usuarioId) return;
+      const m = await _pedirPonte('medir_respostas', { dias: 0 }, 30000);
+      if (!m || m.erro) return;
+      // Sem conversa no periodo nao ha o que reportar — mandar zero sujaria a
+      // serie com dias que so parecem ruins porque ninguem trabalhou.
+      if (!m.conversas) return;
+      await _safeSendMessage({ type: 'tempo_resposta', medicao: m });
+    } catch (e) { /* medicao nunca pode atrapalhar o trabalho */ }
+  }
+
+  function _agendarTempoResposta() {
+    if (_tempoRespTimer) clearTimeout(_tempoRespTimer);
+    _tempoRespTimer = setTimeout(async () => {
+      _tempoRespTimer = null;
+      await medirEEnviarTempoResposta();
+      _agendarTempoResposta();
+    }, _TEMPO_RESP_MS);
+  }
+  _agendarTempoResposta();
+  _aoLimpar(() => { if (_tempoRespTimer) clearTimeout(_tempoRespTimer); });
+
   let _filaTimer = null;
   function _agendarFila(segundos) {
     if (_filaTimer) clearTimeout(_filaTimer);

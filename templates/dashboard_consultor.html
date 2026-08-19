@@ -93,6 +93,56 @@
     </div>
   </div>
 
+  {# TEMPO DE RESPOSTA — o dado é do consultor, então mora na tela dele.
+     Só aparece quando há medição: card vazio todo dia treina a pessoa a
+     ignorar o lugar. #}
+  {% if tempo_resp %}
+  <div class="card">
+    <div class="card-header">
+      <h3>Meu tempo de resposta hoje</h3>
+      <span style="font-size:11px; color:var(--cinza-2);">
+        {% if tempo_resp.aguardando %}
+          {{ tempo_resp.aguardando }} esperando resposta agora
+        {% else %}
+          ninguém esperando agora
+        {% endif %}
+      </span>
+    </div>
+    <div class="card-body">
+      <div class="metricas m-4">
+        <div class="metrica">
+          <div class="lbl">Metade responde em até<button type="button" class="job-i" aria-label="O que é este número"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">A mediana: metade das suas respostas de hoje saiu mais rápido que isso, metade mais devagar. Uma conversa esquecida não distorce este número, diferente da média.</span></button></div>
+          <div class="val">{{ tempo_resp.mediana_ms|dur_curta }}</div>
+          <div class="sub">{{ tempo_resp.respostas }} resposta{{ 's' if tempo_resp.respostas != 1 else '' }}</div>
+        </div>
+        <div class="metrica">
+          <div class="lbl">Os mais demorados<button type="button" class="job-i" aria-label="O que é este número"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">O p95: só 1 em cada 20 respostas demorou mais que isso. É o seu pior dia dentro do dia — onde o cliente sentiu a demora.</span></button></div>
+          <div class="val">{{ tempo_resp.p95_ms|dur_curta }}</div>
+          <div class="sub">1 em cada 20 passou disso</div>
+        </div>
+        <div class="metrica info">
+          <div class="lbl">Primeira resposta<button type="button" class="job-i" aria-label="O que é este número"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">Quanto você demorou para dar o primeiro retorno numa conversa. É o que mais pesa: quem pediu cotação e ficou sem resposta procura outro corretor.</span></button></div>
+          <div class="val">{{ tempo_resp.primeira_mediana_ms|dur_curta }}</div>
+          <div class="sub">mediana do primeiro retorno</div>
+        </div>
+        <div class="metrica {{ 'erro' if tempo_resp.aguardando else '' }}">
+          <div class="lbl">Esperando você</div>
+          <div class="val">{{ tempo_resp.aguardando }}</div>
+          <div class="sub">
+            {% if tempo_resp.mais_antiga_min %}a mais antiga há {{ tempo_resp.mais_antiga_min }} min{% else %}nenhuma conversa em aberto{% endif %}
+          </div>
+        </div>
+      </div>
+      {# O óbvio dito: de onde vem o número e quando ele atualiza. #}
+      <div style="font-size:11px; color:var(--cinza-2); margin-top:2px;">
+        Contado das conversas do WhatsApp deste computador, a cada 20 minutos.
+        Conta também o que você respondeu pelo celular.
+        {% if tempo_resp.conversas %}Hoje: {{ tempo_resp.conversas }} conversa{{ 's' if tempo_resp.conversas != 1 else '' }}.{% endif %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <div class="card">
     <div class="card-header"><h3>Minha produção por operadora</h3></div>
     <div class="card-body">

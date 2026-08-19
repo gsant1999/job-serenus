@@ -237,6 +237,110 @@
     return '';
   }
 
+  // ── TEMPO DE RESPOSTA, LIDO DO HISTORICO QUE JA ESTA NA MEMORIA ──────────
+  //
+  // POR QUE MEDIR ASSIM, E NAO POR EVENTO AO VIVO
+  //
+  // O `checarInbound` marca "respondeu" so enquanto a aba esta aberta. Quem
+  // responde pelo celular, ou fora do horario em que o WhatsApp Web ficou
+  // aberto, some da conta. Foi isso que deixou a campanha #4 com taxa de
+  // resposta 0% sem ninguem saber se era a copy ou a medicao — e decisao de
+  // copy tomada em cima de numero errado e pior que decisao nenhuma.
+  //
+  // Aqui a conta vem do historico: para cada conversa, o par
+  // "mensagem do cliente -> proxima minha" ja carrega a resposta, tenha ela
+  // saido daqui, do celular, ou de madrugada.
+  //
+  // NAO CARREGA NADA. So le `ChatStore.getModelsArray()` e o `msgs._models` de
+  // cada conversa, que e o que o WhatsApp Web ja tem em memoria. Pedir mensagem
+  // por chatId faria a wa-js CARREGAR historico e nao devolver — foi assim que
+  // o renderer bateu 2,5 GB em 11/08 e caiu. Medir nao pode custar isso.
+  const _RESP_TETO_MS = 12 * 60 * 60 * 1000;  // acima disso nao e resposta, e recomeco de conversa
+
+  async function medirRespostas(diasAtras) {
+    if (!window.WPP || !window.WPP.whatsapp) return { erro: 'wpp_ausente' };
+    let chats = [];
+    try {
+      const CS = window.WPP.whatsapp.ChatStore;
+      if (CS && CS.getModelsArray) chats = CS.getModelsArray() || [];
+    } catch (e) { return { erro: 'sem_chatstore' }; }
+    if (!chats.length) return { erro: 'sem_chats' };
+
+    const inicio = new Date();
+    inicio.setHours(0, 0, 0, 0);
+    inicio.setDate(inicio.getDate() - Math.max(0, Number(diasAtras) || 0));
+    const corte = Math.floor(inicio.getTime() / 1000);
+
+    const respostas = [];        // ms de cada resposta minha
+    const primeiras = [];        // ms da PRIMEIRA resposta a um contato novo
+    let aguardando = 0;          // conversas com cliente esperando agora
+    let maisAntigaMin = 0;       // ha quanto tempo espera a mais antiga
+    let conversas = 0, comResposta = 0;
+    const agoraS = Math.floor(Date.now() / 1000);
+
+    for (const c of chats) {
+      try {
+        if (!c || !c.id || c.isGroup) continue;
+        const cid = c.id._serialized || '';
+        if (cid.indexOf('@g.us') > 0 || cid.indexOf('status@') === 0) continue;
+        const models = (c.msgs && c.msgs._models) || [];
+        if (!models.length) continue;
+
+        // ordem cronologica, so o periodo pedido
+        const msgs = models
+          .filter((m) => m && m.t && m.t >= corte && m.id)
+          .sort((a, b) => a.t - b.t);
+        if (!msgs.length) continue;
+        conversas++;
+
+        let esperandoDesde = null;   // hora da mensagem do cliente sem resposta
+        let jaRespondiAqui = false;
+        for (const m of msgs) {
+          const minha = !!(m.id && m.id.fromMe);
+          if (!minha) {
+            // Só a PRIMEIRA da rajada conta: cliente que manda cinco seguidas
+            // esperou uma vez, não cinco.
+            if (esperandoDesde === null) esperandoDesde = m.t;
+          } else if (esperandoDesde !== null) {
+            const ms = (m.t - esperandoDesde) * 1000;
+            if (ms > 0 && ms < _RESP_TETO_MS) {
+              respostas.push(ms);
+              if (!jaRespondiAqui) { primeiras.push(ms); jaRespondiAqui = true; }
+            }
+            esperandoDesde = null;
+            comResposta++;
+          }
+        }
+        if (esperandoDesde !== null) {
+          aguardando++;
+          const min = Math.floor((agoraS - esperandoDesde) / 60);
+          if (min > maisAntigaMin) maisAntigaMin = min;
+        }
+      } catch (e) { /* uma conversa ruim nao derruba a medicao */ }
+    }
+
+    const mediana = (a) => {
+      if (!a.length) return null;
+      const o = [...a].sort((x, y) => x - y);
+      const i = Math.floor(o.length / 2);
+      return o.length % 2 ? o[i] : Math.round((o[i - 1] + o[i]) / 2);
+    };
+    const p = (a, q) => {
+      if (!a.length) return null;
+      const o = [...a].sort((x, y) => x - y);
+      return o[Math.min(o.length - 1, Math.floor(o.length * q))];
+    };
+    // Mediana e p95, nunca so media: uma conversa esquecida por 6h puxa a media
+    // e faz um dia ruim parecer bom (ou o contrario).
+    return {
+      conversas, com_resposta: comResposta,
+      respostas: respostas.length,
+      mediana_ms: mediana(respostas), p95_ms: p(respostas, 0.95),
+      primeira_mediana_ms: mediana(primeiras), primeira_p95_ms: p(primeiras, 0.95),
+      aguardando, mais_antiga_min: maisAntigaMin,
+    };
+  }
+
   async function listarTodasConversas(teto) {
     if (!window.WPP || !window.WPP.chat) return { erro: 'wpp_ausente' };
     let chats = [];
@@ -1352,6 +1456,7 @@
     'ler_conversa_de', 'baixar_audios_ids', 'baixar_midia_ids', 'canario',
     'baixar_documentos', 'ler_mensagens', 'ler_conversa_completa',
     'obter_telefone', 'obter_meu_numero', 'obter_chat_id', 'checar_inbound',
+    'medir_respostas',
   ]);
 
   window.addEventListener('message', async (ev) => {
@@ -1366,6 +1471,7 @@
       else if (d.tipo === 'listar_audios') resp = await listarAudios();
       else if (d.tipo === 'listar_conversas_dia') resp = await listarConversasDoDia(d.horas);
       else if (d.tipo === 'listar_todas_conversas') resp = await listarTodasConversas(d.teto);
+      else if (d.tipo === 'medir_respostas') resp = await medirRespostas(d.dias);
       else if (d.tipo === 'ler_conversa_de') resp = await lerConversaDe(d.chatId, d.desdeMsgId, d.limite);
       else if (d.tipo === 'baixar_audios_ids') resp = await baixarAudiosPorId(d.ids);
       else if (d.tipo === 'baixar_midia_ids') resp = await baixarMidiaPorId(d.ids);
