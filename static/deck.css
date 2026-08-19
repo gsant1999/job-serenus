@@ -351,60 +351,126 @@ a.secundario {
 
 .zap-lista {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: var(--gap);
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 10px;
+  /* O painel rebaixado é o corpo do aparelho: sem ele as teclas flutuam soltas
+     na página e a mesa vira lista de novo. */
+  padding: 12px;
+  background: color-mix(in srgb, #000 22%, var(--fundo));
+  border: 1px solid var(--borda);
+  border-radius: 18px;
 }
 
-.zap-card {
+@media (prefers-color-scheme: light) {
+  .zap-lista { background: color-mix(in srgb, var(--borda) 45%, var(--fundo)); }
+}
+
+/* A TECLA.
+   Isto é uma mesa, não uma lista: toda tecla tem o mesmo tamanho, o mesmo peso
+   e o mesmo lugar, e o dedo aprende onde as coisas ficam. O que muda entre uma
+   e outra é o ícone e o rótulo — nunca a forma. */
+.zap-tecla {
+  position: relative;
+  aspect-ratio: 1;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 7px;
-  min-height: 108px;
-  padding: 14px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 8px;
   background: var(--tijolo);
   border: 1px solid var(--borda);
-  border-radius: var(--raio);
-  text-align: left;
-  transition: transform 140ms var(--ease-saida), opacity 140ms var(--ease-saida);
+  border-radius: 15px;
+  overflow: hidden;
+  text-align: center;
+  transition: transform 130ms var(--ease-saida), opacity 130ms var(--ease-saida);
 }
-.zap-card:active { transform: scale(.97); }
-.zap-card:disabled { opacity: .45; }
+
+/* O brilho de cima é o que faz a tecla parecer teclada e não desenhada. Ele
+   some quando o dedo aperta — luz que vira sombra, como no aparelho de verdade. */
+.zap-tecla::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--texto) 9%, transparent) 0%,
+    transparent 42%,
+    color-mix(in srgb, #000 12%, transparent) 100%);
+  opacity: .55;
+  transition: opacity 130ms var(--ease-saida);
+  pointer-events: none;
+}
+
+.zap-tecla:active { transform: scale(.94); }
+.zap-tecla:active::before { opacity: .15; }
+.zap-tecla:disabled { opacity: .38; }
+.zap-tecla:disabled::before { opacity: .2; }
+
 @media (hover: hover) and (pointer: fine) {
-  .zap-card:hover:not(:disabled) { border-color: var(--borda-forte); }
+  .zap-tecla:hover:not(:disabled) { border-color: var(--borda-forte); }
 }
 
-.zap-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: var(--tijolo-toque);
-  color: var(--texto-fraco);
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
-.zap-card[data-estado="indo"] { border-color: var(--acento); }
-.zap-card[data-estado="indo"] .zap-chip { background: transparent; color: var(--acento); }
+.zap-tecla .icone { color: var(--texto-fraco); flex-shrink: 0; }
 
-.zap-titulo {
-  font-size: 15px;
+.zap-tecla .rotulo {
+  font-size: 11.5px;
   font-weight: 600;
-  line-height: 1.25;
+  line-height: 1.22;
   letter-spacing: -0.01em;
-}
-.zap-previa {
-  margin-top: auto;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--texto-fraco);
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  word-break: break-word;
+}
+
+.zap-tecla .marca {
+  position: absolute;
+  top: 7px; right: 9px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  color: var(--texto-fraco);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Cor por tipo: achar o áudio certo numa mesa de 300 teclas é trabalho de cor,
+   não de leitura. Fica no ícone e num véu fraco — a tecla continua neutra. */
+.zap-tecla[data-tipo="audio"] .icone { color: #a78bfa; }
+.zap-tecla[data-tipo="imagem"] .icone { color: #5ec8b0; }
+.zap-tecla[data-tipo="documento"] .icone { color: #e0a961; }
+.zap-tecla[data-tipo="video"] .icone { color: #7aa8ff; }
+.zap-tecla[data-tipo="funil"] .icone { color: var(--acento); }
+
+.zap-tecla[data-estado="indo"] { border-color: var(--acento); }
+.zap-tecla[data-estado="indo"] .icone,
+.zap-tecla[data-estado="indo"] .marca { color: var(--acento); }
+
+/* A barra de andamento na base da tecla, como a luz do aparelho. */
+.zap-andamento {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 3px;
+  background: var(--acento);
+  transform: scaleX(0);
+  transform-origin: left;
+  opacity: 0;
+}
+.zap-tecla[data-estado="indo"] .zap-andamento {
+  opacity: 1;
+  animation: tecla-correndo 1.4s var(--ease-mov) infinite;
+}
+@keyframes tecla-correndo {
+  0%   { transform: scaleX(0); transform-origin: left; }
+  50%  { transform: scaleX(1); transform-origin: left; }
+  51%  { transform: scaleX(1); transform-origin: right; }
+  100% { transform: scaleX(0); transform-origin: right; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zap-tecla:active { transform: none; }
+  .zap-tecla[data-estado="indo"] .zap-andamento { animation: none; transform: scaleX(1); }
 }
 
 .zap-vazio {

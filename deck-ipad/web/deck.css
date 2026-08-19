@@ -187,31 +187,59 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font-weight: 600;
 }
 
-/* ---------------------------------------------------------------- grade */
+/* ---------------------------------------------------------------- mesa */
 
 .grade {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
-  gap: var(--gap);
-  padding-bottom: 24px;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 10px;
+  padding: 12px;
+  margin-bottom: 24px;
+  background: color-mix(in srgb, #000 22%, var(--fundo));
+  border: 1px solid var(--borda);
+  border-radius: 18px;
 }
 
+@media (prefers-color-scheme: light) {
+  .grade { background: color-mix(in srgb, var(--borda) 45%, var(--fundo)); }
+}
+
+/* A TECLA. Mesmo tamanho, mesmo peso, mesmo lugar: o dedo aprende a mesa. */
 .tijolo {
   position: relative;
+  aspect-ratio: 1;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
+  justify-content: center;
   gap: 8px;
-  min-height: 122px;
-  padding: 14px;
+  padding: 10px 8px;
   background: var(--tijolo);
   border: 1px solid var(--borda);
-  border-radius: var(--raio);
-  text-align: left;
+  border-radius: 15px;
   overflow: hidden;
-  transition: transform 140ms var(--ease-saida), opacity 140ms var(--ease-saida);
+  text-align: center;
+  transition: transform 130ms var(--ease-saida), opacity 130ms var(--ease-saida);
 }
-.tijolo:active { transform: scale(.97); }
+
+/* O brilho de cima some quando o dedo aperta — luz que vira sombra, como no
+   aparelho de verdade. */
+.tijolo::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--texto) 9%, transparent) 0%,
+    transparent 42%,
+    color-mix(in srgb, #000 12%, transparent) 100%);
+  opacity: .55;
+  transition: opacity 130ms var(--ease-saida);
+  pointer-events: none;
+}
+
+.tijolo:active { transform: scale(.94); }
+.tijolo:active::before { opacity: .15; }
 .tijolo:disabled { cursor: default; }
 
 @media (hover: hover) and (pointer: fine) {
@@ -219,42 +247,37 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 
 .tijolo .icone { color: var(--texto-fraco); flex-shrink: 0; }
+
 .tijolo .rotulo {
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1.25;
-  letter-spacing: -0.01em;
-}
-.tijolo .dica {
-  margin-top: auto;
   font-size: 11.5px;
-  line-height: 1.35;
-  color: var(--texto-fraco);
+  font-weight: 600;
+  line-height: 1.22;
+  letter-spacing: -0.01em;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
 }
 
-/* estados: a borda diz o que aconteceu, de longe */
+/* A dica saiu da tecla: nao cabe, e tecla com tres textos deixa de ser tecla.
+   Ela vive no `title` e na folha de confirmacao de quem tem consequencia. */
+.tijolo .dica { display: none; }
+
 .tijolo[data-estado="rodando"] { border-color: var(--acento); }
-.tijolo[data-estado="rodando"] .icone,
-.tijolo[data-estado="rodando"] .dica { color: var(--acento); }
-
+.tijolo[data-estado="rodando"] .icone { color: var(--acento); }
 .tijolo[data-estado="pronto"] { border-color: var(--ok); }
-.tijolo[data-estado="pronto"] .icone,
-.tijolo[data-estado="pronto"] .dica { color: var(--ok); }
-
+.tijolo[data-estado="pronto"] .icone { color: var(--ok); }
 .tijolo[data-estado="falhou"] { border-color: var(--erro); }
-.tijolo[data-estado="falhou"] .icone,
-.tijolo[data-estado="falhou"] .dica { color: var(--erro); }
-
+.tijolo[data-estado="falhou"] .icone { color: var(--erro); }
 .tijolo[data-cuidado="1"] .icone { color: var(--cuidado); }
 
 .tijolo[data-ligado="1"] {
   background: var(--tijolo-toque);
   border-color: var(--cuidado);
 }
-.tijolo[data-ligado="1"] .icone,
-.tijolo[data-ligado="1"] .dica { color: var(--cuidado); }
+.tijolo[data-ligado="1"] .icone { color: var(--cuidado); }
 
-/* barra de andamento: so transform, roda na GPU */
 .andamento {
   position: absolute;
   left: 0; right: 0; bottom: 0;
@@ -269,16 +292,16 @@ button { font: inherit; color: inherit; cursor: pointer; }
   animation: correndo 1.4s var(--ease-mov) infinite;
 }
 @keyframes correndo {
-  0%   { transform: scaleX(0);   transform-origin: left; }
-  50%  { transform: scaleX(1);   transform-origin: left; }
-  51%  { transform: scaleX(1);   transform-origin: right; }
-  100% { transform: scaleX(0);   transform-origin: right; }
+  0%   { transform: scaleX(0); transform-origin: left; }
+  50%  { transform: scaleX(1); transform-origin: left; }
+  51%  { transform: scaleX(1); transform-origin: right; }
+  100% { transform: scaleX(0); transform-origin: right; }
 }
 
 .selo {
   position: absolute;
-  top: 12px; right: 12px;
-  font-size: 10.5px;
+  top: 7px; right: 8px;
+  font-size: 9px;
   font-weight: 700;
   letter-spacing: .04em;
   text-transform: uppercase;
@@ -292,8 +315,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .tijolo.deslizante {
   grid-column: span 2;
-  gap: 10px;
+  aspect-ratio: 2 / 1;
+  justify-content: space-between;
+  align-items: stretch;
+  padding: 12px;
+  gap: 6px;
 }
+.tijolo.deslizante .rotulo { -webkit-line-clamp: 1; text-align: left; }
 .tijolo.deslizante:active { transform: none; }
 
 .valor {

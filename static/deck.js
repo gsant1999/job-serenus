@@ -159,15 +159,42 @@ function filtrar(itens, comoBuscar) {
 
 const ROTULO_MIDIA = { audio: 'Áudio', imagem: 'Imagem', video: 'Vídeo', documento: 'PDF' };
 
+/* ------------------------------------------------------------- ícones */
+/* Numa mesa, o ícone é quem se lê primeiro — o rótulo confirma. Traço, não
+   preenchimento: em tecla pequena, sólido vira mancha. */
+
+const D = {
+  texto: '<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.9 8.9 0 0 1-3.9-.9L3 20.5l1.5-4.4A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z"/>',
+  audio: '<rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3"/>',
+  imagem: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="M21 15l-5-5-8 8"/>',
+  documento: '<path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"/><path d="M14 2v5h5M9 13h6M9 17h6"/>',
+  video: '<rect x="2" y="5" width="14" height="14" rx="2"/><path d="M16 10l6-3v10l-6-3z"/>',
+  funil: '<path d="M3 4h18l-7 8v7l-4 2v-9z"/>',
+};
+
+function icone(nome, px) {
+  const t = px || 26;
+  return `<svg class="icone" width="${t}" height="${t}" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"
+    aria-hidden="true">${D[nome] || D.texto}</svg>`;
+}
+
+
+
 function cartaoModelo(m, travado) {
+  const tipo = m.midia_tipo || 'texto';
   const b = document.createElement('button');
-  b.className = 'zap-card';
+  b.className = 'zap-tecla';
   b.type = 'button';
   b.dataset.chave = 'modelo:' + m.id;
+  b.dataset.tipo = tipo;
   b.disabled = travado;
-  b.innerHTML = '<span class="zap-chip">' + escapar(ROTULO_MIDIA[m.midia_tipo] || 'Texto') + '</span>'
-    + '<span class="zap-titulo">' + escapar(m.titulo || 'Sem título') + '</span>'
-    + '<span class="zap-previa">' + escapar(m.texto || (m.midia_tipo ? 'Sem legenda' : '')) + '</span>';
+  // O título inteiro no `title`: na tecla ele corta em três linhas, e quem
+  // precisa do resto não deveria ter que adivinhar.
+  b.title = m.titulo || 'Sem título';
+  b.innerHTML = icone(tipo)
+    + '<span class="rotulo">' + escapar(m.titulo || 'Sem título') + '</span>'
+    + '<span class="zap-andamento"></span>';
   b.addEventListener('click', () => confirmarModelo(m, b));
   return b;
 }
@@ -176,14 +203,20 @@ function cartaoFunil(f, travado) {
   const passos = f.passos || [];
   const total = passos.reduce((s, p) => s + (Number(p.delay_segundos) || 0), 0);
   const b = document.createElement('button');
-  b.className = 'zap-card';
+  b.className = 'zap-tecla';
   b.type = 'button';
   b.dataset.chave = 'funil:' + f.id;
+  b.dataset.tipo = 'funil';
   b.disabled = travado;
-  b.innerHTML = '<span class="zap-chip">' + passos.length
-      + (passos.length === 1 ? ' mensagem' : ' mensagens') + '</span>'
-    + '<span class="zap-titulo">' + escapar(f.nome || 'Funil sem nome') + '</span>'
-    + '<span class="zap-previa">' + escapar(total ? 'Termina ' + duracao(total) : 'Tudo de uma vez') + '</span>';
+  b.title = (f.nome || 'Funil sem nome') + ' — ' + passos.length
+    + (passos.length === 1 ? ' mensagem' : ' mensagens')
+    + (total ? ', termina ' + duracao(total) : '');
+  // O número de passos fica no canto, como a marca de um preset: diz o tamanho
+  // do disparo sem gastar linha de rótulo.
+  b.innerHTML = '<span class="marca">' + passos.length + '</span>'
+    + icone('funil')
+    + '<span class="rotulo">' + escapar(f.nome || 'Funil sem nome') + '</span>'
+    + '<span class="zap-andamento"></span>';
   b.addEventListener('click', () => confirmarFunil(f, b));
   return b;
 }

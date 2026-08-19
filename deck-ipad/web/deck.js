@@ -152,6 +152,7 @@ function montarTijolo(botao) {
   b.type = 'button';
   b.dataset.botao = botao.id;
   if (botao.cuidado) b.dataset.cuidado = '1';
+  b.title = botao.dica ? `${botao.rotulo} — ${botao.dica}` : botao.rotulo;
   b.innerHTML = `
     ${icone(botao.icone)}
     <span class="rotulo">${escapar(botao.rotulo)}</span>
