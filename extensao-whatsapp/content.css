@@ -4267,3 +4267,18 @@ body[data-job-tema="claro"] .job-cot-prev-txt { color-scheme: light; }
   .job-itens-chip, .job-itens-fav { transition: border-color .16s linear, background .16s linear; }
   .job-itens-chip:active, .job-itens-fav:active { transform: none; }
 }
+/* Botão que abre o painel nativo. Fica no fim da barra, separado dos chips
+   por uma linha: não é um item da biblioteca, é uma mudança de superfície. */
+.job-itens-painel {
+  flex: none; margin-left: 4px; padding: 6px 11px; border-radius: 999px;
+  background: transparent; border: 1px dashed var(--job-borda);
+  color: var(--job-txt-fraco); cursor: pointer;
+  font-family: inherit; font-size: 11.5px; font-weight: 600;
+  transition: color .16s ease, border-color .16s ease, transform .14s ease-out;
+}
+@media (hover: hover) and (pointer: fine) {
+  .job-itens-painel:hover { color: var(--job-acento); border-color: var(--job-acento); }
+}
+.job-itens-painel:focus-visible { outline: 2px solid var(--job-acento); outline-offset: 1px; }
+.job-itens-painel:active { transform: scale(.97); }
+@media (prefers-reduced-motion: reduce) { .job-itens-painel:active { transform: none; } }

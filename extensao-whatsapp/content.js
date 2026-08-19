@@ -1436,6 +1436,8 @@
         '<button type="button" class="job-itens-fav' + favOn + '" data-acao="fav" ' +
           'aria-pressed="' + (_itensSoFav ? 'true' : 'false') + '" title="Apenas favoritos">' +
           _svgIco('estrela', 13) + '</button>' +
+        '<button type="button" class="job-itens-painel" data-acao="painel" ' +
+          'title="Abrir o painel do JOB na lateral da janela">Painel</button>' +
         (lista.length
           ? lista.map((i, n) =>
               '<button type="button" class="job-itens-chip" data-n="' + n + '" ' +
@@ -1460,6 +1462,13 @@
     if (!alvo) return;
     ev.preventDefault();
     ev.stopPropagation();
+    if (alvo.dataset.acao === 'painel') {
+      // Precisa nascer de um clique: chrome.sidePanel.open() exige gesto.
+      _safeSendMessage({ type: 'abrir_painel_lateral' }).then((r) => {
+        if (!r || !r.ok) _dizerNoRodape('Não consegui abrir o painel. Atualize a extensão em chrome://extensions.');
+      });
+      return;
+    }
     if (alvo.dataset.acao === 'fav') {
       _itensSoFav = !_itensSoFav;
       try { chrome.storage.local.set({ jobItensSoFav: _itensSoFav }); } catch (e) {}
@@ -14553,6 +14562,39 @@
     if (!msg || !msg.type) return undefined;
     if (msg.type === 'deck_info') { _deckInfo(!!msg.comCatalogo).then(sendResponse); return true; }
     if (msg.type === 'deck_executar') { _deckExecutar(msg.cmd).then(sendResponse); return true; }
+    // O PAINEL NATIVO NÃO ENXERGA A PÁGINA. Ele mora fora do WhatsApp, então
+    // só esta aba sabe qual conversa está aberta — e é isso que ele pergunta
+    // antes de deixar a pessoa clicar em enviar.
+    if (msg.type === 'painel_conversa') {
+      (async () => {
+        let chatId = '';
+        try { chatId = await pedirChatId(); } catch (e) { chatId = ''; }
+        sendResponse({ ok: true, chatId: chatId || '', nome: (chatId ? nomeDoContato() : '') || '' });
+      })();
+      return true;
+    }
+    // Clique no painel abre a MESMA confirmação de sempre, aqui na conversa.
+    // O painel nunca envia sozinho: clicar longe do WhatsApp é ainda mais
+    // fácil de errar de destino do que clicar dentro dele.
+    if (msg.type === 'painel_abrir_item') {
+      (async () => {
+        try {
+          if (msg.item_tipo === 'funil') {
+            dispararFunil(msg.item_id);
+          } else {
+            const mods = await buscarModelos(false);
+            const m = (mods || []).find((x) => String(x.id) === String(msg.item_id));
+            if (m) abrirPreviewEnvio(m);
+            else _dizerNoRodape('Esse modelo não está mais na sua biblioteca.');
+          }
+          sendResponse({ ok: true });
+        } catch (e) {
+          _falhaTecnica('painel: abrir item', e);
+          sendResponse({ ok: false });
+        }
+      })();
+      return true;
+    }
     return undefined;
   });
 
