@@ -14040,6 +14040,27 @@
       if (!document.getElementById('job-trilho')) criarTrilho();
     }));
     obs.observe(document.body, { childList: true, subtree: false });
+    // A RESERVA DE ESPAÇO TAMBÉM PRECISA DE RELIGAMENTO.
+    //
+    // Medido na tela do Guilherme em 19/08/2026: `job-push-esquerda` no <html>
+    // e `job-push-trilho` FORA, com margin-left: 0px. As duas são postas juntas
+    // por `aplicarClassesHtml` e só saem juntas no botão "Desligar o JOB" — que
+    // ele não apertou, senão a outra teria saído também. Ou seja: alguma coisa
+    // fora do nosso alcance mexe no className do <html> (o próprio WhatsApp
+    // escreve lá no tema escuro), e o estado resultante é o pior possível: o
+    // trilho continua desenhado na esquerda e a página não abre espaço pra ele
+    // — o menu senta em cima da lista de conversas.
+    //
+    // Não descobri QUEM tira. Descobrir isso lendo pode levar dias e a tela do
+    // consultor está torta agora. A regra do projeto vale aqui inteira: nunca
+    // remover sem substituir o religamento. Se o trilho existe e a reserva não,
+    // a reserva volta — custa um `contains` a cada 4s e conserta qualquer causa,
+    // inclusive a que eu ainda não achei.
+    _registrarLoop(setInterval(_soComAbaVisivel(() => {
+      if (!document.getElementById('job-trilho')) return;
+      if (document.documentElement.classList.contains('job-push-trilho')) return;
+      try { aplicarClassesHtml(); } catch (e) { /* próxima volta tenta de novo */ }
+    }), 4000));
     // Transcrição colada no áudio. Best-effort: se qualquer coisa aqui falhar, o
     // resto da extensão continua funcionando — transcrição é ganho, não requisito.
     try { trIniciar(); } catch (e) { console.warn('[JOB] transcrição não iniciou:', e); }
