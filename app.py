@@ -25281,6 +25281,12 @@ _WA_FILA_GATE_MESMO_MAX = int(os.environ.get('WA_FILA_GATE_MESMO_MAX', '8'))
 _WA_FILA_VALIDADE_HORAS = 1                       # padrao, e o que a tela mostra
 _WA_FILA_VALIDADE_MIN_POR_ORIGEM = {
     'lead_pago': 20,        # abertura de lead pago: a pressa e o produto
+    # Funil disparado NA MAO, com a conversa aberta: o consultor esta ali, ao
+    # vivo. Se a sequencia nao completou em 5 minutos, alguma coisa deu errado
+    # (fechou a aba, caiu a conexao) e o resto ja perdeu o contexto. Prazo curto
+    # de proposito: passado isso o cliente recebe uma rajada de passos soltos de
+    # uma conversa que morreu, que e pior do que nao receber.
+    'funil_manual': 5,
 }
 
 
@@ -25674,7 +25680,7 @@ def api_whatsapp_fila_enviar_agora(fid):
     it = dict(item)
     # Só o próprio consultor pode puxar a sua mensagem recém-confirmada; e só
     # o caminho explícito pode usar esta entrega imediata.
-    if it.get('responsavel_id') != usuario_id or it.get('origem') != 'extensao_direto':
+    if it.get('responsavel_id') != usuario_id or it.get('origem') not in ('extensao_direto', 'funil_manual'):
         close_db(conn)
         return _wa_cors(jsonify({"ok": False, "erro": "Esta mensagem não pode ser enviada por aqui"})), 403
     if it.get('status') != 'pendente':
@@ -29900,6 +29906,96 @@ def admin_set_trabalhador(sid):
     close_db(conn)
     
     return jsonify({"ok": True})
+
+
+@app.route('/api/whatsapp/extensao/funis/<int:fid>/disparar', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
+def api_whatsapp_extensao_funil_disparar(fid):
+    """Enfileira um funil inteiro de uma vez, com HORARIO ABSOLUTO por passo.
+
+    Antes o funil tocava dentro da aba: um laco em memoria que dormia o
+    intervalo e mandava o proximo. Fechar ou recarregar o WhatsApp Web matava a
+    sequencia no meio — o cliente ficava com os dois primeiros passos de cinco e
+    ninguem era avisado, nem o consultor nem o servidor.
+
+    Aqui cada passo vira uma linha da fila com o momento em que pode sair. A
+    sequencia passa a viver no servidor: sobrevive a recarregar a pagina, respeita
+    o mesmo limite de ritmo de todo envio e vence sozinha se atrasar demais
+    (ver _WA_FILA_VALIDADE_MIN_POR_ORIGEM['funil_manual']).
+
+    O PRIMEIRO passo sai na hora: nasce liberado, e a extensao pede ele por
+    /fila/<id>/enviar-agora logo em seguida, sem esperar o polling. Foi um
+    pedido explicito — clique do consultor nao pode ter espera artificial.
+    """
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    d = request.get_json(silent=True) or {}
+    usuario_id = getattr(g, 'usuario_id', None)
+    if not usuario_id:
+        return _wa_cors(jsonify({"ok": False, "erro": "Entre no JOB pelo popup da extensão"})), 401
+    chat_id = str(d.get('chat_id') or '').strip()
+    if not chat_id:
+        return _wa_cors(jsonify({"ok": False, "erro": "Abra a conversa do cliente antes de disparar"})), 400
+    telefone = str(d.get('telefone') or '').strip()
+
+    conn = db()
+    funil = conn.execute("""SELECT id, nome, dono_consultor_id FROM whatsapp_funis
+        WHERE id=? AND ativo=1""", (fid,)).fetchone()
+    if not funil:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "Funil não encontrado"})), 404
+    # Mesma regra de visibilidade da listagem: proprio ou compartilhado, nunca
+    # o de um colega.
+    if funil['dono_consultor_id'] is not None and funil['dono_consultor_id'] != usuario_id:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "Você não tem acesso a este funil"})), 403
+    passos = conn.execute("""SELECT p.ordem, p.delay_segundos, m.id AS modelo_id,
+            m.corpo_texto, m.midia_arquivo, m.midia_tipo
+        FROM whatsapp_funil_passos p
+        JOIN modelos_conteudo m ON m.id = p.modelo_id AND m.tipo='whatsapp' AND m.ativo=1
+        WHERE p.funil_id=? ORDER BY p.ordem, p.id""", (fid,)).fetchall()
+    if not passos:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "Este funil não tem passos"})), 400
+
+    lead_id = None
+    if telefone:
+        tel_norm = _normalizar_telefone(re.sub(r'\D', '', telefone))
+        if tel_norm:
+            lead = conn.execute("SELECT id FROM crm_leads WHERE telefone_norm=? ORDER BY id DESC LIMIT 1",
+                                (tel_norm,)).fetchone()
+            if lead:
+                lead_id = lead['id']
+
+    agora = datetime.now(TZ_SP)
+    acc = 0
+    ids = []
+    for p in passos:
+        pd = dict(p)
+        # O intervalo do passo e esperado ANTES dele sair (mesma semantica que a
+        # sequencia tinha na aba, e a mesma do ZapVoice). Por isso soma primeiro:
+        # um primeiro passo com intervalo 0 nasce liberado e sai na hora.
+        acc += _funil_num(pd.get('delay_segundos'), 0, 0, 3600)
+        liberar = (agora + timedelta(seconds=acc)).strftime('%Y-%m-%d %H:%M:%S')
+        tipo = pd['midia_tipo'] if pd['midia_tipo'] in ('audio', 'imagem', 'video', 'documento') else 'texto'
+        cur = conn.cursor()
+        cur.execute("""INSERT INTO whatsapp_extensao_fila
+            (lead_id, responsavel_id, telefone, chat_id, tipo, texto, midia_arquivo,
+             origem, criado_por, liberar_em)
+            VALUES (?,?,?,?,?,?,?,'funil_manual',?,?)""",
+            (lead_id, usuario_id, telefone, chat_id, tipo, (pd['corpo_texto'] or '')[:4000],
+             (pd['midia_arquivo'] if tipo != 'texto' else None), usuario_id, liberar))
+        ids.append(_last_insert_id(cur))
+    conn.execute("UPDATE whatsapp_funis SET vezes_disparado = COALESCE(vezes_disparado,0) + 1 WHERE id=?", (fid,))
+    if lead_id:
+        conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+            VALUES (?,?,?,?,?)""",
+            (lead_id, 'Extensão WhatsApp', 'mensagem',
+             f"Funil \"{funil['nome']}\" disparado ({len(ids)} passo(s)).", _agora_sp()))
+    conn.commit()
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "ids": ids, "primeiro_id": ids[0] if ids else None,
+                             "total": len(ids), "funil": funil['nome']}))
 
 
 @app.route('/api/whatsapp/extensao/funis/<int:fid>/disparado', methods=['POST', 'OPTIONS'])

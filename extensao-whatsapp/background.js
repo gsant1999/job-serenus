@@ -1236,6 +1236,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       'POST', {}, 15000).then(sendResponse);
     return true;
   }
+  if (msg && msg.type === 'funil_disparar') {
+    // Enfileira o funil INTEIRO no servidor, com horario absoluto por passo.
+    // O envio deixou de morar na aba: se o WhatsApp Web fechar no meio, os
+    // passos que faltam continuam de pe no servidor.
+    chamarJob('/api/whatsapp/extensao/funis/' + encodeURIComponent(msg.funil_id) + '/disparar', 'POST',
+      { chat_id: msg.chat_id || '', telefone: msg.telefone || '', usuario_id: msg.usuario_id }, 20000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'funil_disparado') {
     // Só registra que o funil foi tocado (contador + timeline do lead) — o
     // envio de cada passo já aconteceu client-side pela ponte wa-js. Manda

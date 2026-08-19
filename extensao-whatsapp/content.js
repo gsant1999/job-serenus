@@ -11436,7 +11436,6 @@
   // mesma conversa. Acompanhados numa bolha discreta e arrastável (não trava
   // mais a tela — pedido do Guilherme, 18/07).
   let _filaFunis = []; // [{id, funil, nomeContato, chatId, telefone, usuarioId, status, passoAtual, segundosRestantes, enviados, cancelar}]
-  const _chatsOcupados = new Set();
 
   async function buscarFunis(forcar) {
     // ATENÇÃO: o cache tem que devolver o MESMO formato {ok, funis} do caminho
@@ -12324,98 +12323,118 @@
       ok: 'Disparar agora' })) return { ok: false, erro: 'cancelado' };
     let telefone = await garantirTelefone(nome, chatId);
 
+    // O FUNIL NAO MORA MAIS NA ABA.
+    //
+    // Antes daqui saia um laco em memoria que dormia o intervalo e mandava o
+    // proximo passo. Fechar ou recarregar o WhatsApp Web matava a sequencia no
+    // meio: o cliente ficava com dois passos de cinco e ninguem era avisado.
+    //
+    // Agora o servidor recebe a sequencia inteira, com o horario de cada passo,
+    // e ela sobrevive a aba. O que continua igual e a sensacao: o primeiro passo
+    // sai NA HORA, sem esperar o polling de 20s (pedido explicito).
     const job = {
       id: _uid(), funil, chatId, nomeContato: nome, telefone, usuarioId,
-      status: 'aguardando', passoAtual: 0, segundosRestantes: 0, enviados: 0, cancelar: false,
+      status: 'rodando', passoAtual: 0, segundosRestantes: 0, enviados: 0, cancelar: false,
+      naFila: true,
     };
     _filaFunis.push(job);
-    const podeComecar = !_chatsOcupados.has(chatId);
-    if (podeComecar) { _chatsOcupados.add(chatId); job.status = 'rodando'; }
     renderBubble();
-    if (podeComecar) executarJob(job);
-    return { ok: true, nome, passos: funil.passos.length, funil: funil.nome,
-             comecaAgora: podeComecar, totalSegundos: totalS };
-  }
 
-  async function executarJob(job) {
-    const { funil } = job;
-    function reportarProgresso(passoIdx, segundosRestantes) {
-      job.passoAtual = passoIdx; job.segundosRestantes = segundosRestantes || 0;
-      renderBubble();
-      try {
-        chrome.runtime.sendMessage({
-          type: 'funil_progresso', usuario_id: job.usuarioId, job_uid: job.id,
-          funil_id: funil.id, funil_nome: funil.nome, nome: job.nomeContato, telefone: job.telefone,
-          passo_atual: passoIdx + 1, total_passos: funil.passos.length,
-          segundos_restantes: segundosRestantes || 0, status: 'rodando',
-        });
-      } catch (e) { /* best-effort, nunca trava o disparo */ }
+    let enfileirou;
+    try {
+      enfileirou = await _safeSendMessage({ type: 'funil_disparar', funil_id: funil.id,
+        chat_id: chatId, telefone, usuario_id: usuarioId });
+    } catch (e) {
+      enfileirou = null;
     }
-    reportarProgresso(0, 0);
-    for (let i = 0; i < funil.passos.length; i++) {
-      if (job.cancelar) break;
-      const passo = funil.passos[i];
-      const segundos = Math.max(0, passo.delay_segundos || 0);
-      let resta = segundos;
-      reportarProgresso(i, resta);
-      while (resta > 0) {
-        if (job.cancelar) break;
-        await new Promise((r) => setTimeout(r, 1000));
-        resta--;
-        if (resta % 3 === 0) reportarProgresso(i, resta);
-        else { job.segundosRestantes = resta; renderBubble(); }
-      }
-      if (job.cancelar) break;
-      job.enviando = i; renderBubble();
-      if (_foiRepetido(job.chatId, passo.tipo, passo.texto, passo.modelo_id)) {
-        job.bloqueados = (job.bloqueados || 0) + 1;
-        job.enviando = -1;
-        job.erro = 'Passo repetido bloqueado para este contato.';
-        renderBubble();
-        continue;
-      }
-      let envio;
-      try {
-        if (passo.tipo && passo.tipo !== 'texto' && passo.midia_url) {
-          const dl = await chrome.runtime.sendMessage({ type: 'baixar_midia', url: passo.midia_url });
-          if (dl && dl.ok) envio = await pedirEnviarMidia(job.chatId, passo.tipo, dl.dataUrl, passo.texto, _nomeArquivoDaUrl(passo.midia_url));
-          else envio = { ok: false, erro: (dl && dl.erro) || 'falha ao baixar a mídia' };
+    if (!enfileirou || !enfileirou.ok) {
+      job.status = 'cancelado';
+      job.erro = (enfileirou && enfileirou.erro) || 'não consegui preparar o funil';
+      renderBubble();
+      setTimeout(() => { _filaFunis = _filaFunis.filter((j) => j.id !== job.id); renderBubble(); }, 8000);
+      return { ok: false, erro: job.erro };
+    }
+    job.filaIds = enfileirou.ids || [];
+    job.total = enfileirou.total || funil.passos.length;
+
+    // Primeiro passo AGORA. O resto o drenador normal da fila pega sozinho,
+    // respeitando o horario de cada um e o mesmo limite de ritmo de todo envio.
+    _jobGateTomar('envio_direto');
+    try {
+      const pronto = await _safeSendMessage({ type: 'fila_enviar_agora',
+        fila_id: enfileirou.primeiro_id, usuario_id: usuarioId });
+      const item = pronto && pronto.ok && pronto.item;
+      if (item) {
+        const envio = await _enviarItemDaFila(item);
+        await _safeSendMessage({ type: 'fila_confirmar', fila_id: item.id,
+          ok: !!(envio && envio.ok), erro: (envio && envio.erro) || null,
+          wpp_msg_id: (envio && envio.wpp_msg_id) || null });
+        if (envio && envio.ok) {
+          _registrarEnvio(chatId, funil.passos[0] && funil.passos[0].tipo, item.texto,
+                          funil.passos[0] && funil.passos[0].modelo_id);
+          job.enviados = 1;
+          job.passoAtual = 1;
         } else {
-          envio = await pedirEnviarTexto(job.chatId, passo.texto);
+          job.erro = (envio && envio.erro) || 'falha no primeiro passo';
         }
-      } catch (e) {
-        // A bolha do funil mostra este texto passo a passo: tem que ser uma
-        // frase, não um objeto de exceção.
-        _falhaTecnica('funil: envio do passo', e);
-        envio = { ok: false, erro: 'não consegui enviar este passo' };
       }
-      job.enviando = -1;
-      if (envio && envio.ok) { _registrarEnvio(job.chatId, passo.tipo, passo.texto, passo.modelo_id); job.enviados++; job.passoAtual = i + 1; }
-      renderBubble();
+      // Sem item = o servidor mandou esperar (ritmo). Nao e erro: o passo
+      // continua na fila e sai sozinho. `espera_s` diz quando voltar.
+      _agendarFila(item ? 1 : Math.max(1, Math.ceil(Number(pronto && pronto.espera_s) || 1)));
+    } catch (e) {
+      _falhaTecnica('funil: primeiro passo', e);
+      _agendarFila(1);
+    } finally {
+      _jobGateSoltar('envio_direto');
     }
-    job.status = job.cancelar ? 'cancelado' : 'concluido';
+
+    // Enquanto sobrar passo na fila do servidor, a bolha FICA — e com ela o
+    // botao de cancelar. Sumir sozinha em 8s tirava da tela a unica forma de
+    // desistir do resto da sequencia, que e justamente quando o consultor
+    // percebe que disparou o funil errado.
+    const faltam = (job.total || funil.passos.length) - (job.enviados || 0);
+    job.status = faltam > 0 ? 'rodando' : 'concluido';
     renderBubble();
-    try { await chrome.runtime.sendMessage({ type: 'funil_disparado', funil_id: funil.id, telefone: job.telefone, enviados: job.enviados, usuario_id: job.usuarioId, job_uid: job.id }); } catch (e) { /* registro é best-effort */ }
-    // Libera o chat pro próximo job enfileirado pra ele (se tiver).
-    _chatsOcupados.delete(job.chatId);
-    const proximo = _filaFunis.find((j) => j.status === 'aguardando' && j.chatId === job.chatId);
-    if (proximo) { _chatsOcupados.add(job.chatId); proximo.status = 'rodando'; executarJob(proximo); }
-    // Some da bolha sozinho depois de um tempo — mas fica visível o bastante
-    // pra dar tempo do consultor ver que terminou (ou que deu erro).
-    setTimeout(() => {
-      _filaFunis = _filaFunis.filter((j) => j.id !== job.id);
-      renderBubble();
-    }, 8000);
-    renderBubble();
+    if (faltam <= 0) {
+      setTimeout(() => {
+        _filaFunis = _filaFunis.filter((j) => j.id !== job.id);
+        renderBubble();
+      }, 8000);
+    }
+    // Quem disparou pelo deck do iPad não está olhando a bolha aqui no Mac: o
+    // resultado tem que voltar como valor pra virar recado na tela dele.
+    // `comecaAgora` é se o primeiro passo REALMENTE saiu — quando o servidor
+    // segura pelo ritmo, ele fica na fila e a mensagem no iPad muda por causa
+    // disso.
+    return { ok: true, nome, funil: funil.nome, totalSegundos: totalS,
+             passos: job.total || funil.passos.length,
+             comecaAgora: (job.enviados || 0) > 0 };
   }
 
-  function cancelarJob(jobId) {
+  // executarJob() e _chatsOcupados foram removidos: eram o laco em memoria que
+  // tocava a sequencia dentro da aba. Quem toca o funil agora e a fila do
+  // servidor (ver dispararFunil), que sobrevive a fechar o WhatsApp Web.
+  // CANCELAR TEM QUE ALCANCAR O SERVIDOR.
+  //
+  // Enquanto o funil rodava dentro da aba, cancelar era so levantar uma flag no
+  // laco. Agora os passos que faltam sao linhas na fila do servidor: marcar a
+  // flag aqui nao impediria nada — eles sairiam do mesmo jeito, um por um, e o
+  // consultor veria "cancelado" na tela enquanto o cliente recebia a sequencia
+  // inteira. Cancelar de verdade e apagar as linhas que ainda nao sairam.
+  async function cancelarJob(jobId) {
     const job = _filaFunis.find((j) => j.id === jobId);
     if (!job) return;
-    if (job.status === 'aguardando') {
-      _filaFunis = _filaFunis.filter((j) => j.id !== jobId);
-    } else {
-      job.cancelar = true;
+    job.cancelar = true;
+    job.status = 'cancelado';
+    renderBubble();
+    const pendentes = (job.filaIds || []).slice(job.enviados || 0);
+    for (const fid of pendentes) {
+      try {
+        // `repetivel` no background: cancelar duas vezes da no mesmo, e perder a
+        // resposta na rede seria pior (a mensagem sairia).
+        await _safeSendMessage({ type: 'fila_cancelar', fila_id: fid,
+          usuario_id: job.usuarioId, motivo: 'funil cancelado pelo consultor' });
+      } catch (e) { /* segue cancelando os outros */ }
     }
     renderBubble();
   }
@@ -12453,13 +12472,22 @@
     const aguardando = _filaFunis.filter((j) => j.status === 'aguardando').length;
 
     const linhas = _filaFunis.map((j) => {
+      // A BOLHA NAO PODE DIZER "CONCLUIDO" COM PASSO NA RUA.
+      //
+      // O primeiro passo sai daqui; os outros ficam com o servidor. Se a bolha
+      // dissesse "concluido — 1/6" logo apos o clique, o consultor leria que
+      // acabou e mandaria o resto na mao — e o cliente receberia tudo duas
+      // vezes. Enquanto sobrar passo, ela diz que ainda vai sair, e diz que
+      // isso vale mesmo se ele fechar o WhatsApp.
+      const _tot = j.total || (j.funil.passos || []).length;
+      const _faltam = Math.max(0, _tot - (j.enviados || 0));
       let sub;
-      if (j.status === 'aguardando') sub = 'na fila — espera a conversa liberar';
-      else if (j.status === 'concluido') sub = 'concluído — ' + j.enviados + '/' + j.funil.passos.length + ' enviados';
-      else if (j.status === 'cancelado') sub = 'cancelado — ' + j.enviados + '/' + j.funil.passos.length + ' enviados';
-      else if (typeof j.enviando === 'number' && j.enviando >= 0) sub = 'passo ' + (j.enviando + 1) + '/' + j.funil.passos.length + ': enviando…';
-      else sub = 'passo ' + (j.passoAtual + 1) + '/' + j.funil.passos.length + (j.segundosRestantes ? (' — em ' + j.segundosRestantes + 's') : '');
-      const acaoBtn = (j.status === 'rodando' || j.status === 'aguardando')
+      if (j.status === 'cancelado' && j.erro) sub = j.erro;
+      else if (j.status === 'cancelado') sub = 'cancelado — ' + (j.enviados || 0) + '/' + _tot + ' enviados, o resto não sai';
+      else if (_faltam > 0) sub = (j.enviados || 0) + '/' + _tot + ' enviados — os outros ' + _faltam +
+        ' saem sozinhos, mesmo se fechar o WhatsApp';
+      else sub = 'concluído — ' + _tot + '/' + _tot + ' enviados';
+      const acaoBtn = (j.status !== 'cancelado' && _faltam > 0)
         ? '<button class="job-fb-cancelar" data-jid="' + j.id + '">' + (j.status === 'aguardando' ? 'tirar da fila' : 'cancelar') + '</button>'
         : '<button class="job-fb-fechar" data-jid="' + j.id + '">fechar</button>';
       return '<div class="job-fb-linha job-fb-' + j.status + '">' +
