@@ -1,0 +1,326 @@
+{
+  "paginas": [
+    {
+      "id": "dia",
+      "nome": "Dia a dia",
+      "botoes": [
+        {
+          "id": "abrir_job",
+          "rotulo": "Abrir o JOB",
+          "dica": "Produção, no navegador do Mac",
+          "icone": "link",
+          "acao": {
+            "tipo": "abrir",
+            "alvo": "https://job-serenus-production.up.railway.app"
+          }
+        },
+        {
+          "id": "abrir_crm",
+          "rotulo": "Abrir o CRM",
+          "dica": "Lista de leads",
+          "icone": "conversa",
+          "acao": {
+            "tipo": "abrir",
+            "alvo": "https://job-serenus-production.up.railway.app/crm"
+          }
+        },
+        {
+          "id": "abrir_financeiro",
+          "rotulo": "Abrir o Financeiro",
+          "dica": "Fluxo de caixa",
+          "icone": "banco",
+          "acao": {
+            "tipo": "abrir",
+            "alvo": "https://job-serenus-production.up.railway.app/financeiro"
+          }
+        },
+        {
+          "id": "validar_app",
+          "rotulo": "Validar o app.py",
+          "dica": "Confere a sintaxe antes de subir",
+          "icone": "olho",
+          "acao": {
+            "tipo": "shell",
+            "comando": "python3 -c 'import ast; ast.parse(open(\"app.py\").read())' && echo 'app.py: sintaxe ok'",
+            "tempo_max": 60
+          }
+        },
+        {
+          "id": "git_status",
+          "rotulo": "O que está sem commit",
+          "dica": "Estado do repositório e os 5 últimos commits",
+          "icone": "lupa",
+          "acao": {
+            "tipo": "shell",
+            "comando": "git status -sb && echo '--- ultimos commits ---' && git log --oneline -5",
+            "tempo_max": 30
+          }
+        },
+        {
+          "id": "ci_servidor",
+          "rotulo": "Rodar o CI do servidor",
+          "dica": "As três verificações antes do deploy",
+          "icone": "raio",
+          "acao": {
+            "tipo": "shell",
+            "comando": "python3 scripts/ci_servidor.py",
+            "tempo_max": 180
+          }
+        },
+        {
+          "id": "checar_extensao",
+          "rotulo": "Checar a extensão",
+          "dica": "Todo JS da extensão tem que compilar",
+          "icone": "engrenagem",
+          "acao": {
+            "tipo": "shell",
+            "comando": "sh scripts/checar_extensao.sh",
+            "tempo_max": 120
+          }
+        },
+        {
+          "id": "bancada",
+          "rotulo": "Abrir a bancada de telas",
+          "dica": "Ver a extensão nos dois temas antes de commitar",
+          "icone": "tela",
+          "acao": {
+            "tipo": "sequencia",
+            "passos": [
+              {
+                "tipo": "shell",
+                "comando": "lsof -ti tcp:8899 >/dev/null 2>&1 || (nohup python3 -m http.server 8899 --directory scripts >/dev/null 2>&1 & sleep 1)",
+                "tempo_max": 30
+              },
+              {
+                "tipo": "abrir",
+                "alvo": "http://localhost:8899/bancada-telas.html"
+              }
+            ]
+          }
+        },
+        {
+          "id": "enviar_github",
+          "rotulo": "Enviar o commit para o GitHub",
+          "dica": "Só o que já está commitado nesta branch",
+          "icone": "nuvem",
+          "cuidado": true,
+          "confirmar": "Isso envia os commits desta branch para o GitHub. Se a branch for a main, o Railway publica em produção em 2 a 3 minutos.",
+          "acao": {
+            "tipo": "shell",
+            "comando": "git push origin HEAD",
+            "tempo_max": 180
+          }
+        }
+      ]
+    },
+    {
+      "id": "mac",
+      "nome": "MacBook",
+      "botoes": [
+        {
+          "id": "mudo_mic",
+          "rotulo": "Deixar o microfone mudo",
+          "rotulo_ligado": "Microfone mudo",
+          "dica": "Vale para qualquer reunião: é o microfone do Mac inteiro",
+          "icone": "microfone",
+          "icone_ligado": "microfone-mudo",
+          "controle": "alternar",
+          "consulta": "osascript -e 'input volume of (get volume settings)' | awk '{print ($1==0)?1:0}'",
+          "ligar": {
+            "tipo": "applescript",
+            "script": "set volume input volume 0"
+          },
+          "desligar": {
+            "tipo": "applescript",
+            "script": "set volume input volume 75"
+          }
+        },
+        {
+          "id": "volume",
+          "rotulo": "Volume do Mac",
+          "dica": "Solta o dedo para aplicar",
+          "icone": "volume",
+          "controle": "deslizante",
+          "minimo": 0,
+          "maximo": 100,
+          "passo": 5,
+          "unidade": "%",
+          "consulta": "osascript -e 'output volume of (get volume settings)'",
+          "acao": {
+            "tipo": "applescript",
+            "script": "set volume output volume {valor}"
+          }
+        },
+        {
+          "id": "apagar_tela",
+          "rotulo": "Apagar a tela agora",
+          "dica": "Não fecha nada; só desliga o monitor",
+          "icone": "cadeado",
+          "acao": {
+            "tipo": "shell",
+            "comando": "pmset displaysleepnow",
+            "tempo_max": 15
+          }
+        },
+        {
+          "id": "captura_area",
+          "rotulo": "Capturar um pedaço da tela",
+          "dica": "Abre a mira; o recorte vai para a área de transferência",
+          "icone": "camera",
+          "acao": {
+            "tipo": "teclas",
+            "combinacao": "cmd+shift+ctrl+4"
+          }
+        },
+        {
+          "id": "gravar_tela",
+          "rotulo": "Abrir a gravação de tela",
+          "dica": "Painel de captura do macOS",
+          "icone": "camera",
+          "acao": {
+            "tipo": "teclas",
+            "combinacao": "cmd+shift+5"
+          }
+        },
+        {
+          "id": "mission_control",
+          "rotulo": "Ver todas as janelas",
+          "dica": "Mission Control",
+          "icone": "janela",
+          "acao": {
+            "tipo": "teclas",
+            "combinacao": "f3"
+          }
+        },
+        {
+          "id": "abrir_chrome",
+          "rotulo": "Trazer o Chrome para a frente",
+          "icone": "janela",
+          "acao": {
+            "tipo": "abrir",
+            "alvo": "Google Chrome"
+          }
+        },
+        {
+          "id": "abrir_terminal",
+          "rotulo": "Trazer o Terminal para a frente",
+          "icone": "terminal",
+          "acao": {
+            "tipo": "abrir",
+            "alvo": "Terminal"
+          }
+        },
+        {
+          "id": "abrir_pasta",
+          "rotulo": "Abrir a pasta do JOB",
+          "dica": "No Finder",
+          "icone": "pasta",
+          "acao": {
+            "tipo": "abrir",
+            "alvo": ".",
+            "aplicativo": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "textos",
+      "nome": "Textos",
+      "botoes": [
+        {
+          "id": "texto_link_job",
+          "rotulo": "Colar o endereço do JOB",
+          "dica": "Cola no aplicativo que estiver na frente do Mac",
+          "icone": "texto",
+          "acao": {
+            "tipo": "texto",
+            "texto": "https://job-serenus-production.up.railway.app",
+            "colar": true
+          }
+        },
+        {
+          "id": "texto_link_crm",
+          "rotulo": "Colar o endereço do CRM",
+          "dica": "Cola no aplicativo que estiver na frente do Mac",
+          "icone": "texto",
+          "acao": {
+            "tipo": "texto",
+            "texto": "https://job-serenus-production.up.railway.app/crm",
+            "colar": true
+          }
+        },
+        {
+          "id": "texto_modelo",
+          "rotulo": "Colar a saudação padrão",
+          "dica": "Texto de exemplo: troque em botoes.json",
+          "icone": "texto",
+          "acao": {
+            "tipo": "texto",
+            "texto": "Olá! Aqui é da Serenus Corretora de Saúde. Posso te ajudar com a cotação do seu plano?",
+            "colar": true
+          }
+        },
+        {
+          "id": "copiar_ip",
+          "rotulo": "Copiar o IP do Mac",
+          "dica": "Só copia, não cola",
+          "icone": "link",
+          "acao": {
+            "tipo": "shell",
+            "comando": "ipconfig getifaddr en0 | tr -d '\\n' | tee /dev/stderr | pbcopy",
+            "tempo_max": 15
+          }
+        }
+      ]
+    },
+    {
+      "id": "whats",
+      "nome": "WhatsApp",
+      "botoes": [
+        {
+          "id": "abrir_whats",
+          "rotulo": "Abrir o WhatsApp Web",
+          "dica": "No Chrome, onde a extensão roda",
+          "icone": "conversa",
+          "acao": {
+            "tipo": "shell",
+            "comando": "open -a 'Google Chrome' https://web.whatsapp.com",
+            "tempo_max": 20
+          }
+        },
+        {
+          "id": "abrir_funis",
+          "rotulo": "Abrir os funis",
+          "dica": "Sequências de disparo do CRM",
+          "icone": "raio",
+          "acao": {
+            "tipo": "abrir",
+            "alvo": "https://job-serenus-production.up.railway.app/crm/funis"
+          }
+        },
+        {
+          "id": "abrir_extensoes",
+          "rotulo": "Abrir as extensões do Chrome",
+          "dica": "Para recarregar a extensão depois de mexer nela",
+          "icone": "engrenagem",
+          "acao": {
+            "tipo": "shell",
+            "comando": "open -a 'Google Chrome' 'chrome://extensions'",
+            "tempo_max": 20
+          }
+        },
+        {
+          "id": "abrir_painel_crm",
+          "rotulo": "Abrir o painel do CRM",
+          "dica": "Visão do dia",
+          "icone": "lupa",
+          "acao": {
+            "tipo": "abrir",
+            "alvo": "https://job-serenus-production.up.railway.app/crm/painel"
+          }
+        }
+      ],
+      "tela": "whatsapp"
+    }
+  ]
+}
