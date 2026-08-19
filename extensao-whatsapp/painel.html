@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-tema="escuro">
+<head>
+<meta charset="utf-8">
+<title>JOB</title>
+<link rel="stylesheet" href="painel.css">
+</head>
+<body>
+  <!-- CABEÇALHO: diz onde a pessoa está e para qual conversa vai o envio.
+       Sem isso, o painel nativo vira uma janela solta: ele não fica dentro do
+       WhatsApp, então "a conversa aberta" precisa estar escrita, não suposta. -->
+  <header class="pn-topo">
+    <div class="pn-marca">JOB</div>
+    <div class="pn-conversa" id="pn-conversa">
+      <span class="pn-conversa-rot">Conversa aberta</span>
+      <strong id="pn-conversa-nome">verificando…</strong>
+    </div>
+  </header>
+
+  <div class="pn-busca-linha">
+    <input type="search" id="pn-busca" class="pn-busca" autocomplete="off"
+           placeholder="Buscar funil ou modelo" aria-label="Buscar funil ou modelo">
+    <button type="button" id="pn-fav" class="pn-fav" aria-pressed="false"
+            title="Mostrar apenas favoritos">Favoritos</button>
+  </div>
+
+  <nav class="pn-abas" role="tablist" aria-label="Tipo de conteúdo">
+    <button type="button" class="pn-aba pn-aba-on" data-aba="tudo" role="tab" aria-selected="true">Tudo</button>
+    <button type="button" class="pn-aba" data-aba="funil" role="tab" aria-selected="false">Funis</button>
+    <button type="button" class="pn-aba" data-aba="modelo" role="tab" aria-selected="false">Modelos</button>
+  </nav>
+
+  <main class="pn-lista" id="pn-lista" role="list" aria-live="polite">
+    <p class="pn-estado">Carregando…</p>
+  </main>
+
+  <footer class="pn-rodape">
+    <span id="pn-rodape-txt">O envio abre a confirmação antes de sair.</span>
+  </footer>
+
+<script src="painel.js"></script>
+</body>
+</html>

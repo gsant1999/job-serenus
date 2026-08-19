@@ -4217,15 +4217,33 @@ body[data-job-tema="claro"] .job-cot-prev-txt { color-scheme: light; }
    cortado foi o defeito que a auditoria encontrou na WaSpeed.
    ══════════════════════════════════════════════════════════════════════ */
 #job-itens-bar {
-  display: flex; align-items: center; gap: 6px;
-  height: 46px; box-sizing: border-box; padding: 0 12px;
-  overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
+  display: flex; align-items: center; gap: 5px;
+  /* PEQUENA. 46px eram altos demais pra uma tira de atalho: o espaço da
+     conversa é do cliente, não da extensão. */
+  height: 32px; box-sizing: border-box; padding: 0 10px;
+  /* A ROLAGEM LATERAL PRECISA DE TRÊS COISAS JUNTAS, e faltavam duas:
+     - `min-width: 0` e `width: 100%`, senão o container cresce com o conteúdo
+       em vez de rolar (é filho de flex, e filho de flex não encolhe sozinho);
+     - `flex-wrap: nowrap`, pra fila única;
+     - e nenhum ancestral pode cortar: por isso a tira é o último filho, fora
+       da área que o WhatsApp recorta.
+     Sem isso os últimos itens ficavam escondidos atrás da borda, sem barra
+     nenhuma pra alcançá-los. */
+  width: 100%; min-width: 0; flex: none; flex-wrap: nowrap;
+  overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: thin; scrollbar-color: var(--job-bg3) transparent;
+  overscroll-behavior-x: contain;
   background: var(--job-bg1); border-top: 1px solid var(--job-borda);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 }
+/* Barra de rolagem discreta e SEMPRE alcançável (a do sistema some no macOS e
+   dá a impressão de que não há mais nada à direita). */
+#job-itens-bar::-webkit-scrollbar { height: 6px; }
+#job-itens-bar::-webkit-scrollbar-thumb { background: var(--job-bg3); border-radius: 999px; }
+#job-itens-bar::-webkit-scrollbar-track { background: transparent; }
 .job-itens-fav {
   flex: none; display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; border-radius: 8px;
+  width: 24px; height: 24px; border-radius: 7px;
   background: transparent; border: 1px solid var(--job-borda);
   color: var(--job-txt-fraco2); cursor: pointer;
   transition: color .16s ease, border-color .16s ease, background .16s ease, transform .14s ease-out;
@@ -4233,8 +4251,8 @@ body[data-job-tema="claro"] .job-cot-prev-txt { color-scheme: light; }
 .job-itens-fav-on { color: var(--job-acento); border-color: var(--job-acento); background: var(--job-bg3-hover); }
 .job-itens-fav:active { transform: scale(.97); }
 .job-itens-chip {
-  flex: none; display: inline-flex; align-items: center; gap: 6px;
-  max-width: 250px; padding: 6px 11px; border-radius: 999px;
+  flex: none; display: inline-flex; align-items: center; gap: 5px;
+  max-width: 210px; padding: 4px 9px; border-radius: 999px;
   background: var(--job-bg2); border: 1px solid var(--job-borda);
   color: var(--job-txt); cursor: pointer;
   font-family: inherit; font-size: 12px; font-weight: 600;
@@ -4267,3 +4285,18 @@ body[data-job-tema="claro"] .job-cot-prev-txt { color-scheme: light; }
   .job-itens-chip, .job-itens-fav { transition: border-color .16s linear, background .16s linear; }
   .job-itens-chip:active, .job-itens-fav:active { transform: none; }
 }
+/* Botão que abre o painel nativo. Fica no fim da barra, separado dos chips
+   por uma linha: não é um item da biblioteca, é uma mudança de superfície. */
+.job-itens-painel {
+  flex: none; margin-left: 4px; padding: 6px 11px; border-radius: 999px;
+  background: transparent; border: 1px dashed var(--job-borda);
+  color: var(--job-txt-fraco); cursor: pointer;
+  font-family: inherit; font-size: 11.5px; font-weight: 600;
+  transition: color .16s ease, border-color .16s ease, transform .14s ease-out;
+}
+@media (hover: hover) and (pointer: fine) {
+  .job-itens-painel:hover { color: var(--job-acento); border-color: var(--job-acento); }
+}
+.job-itens-painel:focus-visible { outline: 2px solid var(--job-acento); outline-offset: 1px; }
+.job-itens-painel:active { transform: scale(.97); }
+@media (prefers-reduced-motion: reduce) { .job-itens-painel:active { transform: none; } }

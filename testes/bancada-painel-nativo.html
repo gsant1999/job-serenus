@@ -1,0 +1,716 @@
+<!doctype html><meta charset="utf-8"><title>Bancada — painel nativo</title>
+<style>body{margin:0;padding:18px;background:#1b1b22;font-family:-apple-system,system-ui,sans-serif;color:#e6e8ef;display:flex;gap:16px;flex-wrap:wrap}
+h2{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#9aa1b5;margin:0 0 7px}
+iframe{width:330px;height:520px;border:1px solid #2a2a35;border-radius:10px;background:#000}</style>
+<div><h2>Escuro — conversa aberta</h2><iframe srcdoc="&lt;!doctype html&gt;&lt;html&gt;&lt;meta charset=&quot;utf-8&quot;&gt;&lt;style&gt;/* ══════════════════════════════════════════════════════════════════════
+   PAINEL NATIVO (chrome.sidePanel)
+
+   Por que ele tem CSS próprio e não reusa o content.css: aquele é escrito
+   para sobreviver DENTRO do WhatsApp, com prefixos e brigas de
+   especificidade que aqui só atrapalham. Aqui a página é nossa inteira.
+
+   Os TOKENS são os mesmos do resto da extensão, de propósito: o painel tem
+   que parecer a mesma ferramenta, não um segundo produto.
+   ══════════════════════════════════════════════════════════════════════ */
+:root {
+  --job-bg0: #0f0f16;
+  --job-bg1: #15151e;
+  --job-bg2: #1b1b26;
+  --job-bg3: #23232f;
+  --job-bg3-hover: #2a2a38;
+  --job-borda: rgba(255,255,255,.09);
+  --job-txt: #f2f4fa;
+  --job-txt-fraco: #a4aec4;
+  --job-txt-fraco2: #8b95ab;
+  --job-acento: #1fb673;
+  --job-anel: rgba(31,182,115,.45);
+}
+/* Tema claro: mesma estrutura, superfícies claras. Segue a escolha do
+   consultor no popup, guardada em storage. */
+html[data-tema=&quot;claro&quot;] {
+  --job-bg0: #efece4;
+  --job-bg1: #f4f1e8;
+  --job-bg2: #fdfcf9;
+  --job-bg3: #e2ded1;
+  --job-bg3-hover: #d8d3c3;
+  --job-borda: rgba(0,0,0,.10);
+  --job-txt: #1c1a13;
+  --job-txt-fraco: #6b6553;
+  --job-txt-fraco2: #837c68;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex; flex-direction: column;
+  background: var(--job-bg0); color: var(--job-txt);
+  font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, system-ui, sans-serif;
+  font-size: 13px;
+}
+
+.pn-topo {
+  flex: none; display: flex; align-items: center; gap: 10px;
+  padding: 11px 13px; background: var(--job-bg1);
+  border-bottom: 1px solid var(--job-borda);
+}
+.pn-marca {
+  font-size: 11px; font-weight: 800; letter-spacing: .13em;
+  color: var(--job-acento);
+}
+.pn-conversa { display: flex; flex-direction: column; min-width: 0; }
+.pn-conversa-rot {
+  font-size: 9px; font-weight: 700; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--job-txt-fraco2);
+}
+.pn-conversa strong {
+  font-size: 12.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Sem conversa aberta o envio não tem destino. O aviso é âmbar e o texto
+   diz o que fazer — a régua manda dizer o óbvio, não deixar adivinhar. */
+.pn-conversa.pn-sem strong { color: #d99b2b; }
+
+.pn-busca-linha {
+  flex: none; display: flex; gap: 7px; padding: 10px 13px 7px;
+}
+.pn-busca {
+  flex: 1; min-width: 0; padding: 8px 11px; border-radius: 9px;
+  background: var(--job-bg2); border: 1px solid var(--job-borda);
+  color: var(--job-txt); font-family: inherit; font-size: 12.5px;
+}
+.pn-busca::placeholder { color: var(--job-txt-fraco2); }
+.pn-busca:focus { outline: none; border-color: var(--job-acento); box-shadow: 0 0 0 3px var(--job-anel); }
+.pn-fav {
+  flex: none; padding: 8px 11px; border-radius: 9px;
+  background: transparent; border: 1px solid var(--job-borda);
+  color: var(--job-txt-fraco); cursor: pointer;
+  font-family: inherit; font-size: 11.5px; font-weight: 600;
+  transition: color .16s ease, border-color .16s ease, background .16s ease, transform .14s ease-out;
+}
+.pn-fav[aria-pressed=&quot;true&quot;] {
+  color: var(--job-acento); border-color: var(--job-acento); background: var(--job-bg3-hover);
+}
+.pn-fav:active { transform: scale(.97); }
+
+.pn-abas { flex: none; display: flex; gap: 4px; padding: 0 13px 9px; }
+.pn-aba {
+  padding: 5px 11px; border-radius: 999px;
+  background: transparent; border: 1px solid var(--job-borda);
+  color: var(--job-txt-fraco); cursor: pointer;
+  font-family: inherit; font-size: 11.5px; font-weight: 600;
+  transition: color .16s ease, border-color .16s ease, background .16s ease, transform .14s ease-out;
+}
+.pn-aba-on { color: var(--job-acento); border-color: var(--job-acento); background: var(--job-bg3-hover); }
+.pn-aba:active { transform: scale(.97); }
+
+.pn-lista { flex: 1; overflow-y: auto; padding: 0 9px 10px; }
+.pn-item {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 9px 10px; margin-bottom: 5px; border-radius: 10px;
+  background: var(--job-bg2); border: 1px solid var(--job-borda);
+  color: var(--job-txt); cursor: pointer; text-align: left;
+  font-family: inherit; font-size: 12.5px;
+  /* Nomeada, nunca `all`. */
+  transition: border-color .16s ease, background .16s ease, transform .14s ease-out;
+}
+@media (hover: hover) and (pointer: fine) {
+  .pn-item:hover { border-color: var(--job-acento); background: var(--job-bg3-hover); }
+}
+.pn-item:focus-visible { outline: 2px solid var(--job-acento); outline-offset: 1px; }
+.pn-item:active { transform: scale(.99); }
+.pn-item[disabled] { opacity: .5; cursor: not-allowed; }
+.pn-item-ico { flex: none; width: 15px; height: 15px; color: var(--job-acento); display: inline-flex; }
+.pn-item-ico svg { width: 100%; height: 100%; }
+/* Empilha nome e legenda. Eram &lt;span&gt; (inline) e corriam na mesma linha,
+   colidindo — apareceu na bancada, não no código. */
+.pn-item-corpo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pn-item-nome { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-item-sub { display: block; font-size: 10.5px; color: var(--job-txt-fraco2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Quantos passos o funil tem, antes do clique: a diferença entre mandar uma
+   mensagem e mandar seis não pode ser descoberta depois. */
+.pn-item-n {
+  flex: none; min-width: 19px; padding: 2px 6px; border-radius: 999px;
+  background: var(--job-bg3); color: var(--job-txt-fraco);
+  font-size: 10px; font-weight: 700; text-align: center;
+}
+.pn-estado { padding: 18px 13px; color: var(--job-txt-fraco2); font-size: 12px; line-height: 1.5; }
+
+.pn-rodape {
+  flex: none; padding: 8px 13px; background: var(--job-bg1);
+  border-top: 1px solid var(--job-borda);
+  font-size: 10.5px; color: var(--job-txt-fraco2); line-height: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pn-item, .pn-aba, .pn-fav { transition: border-color .16s linear, background .16s linear; }
+  .pn-item:active, .pn-aba:active, .pn-fav:active { transform: none; }
+}
+&lt;/style&gt;&lt;body&gt;
+  &lt;!-- CABEÇALHO: diz onde a pessoa está e para qual conversa vai o envio.
+       Sem isso, o painel nativo vira uma janela solta: ele não fica dentro do
+       WhatsApp, então &quot;a conversa aberta&quot; precisa estar escrita, não suposta. --&gt;
+  &lt;header class=&quot;pn-topo&quot;&gt;
+    &lt;div class=&quot;pn-marca&quot;&gt;JOB&lt;/div&gt;
+    &lt;div class=&quot;pn-conversa&quot; id=&quot;pn-conversa&quot;&gt;
+      &lt;span class=&quot;pn-conversa-rot&quot;&gt;Conversa aberta&lt;/span&gt;
+      &lt;strong id=&quot;pn-conversa-nome&quot;&gt;Vitor Bezerra&lt;/strong&gt;
+    &lt;/div&gt;
+  &lt;/header&gt;
+
+  &lt;div class=&quot;pn-busca-linha&quot;&gt;
+    &lt;input type=&quot;search&quot; id=&quot;pn-busca&quot; value=&quot;&quot; class=&quot;pn-busca&quot; autocomplete=&quot;off&quot;
+           placeholder=&quot;Buscar funil ou modelo&quot; aria-label=&quot;Buscar funil ou modelo&quot;&gt;
+    &lt;button type=&quot;button&quot; id=&quot;pn-fav&quot; class=&quot;pn-fav&quot; aria-pressed=&quot;false&quot;
+            title=&quot;Mostrar apenas favoritos&quot;&gt;Favoritos&lt;/button&gt;
+  &lt;/div&gt;
+
+  &lt;nav class=&quot;pn-abas&quot; role=&quot;tablist&quot; aria-label=&quot;Tipo de conteúdo&quot;&gt;
+    &lt;button type=&quot;button&quot; class=&quot;pn-aba pn-aba-on&quot; data-aba=&quot;tudo&quot; role=&quot;tab&quot; aria-selected=&quot;true&quot;&gt;Tudo&lt;/button&gt;
+    &lt;button type=&quot;button&quot; class=&quot;pn-aba&quot; data-aba=&quot;funil&quot; role=&quot;tab&quot; aria-selected=&quot;false&quot;&gt;Funis&lt;/button&gt;
+    &lt;button type=&quot;button&quot; class=&quot;pn-aba&quot; data-aba=&quot;modelo&quot; role=&quot;tab&quot; aria-selected=&quot;false&quot;&gt;Modelos&lt;/button&gt;
+  &lt;/nav&gt;
+
+  &lt;main class=&quot;pn-lista&quot; id=&quot;pn-lista&quot; role=&quot;list&quot; aria-live=&quot;polite&quot;&gt;
+    &lt;button class=&quot;pn-item&quot;&gt;&lt;span class=&quot;pn-item-ico&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;&lt;polygon points=&quot;22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3&quot;/&gt;&lt;/svg&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-corpo&quot;&gt;&lt;span class=&quot;pn-item-nome&quot;&gt;CAMPANHA MEI&lt;/span&gt;&lt;span class=&quot;pn-item-sub&quot;&gt;Funil · favorito&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-n&quot;&gt;4&lt;/span&gt;&lt;/button&gt;&lt;button class=&quot;pn-item&quot;&gt;&lt;span class=&quot;pn-item-ico&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;&lt;polygon points=&quot;22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3&quot;/&gt;&lt;/svg&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-corpo&quot;&gt;&lt;span class=&quot;pn-item-nome&quot;&gt;ABERTURA PME — CAMPANHA MEI 22/09&lt;/span&gt;&lt;span class=&quot;pn-item-sub&quot;&gt;Funil&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-n&quot;&gt;5&lt;/span&gt;&lt;/button&gt;&lt;button class=&quot;pn-item&quot;&gt;&lt;span class=&quot;pn-item-ico&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;&lt;polygon points=&quot;22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3&quot;/&gt;&lt;/svg&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-corpo&quot;&gt;&lt;span class=&quot;pn-item-nome&quot;&gt;PRIMEIRO CONTATO VERA CRUZ&lt;/span&gt;&lt;span class=&quot;pn-item-sub&quot;&gt;Funil&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-n&quot;&gt;3&lt;/span&gt;&lt;/button&gt;&lt;button class=&quot;pn-item&quot;&gt;&lt;span class=&quot;pn-item-ico&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;&lt;polygon points=&quot;22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3&quot;/&gt;&lt;/svg&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-corpo&quot;&gt;&lt;span class=&quot;pn-item-nome&quot;&gt;COPARTICIPAÇÃO VERA CRUZ EMPRESARIAL&lt;/span&gt;&lt;span class=&quot;pn-item-sub&quot;&gt;Funil&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-n&quot;&gt;6&lt;/span&gt;&lt;/button&gt;&lt;button class=&quot;pn-item&quot;&gt;&lt;span class=&quot;pn-item-ico&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;&lt;path d=&quot;M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z&quot;/&gt;&lt;/svg&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-corpo&quot;&gt;&lt;span class=&quot;pn-item-nome&quot;&gt;Tabela de coparticipação — Bene&lt;/span&gt;&lt;span class=&quot;pn-item-sub&quot;&gt;Modelo · texto · favorito&lt;/span&gt;&lt;/span&gt;&lt;/button&gt;&lt;button class=&quot;pn-item&quot;&gt;&lt;span class=&quot;pn-item-ico&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;&lt;path d=&quot;M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z&quot;/&gt;&lt;/svg&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-corpo&quot;&gt;&lt;span class=&quot;pn-item-nome&quot;&gt;Saudação 1 (áudio)&lt;/span&gt;&lt;span class=&quot;pn-item-sub&quot;&gt;Modelo · audio&lt;/span&gt;&lt;/span&gt;&lt;/button&gt;
+  &lt;/main&gt;
+
+  &lt;footer class=&quot;pn-rodape&quot;&gt;
+    &lt;span id=&quot;pn-rodape-txt&quot;&gt;O envio abre a confirmação antes de sair.&lt;/span&gt;
+  &lt;/footer&gt;
+
+
+&lt;/body&gt;&lt;/html&gt;"></iframe></div>
+<div><h2>Escuro — buscou VERA</h2><iframe srcdoc="&lt;!doctype html&gt;&lt;html&gt;&lt;meta charset=&quot;utf-8&quot;&gt;&lt;style&gt;/* ══════════════════════════════════════════════════════════════════════
+   PAINEL NATIVO (chrome.sidePanel)
+
+   Por que ele tem CSS próprio e não reusa o content.css: aquele é escrito
+   para sobreviver DENTRO do WhatsApp, com prefixos e brigas de
+   especificidade que aqui só atrapalham. Aqui a página é nossa inteira.
+
+   Os TOKENS são os mesmos do resto da extensão, de propósito: o painel tem
+   que parecer a mesma ferramenta, não um segundo produto.
+   ══════════════════════════════════════════════════════════════════════ */
+:root {
+  --job-bg0: #0f0f16;
+  --job-bg1: #15151e;
+  --job-bg2: #1b1b26;
+  --job-bg3: #23232f;
+  --job-bg3-hover: #2a2a38;
+  --job-borda: rgba(255,255,255,.09);
+  --job-txt: #f2f4fa;
+  --job-txt-fraco: #a4aec4;
+  --job-txt-fraco2: #8b95ab;
+  --job-acento: #1fb673;
+  --job-anel: rgba(31,182,115,.45);
+}
+/* Tema claro: mesma estrutura, superfícies claras. Segue a escolha do
+   consultor no popup, guardada em storage. */
+html[data-tema=&quot;claro&quot;] {
+  --job-bg0: #efece4;
+  --job-bg1: #f4f1e8;
+  --job-bg2: #fdfcf9;
+  --job-bg3: #e2ded1;
+  --job-bg3-hover: #d8d3c3;
+  --job-borda: rgba(0,0,0,.10);
+  --job-txt: #1c1a13;
+  --job-txt-fraco: #6b6553;
+  --job-txt-fraco2: #837c68;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex; flex-direction: column;
+  background: var(--job-bg0); color: var(--job-txt);
+  font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, system-ui, sans-serif;
+  font-size: 13px;
+}
+
+.pn-topo {
+  flex: none; display: flex; align-items: center; gap: 10px;
+  padding: 11px 13px; background: var(--job-bg1);
+  border-bottom: 1px solid var(--job-borda);
+}
+.pn-marca {
+  font-size: 11px; font-weight: 800; letter-spacing: .13em;
+  color: var(--job-acento);
+}
+.pn-conversa { display: flex; flex-direction: column; min-width: 0; }
+.pn-conversa-rot {
+  font-size: 9px; font-weight: 700; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--job-txt-fraco2);
+}
+.pn-conversa strong {
+  font-size: 12.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Sem conversa aberta o envio não tem destino. O aviso é âmbar e o texto
+   diz o que fazer — a régua manda dizer o óbvio, não deixar adivinhar. */
+.pn-conversa.pn-sem strong { color: #d99b2b; }
+
+.pn-busca-linha {
+  flex: none; display: flex; gap: 7px; padding: 10px 13px 7px;
+}
+.pn-busca {
+  flex: 1; min-width: 0; padding: 8px 11px; border-radius: 9px;
+  background: var(--job-bg2); border: 1px solid var(--job-borda);
+  color: var(--job-txt); font-family: inherit; font-size: 12.5px;
+}
+.pn-busca::placeholder { color: var(--job-txt-fraco2); }
+.pn-busca:focus { outline: none; border-color: var(--job-acento); box-shadow: 0 0 0 3px var(--job-anel); }
+.pn-fav {
+  flex: none; padding: 8px 11px; border-radius: 9px;
+  background: transparent; border: 1px solid var(--job-borda);
+  color: var(--job-txt-fraco); cursor: pointer;
+  font-family: inherit; font-size: 11.5px; font-weight: 600;
+  transition: color .16s ease, border-color .16s ease, background .16s ease, transform .14s ease-out;
+}
+.pn-fav[aria-pressed=&quot;true&quot;] {
+  color: var(--job-acento); border-color: var(--job-acento); background: var(--job-bg3-hover);
+}
+.pn-fav:active { transform: scale(.97); }
+
+.pn-abas { flex: none; display: flex; gap: 4px; padding: 0 13px 9px; }
+.pn-aba {
+  padding: 5px 11px; border-radius: 999px;
+  background: transparent; border: 1px solid var(--job-borda);
+  color: var(--job-txt-fraco); cursor: pointer;
+  font-family: inherit; font-size: 11.5px; font-weight: 600;
+  transition: color .16s ease, border-color .16s ease, background .16s ease, transform .14s ease-out;
+}
+.pn-aba-on { color: var(--job-acento); border-color: var(--job-acento); background: var(--job-bg3-hover); }
+.pn-aba:active { transform: scale(.97); }
+
+.pn-lista { flex: 1; overflow-y: auto; padding: 0 9px 10px; }
+.pn-item {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 9px 10px; margin-bottom: 5px; border-radius: 10px;
+  background: var(--job-bg2); border: 1px solid var(--job-borda);
+  color: var(--job-txt); cursor: pointer; text-align: left;
+  font-family: inherit; font-size: 12.5px;
+  /* Nomeada, nunca `all`. */
+  transition: border-color .16s ease, background .16s ease, transform .14s ease-out;
+}
+@media (hover: hover) and (pointer: fine) {
+  .pn-item:hover { border-color: var(--job-acento); background: var(--job-bg3-hover); }
+}
+.pn-item:focus-visible { outline: 2px solid var(--job-acento); outline-offset: 1px; }
+.pn-item:active { transform: scale(.99); }
+.pn-item[disabled] { opacity: .5; cursor: not-allowed; }
+.pn-item-ico { flex: none; width: 15px; height: 15px; color: var(--job-acento); display: inline-flex; }
+.pn-item-ico svg { width: 100%; height: 100%; }
+/* Empilha nome e legenda. Eram &lt;span&gt; (inline) e corriam na mesma linha,
+   colidindo — apareceu na bancada, não no código. */
+.pn-item-corpo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pn-item-nome { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-item-sub { display: block; font-size: 10.5px; color: var(--job-txt-fraco2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Quantos passos o funil tem, antes do clique: a diferença entre mandar uma
+   mensagem e mandar seis não pode ser descoberta depois. */
+.pn-item-n {
+  flex: none; min-width: 19px; padding: 2px 6px; border-radius: 999px;
+  background: var(--job-bg3); color: var(--job-txt-fraco);
+  font-size: 10px; font-weight: 700; text-align: center;
+}
+.pn-estado { padding: 18px 13px; color: var(--job-txt-fraco2); font-size: 12px; line-height: 1.5; }
+
+.pn-rodape {
+  flex: none; padding: 8px 13px; background: var(--job-bg1);
+  border-top: 1px solid var(--job-borda);
+  font-size: 10.5px; color: var(--job-txt-fraco2); line-height: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pn-item, .pn-aba, .pn-fav { transition: border-color .16s linear, background .16s linear; }
+  .pn-item:active, .pn-aba:active, .pn-fav:active { transform: none; }
+}
+&lt;/style&gt;&lt;body&gt;
+  &lt;!-- CABEÇALHO: diz onde a pessoa está e para qual conversa vai o envio.
+       Sem isso, o painel nativo vira uma janela solta: ele não fica dentro do
+       WhatsApp, então &quot;a conversa aberta&quot; precisa estar escrita, não suposta. --&gt;
+  &lt;header class=&quot;pn-topo&quot;&gt;
+    &lt;div class=&quot;pn-marca&quot;&gt;JOB&lt;/div&gt;
+    &lt;div class=&quot;pn-conversa&quot; id=&quot;pn-conversa&quot;&gt;
+      &lt;span class=&quot;pn-conversa-rot&quot;&gt;Conversa aberta&lt;/span&gt;
+      &lt;strong id=&quot;pn-conversa-nome&quot;&gt;Vitor Bezerra&lt;/strong&gt;
+    &lt;/div&gt;
+  &lt;/header&gt;
+
+  &lt;div class=&quot;pn-busca-linha&quot;&gt;
+    &lt;input type=&quot;search&quot; id=&quot;pn-busca&quot; value=&quot;VERA&quot; class=&quot;pn-busca&quot; autocomplete=&quot;off&quot;
+           placeholder=&quot;Buscar funil ou modelo&quot; aria-label=&quot;Buscar funil ou modelo&quot;&gt;
+    &lt;button type=&quot;button&quot; id=&quot;pn-fav&quot; class=&quot;pn-fav&quot; aria-pressed=&quot;false&quot;
+            title=&quot;Mostrar apenas favoritos&quot;&gt;Favoritos&lt;/button&gt;
+  &lt;/div&gt;
+
+  &lt;nav class=&quot;pn-abas&quot; role=&quot;tablist&quot; aria-label=&quot;Tipo de conteúdo&quot;&gt;
+    &lt;button type=&quot;button&quot; class=&quot;pn-aba pn-aba-on&quot; data-aba=&quot;tudo&quot; role=&quot;tab&quot; aria-selected=&quot;true&quot;&gt;Tudo&lt;/button&gt;
+    &lt;button type=&quot;button&quot; class=&quot;pn-aba&quot; data-aba=&quot;funil&quot; role=&quot;tab&quot; aria-selected=&quot;false&quot;&gt;Funis&lt;/button&gt;
+    &lt;button type=&quot;button&quot; class=&quot;pn-aba&quot; data-aba=&quot;modelo&quot; role=&quot;tab&quot; aria-selected=&quot;false&quot;&gt;Modelos&lt;/button&gt;
+  &lt;/nav&gt;
+
+  &lt;main class=&quot;pn-lista&quot; id=&quot;pn-lista&quot; role=&quot;list&quot; aria-live=&quot;polite&quot;&gt;
+    &lt;button class=&quot;pn-item&quot;&gt;&lt;span class=&quot;pn-item-ico&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;&lt;polygon points=&quot;22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3&quot;/&gt;&lt;/svg&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-corpo&quot;&gt;&lt;span class=&quot;pn-item-nome&quot;&gt;PRIMEIRO CONTATO VERA CRUZ&lt;/span&gt;&lt;span class=&quot;pn-item-sub&quot;&gt;Funil&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-n&quot;&gt;3&lt;/span&gt;&lt;/button&gt;&lt;button class=&quot;pn-item&quot;&gt;&lt;span class=&quot;pn-item-ico&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;&lt;polygon points=&quot;22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3&quot;/&gt;&lt;/svg&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-corpo&quot;&gt;&lt;span class=&quot;pn-item-nome&quot;&gt;COPARTICIPAÇÃO VERA CRUZ EMPRESARIAL&lt;/span&gt;&lt;span class=&quot;pn-item-sub&quot;&gt;Funil&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-n&quot;&gt;6&lt;/span&gt;&lt;/button&gt;
+  &lt;/main&gt;
+
+  &lt;footer class=&quot;pn-rodape&quot;&gt;
+    &lt;span id=&quot;pn-rodape-txt&quot;&gt;O envio abre a confirmação antes de sair.&lt;/span&gt;
+  &lt;/footer&gt;
+
+
+&lt;/body&gt;&lt;/html&gt;"></iframe></div>
+<div><h2>Claro — favoritos</h2><iframe srcdoc="&lt;!doctype html&gt;&lt;html data-tema=&quot;claro&quot;&gt;&lt;meta charset=&quot;utf-8&quot;&gt;&lt;style&gt;/* ══════════════════════════════════════════════════════════════════════
+   PAINEL NATIVO (chrome.sidePanel)
+
+   Por que ele tem CSS próprio e não reusa o content.css: aquele é escrito
+   para sobreviver DENTRO do WhatsApp, com prefixos e brigas de
+   especificidade que aqui só atrapalham. Aqui a página é nossa inteira.
+
+   Os TOKENS são os mesmos do resto da extensão, de propósito: o painel tem
+   que parecer a mesma ferramenta, não um segundo produto.
+   ══════════════════════════════════════════════════════════════════════ */
+:root {
+  --job-bg0: #0f0f16;
+  --job-bg1: #15151e;
+  --job-bg2: #1b1b26;
+  --job-bg3: #23232f;
+  --job-bg3-hover: #2a2a38;
+  --job-borda: rgba(255,255,255,.09);
+  --job-txt: #f2f4fa;
+  --job-txt-fraco: #a4aec4;
+  --job-txt-fraco2: #8b95ab;
+  --job-acento: #1fb673;
+  --job-anel: rgba(31,182,115,.45);
+}
+/* Tema claro: mesma estrutura, superfícies claras. Segue a escolha do
+   consultor no popup, guardada em storage. */
+html[data-tema=&quot;claro&quot;] {
+  --job-bg0: #efece4;
+  --job-bg1: #f4f1e8;
+  --job-bg2: #fdfcf9;
+  --job-bg3: #e2ded1;
+  --job-bg3-hover: #d8d3c3;
+  --job-borda: rgba(0,0,0,.10);
+  --job-txt: #1c1a13;
+  --job-txt-fraco: #6b6553;
+  --job-txt-fraco2: #837c68;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex; flex-direction: column;
+  background: var(--job-bg0); color: var(--job-txt);
+  font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, system-ui, sans-serif;
+  font-size: 13px;
+}
+
+.pn-topo {
+  flex: none; display: flex; align-items: center; gap: 10px;
+  padding: 11px 13px; background: var(--job-bg1);
+  border-bottom: 1px solid var(--job-borda);
+}
+.pn-marca {
+  font-size: 11px; font-weight: 800; letter-spacing: .13em;
+  color: var(--job-acento);
+}
+.pn-conversa { display: flex; flex-direction: column; min-width: 0; }
+.pn-conversa-rot {
+  font-size: 9px; font-weight: 700; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--job-txt-fraco2);
+}
+.pn-conversa strong {
+  font-size: 12.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Sem conversa aberta o envio não tem destino. O aviso é âmbar e o texto
+   diz o que fazer — a régua manda dizer o óbvio, não deixar adivinhar. */
+.pn-conversa.pn-sem strong { color: #d99b2b; }
+
+.pn-busca-linha {
+  flex: none; display: flex; gap: 7px; padding: 10px 13px 7px;
+}
+.pn-busca {
+  flex: 1; min-width: 0; padding: 8px 11px; border-radius: 9px;
+  background: var(--job-bg2); border: 1px solid var(--job-borda);
+  color: var(--job-txt); font-family: inherit; font-size: 12.5px;
+}
+.pn-busca::placeholder { color: var(--job-txt-fraco2); }
+.pn-busca:focus { outline: none; border-color: var(--job-acento); box-shadow: 0 0 0 3px var(--job-anel); }
+.pn-fav {
+  flex: none; padding: 8px 11px; border-radius: 9px;
+  background: transparent; border: 1px solid var(--job-borda);
+  color: var(--job-txt-fraco); cursor: pointer;
+  font-family: inherit; font-size: 11.5px; font-weight: 600;
+  transition: color .16s ease, border-color .16s ease, background .16s ease, transform .14s ease-out;
+}
+.pn-fav[aria-pressed=&quot;true&quot;] {
+  color: var(--job-acento); border-color: var(--job-acento); background: var(--job-bg3-hover);
+}
+.pn-fav:active { transform: scale(.97); }
+
+.pn-abas { flex: none; display: flex; gap: 4px; padding: 0 13px 9px; }
+.pn-aba {
+  padding: 5px 11px; border-radius: 999px;
+  background: transparent; border: 1px solid var(--job-borda);
+  color: var(--job-txt-fraco); cursor: pointer;
+  font-family: inherit; font-size: 11.5px; font-weight: 600;
+  transition: color .16s ease, border-color .16s ease, background .16s ease, transform .14s ease-out;
+}
+.pn-aba-on { color: var(--job-acento); border-color: var(--job-acento); background: var(--job-bg3-hover); }
+.pn-aba:active { transform: scale(.97); }
+
+.pn-lista { flex: 1; overflow-y: auto; padding: 0 9px 10px; }
+.pn-item {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 9px 10px; margin-bottom: 5px; border-radius: 10px;
+  background: var(--job-bg2); border: 1px solid var(--job-borda);
+  color: var(--job-txt); cursor: pointer; text-align: left;
+  font-family: inherit; font-size: 12.5px;
+  /* Nomeada, nunca `all`. */
+  transition: border-color .16s ease, background .16s ease, transform .14s ease-out;
+}
+@media (hover: hover) and (pointer: fine) {
+  .pn-item:hover { border-color: var(--job-acento); background: var(--job-bg3-hover); }
+}
+.pn-item:focus-visible { outline: 2px solid var(--job-acento); outline-offset: 1px; }
+.pn-item:active { transform: scale(.99); }
+.pn-item[disabled] { opacity: .5; cursor: not-allowed; }
+.pn-item-ico { flex: none; width: 15px; height: 15px; color: var(--job-acento); display: inline-flex; }
+.pn-item-ico svg { width: 100%; height: 100%; }
+/* Empilha nome e legenda. Eram &lt;span&gt; (inline) e corriam na mesma linha,
+   colidindo — apareceu na bancada, não no código. */
+.pn-item-corpo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pn-item-nome { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-item-sub { display: block; font-size: 10.5px; color: var(--job-txt-fraco2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Quantos passos o funil tem, antes do clique: a diferença entre mandar uma
+   mensagem e mandar seis não pode ser descoberta depois. */
+.pn-item-n {
+  flex: none; min-width: 19px; padding: 2px 6px; border-radius: 999px;
+  background: var(--job-bg3); color: var(--job-txt-fraco);
+  font-size: 10px; font-weight: 700; text-align: center;
+}
+.pn-estado { padding: 18px 13px; color: var(--job-txt-fraco2); font-size: 12px; line-height: 1.5; }
+
+.pn-rodape {
+  flex: none; padding: 8px 13px; background: var(--job-bg1);
+  border-top: 1px solid var(--job-borda);
+  font-size: 10.5px; color: var(--job-txt-fraco2); line-height: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pn-item, .pn-aba, .pn-fav { transition: border-color .16s linear, background .16s linear; }
+  .pn-item:active, .pn-aba:active, .pn-fav:active { transform: none; }
+}
+&lt;/style&gt;&lt;body&gt;
+  &lt;!-- CABEÇALHO: diz onde a pessoa está e para qual conversa vai o envio.
+       Sem isso, o painel nativo vira uma janela solta: ele não fica dentro do
+       WhatsApp, então &quot;a conversa aberta&quot; precisa estar escrita, não suposta. --&gt;
+  &lt;header class=&quot;pn-topo&quot;&gt;
+    &lt;div class=&quot;pn-marca&quot;&gt;JOB&lt;/div&gt;
+    &lt;div class=&quot;pn-conversa&quot; id=&quot;pn-conversa&quot;&gt;
+      &lt;span class=&quot;pn-conversa-rot&quot;&gt;Conversa aberta&lt;/span&gt;
+      &lt;strong id=&quot;pn-conversa-nome&quot;&gt;Maria Silva&lt;/strong&gt;
+    &lt;/div&gt;
+  &lt;/header&gt;
+
+  &lt;div class=&quot;pn-busca-linha&quot;&gt;
+    &lt;input type=&quot;search&quot; id=&quot;pn-busca&quot; value=&quot;&quot; class=&quot;pn-busca&quot; autocomplete=&quot;off&quot;
+           placeholder=&quot;Buscar funil ou modelo&quot; aria-label=&quot;Buscar funil ou modelo&quot;&gt;
+    &lt;button type=&quot;button&quot; id=&quot;pn-fav&quot; class=&quot;pn-fav&quot; aria-pressed=&quot;true&quot;
+            title=&quot;Mostrar apenas favoritos&quot;&gt;Favoritos&lt;/button&gt;
+  &lt;/div&gt;
+
+  &lt;nav class=&quot;pn-abas&quot; role=&quot;tablist&quot; aria-label=&quot;Tipo de conteúdo&quot;&gt;
+    &lt;button type=&quot;button&quot; class=&quot;pn-aba pn-aba-on&quot; data-aba=&quot;tudo&quot; role=&quot;tab&quot; aria-selected=&quot;true&quot;&gt;Tudo&lt;/button&gt;
+    &lt;button type=&quot;button&quot; class=&quot;pn-aba&quot; data-aba=&quot;funil&quot; role=&quot;tab&quot; aria-selected=&quot;false&quot;&gt;Funis&lt;/button&gt;
+    &lt;button type=&quot;button&quot; class=&quot;pn-aba&quot; data-aba=&quot;modelo&quot; role=&quot;tab&quot; aria-selected=&quot;false&quot;&gt;Modelos&lt;/button&gt;
+  &lt;/nav&gt;
+
+  &lt;main class=&quot;pn-lista&quot; id=&quot;pn-lista&quot; role=&quot;list&quot; aria-live=&quot;polite&quot;&gt;
+    &lt;button class=&quot;pn-item&quot;&gt;&lt;span class=&quot;pn-item-ico&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;&lt;polygon points=&quot;22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3&quot;/&gt;&lt;/svg&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-corpo&quot;&gt;&lt;span class=&quot;pn-item-nome&quot;&gt;CAMPANHA MEI&lt;/span&gt;&lt;span class=&quot;pn-item-sub&quot;&gt;Funil · favorito&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-n&quot;&gt;4&lt;/span&gt;&lt;/button&gt;&lt;button class=&quot;pn-item&quot;&gt;&lt;span class=&quot;pn-item-ico&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;&lt;path d=&quot;M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z&quot;/&gt;&lt;/svg&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-corpo&quot;&gt;&lt;span class=&quot;pn-item-nome&quot;&gt;Tabela de coparticipação — Bene&lt;/span&gt;&lt;span class=&quot;pn-item-sub&quot;&gt;Modelo · texto · favorito&lt;/span&gt;&lt;/span&gt;&lt;/button&gt;
+  &lt;/main&gt;
+
+  &lt;footer class=&quot;pn-rodape&quot;&gt;
+    &lt;span id=&quot;pn-rodape-txt&quot;&gt;O envio abre a confirmação antes de sair.&lt;/span&gt;
+  &lt;/footer&gt;
+
+
+&lt;/body&gt;&lt;/html&gt;"></iframe></div>
+<div><h2>Escuro — SEM conversa</h2><iframe srcdoc="&lt;!doctype html&gt;&lt;html&gt;&lt;meta charset=&quot;utf-8&quot;&gt;&lt;style&gt;/* ══════════════════════════════════════════════════════════════════════
+   PAINEL NATIVO (chrome.sidePanel)
+
+   Por que ele tem CSS próprio e não reusa o content.css: aquele é escrito
+   para sobreviver DENTRO do WhatsApp, com prefixos e brigas de
+   especificidade que aqui só atrapalham. Aqui a página é nossa inteira.
+
+   Os TOKENS são os mesmos do resto da extensão, de propósito: o painel tem
+   que parecer a mesma ferramenta, não um segundo produto.
+   ══════════════════════════════════════════════════════════════════════ */
+:root {
+  --job-bg0: #0f0f16;
+  --job-bg1: #15151e;
+  --job-bg2: #1b1b26;
+  --job-bg3: #23232f;
+  --job-bg3-hover: #2a2a38;
+  --job-borda: rgba(255,255,255,.09);
+  --job-txt: #f2f4fa;
+  --job-txt-fraco: #a4aec4;
+  --job-txt-fraco2: #8b95ab;
+  --job-acento: #1fb673;
+  --job-anel: rgba(31,182,115,.45);
+}
+/* Tema claro: mesma estrutura, superfícies claras. Segue a escolha do
+   consultor no popup, guardada em storage. */
+html[data-tema=&quot;claro&quot;] {
+  --job-bg0: #efece4;
+  --job-bg1: #f4f1e8;
+  --job-bg2: #fdfcf9;
+  --job-bg3: #e2ded1;
+  --job-bg3-hover: #d8d3c3;
+  --job-borda: rgba(0,0,0,.10);
+  --job-txt: #1c1a13;
+  --job-txt-fraco: #6b6553;
+  --job-txt-fraco2: #837c68;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex; flex-direction: column;
+  background: var(--job-bg0); color: var(--job-txt);
+  font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, system-ui, sans-serif;
+  font-size: 13px;
+}
+
+.pn-topo {
+  flex: none; display: flex; align-items: center; gap: 10px;
+  padding: 11px 13px; background: var(--job-bg1);
+  border-bottom: 1px solid var(--job-borda);
+}
+.pn-marca {
+  font-size: 11px; font-weight: 800; letter-spacing: .13em;
+  color: var(--job-acento);
+}
+.pn-conversa { display: flex; flex-direction: column; min-width: 0; }
+.pn-conversa-rot {
+  font-size: 9px; font-weight: 700; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--job-txt-fraco2);
+}
+.pn-conversa strong {
+  font-size: 12.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Sem conversa aberta o envio não tem destino. O aviso é âmbar e o texto
+   diz o que fazer — a régua manda dizer o óbvio, não deixar adivinhar. */
+.pn-conversa.pn-sem strong { color: #d99b2b; }
+
+.pn-busca-linha {
+  flex: none; display: flex; gap: 7px; padding: 10px 13px 7px;
+}
+.pn-busca {
+  flex: 1; min-width: 0; padding: 8px 11px; border-radius: 9px;
+  background: var(--job-bg2); border: 1px solid var(--job-borda);
+  color: var(--job-txt); font-family: inherit; font-size: 12.5px;
+}
+.pn-busca::placeholder { color: var(--job-txt-fraco2); }
+.pn-busca:focus { outline: none; border-color: var(--job-acento); box-shadow: 0 0 0 3px var(--job-anel); }
+.pn-fav {
+  flex: none; padding: 8px 11px; border-radius: 9px;
+  background: transparent; border: 1px solid var(--job-borda);
+  color: var(--job-txt-fraco); cursor: pointer;
+  font-family: inherit; font-size: 11.5px; font-weight: 600;
+  transition: color .16s ease, border-color .16s ease, background .16s ease, transform .14s ease-out;
+}
+.pn-fav[aria-pressed=&quot;true&quot;] {
+  color: var(--job-acento); border-color: var(--job-acento); background: var(--job-bg3-hover);
+}
+.pn-fav:active { transform: scale(.97); }
+
+.pn-abas { flex: none; display: flex; gap: 4px; padding: 0 13px 9px; }
+.pn-aba {
+  padding: 5px 11px; border-radius: 999px;
+  background: transparent; border: 1px solid var(--job-borda);
+  color: var(--job-txt-fraco); cursor: pointer;
+  font-family: inherit; font-size: 11.5px; font-weight: 600;
+  transition: color .16s ease, border-color .16s ease, background .16s ease, transform .14s ease-out;
+}
+.pn-aba-on { color: var(--job-acento); border-color: var(--job-acento); background: var(--job-bg3-hover); }
+.pn-aba:active { transform: scale(.97); }
+
+.pn-lista { flex: 1; overflow-y: auto; padding: 0 9px 10px; }
+.pn-item {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 9px 10px; margin-bottom: 5px; border-radius: 10px;
+  background: var(--job-bg2); border: 1px solid var(--job-borda);
+  color: var(--job-txt); cursor: pointer; text-align: left;
+  font-family: inherit; font-size: 12.5px;
+  /* Nomeada, nunca `all`. */
+  transition: border-color .16s ease, background .16s ease, transform .14s ease-out;
+}
+@media (hover: hover) and (pointer: fine) {
+  .pn-item:hover { border-color: var(--job-acento); background: var(--job-bg3-hover); }
+}
+.pn-item:focus-visible { outline: 2px solid var(--job-acento); outline-offset: 1px; }
+.pn-item:active { transform: scale(.99); }
+.pn-item[disabled] { opacity: .5; cursor: not-allowed; }
+.pn-item-ico { flex: none; width: 15px; height: 15px; color: var(--job-acento); display: inline-flex; }
+.pn-item-ico svg { width: 100%; height: 100%; }
+/* Empilha nome e legenda. Eram &lt;span&gt; (inline) e corriam na mesma linha,
+   colidindo — apareceu na bancada, não no código. */
+.pn-item-corpo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pn-item-nome { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-item-sub { display: block; font-size: 10.5px; color: var(--job-txt-fraco2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Quantos passos o funil tem, antes do clique: a diferença entre mandar uma
+   mensagem e mandar seis não pode ser descoberta depois. */
+.pn-item-n {
+  flex: none; min-width: 19px; padding: 2px 6px; border-radius: 999px;
+  background: var(--job-bg3); color: var(--job-txt-fraco);
+  font-size: 10px; font-weight: 700; text-align: center;
+}
+.pn-estado { padding: 18px 13px; color: var(--job-txt-fraco2); font-size: 12px; line-height: 1.5; }
+
+.pn-rodape {
+  flex: none; padding: 8px 13px; background: var(--job-bg1);
+  border-top: 1px solid var(--job-borda);
+  font-size: 10.5px; color: var(--job-txt-fraco2); line-height: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pn-item, .pn-aba, .pn-fav { transition: border-color .16s linear, background .16s linear; }
+  .pn-item:active, .pn-aba:active, .pn-fav:active { transform: none; }
+}
+&lt;/style&gt;&lt;body&gt;
+  &lt;!-- CABEÇALHO: diz onde a pessoa está e para qual conversa vai o envio.
+       Sem isso, o painel nativo vira uma janela solta: ele não fica dentro do
+       WhatsApp, então &quot;a conversa aberta&quot; precisa estar escrita, não suposta. --&gt;
+  &lt;header class=&quot;pn-topo&quot;&gt;
+    &lt;div class=&quot;pn-marca&quot;&gt;JOB&lt;/div&gt;
+    &lt;div class=&quot;pn-conversa pn-sem&quot; id=&quot;pn-conversa&quot;&gt;
+      &lt;span class=&quot;pn-conversa-rot&quot;&gt;Conversa aberta&lt;/span&gt;
+      &lt;strong id=&quot;pn-conversa-nome&quot;&gt;nenhuma&lt;/strong&gt;
+    &lt;/div&gt;
+  &lt;/header&gt;
+
+  &lt;div class=&quot;pn-busca-linha&quot;&gt;
+    &lt;input type=&quot;search&quot; id=&quot;pn-busca&quot; value=&quot;&quot; class=&quot;pn-busca&quot; autocomplete=&quot;off&quot;
+           placeholder=&quot;Buscar funil ou modelo&quot; aria-label=&quot;Buscar funil ou modelo&quot;&gt;
+    &lt;button type=&quot;button&quot; id=&quot;pn-fav&quot; class=&quot;pn-fav&quot; aria-pressed=&quot;false&quot;
+            title=&quot;Mostrar apenas favoritos&quot;&gt;Favoritos&lt;/button&gt;
+  &lt;/div&gt;
+
+  &lt;nav class=&quot;pn-abas&quot; role=&quot;tablist&quot; aria-label=&quot;Tipo de conteúdo&quot;&gt;
+    &lt;button type=&quot;button&quot; class=&quot;pn-aba pn-aba-on&quot; data-aba=&quot;tudo&quot; role=&quot;tab&quot; aria-selected=&quot;true&quot;&gt;Tudo&lt;/button&gt;
+    &lt;button type=&quot;button&quot; class=&quot;pn-aba&quot; data-aba=&quot;funil&quot; role=&quot;tab&quot; aria-selected=&quot;false&quot;&gt;Funis&lt;/button&gt;
+    &lt;button type=&quot;button&quot; class=&quot;pn-aba&quot; data-aba=&quot;modelo&quot; role=&quot;tab&quot; aria-selected=&quot;false&quot;&gt;Modelos&lt;/button&gt;
+  &lt;/nav&gt;
+
+  &lt;main class=&quot;pn-lista&quot; id=&quot;pn-lista&quot; role=&quot;list&quot; aria-live=&quot;polite&quot;&gt;
+    &lt;button class=&quot;pn-item&quot; disabled&gt;&lt;span class=&quot;pn-item-ico&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;&lt;polygon points=&quot;22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3&quot;/&gt;&lt;/svg&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-corpo&quot;&gt;&lt;span class=&quot;pn-item-nome&quot;&gt;CAMPANHA MEI&lt;/span&gt;&lt;span class=&quot;pn-item-sub&quot;&gt;Funil · favorito&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-n&quot;&gt;4&lt;/span&gt;&lt;/button&gt;&lt;button class=&quot;pn-item&quot; disabled&gt;&lt;span class=&quot;pn-item-ico&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;&lt;polygon points=&quot;22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3&quot;/&gt;&lt;/svg&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-corpo&quot;&gt;&lt;span class=&quot;pn-item-nome&quot;&gt;ABERTURA PME — CAMPANHA MEI 22/09&lt;/span&gt;&lt;span class=&quot;pn-item-sub&quot;&gt;Funil&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-n&quot;&gt;5&lt;/span&gt;&lt;/button&gt;&lt;button class=&quot;pn-item&quot; disabled&gt;&lt;span class=&quot;pn-item-ico&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;&lt;polygon points=&quot;22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3&quot;/&gt;&lt;/svg&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-corpo&quot;&gt;&lt;span class=&quot;pn-item-nome&quot;&gt;PRIMEIRO CONTATO VERA CRUZ&lt;/span&gt;&lt;span class=&quot;pn-item-sub&quot;&gt;Funil&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-n&quot;&gt;3&lt;/span&gt;&lt;/button&gt;&lt;button class=&quot;pn-item&quot; disabled&gt;&lt;span class=&quot;pn-item-ico&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;&lt;polygon points=&quot;22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3&quot;/&gt;&lt;/svg&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-corpo&quot;&gt;&lt;span class=&quot;pn-item-nome&quot;&gt;COPARTICIPAÇÃO VERA CRUZ EMPRESARIAL&lt;/span&gt;&lt;span class=&quot;pn-item-sub&quot;&gt;Funil&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-n&quot;&gt;6&lt;/span&gt;&lt;/button&gt;&lt;button class=&quot;pn-item&quot; disabled&gt;&lt;span class=&quot;pn-item-ico&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;&lt;path d=&quot;M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z&quot;/&gt;&lt;/svg&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-corpo&quot;&gt;&lt;span class=&quot;pn-item-nome&quot;&gt;Tabela de coparticipação — Bene&lt;/span&gt;&lt;span class=&quot;pn-item-sub&quot;&gt;Modelo · texto · favorito&lt;/span&gt;&lt;/span&gt;&lt;/button&gt;&lt;button class=&quot;pn-item&quot; disabled&gt;&lt;span class=&quot;pn-item-ico&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;&lt;path d=&quot;M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z&quot;/&gt;&lt;/svg&gt;&lt;/span&gt;&lt;span class=&quot;pn-item-corpo&quot;&gt;&lt;span class=&quot;pn-item-nome&quot;&gt;Saudação 1 (áudio)&lt;/span&gt;&lt;span class=&quot;pn-item-sub&quot;&gt;Modelo · audio&lt;/span&gt;&lt;/span&gt;&lt;/button&gt;
+  &lt;/main&gt;
+
+  &lt;footer class=&quot;pn-rodape&quot;&gt;
+    &lt;span id=&quot;pn-rodape-txt&quot;&gt;Abra uma conversa no WhatsApp Web para poder enviar daqui.&lt;/span&gt;
+  &lt;/footer&gt;
+
+
+&lt;/body&gt;&lt;/html&gt;"></iframe></div>

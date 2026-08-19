@@ -1233,6 +1233,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       'POST', {}, 15000).then(sendResponse);
     return true;
   }
+  // ABRIR O PAINEL NATIVO.
+  //
+  // chrome.sidePanel.open() exige gesto do usuário. Clique no popup ou no
+  // trilho conta — por isso a chamada vem de uma mensagem, e não de um
+  // temporizador ou de um evento de página.
+  //
+  // O ícone da extensão já abre o popup (default_popup), então não dá pra usar
+  // openPanelOnActionClick: os dois disputariam o mesmo clique.
+  if (msg && msg.type === 'abrir_painel_lateral') {
+    (async () => {
+      try {
+        let janelaId = sender && sender.tab && sender.tab.windowId;
+        if (!janelaId) {
+          const j = await chrome.windows.getCurrent();
+          janelaId = j && j.id;
+        }
+        await chrome.sidePanel.open({ windowId: janelaId });
+        sendResponse({ ok: true });
+      } catch (e) {
+        sendResponse({ ok: false, erro: String((e && e.message) || e) });
+      }
+    })();
+    return true;
+  }
   if (msg && msg.type === 'tempo_resposta') {
     chamarJob('/api/whatsapp/tempo-resposta', 'POST', msg.medicao || {}, 15000).then(sendResponse);
     return true;

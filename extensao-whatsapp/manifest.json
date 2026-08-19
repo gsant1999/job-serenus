@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "JOB — Análise de WhatsApp",
-  "version": "4.105.0",
+  "version": "4.107.0",
   "description": "Painel dentro do WhatsApp Web: analisa o lead, calcula o Score e envia mensagens da biblioteca de modelos.",
   "permissions": [
     "notifications",
     "storage",
     "tabs",
     "scripting",
-    "alarms"
+    "alarms",
+    "sidePanel"
   ],
   "host_permissions": [
     "https://web.whatsapp.com/*",
@@ -91,5 +92,9 @@
       ],
       "run_at": "document_start"
     }
-  ]
+  ],
+  "side_panel": {
+    "default_path": "painel.html"
+  },
+  "version_name": "4.107.0"
 }

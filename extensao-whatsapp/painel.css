@@ -1,0 +1,143 @@
+/* ══════════════════════════════════════════════════════════════════════
+   PAINEL NATIVO (chrome.sidePanel)
+
+   Por que ele tem CSS próprio e não reusa o content.css: aquele é escrito
+   para sobreviver DENTRO do WhatsApp, com prefixos e brigas de
+   especificidade que aqui só atrapalham. Aqui a página é nossa inteira.
+
+   Os TOKENS são os mesmos do resto da extensão, de propósito: o painel tem
+   que parecer a mesma ferramenta, não um segundo produto.
+   ══════════════════════════════════════════════════════════════════════ */
+:root {
+  --job-bg0: #0f0f16;
+  --job-bg1: #15151e;
+  --job-bg2: #1b1b26;
+  --job-bg3: #23232f;
+  --job-bg3-hover: #2a2a38;
+  --job-borda: rgba(255,255,255,.09);
+  --job-txt: #f2f4fa;
+  --job-txt-fraco: #a4aec4;
+  --job-txt-fraco2: #8b95ab;
+  --job-acento: #1fb673;
+  --job-anel: rgba(31,182,115,.45);
+}
+/* Tema claro: mesma estrutura, superfícies claras. Segue a escolha do
+   consultor no popup, guardada em storage. */
+html[data-tema="claro"] {
+  --job-bg0: #efece4;
+  --job-bg1: #f4f1e8;
+  --job-bg2: #fdfcf9;
+  --job-bg3: #e2ded1;
+  --job-bg3-hover: #d8d3c3;
+  --job-borda: rgba(0,0,0,.10);
+  --job-txt: #1c1a13;
+  --job-txt-fraco: #6b6553;
+  --job-txt-fraco2: #837c68;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex; flex-direction: column;
+  background: var(--job-bg0); color: var(--job-txt);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+}
+
+.pn-topo {
+  flex: none; display: flex; align-items: center; gap: 10px;
+  padding: 11px 13px; background: var(--job-bg1);
+  border-bottom: 1px solid var(--job-borda);
+}
+.pn-marca {
+  font-size: 11px; font-weight: 800; letter-spacing: .13em;
+  color: var(--job-acento);
+}
+.pn-conversa { display: flex; flex-direction: column; min-width: 0; }
+.pn-conversa-rot {
+  font-size: 9px; font-weight: 700; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--job-txt-fraco2);
+}
+.pn-conversa strong {
+  font-size: 12.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Sem conversa aberta o envio não tem destino. O aviso é âmbar e o texto
+   diz o que fazer — a régua manda dizer o óbvio, não deixar adivinhar. */
+.pn-conversa.pn-sem strong { color: #d99b2b; }
+
+.pn-busca-linha {
+  flex: none; display: flex; gap: 7px; padding: 10px 13px 7px;
+}
+.pn-busca {
+  flex: 1; min-width: 0; padding: 8px 11px; border-radius: 9px;
+  background: var(--job-bg2); border: 1px solid var(--job-borda);
+  color: var(--job-txt); font-family: inherit; font-size: 12.5px;
+}
+.pn-busca::placeholder { color: var(--job-txt-fraco2); }
+.pn-busca:focus { outline: none; border-color: var(--job-acento); box-shadow: 0 0 0 3px var(--job-anel); }
+.pn-fav {
+  flex: none; padding: 8px 11px; border-radius: 9px;
+  background: transparent; border: 1px solid var(--job-borda);
+  color: var(--job-txt-fraco); cursor: pointer;
+  font-family: inherit; font-size: 11.5px; font-weight: 600;
+  transition: color .16s ease, border-color .16s ease, background .16s ease, transform .14s ease-out;
+}
+.pn-fav[aria-pressed="true"] {
+  color: var(--job-acento); border-color: var(--job-acento); background: var(--job-bg3-hover);
+}
+.pn-fav:active { transform: scale(.97); }
+
+.pn-abas { flex: none; display: flex; gap: 4px; padding: 0 13px 9px; }
+.pn-aba {
+  padding: 5px 11px; border-radius: 999px;
+  background: transparent; border: 1px solid var(--job-borda);
+  color: var(--job-txt-fraco); cursor: pointer;
+  font-family: inherit; font-size: 11.5px; font-weight: 600;
+  transition: color .16s ease, border-color .16s ease, background .16s ease, transform .14s ease-out;
+}
+.pn-aba-on { color: var(--job-acento); border-color: var(--job-acento); background: var(--job-bg3-hover); }
+.pn-aba:active { transform: scale(.97); }
+
+.pn-lista { flex: 1; overflow-y: auto; padding: 0 9px 10px; }
+.pn-item {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 9px 10px; margin-bottom: 5px; border-radius: 10px;
+  background: var(--job-bg2); border: 1px solid var(--job-borda);
+  color: var(--job-txt); cursor: pointer; text-align: left;
+  font-family: inherit; font-size: 12.5px;
+  /* Nomeada, nunca `all`. */
+  transition: border-color .16s ease, background .16s ease, transform .14s ease-out;
+}
+@media (hover: hover) and (pointer: fine) {
+  .pn-item:hover { border-color: var(--job-acento); background: var(--job-bg3-hover); }
+}
+.pn-item:focus-visible { outline: 2px solid var(--job-acento); outline-offset: 1px; }
+.pn-item:active { transform: scale(.99); }
+.pn-item[disabled] { opacity: .5; cursor: not-allowed; }
+.pn-item-ico { flex: none; width: 15px; height: 15px; color: var(--job-acento); display: inline-flex; }
+.pn-item-ico svg { width: 100%; height: 100%; }
+/* Empilha nome e legenda. Eram <span> (inline) e corriam na mesma linha,
+   colidindo — apareceu na bancada, não no código. */
+.pn-item-corpo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pn-item-nome { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-item-sub { display: block; font-size: 10.5px; color: var(--job-txt-fraco2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Quantos passos o funil tem, antes do clique: a diferença entre mandar uma
+   mensagem e mandar seis não pode ser descoberta depois. */
+.pn-item-n {
+  flex: none; min-width: 19px; padding: 2px 6px; border-radius: 999px;
+  background: var(--job-bg3); color: var(--job-txt-fraco);
+  font-size: 10px; font-weight: 700; text-align: center;
+}
+.pn-estado { padding: 18px 13px; color: var(--job-txt-fraco2); font-size: 12px; line-height: 1.5; }
+
+.pn-rodape {
+  flex: none; padding: 8px 13px; background: var(--job-bg1);
+  border-top: 1px solid var(--job-borda);
+  font-size: 10.5px; color: var(--job-txt-fraco2); line-height: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pn-item, .pn-aba, .pn-fav { transition: border-color .16s linear, background .16s linear; }
+  .pn-item:active, .pn-aba:active, .pn-fav:active { transform: none; }
+}

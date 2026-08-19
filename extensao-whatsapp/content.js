@@ -1358,9 +1358,7 @@
   //  telas do Guilherme os chips estão lá com o campo vazio — digitar filtra,
   //  não invoca.
   const _ITENS_ID = 'job-itens-bar';
-  const _ITENS_ALTURA = 46;          // px reservados no #main, como eles fazem
   const _ITENS_DEBOUNCE = 400;       // igual ao deles: 180ms buscava a cada letra
-  const _ITENS_TETO = 40;
   let _itensTermo = '';
   let _itensSoFav = false;
   let _itensDebounce = null;
@@ -1380,14 +1378,13 @@
     return String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
   }
 
-  // Reserva a faixa encolhendo o #main, como o ZapVoice. Sobrepor tapa a
-  // última mensagem — que é justamente a que a pessoa está respondendo.
-  function _itensReservar(ligado) {
-    const main = _itensMain();
-    if (!main) return;
-    if (ligado) main.style.setProperty('height', 'calc(100% - ' + _ITENS_ALTURA + 'px)', 'important');
-    else main.style.removeProperty('height');
-  }
+  // NÃO MEXE NA ALTURA DO #main. Ponto.
+  //
+  // A primeira versão encolhia o #main em 46px E inseria uma faixa de 46px:
+  // roubava o dobro do espaço da conversa. O ZapVoice encolhe porque a barra
+  // dele é grande; a nossa é uma tira fina no rodapé, e o layout do próprio
+  // WhatsApp já acomoda. Espaço de conversa é do cliente, não da extensão.
+  function _itensReservar() { /* mantido só pra não quebrar chamadas antigas */ }
 
   async function _itensCarregar() {
     const out = [];
@@ -1406,11 +1403,19 @@
     return out;
   }
 
+  // ORDEM É A DO CADASTRO, NÃO A MINHA.
+  //
+  // Nada de ordenar por favorito, por tipo ou por relevância: o consultor
+  // decorou a ordem em que cadastrou ("o segundo material da Vera Ouro"), e
+  // reordenar quebra essa memória. Filtrar só REMOVE da lista; o que sobra
+  // mantém a posição relativa que veio do servidor.
+  //
+  // Sem teto também: cortar em 40 escondia item sem avisar. Quem tem muitos
+  // itens rola a barra — que agora rola de verdade.
   function _itensFiltrar(todos) {
     const alvo = _itensNorm(_itensTermo);
-    return todos
-      .filter((i) => (!_itensSoFav || i.fav) && (!alvo || _itensNorm(i.nome).includes(alvo)))
-      .slice(0, _ITENS_TETO);
+    return todos.filter((i) =>
+      (!_itensSoFav || i.fav) && (!alvo || _itensNorm(i.nome).includes(alvo)));
   }
 
   async function _itensDesenhar() {
@@ -1425,10 +1430,12 @@
         cx.setAttribute('role', 'toolbar');
         cx.setAttribute('aria-label', 'Funis e modelos do JOB');
         cx.addEventListener('mousedown', _itensClique);
-        rodape.parentElement.insertBefore(cx, rodape.nextSibling);
-        _itensReservar(true);
-      } else if (cx.previousElementSibling !== rodape) {
-        rodape.parentElement.insertBefore(cx, rodape.nextSibling);
+        rodape.parentElement.appendChild(cx);
+      } else if (cx !== rodape.parentElement.lastElementChild) {
+        // ABAIXO DO CAMPO, SEMPRE. Ficou acima na primeira versão porque
+        // `insertBefore(rodape.nextSibling)` depende da ordem dos irmãos, e o
+        // WhatsApp reordena o rodapé. Último filho não tem essa dúvida.
+        rodape.parentElement.appendChild(cx);
       }
       cx._itens = lista;
       const favOn = _itensSoFav ? ' job-itens-fav-on' : '';
@@ -1436,6 +1443,8 @@
         '<button type="button" class="job-itens-fav' + favOn + '" data-acao="fav" ' +
           'aria-pressed="' + (_itensSoFav ? 'true' : 'false') + '" title="Apenas favoritos">' +
           _svgIco('estrela', 13) + '</button>' +
+        '<button type="button" class="job-itens-painel" data-acao="painel" ' +
+          'title="Abrir o painel do JOB na lateral da janela">Painel</button>' +
         (lista.length
           ? lista.map((i, n) =>
               '<button type="button" class="job-itens-chip" data-n="' + n + '" ' +
@@ -1460,6 +1469,13 @@
     if (!alvo) return;
     ev.preventDefault();
     ev.stopPropagation();
+    if (alvo.dataset.acao === 'painel') {
+      // Precisa nascer de um clique: chrome.sidePanel.open() exige gesto.
+      _safeSendMessage({ type: 'abrir_painel_lateral' }).then((r) => {
+        if (!r || !r.ok) _dizerNoRodape('Não consegui abrir o painel. Atualize a extensão em chrome://extensions.');
+      });
+      return;
+    }
     if (alvo.dataset.acao === 'fav') {
       _itensSoFav = !_itensSoFav;
       try { chrome.storage.local.set({ jobItensSoFav: _itensSoFav }); } catch (e) {}
@@ -14599,6 +14615,39 @@
     if (!msg || !msg.type) return undefined;
     if (msg.type === 'deck_info') { _deckInfo(!!msg.comCatalogo).then(sendResponse); return true; }
     if (msg.type === 'deck_executar') { _deckExecutar(msg.cmd).then(sendResponse); return true; }
+    // O PAINEL NATIVO NÃO ENXERGA A PÁGINA. Ele mora fora do WhatsApp, então
+    // só esta aba sabe qual conversa está aberta — e é isso que ele pergunta
+    // antes de deixar a pessoa clicar em enviar.
+    if (msg.type === 'painel_conversa') {
+      (async () => {
+        let chatId = '';
+        try { chatId = await pedirChatId(); } catch (e) { chatId = ''; }
+        sendResponse({ ok: true, chatId: chatId || '', nome: (chatId ? nomeDoContato() : '') || '' });
+      })();
+      return true;
+    }
+    // Clique no painel abre a MESMA confirmação de sempre, aqui na conversa.
+    // O painel nunca envia sozinho: clicar longe do WhatsApp é ainda mais
+    // fácil de errar de destino do que clicar dentro dele.
+    if (msg.type === 'painel_abrir_item') {
+      (async () => {
+        try {
+          if (msg.item_tipo === 'funil') {
+            dispararFunil(msg.item_id);
+          } else {
+            const mods = await buscarModelos(false);
+            const m = (mods || []).find((x) => String(x.id) === String(msg.item_id));
+            if (m) abrirPreviewEnvio(m);
+            else _dizerNoRodape('Esse modelo não está mais na sua biblioteca.');
+          }
+          sendResponse({ ok: true });
+        } catch (e) {
+          _falhaTecnica('painel: abrir item', e);
+          sendResponse({ ok: false });
+        }
+      })();
+      return true;
+    }
     return undefined;
   });
 
