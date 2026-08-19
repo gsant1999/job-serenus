@@ -12,8 +12,11 @@ const tela = {
   folhaConfirmar: el('folha-confirmar'),
 };
 
-let zap = { consultado: false, ligada: false, chat: null, rascunho: [],
+let zap = { consultado: false, ligada: false, chat: null, rascunho: [], conversas: [],
             modelos: [], funis: [], comandos: [] };
+// Destino escolhido na lista. null = manda para a conversa que estiver aberta,
+// que é o caso comum de quem está sentado na frente do computador.
+let zapAlvo = null;
 let zapSecao = localStorage.getItem('deck_zap_secao') || 'mensagens';
 let zapBusca = '';
 // null = todas as pastas; '' = os que não estão em pasta nenhuma; texto = a pasta.
@@ -57,14 +60,24 @@ function pintar() {
     return;
   }
   const parado = motivoDeNaoEnviar();
+  const alvo = alvoAtual();
   tela.topo.dataset.estado = parado ? 'parado' : 'pronto';
+  const trocar = zap.conversas.length
+    ? '<button class="secundario zap-trocar" type="button" id="zap-trocar">'
+      + (alvo && alvo.escolhido ? 'Trocar' : 'Escolher outra') + '</button>'
+    : '';
   tela.topo.innerHTML = parado
-    ? '<span class="zap-pulso"></span><div><p class="zap-rot">Sem conversa para enviar</p>'
-      + '<p class="zap-motivo">' + escapar(parado) + '</p></div>'
+    ? '<span class="zap-pulso"></span><div style="flex:1;min-width:0">'
+      + '<p class="zap-rot">Sem conversa para enviar</p>'
+      + '<p class="zap-motivo">' + escapar(parado) + '</p></div>' + trocar
     : '<span class="zap-pulso"></span><div style="flex:1;min-width:0">'
-      + '<p class="zap-rot">Vai para a conversa aberta no computador</p>'
-      + '<h2 class="zap-nome">' + escapar(zap.chat.nome || 'Conversa sem nome salvo') + '</h2>'
-      + rascunhoHtml() + '</div>';
+      + '<p class="zap-rot">' + (alvo.escolhido
+          ? 'Vai abrir esta conversa no computador e enviar'
+          : 'Vai para a conversa aberta no computador') + '</p>'
+      + '<h2 class="zap-nome">' + escapar(alvo.nome || 'Conversa sem nome salvo') + '</h2>'
+      + (alvo.escolhido ? '' : rascunhoHtml()) + '</div>' + trocar;
+  const bt = el('zap-trocar');
+  if (bt) bt.addEventListener('click', abrirEscolhaDeConversa);
   pintarLista();
 }
 
@@ -83,6 +96,15 @@ function rascunhoHtml() {
     + '</div>').join('') + '</div>';
 }
 
+// PARA QUEM VAI. É a pergunta mais importante da tela inteira.
+// Sem escolha, vale a conversa aberta no computador. Com escolha, o WhatsApp
+// pula para ela antes de enviar — e quem escolheu precisa ver isso escrito.
+function alvoAtual() {
+  if (zapAlvo) return { chatId: zapAlvo.chatId, nome: zapAlvo.nome, escolhido: true };
+  if (zap.chat) return { chatId: zap.chat.chatId, nome: zap.chat.nome, escolhido: false };
+  return null;
+}
+
 // A condição que governa a tela, dita com todas as letras — e com o que fazer.
 function motivoDeNaoEnviar() {
   if (!zap.consultado) return 'Ainda perguntando ao computador.';
@@ -90,9 +112,9 @@ function motivoDeNaoEnviar() {
     return 'A extensão do JOB não está falando com o deck. Abra o WhatsApp Web no '
          + 'Chrome do computador (e clique na aba uma vez).';
   }
-  if (!zap.chat) {
-    return 'Nenhuma conversa aberta no WhatsApp Web. Abra a conversa do cliente e '
-         + 'ela aparece aqui.';
+  if (!alvoAtual()) {
+    return 'Nenhuma conversa aberta no WhatsApp Web. Abra a conversa do cliente, '
+         + 'ou escolha uma na lista.';
   }
   return '';
 }
@@ -293,13 +315,16 @@ function desenharLista(itens) {
 function fecharFolha() {
   confirmando = null;
   desenharMidia(null);   // sem isto o áudio continua tocando com a folha fechada
+  const contatos = el('zap-contatos');
+  if (contatos) contatos.remove();
   tela.cortina.classList.remove('aberta');
   tela.folha.classList.remove('aberta');
   setTimeout(() => { tela.folha.hidden = true; tela.cortina.hidden = true; }, 280);
 }
 
 function confirmarModelo(m, card) {
-  const nome = zap.chat.nome || 'a conversa aberta';
+  const alvo = alvoAtual();
+  const nome = (alvo && alvo.nome) || 'a conversa aberta';
   confirmando = { tipo: 'modelo', id: m.id, chave: card.dataset.chave };
   abrirFolha({
     titulo: m.titulo || 'Enviar mensagem',
@@ -310,7 +335,8 @@ function confirmarModelo(m, card) {
 }
 
 function confirmarFunil(f, card) {
-  const nome = zap.chat.nome || 'a conversa aberta';
+  const alvo = alvoAtual();
+  const nome = (alvo && alvo.nome) || 'a conversa aberta';
   const passos = f.passos || [];
   let acumulado = 0;
   const lista = passos.map((p, i) => {
@@ -329,15 +355,78 @@ function confirmarFunil(f, card) {
   });
 }
 
+/* ------------------------------------------------------- escolher conversa */
+
+function abrirEscolhaDeConversa() {
+  abrirFolha({ titulo: 'Para quem vai', texto: '', confirmar: null });
+  const corpo = document.createElement('div');
+  corpo.id = 'zap-contatos';
+  corpo.className = 'zap-contatos';
+  tela.folhaTexto.insertAdjacentElement('afterend', corpo);
+
+  const busca = document.createElement('input');
+  busca.className = 'zap-busca';
+  busca.type = 'search';
+  busca.placeholder = 'Buscar pelo nome';
+  busca.setAttribute('aria-label', 'Buscar conversa pelo nome');
+  corpo.appendChild(busca);
+
+  const lista = document.createElement('div');
+  lista.className = 'zap-contatos-lista';
+  corpo.appendChild(lista);
+
+  function desenhar() {
+    const q = busca.value.trim().toLowerCase();
+    const itens = zap.conversas.filter((c) => !q || (c.nome || '').toLowerCase().indexOf(q) >= 0);
+    lista.innerHTML = '';
+    if (zap.chat) lista.appendChild(linhaConversa(
+      { chatId: zap.chat.chatId, nome: zap.chat.nome }, true));
+    if (!itens.length) {
+      const p = document.createElement('p');
+      p.className = 'zap-vazio';
+      p.textContent = q ? 'Nenhuma conversa com esse nome.'
+        : 'A lista aparece quando a extensão terminar de ler as conversas.';
+      lista.appendChild(p);
+      return;
+    }
+    itens.forEach((c) => {
+      if (zap.chat && c.chatId === zap.chat.chatId) return;   // já está no topo
+      lista.appendChild(linhaConversa(c, false));
+    });
+  }
+  busca.addEventListener('input', desenhar);
+  desenhar();
+}
+
+function linhaConversa(c, ehAberta) {
+  const b = document.createElement('button');
+  b.className = 'zap-contato';
+  b.type = 'button';
+  const escolhida = zapAlvo ? zapAlvo.chatId === c.chatId : ehAberta;
+  b.setAttribute('aria-pressed', String(escolhida));
+  b.innerHTML = '<span class="nome">' + escapar(c.nome || 'Sem nome salvo') + '</span>'
+    + (ehAberta ? '<span class="etiqueta">aberta agora</span>' : '');
+  b.addEventListener('click', () => {
+    // Escolher a conversa que já está aberta é o mesmo que não escolher nada:
+    // assim o deck não fica prometendo abrir o que já está na frente.
+    zapAlvo = ehAberta ? null : { chatId: c.chatId, nome: c.nome };
+    fecharFolha();
+    pintar();
+  });
+  return b;
+}
+
 /* --------------------------------------------------------------- envio */
 
 async function disparar(pedido) {
   const card = tela.lista.querySelector('[data-chave="' + pedido.chave + '"]');
   if (card) { card.dataset.estado = 'indo'; card.disabled = true; }
   try {
+    const alvo = alvoAtual();
     const r = await chamar('/api/deck/comando', {
       method: 'POST',
-      body: JSON.stringify({ tipo: pedido.tipo, id: pedido.id }),
+      body: JSON.stringify({ tipo: pedido.tipo, id: pedido.id,
+                             chatId: (alvo && alvo.escolhido) ? alvo.chatId : '' }),
     });
     if (r.erro) { recado(r.erro, 'erro'); soltarCard(pedido.chave); return; }
     zapEsperando = { id: r.comando.id, chave: pedido.chave, em: Date.now() };
@@ -390,10 +479,16 @@ async function bater(deVolta) {
       ligada: r.extensao.ligada,
       chat: r.extensao.chat,
       rascunho: r.extensao.rascunho || [],
+      conversas: r.extensao.conversas || [],
       modelos: r.extensao.modelos || [],
       funis: r.extensao.funis || [],
       comandos: r.comandos || [],
     };
+    if (zapAlvo && zap.conversas.length
+        && !zap.conversas.some((c) => c.chatId === zapAlvo.chatId)
+        && !(zap.chat && zap.chat.chatId === zapAlvo.chatId)) {
+      zapAlvo = null;   // saiu da lista: volta para a conversa aberta em vez de mentir
+    }
     conferirComando();
     // Só repinta quando algo mudou: repintar a cada 2,5s mataria o toque em
     // curso e piscaria a tela na cara de quem está usando.

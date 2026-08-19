@@ -633,3 +633,59 @@ a.secundario {
   font-size: 13.5px;
   color: var(--texto-fraco);
 }
+
+
+/* ═══════════════ Escolher a conversa ═══════════════ */
+/* Estar na rua e ter que voltar ao computador só para clicar num contato é o
+   contrário do que este deck existe para fazer. */
+
+.zap-trocar { flex-shrink: 0; align-self: flex-start; }
+
+.zap-contatos { display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px; }
+.zap-contatos .zap-busca { margin-bottom: 0; }
+
+.zap-contatos-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 46vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.zap-contato {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px;
+  padding: 12px 14px;
+  background: var(--tijolo);
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+  text-align: left;
+  transition: transform 130ms var(--ease-saida);
+}
+.zap-contato:active { transform: scale(.98); }
+.zap-contato[aria-pressed="true"] { border-color: var(--acento); }
+
+.zap-contato .nome {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zap-contato .etiqueta {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--acento);
+}

@@ -14429,6 +14429,8 @@
 
   let _deckUltimoChat = '';
   let _deckRascunho = [];
+  let _deckConversas = [];
+  let _deckConversasEm = 0;
 
   async function _deckInfo(comCatalogo) {
     const info = { chat: null, catalogo: null, rascunho: null };
@@ -14458,6 +14460,27 @@
         _deckUltimoChat = '';
         _deckRascunho = [];
       }
+      // OS NOMES COM QUEM ELE ESTÁ FALANDO.
+      //
+      // Sem esta lista o deck só sabe mandar para a conversa que já está
+      // aberta, e o consultor tem que voltar ao computador só para clicar num
+      // contato — que é justamente o que o iPad existe para evitar. Recarrega
+      // no máximo a cada 45s: é leitura, e leitura trava a navegação da aba.
+      if (Date.now() - _deckConversasEm > 45000) {
+        _deckConversasEm = Date.now();
+        try {
+          const r = await _pedirPonte('listar_conversas_dia', { horas: 72 }, 20000);
+          if (r && Array.isArray(r.conversas)) {
+            _deckConversas = r.conversas
+              .filter((c) => c.chat_id && !String(c.chat_id).endsWith('@g.us'))
+              .sort((a, b) => (b.ultima_msg_em || 0) - (a.ultima_msg_em || 0))
+              .slice(0, 40)
+              .map((c) => ({ chatId: c.chat_id, nome: c.nome || '',
+                             telefone: c.telefone || '', em: c.ultima_msg_em || 0 }));
+          }
+        } catch (e) { /* sem lista o deck ainda funciona na conversa aberta */ }
+      }
+      info.conversas = _deckConversas;
     } catch (e) { /* nenhuma conversa aberta é estado normal, não é erro */ }
     if (comCatalogo) {
       try {
@@ -14494,10 +14517,33 @@
     // cometer, e não tem desfazer. Confere antes de qualquer envio.
     let chatId = '';
     try { chatId = await pedirChatId(); } catch (e) { chatId = ''; }
-    if (!chatId) return { ok: false, mensagem: 'Nenhuma conversa aberta no WhatsApp Web. Não enviei nada.' };
+
+    // O DECK ESCOLHE O DESTINO; AQUI A GENTE VAI ATÉ ELE.
+    //
+    // Antes isto recusava quando a conversa aberta era outra. Só que o consultor
+    // está no iPad justamente para não voltar ao computador e clicar no contato:
+    // se ele escolheu alguém na lista, o certo é ABRIR a conversa e enviar.
+    //
+    // O que não muda é a garantia: depois de trocar, conferimos que a tela
+    // está mesmo na conversa pedida. Mandar para o cliente errado não tem
+    // desfazer, e "achei que tinha trocado" é como isso aconteceria.
     if (cmd.chatId && String(cmd.chatId) !== String(chatId)) {
-      return { ok: false, mensagem: 'A conversa aberta no Mac mudou depois do toque. Não enviei nada.' };
+      const ida = await _pedirPonte('abrir_chat', { chatId: cmd.chatId }, 15000);
+      if (!ida || !ida.ok) {
+        const porque = (ida && ida.erro) === 'leitura_em_andamento'
+          ? 'O WhatsApp Web está no meio de uma leitura. Tente de novo em alguns segundos.'
+          : 'Não consegui abrir essa conversa no WhatsApp Web. Não enviei nada.';
+        return { ok: false, mensagem: porque };
+      }
+      await new Promise((r) => setTimeout(r, 700));
+      try { chatId = await pedirChatId(); } catch (e) { chatId = ''; }
+      if (String(chatId) !== String(cmd.chatId)) {
+        return { ok: false, mensagem: 'Pedi para abrir a conversa e o WhatsApp não confirmou a troca. '
+                                    + 'Não enviei nada.' };
+      }
+      _deckUltimoChat = '';   // o rascunho precisa ser relido para a conversa nova
     }
+    if (!chatId) return { ok: false, mensagem: 'Nenhuma conversa aberta no WhatsApp Web. Não enviei nada.' };
     const nome = nomeDoContato() || 'este contato';
 
     if (cmd.tipo === 'funil') {
