@@ -266,6 +266,13 @@
     } catch (e) { return { erro: 'sem_chatstore' }; }
     if (!chats.length) return { erro: 'sem_chats' };
 
+    // TETO DE CONVERSAS. A conta é barata por conversa, mas "todas as
+    // conversas" numa conta com centenas delas vira um pico de CPU no meio do
+    // trabalho de alguém. 250 é folga de sobra pro dia (o WhatsApp mantém em
+    // memória as recentes, que são justamente as do dia) e mantém o custo
+    // previsível. Medir não pode competir com atender.
+    if (chats.length > 250) chats = chats.slice(0, 250);
+
     const inicio = new Date();
     inicio.setHours(0, 0, 0, 0);
     inicio.setDate(inicio.getDate() - Math.max(0, Number(diasAtras) || 0));

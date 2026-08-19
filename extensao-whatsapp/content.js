@@ -1401,6 +1401,7 @@
   }
 
   async function _itensCarregar() {
+    if (_itensCarregado) return _itensCarregado;   // uma vez por sessão, e só sob demanda
     const out = [];
     try {
       const rf = await buscarFunis(false);
@@ -1414,6 +1415,7 @@
         out.push({ tipo: 'modelo', id: m.id, nome: m.nome || '', fav: !!m.favorito, modelo: m });
       }
     } catch (e) { /* segue */ }
+    _itensCarregado = out;
     return out;
   }
 
@@ -1434,8 +1436,11 @@
 
   async function _itensDesenhar() {
     try {
+      // Sem nada digitado e sem favoritos pedidos, não há tira: espaço de
+      // conversa é do cliente.
+      if (!_itensTermo && !_itensSoFav) { _itensSumir(); return; }
       const rodape = _itensRodape();
-      if (!rodape || !rodape.parentElement) { _itensSumir(); return; }
+      if (!rodape) { _itensSumir(); return; }
       const lista = _itensFiltrar(await _itensCarregar());
       let cx = document.getElementById(_ITENS_ID);
       if (!cx) {
@@ -1444,12 +1449,19 @@
         cx.setAttribute('role', 'toolbar');
         cx.setAttribute('aria-label', 'Funis e modelos do JOB');
         cx.addEventListener('mousedown', _itensClique);
-        rodape.parentElement.appendChild(cx);
-      } else if (cx !== rodape.parentElement.lastElementChild) {
-        // ABAIXO DO CAMPO, SEMPRE. Ficou acima na primeira versão porque
-        // `insertBefore(rodape.nextSibling)` depende da ordem dos irmãos, e o
-        // WhatsApp reordena o rodapé. Último filho não tem essa dúvida.
-        rodape.parentElement.appendChild(cx);
+        rodape.appendChild(cx);
+      } else if (cx.parentElement !== rodape || cx !== rodape.lastElementChild) {
+        // DENTRO DO RODAPÉ, COMO ÚLTIMO FILHO.
+        //
+        // Duas tentativas anteriores puseram a tira como IRMÃ do rodapé, e nas
+        // duas ela apareceu no TOPO da conversa. O motivo: `rodape.parentElement`
+        // nem sempre é o que eu supunha — `footer.copyable-area` pode casar com
+        // um wrapper que envolve a conversa toda, e aí "depois do rodapé" vira
+        // "no começo da área".
+        //
+        // Dentro do rodapé não tem essa dúvida: o rodapé é a faixa do campo de
+        // digitar, e o último filho dele fica embaixo do campo. Ponto.
+        rodape.appendChild(cx);
       }
       cx._itens = lista;
       const favOn = _itensSoFav ? ' job-itens-fav-on' : '';
@@ -1530,6 +1542,15 @@
     });
   }
 
+  // SÓ CARREGA QUANDO O CONSULTOR DIGITA. Nada em segundo plano.
+  //
+  // A versão anterior buscava funis e modelos assim que a conversa abria, e
+  // redesenhava a cada mutação. Isso é trabalho que ninguém pediu, competindo
+  // com o WhatsApp por CPU — e o WhatsApp é o que precisa estar rápido.
+  //
+  // Agora a tira nasce vazia (só o campo de busca do próprio WhatsApp a
+  // alimenta): o consultor digita, e AÍ ela busca. Sem digitar, custo zero.
+  let _itensCarregado = null;
   async function _itensSincronizar() {
     let ativo = null;
     try { ativo = window.WPP && WPP.chat && WPP.chat.getActiveChat && WPP.chat.getActiveChat(); }
@@ -1537,7 +1558,7 @@
     if (!ativo || !_itensRodape()) { _itensSumir(); return; }
     _itensTermo = '';
     _itensLigarCampo();
-    await _itensDesenhar();
+    _itensSumir();   // conversa nova começa limpa: nada carregado, nada na tela
   }
 
   function iniciarBarraItens() {
@@ -1547,14 +1568,17 @@
     try { chrome.storage.local.get(['jobItensSoFav'], (c) => { _itensSoFav = !!(c && c.jobItensSoFav); }); }
     catch (e) {}
     _itensSincronizar();
-    // Observa o rodapé: é onde o WhatsApp recria o campo. Mesma ideia do
-    // MutationObserver deles, e é o que faz o filtro sobreviver à troca de
-    // conversa.
-    try {
-      const alvo = _itensMain() || document.body;
-      _itensObs = new MutationObserver(() => { _itensLigarCampo(); _itensSincronizarLeve(); });
-      _itensObs.observe(alvo, { childList: true, subtree: true });
-    } catch (e) {}
+    // NADA DE OBSERVER NO #main. NUNCA.
+    //
+    // Eu tinha posto um MutationObserver no #main com subtree:true — ou seja,
+    // na CONVERSA INTEIRA. Ele dispara a cada mensagem renderizada, a cada
+    // rolagem, milhares de vezes por minuto, e cada disparo chamava religar +
+    // redesenhar. Resultado: o WhatsApp do Guilherme travou e o renderer caiu
+    // com "Código de erro: 15" (falta de memória). É a MESMA cicatriz de
+    // 11/08 e de 14/08 registradas neste repositório, e eu a reabri.
+    //
+    // O que sobrou é o que basta: o evento de troca de conversa da própria
+    // wa-js. É de graça, é exato, e é o que o ZapVoice usa.
     try {
       const onChat = () => { _itensSincronizar(); };
       if (window.WPP && WPP.ev && WPP.ev.addListener) {
@@ -13937,7 +13961,10 @@
   // nada: le o que o WhatsApp Web ja tem em memoria. O objetivo e ter o numero,
   // nao te-lo ao vivo — e medicao que custa recurso vira a primeira coisa que
   // alguem desliga.
-  const _TEMPO_RESP_MS = 20 * 60 * 1000;
+  // De hora em hora, não de 20 em 20 min: é um número que muda devagar, e
+  // medição que compete com o atendimento é a primeira coisa que alguém
+  // desliga — com razão.
+  const _TEMPO_RESP_MS = 60 * 60 * 1000;
   let _tempoRespTimer = null;
 
   async function medirEEnviarTempoResposta() {
