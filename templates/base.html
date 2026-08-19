@@ -417,6 +417,42 @@
   .metrica.info .val { color:var(--azul); }
   .metrica.erro .val { color:var(--rosa); }
 
+  /* "i" DE CONCEITO DIFÍCIL — componente, não enfeite de uma tela só.
+     Regra do projeto: todo conceito que o corretor não usa no dia a dia
+     (mediana, p95, primeira resposta, agravo, coparticipação) leva um "i" ao
+     lado, explicado em linguagem de corretor. Fica aqui em base.html porque
+     vai se repetir: três cópias divergem na primeira mudança de cor.
+     É <button> e não <span> de propósito — chega pelo teclado e é lido em voz
+     alta como botão. */
+  .job-i { display:inline-flex; align-items:center; justify-content:center;
+    width:15px; height:15px; margin-left:5px; padding:0; border-radius:50%;
+    border:1px solid var(--borda); background:transparent; color:var(--cinza);
+    font-family:'Sora',sans-serif; font-size:10px; font-weight:700; line-height:1;
+    cursor:help; vertical-align:middle; position:relative;
+    transition:color 140ms var(--ease-saida,ease), border-color 140ms var(--ease-saida,ease); }
+  .job-i:hover, .job-i:focus-visible { color:var(--texto); border-color:var(--cinza); }
+  .job-i:active { transform:scale(.97); }
+  .job-i .job-i-txt { position:absolute; bottom:calc(100% + 7px); left:50%;
+    /* nasce de onde foi chamado, não do centro da tela */
+    transform-origin:bottom center; transform:translateX(-50%) scale(.95);
+    opacity:0; pointer-events:none;
+    width:max-content; max-width:250px; padding:8px 10px; border-radius:8px;
+    background:var(--panel); border:1px solid var(--borda);
+    box-shadow:0 6px 20px rgba(0,0,0,.28);
+    font-family:'Inter',sans-serif; font-size:11px; font-weight:400; line-height:1.45;
+    color:var(--texto); text-transform:none; letter-spacing:0; text-align:left;
+    z-index:60;
+    transition:opacity 150ms var(--ease-saida,ease), transform 150ms var(--ease-saida,ease); }
+  .job-i:hover .job-i-txt, .job-i:focus-visible .job-i-txt {
+    opacity:1; transform:translateX(-50%) scale(1); }
+  /* Em toque o hover gruda no tap: ali a explicação vem do foco, não do dedo. */
+  @media (hover: none) { .job-i:hover .job-i-txt { opacity:0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .job-i .job-i-txt { transition:opacity 150ms linear; transform:translateX(-50%); }
+    .job-i:hover .job-i-txt, .job-i:focus-visible .job-i-txt { transform:translateX(-50%); }
+    .job-i:active { transform:none; }
+  }
+
   /* Regra da casa: NUNCA color:#fff em elemento que vive sobre fundo claro no
      tema claro. Use var(--texto), que vira branco no escuro e escuro no claro.
      Branco literal so vale onde o fundo e escuro NOS DOIS temas — a sidebar, o
