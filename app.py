@@ -50245,50 +50245,55 @@ def _migrar_motivo_recusa_corretor():
         if conn is not None:
             close_db(conn)
 
-    # FILA: conserta o carimbo de hora das mensagens que ainda nao sairam.
-    #
-    # criado_em vinha do default do banco (CURRENT_TIMESTAMP = UTC), mas o
-    # vencimento compara com horario de Sao Paulo. Resultado: mensagem recem
-    # criada aparecia com idade NEGATIVA e ficava ~3h imune ao prazo — a trava
-    # que nasceu do incidente de 18/08 so comecava a valer 3h depois do devido.
-    # Os inserts agora carimbam em SP; aqui ficam as linhas ja gravadas.
-    #
-    # Toca so no que ainda pode sair (pendente/enviando) e so no que esta no
-    # futuro (sinal inequivoco do desvio). Historico fica como esta.
+def _migrar_fila_criado_em_utc():
+    """Conserta o carimbo de hora das mensagens da fila que ainda nao sairam.
+
+    criado_em vinha do default do banco (CURRENT_TIMESTAMP = UTC), mas o
+    vencimento compara com horario de Sao Paulo. Mensagem recem criada aparecia
+    com idade NEGATIVA e ficava ~3h imune ao prazo. Os inserts ja carimbam em
+    SP; aqui ficam as linhas gravadas antes disso.
+
+    FUNCAO PROPRIA DE PROPOSITO. Na primeira tentativa isto morava no fim de
+    _migrar_motivo_recusa_corretor(), que retorna cedo quando a flag dela ja
+    existe — em producao ela existia, entao este bloco nunca era alcancado e a
+    migracao passou despercebida ate eu conferir o flag no banco. Migracao
+    pendurada em migracao alheia herda o early-return dela.
+
+    Toca so no que ainda pode sair (pendente/enviando) e so no que esta no
+    futuro, sinal inequivoco do desvio. Historico fica como esta.
+    """
     conn = None
     try:
         conn = db()
-        ja = conn.execute("SELECT 1 FROM meta_flags WHERE k='fila_criado_em_utc_20260819'").fetchone()
-        if not ja:
-            agora_sp = datetime.now(TZ_SP)
-            n_fix = 0
-            pend = conn.execute("""SELECT id, criado_em FROM whatsapp_extensao_fila
-                WHERE status IN ('pendente','enviando')""").fetchall()
-            for r in [dict(x) for x in pend]:
-                nasceu = _parse_dt_seguro(r.get('criado_em'))
-                if not nasceu:
-                    continue
-                if nasceu.tzinfo is None:
-                    nasceu = TZ_SP.localize(nasceu)
-                # so o que esta no futuro: nenhuma mensagem nasce depois de agora
-                if nasceu <= agora_sp:
-                    continue
-                # O valor gravado era hora UTC, mas foi lido como se fosse SP.
-                # SP e UTC-3, entao somar o offset (negativo) devolve o instante
-                # real: 02:31 lido como SP + (-3h) = 23:31, que e quando de fato
-                # nasceu. Somar +3 dobraria o erro em vez de desfaze-lo.
-                corrigido = nasceu + agora_sp.utcoffset()
-                conn.execute("UPDATE whatsapp_extensao_fila SET criado_em=? WHERE id=?",
-                             (corrigido.strftime('%Y-%m-%d %H:%M:%S'), r['id']))
-                n_fix += 1
-            conn.execute("INSERT INTO meta_flags (k) VALUES ('fila_criado_em_utc_20260819')")
-            conn.commit()
-            print(f"[FILA_TZ] {n_fix} mensagem(ns) pendente(s) com carimbo de hora corrigido")
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        if conn.execute("SELECT 1 FROM meta_flags WHERE k='fila_criado_em_utc_20260819'").fetchone():
+            return
+        agora_sp = datetime.now(TZ_SP)
+        n_fix = 0
+        pend = conn.execute("""SELECT id, criado_em FROM whatsapp_extensao_fila
+            WHERE status IN ('pendente','enviando')""").fetchall()
+        for r in [dict(x) for x in pend]:
+            nasceu = _parse_dt_seguro(r.get('criado_em'))
+            if not nasceu:
+                continue
+            if nasceu.tzinfo is None:
+                nasceu = TZ_SP.localize(nasceu)
+            if nasceu <= agora_sp:
+                continue
+            # O valor gravado era hora UTC lida como SP. SP e UTC-3, entao somar
+            # o offset (negativo) devolve o instante real: 02:31 + (-3h) = 23:31.
+            corrigido = nasceu + agora_sp.utcoffset()
+            conn.execute("UPDATE whatsapp_extensao_fila SET criado_em=? WHERE id=?",
+                         (corrigido.strftime('%Y-%m-%d %H:%M:%S'), r['id']))
+            n_fix += 1
+        conn.execute("INSERT INTO meta_flags (k) VALUES ('fila_criado_em_utc_20260819')")
+        conn.commit()
+        print(f"[FILA_TZ] {n_fix} mensagem(ns) pendente(s) com carimbo de hora corrigido")
     except Exception as e:
         if conn is not None:
             try: conn.rollback()
             except Exception: pass
-        print(f"[FILA_TZ] migração pulada: {e}")
+        print(f"[FILA_TZ] migracao pulada: {e}")
     finally:
         if conn is not None:
             try: close_db(conn)
@@ -50428,6 +50433,7 @@ _backfill_telefone_canonico()
 # Depois do canonico: ele padroniza o que existe, este preenche o que faltava.
 _backfill_telefone_norm_vazio()
 _migrar_motivo_recusa_corretor()
+_migrar_fila_criado_em_utc()
 
 
 # ─── BACKFILL das notas da extensão ↔ lead (31/07/2026) ──────────────────────

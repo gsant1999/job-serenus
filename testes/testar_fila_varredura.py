@@ -115,21 +115,42 @@ checa('funil de 30 min venceu', status(velho_funil) == 'cancelado_atraso', statu
 checa('o de 2 min continua de pé', status(novo_pago) == 'pendente', status(novo_pago))
 
 print('\n4) Quem ficou sem mensagem vira pendência (ninguém morre calado)')
+# A pendência vive em `notificacoes` (tipo='pendencia'), não numa tabela
+# separada. A primeira versão deste teste consultava `pendencias`, engolia o
+# erro de tabela inexistente e passava com -1: teste que passa por acidente é
+# pior que teste nenhum, porque dá sensação de cobertura sem cobrir nada.
 with A.app.app_context():
     conn = A.db()
-    try:
-        pend = conn.execute("SELECT COUNT(*) n FROM pendencias WHERE chave LIKE 'wa_fila_venceu:%'").fetchone()['n']
-    except Exception:
-        pend = -1
+    linhas = [dict(x) for x in conn.execute(
+        "SELECT usuario_id, titulo, severidade FROM notificacoes "
+        "WHERE chave LIKE 'wa_fila_venceu:%' AND tipo='pendencia'").fetchall()]
     A.close_db(conn)
-checa('abriu pendência para os vencidos', pend != 0, f'{pend} pendência(s)')
+checa('abriu pendência para cada vencido', len(linhas) >= 2, f'{len(linhas)} pendência(s)')
+checa('lead pago é tratado como erro, não aviso',
+      any(x['severidade'] == 'erro' for x in linhas))
+checa('a pendência vai para o dono da mensagem',
+      bool(linhas) and all(x['usuario_id'] == 2 for x in linhas),
+      str([x['usuario_id'] for x in linhas]))
+checa('o texto chega acentuado ao consultor',
+      any('não' in (x['titulo'] or '') for x in linhas),
+      str([(x['titulo'] or '')[:40] for x in linhas]))
 
 print('\n5) A varredura tem rede de segurança contra restart')
 checa('roda no agendador', "sched.add_job(_varrer_fila_vencida" in fonte)
 checa('e também por request (APScheduler morre em restart)', '_varrer_fila_throttled()' in fonte)
 checa('o throttle é de 5 min', '_VARREDURA_FILA_INTERVALO = 300' in fonte)
 
-print('\n6) Varrer duas vezes não reabre nem duplica')
+print('\n6) A migração do fuso é função própria, não pendurada em outra')
+checa('existe função própria', 'def _migrar_fila_criado_em_utc():' in fonte)
+checa('é chamada no startup', '\n_migrar_fila_criado_em_utc()' in fonte)
+# Pendurar migração em migração alheia herda o early-return dela: foi assim que
+# a primeira versão nunca rodou em produção.
+_ini = fonte.find('def _migrar_motivo_recusa_corretor():')
+_fim = fonte.find('\ndef ', _ini + 10)
+checa('não vive dentro da migração que retorna cedo',
+      'fila_criado_em_utc' not in fonte[_ini:_fim])
+
+print('\n7) Varrer duas vezes não reabre nem duplica')
 with A.app.app_context():
     conn = A.db()
     n2 = A._wa_fila_vencer_atrasados(conn)
