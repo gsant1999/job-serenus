@@ -1336,6 +1336,96 @@
     return '<svg viewBox="0 0 24 24" width="' + s + '" height="' + s + '" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' + p + '</svg>';
   }
 
+  // ══════════════════════════════════════════════════════════════════════
+  //  BARRA DE MENSAGEM — atalho colado no campo de digitar
+  //
+  //  POR QUE EXISTE, SE JÁ TEM O TRILHO
+  //  O trilho fica na borda da tela. Quem está com a mão no teclado
+  //  respondendo cliente precisa tirar o olho do campo e ir até a lateral pra
+  //  buscar um áudio salvo. É a distância que o consultor paga dezenas de
+  //  vezes por dia. Padrão observado na WaSpeed, que o Guilherme pediu.
+  //
+  //  UMA SUPERFÍCIE SÓ. Estes botões abrem o MESMO painel docado do trilho,
+  //  na mesma seção. A crítica central à WaSpeed foi justamente esta: os
+  //  ícones dela abrem três coisas diferentes (menu flutuante, painel
+  //  encaixado, modal central), e o usuário nunca aprende onde as coisas vão
+  //  aparecer. Aqui o atalho muda o CAMINHO, nunca o destino.
+  //
+  //  COMO SOBREVIVE À ATUALIZAÇÃO DO WHATSAPP
+  //  A WaSpeed se pendura em classe gerada pelo Meta (`x1n2onr6`) e em
+  //  `nth-child(6)` — quebra a cada release, e foi o que a auditoria mostrou
+  //  (leva ~8s pra aparecer, às vezes não aparece). Aqui a âncora passa pelo
+  //  _qsRemoto: lista de seletores com alternativa, corrigível pelo site sem
+  //  deploy nem loja. E se nenhum casar, a barra simplesmente não nasce — o
+  //  trilho continua ali, e o WhatsApp não quebra.
+  const _BARRA_ID = 'job-barra-msg';
+  const _BARRA_ITENS = [
+    { secao: 'mensagens', ico: _ICO_MENSAGENS, rotulo: 'Modelos salvos' },
+    { secao: 'funis', ico: _ICO_FUNIS, rotulo: 'Funis' },
+    { secao: 'ficha', ico: _ICO_CRM, rotulo: 'Ficha do lead' },
+    { secao: 'cotacao', ico: _ICO_COTACAO, rotulo: 'Cotação' },
+  ];
+
+  function _barraAncora() {
+    // O rodapé da conversa. Só existe com conversa aberta — é o que faz a
+    // barra aparecer e sumir junto com o campo de digitar, sem código extra.
+    return _qsRemoto('rodapeConversa', ['#main footer', 'footer.copyable-area', '#main > footer']);
+  }
+
+  function montarBarraMensagem() {
+    try {
+      const ancora = _barraAncora();
+      if (!ancora) { const v = document.getElementById(_BARRA_ID); if (v) v.remove(); return; }
+      const ja = document.getElementById(_BARRA_ID);
+      // Se já está no lugar certo, não recria: recriar a cada mutação do
+      // WhatsApp piscaria a barra na cara de quem está digitando.
+      if (ja && ja.parentElement === ancora.parentElement && ja.nextElementSibling === ancora) return;
+      if (ja) ja.remove();
+
+      const barra = document.createElement('div');
+      barra.id = _BARRA_ID;
+      barra.className = 'job-barra';
+      barra.setAttribute('role', 'toolbar');
+      barra.setAttribute('aria-label', 'Atalhos do JOB');
+      barra.innerHTML =
+        '<span class="job-barra-marca" aria-hidden="true">JOB</span>' +
+        _BARRA_ITENS.map((i) =>
+          '<button type="button" class="job-barra-btn" data-secao="' + i.secao + '" ' +
+            'title="' + i.rotulo + '" aria-label="' + i.rotulo + '">' +
+            '<span class="job-barra-ico" aria-hidden="true">' + i.ico + '</span>' +
+            '<span class="job-barra-txt">' + i.rotulo + '</span>' +
+          '</button>').join('');
+
+      barra.addEventListener('click', (ev) => {
+        const b = ev.target && ev.target.closest && ev.target.closest('.job-barra-btn');
+        if (!b) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        try { abrirSecao(b.dataset.secao); } catch (e) { _falhaTecnica('barra de mensagem', e); }
+      });
+
+      // ANTES do rodapé, não dentro: dentro, o WhatsApp reescreve o rodapé
+      // inteiro ao trocar de conversa e leva a barra junto.
+      ancora.parentElement.insertBefore(barra, ancora);
+    } catch (e) { /* a barra é conveniência: nunca pode derrubar a extensão */ }
+  }
+
+  function iniciarBarraMensagem() {
+    montarBarraMensagem();
+    // O WhatsApp recria o rodapé ao trocar de conversa. Observar o container
+    // e remontar é o que faz a barra não sumir depois da primeira troca.
+    try {
+      const alvo = _qsRemoto('mainContainer', ['#main']) || document.body;
+      const obs = new MutationObserver(() => {
+        clearTimeout(_barraDebounce);
+        _barraDebounce = setTimeout(montarBarraMensagem, 250);
+      });
+      obs.observe(alvo, { childList: true, subtree: true });
+      _aoLimpar(() => { try { obs.disconnect(); } catch (e) {} clearTimeout(_barraDebounce); });
+    } catch (e) { /* sem observer a barra ainda funciona na conversa atual */ }
+  }
+  let _barraDebounce = null;
+
   function criarTrilho() {
     if (document.getElementById('job-trilho')) return;
     const trilho = document.createElement('div');
@@ -13460,6 +13550,9 @@
   }).catch(() => {});
   carregarPreferenciaLado().then(() => {
     criarTrilho();
+    // Atalho colado no campo de digitar. Nasce depois do trilho porque abre as
+    // mesmas seções dele — se o trilho falhar, a barra não teria pra onde ir.
+    iniciarBarraMensagem();
     // O portão é avaliado assim que a barra existe. Sem credencial nenhuma, o
     // WhatsApp fica embaçado até a pessoa entrar (ou desligar a extensão).
     _conferirPortao();
