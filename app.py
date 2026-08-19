@@ -24928,60 +24928,90 @@ Serenus pelo contato abaixo.</p>
     return Response(html, mimetype='text/html')
 
 
-def _extensao_lista_arquivos():
-    """O que entra no zip, LIDO DO MANIFEST — não escrito à mão.
+def _extensao_nome_seguro(nome):
+    """Nome que pode virar caminho DENTRO da pasta da extensão — e nada além.
+
+    A lista de arquivos é a tranca da rota `/extensao/arquivo/<nome>`. Agora que
+    ela é deduzida também do HTML, quem escreve um `src` numa página escreve,
+    indiretamente, o que o servidor aceita entregar. Então todo nome deduzido
+    passa por aqui antes de entrar na lista: nada de caminho absoluto, `..`,
+    barra invertida ou esquema (`http:`, `data:`).
+    """
+    if not nome or nome[0] in '/\\':
+        return False
+    if '\\' in nome or ':' in nome:
+        return False
+    return all(p and p not in ('.', '..') for p in nome.split('/'))
+
+
+_RE_EXTENSAO_ASSET = re.compile(r"""(?:src|href)\s*=\s*["']([^"']+)["']""", re.I)
+
+
+def _extensao_assets_do_html(base, paginas):
+    """O que o HTML pede e o manifest não tem como saber.
+
+    `popup.html` carrega `popup.js`; `painel.html` carrega `painel.css` e
+    `painel.js`. Nada disso está no manifest — ele declara a PÁGINA, não o que
+    ela puxa depois. `popup.js` estava resolvido do jeito frágil (escrito à mão
+    na lista) e por isso o painel nativo repetiu o erro sozinho: o manifest
+    ganhou `side_panel`, o pacote não ganhou `painel.html`, e o Chrome passou a
+    recusar a extensão inteira com "Side panel file path must exist" — quebrando
+    na máquina do consultor, no meio da atualização, não aqui.
+
+    Ler o HTML fecha o assunto: quem for referenciado numa página do pacote
+    entra no pacote, sem ninguém precisar lembrar.
+    """
+    achados = set()
+    fila = [p for p in paginas if p.lower().endswith('.html')]
+    vistas = set()
+    while fila:
+        pagina = fila.pop()
+        if pagina in vistas:
+            continue
+        vistas.add(pagina)
+        caminho = os.path.join(base, pagina)
+        if not os.path.exists(caminho):
+            continue
+        try:
+            with open(caminho, encoding='utf-8') as fh:
+                html = fh.read()
+        except Exception:
+            continue
+        pasta = os.path.dirname(pagina)
+        for ref in _RE_EXTENSAO_ASSET.findall(html):
+            ref = ref.split('#')[0].split('?')[0].strip()
+            # Só o que mora na pasta: link externo, `data:` e âncora não são arquivo.
+            if not ref or ':' in ref or '//' in ref:
+                continue
+            alvo = os.path.normpath(os.path.join(pasta, ref)).replace(os.sep, '/')
+            if not _extensao_nome_seguro(alvo):
+                continue
+            achados.add(alvo)
+            if alvo.lower().endswith('.html'):
+                fila.append(alvo)
+    return achados
+
+
+def _extensao_arquivos_exigidos():
+    """O que o Chrome vai procurar na pasta, LIDO DO MANIFEST — não escrito à mão.
 
     Esta lista era fixa e ficou velha três vezes: primeiro quando a extensão
-    ganhou site-bridge/painel-bridge/cotador-painel, e agora com a pasta
+    ganhou site-bridge/painel-bridge/cotador-painel, depois com a pasta
     `logos/`, que fez a página de instalação recusar o pacote inteiro. O aviso
     ficou registrado no próprio código ("lista escrita à mão vira mentira
     silenciosa") e mesmo assim se repetiu — porque manter duas verdades em
     lugares diferentes não é questão de atenção, é questão de tempo.
 
-    Agora o manifest é a única fonte: quem declarar um arquivo lá o recebe no
-    zip, sem ninguém lembrar de nada. `popup.js` entra à parte porque é
-    carregado pelo HTML do popup, não pelo manifest — o manifest não tem como
-    saber dele.
+    Por isso nenhum nome é digitado aqui. Sai tudo de duas fontes que já são a
+    verdade: o manifest (o que o Chrome carrega) e o HTML das páginas do pacote
+    (o que a página puxa depois de carregada, que o manifest não enxerga).
     """
     base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'extensao-whatsapp')
-    nomes = {'manifest.json', 'popup.js'}
-    try:
-        d = json.load(open(os.path.join(base, 'manifest.json')))
-    except Exception:
-        return sorted(nomes)
-    for cs in d.get('content_scripts', []):
-        nomes.update(cs.get('js', []))
-        nomes.update(cs.get('css', []))
-    for r in d.get('web_accessible_resources', []):
-        nomes.update(r.get('resources', []))
-    sw = (d.get('background') or {}).get('service_worker')
-    if sw:
-        nomes.add(sw)
-    pop = (d.get('action') or {}).get('default_popup')
-    if pop:
-        nomes.add(pop)
-    nomes.update((d.get('icons') or {}).values())
-    return sorted(n for n in nomes if os.path.exists(os.path.join(base, n)))
-
-
-# Mantido como NOME por compatibilidade com quem já lê a constante; o valor
-# agora vem do manifest.
-_EXTENSAO_ARQUIVOS = _extensao_lista_arquivos()
-
-
-def _extensao_arquivos_faltando():
-    """Confere o zip contra o manifest ANTES de servir. Existe porque esta lista
-    ficou pra tras quando a extensao ganhou site-bridge.js, painel-bridge.js e
-    cotador-painel.js: o download entregava um pacote que o proprio manifest
-    referenciava mas nao continha, e o Chrome recusava a instalacao inteira com
-    'Nao foi possivel carregar site-bridge.js'. Lista escrita a mao vira mentira
-    silenciosa — aqui ela e checada contra a verdade, que e o manifest."""
-    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'extensao-whatsapp')
-    try:
-        d = json.load(open(os.path.join(base, 'manifest.json')))
-    except Exception:
-        return []
     exigidos = {'manifest.json'}
+    try:
+        d = json.load(open(os.path.join(base, 'manifest.json')))
+    except Exception:
+        return exigidos
     for cs in d.get('content_scripts', []):
         exigidos.update(cs.get('js', []))
         exigidos.update(cs.get('css', []))
@@ -24990,17 +25020,45 @@ def _extensao_arquivos_faltando():
     sw = (d.get('background') or {}).get('service_worker')
     if sw:
         exigidos.add(sw)
-    pop = (d.get('action') or {}).get('default_popup')
-    if pop:
-        exigidos.add(pop)
+    # Toda página que o manifest aponta. `side_panel` entrou na lista depois de
+    # derrubar a instalação de um consultor por estar de fora dela.
+    for pagina in ((d.get('action') or {}).get('default_popup'),
+                   (d.get('side_panel') or {}).get('default_path'),
+                   d.get('options_page'),
+                   (d.get('options_ui') or {}).get('page')):
+        if pagina:
+            exigidos.add(pagina)
     exigidos.update((d.get('icons') or {}).values())
-    # Falta = o manifest pede, e o zip nao leva (ou o arquivo nem existe no disco).
-    # Recalcula em vez de usar a constante congelada no import: em dev o arquivo
-    # muda com o servidor de pé, e comparar com uma foto velha esconde o erro
-    # justamente quando ele acabou de ser criado.
-    atuais = _extensao_lista_arquivos()
-    return sorted(n for n in exigidos
-                  if n not in atuais or not os.path.exists(os.path.join(base, n)))
+    exigidos.update(_extensao_assets_do_html(base, exigidos))
+    return {n for n in exigidos if _extensao_nome_seguro(n)}
+
+
+def _extensao_lista_arquivos():
+    """O que entra no zip: o exigido que existe mesmo no disco."""
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'extensao-whatsapp')
+    return sorted(n for n in _extensao_arquivos_exigidos()
+                  if os.path.exists(os.path.join(base, n)))
+
+
+# Mantido como NOME por compatibilidade com quem já lê a constante; o valor
+# agora vem do manifest.
+_EXTENSAO_ARQUIVOS = _extensao_lista_arquivos()
+
+
+def _extensao_arquivos_faltando():
+    """Confere o pacote ANTES de servir. Existe porque esta lista ficou pra trás
+    quando a extensao ganhou site-bridge.js, painel-bridge.js e
+    cotador-painel.js: o download entregava um pacote que o proprio manifest
+    referenciava mas nao continha, e o Chrome recusava a instalacao inteira com
+    'Nao foi possivel carregar site-bridge.js'. Lista escrita a mao vira mentira
+    silenciosa — aqui ela e checada contra a verdade, que e o manifest.
+
+    Recalcula em vez de usar a constante congelada no import: em dev o arquivo
+    muda com o servidor de pé, e comparar com uma foto velha esconde o erro
+    justamente quando ele acabou de ser criado."""
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'extensao-whatsapp')
+    return sorted(n for n in _extensao_arquivos_exigidos()
+                  if not os.path.exists(os.path.join(base, n)))
 
 
 def _extensao_versao_dev():
