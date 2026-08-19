@@ -241,6 +241,10 @@ def _auto_pull_leads_no_request():
         _auto_pull_leads_throttled()
     except Exception:
         pass
+    try:
+        _varrer_fila_throttled()
+    except Exception:
+        pass
 
 
 # O scheduler real (backup 22:00 + import de leads) é _iniciar_scheduler_backup,
@@ -11317,9 +11321,10 @@ def _campanha_enfileirar(conn, campanha_id, texto_fallback='', apto_ids=None):
                 continue
             texto = _preencher_texto(_rnd.choice(msgs), ct['nome'])
             conn.execute("""INSERT INTO whatsapp_extensao_fila
-                (lead_id, responsavel_id, telefone, chat_id, tipo, texto, origem, criado_por)
-                VALUES (?,?,?,?,?,?,'campanha',?)""",
-                (None, cid, ct['telefone'] or ct['telefone_norm'], chat_id, 'texto', texto, cid))
+                (lead_id, responsavel_id, telefone, chat_id, tipo, texto, origem, criado_por, criado_em)
+                VALUES (?,?,?,?,?,?,'campanha',?,?)""",
+                (None, cid, ct['telefone'] or ct['telefone_norm'], chat_id, 'texto', texto, cid,
+                 _agora_sp()))
             fila_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
                        else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
             conn.execute("UPDATE campanha_contato SET status='enfileirado', fila_id=? WHERE id=?", (fila_id, ct['id']))
@@ -11392,10 +11397,11 @@ def _campanha_disparar_funil(conn, contato):
         texto = _preencher_texto(p['corpo_texto'] or '', contato['nome'])
         liberar = (agora + _td(seconds=acc)).strftime('%Y-%m-%d %H:%M:%S')
         conn.execute("""INSERT INTO whatsapp_extensao_fila
-            (lead_id, responsavel_id, telefone, chat_id, tipo, texto, midia_arquivo, origem, criado_por, liberar_em)
-            VALUES (?,?,?,?,?,?,?,'campanha_funil',?,?)""",
+            (lead_id, responsavel_id, telefone, chat_id, tipo, texto, midia_arquivo, origem, criado_por, liberar_em, criado_em)
+            VALUES (?,?,?,?,?,?,?,'campanha_funil',?,?,?)""",
             (None, contato['consultor_id'], contato['telefone'] or contato['telefone_norm'], chat_id,
-             tipo, texto, (p['midia_arquivo'] if tipo != 'texto' else None), contato['consultor_id'], liberar))
+             tipo, texto, (p['midia_arquivo'] if tipo != 'texto' else None), contato['consultor_id'], liberar,
+             _agora_sp()))
         n += 1
         acc += max(3, int(p['delay_segundos'] or 5)) + _rnd.uniform(2, 10)  # próximo passo
     conn.execute("UPDATE campanha_contato SET funil_em=? WHERE id=?", (_agora_sp(), contato['id']))
@@ -11497,10 +11503,11 @@ def _lead_atender_com_funil(conn, lead_id, usuario_id):
         texto = _preencher_texto(p['corpo_texto'] or '', lead['nome'], agora)
         liberar = (agora + _td(seconds=acc)).strftime('%Y-%m-%d %H:%M:%S')
         conn.execute("""INSERT INTO whatsapp_extensao_fila
-            (lead_id, responsavel_id, telefone, chat_id, tipo, texto, midia_arquivo, origem, criado_por, liberar_em)
-            VALUES (?,?,?,?,?,?,?,'atendimento_manual',?,?)""",
+            (lead_id, responsavel_id, telefone, chat_id, tipo, texto, midia_arquivo, origem, criado_por, liberar_em, criado_em)
+            VALUES (?,?,?,?,?,?,?,'atendimento_manual',?,?,?)""",
             (lead_id, usuario_id, lead['telefone'] or lead['telefone_norm'], chat_id,
-             tipo, texto, (p['midia_arquivo'] if tipo != 'texto' else None), usuario_id, liberar))
+             tipo, texto, (p['midia_arquivo'] if tipo != 'texto' else None), usuario_id, liberar,
+             _agora_sp()))
         n += 1
         acc += max(2, int(p['delay_segundos'] or 3))  # espaça os passos (sem delay artificial no 1º)
     conn.execute("UPDATE crm_leads SET atendido_em=? WHERE id=? AND atendido_em IS NULL", (_agora_sp(), lead_id))
@@ -11529,9 +11536,10 @@ def _atender_lead_pago_auto(conn, lead_id):
         return False
     texto = _lead_pago_opener(conn, uid, lead['nome'])
     conn.execute("""INSERT INTO whatsapp_extensao_fila
-        (lead_id, responsavel_id, telefone, chat_id, tipo, texto, origem, criado_por)
-        VALUES (?,?,?,?,?,?,'lead_pago',?)""",
-        (lead_id, uid, lead['telefone'] or lead['telefone_norm'], chat_id, 'texto', texto, uid))
+        (lead_id, responsavel_id, telefone, chat_id, tipo, texto, origem, criado_por, criado_em)
+        VALUES (?,?,?,?,?,?,'lead_pago',?,?)""",
+        (lead_id, uid, lead['telefone'] or lead['telefone_norm'], chat_id, 'texto', texto, uid,
+         _agora_sp()))
     conn.execute("UPDATE crm_leads SET atendido_em=? WHERE id=?", (_agora_sp(), lead_id))
     conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
         VALUES (?,?,?,?,?)""",
@@ -25355,9 +25363,10 @@ def crm_lead_whatsapp_extensao_enfileirar(lid):
     if not chat_id:
         close_db(conn); return jsonify({"ok": False, "erro": "Lead sem telefone válido"}), 400
     conn.execute("""INSERT INTO whatsapp_extensao_fila
-        (lead_id, responsavel_id, telefone, chat_id, tipo, texto, origem, criado_por)
-        VALUES (?,?,?,?,'texto',?,'crm_lead',?)""",
-        (lid, ld['responsavel_id'], ld['telefone'], chat_id, texto, session.get('user_id')))
+        (lead_id, responsavel_id, telefone, chat_id, tipo, texto, origem, criado_por, criado_em)
+        VALUES (?,?,?,?,'texto',?,'crm_lead',?,?)""",
+        (lid, ld['responsavel_id'], ld['telefone'], chat_id, texto, session.get('user_id'),
+         _agora_sp()))
     fila_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
                else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
     conn.commit(); close_db(conn)
@@ -25377,6 +25386,73 @@ def crm_lead_whatsapp_extensao_status(lid):
     if not item or item['lead_id'] != lid:
         return jsonify({"ok": False, "erro": "Não encontrado"}), 404
     return jsonify({"ok": True, "status": item['status'], "erro": item['erro']})
+
+
+def _wa_fila_vencer_atrasados(conn, usuario_id=None, agora=None):
+    """Vence o que passou do prazo e abre pendencia pra cada um. Devolve quantos.
+
+    MORA FORA DA ROTA DE PROPOSITO. Ate 19/08/2026 esta logica so rodava dentro
+    de /fila/proximo — ou seja, so quando a extensao perguntava se tinha algo
+    pra mandar. Quem tinha a extensao PARADA nunca disparava o vencimento: as
+    mensagens ficavam 'pendente' indefinidamente, sem sair e sem avisar
+    ninguem. Foi o que aconteceu com 5 aberturas de lead pago da Aline e da
+    Bianca, presas de 8 a 15 horas — leads que a Serenus pagou e que ficaram
+    sem primeira mensagem, em silencio.
+
+    Depender do componente quebrado pra reportar a propria quebra e a receita
+    da falha silenciosa. Agora o servidor varre sozinho, de tempos em tempos,
+    independente de qualquer extensao estar viva.
+
+    usuario_id=None varre TODO MUNDO (e o que a rotina agendada faz).
+    """
+    agora = agora or datetime.now(TZ_SP)
+    if usuario_id:
+        vencidos = conn.execute("""SELECT id, origem, telefone, lead_id, criado_em, responsavel_id
+            FROM whatsapp_extensao_fila
+            WHERE responsavel_id=? AND status IN ('pendente','enviando')""",
+            (usuario_id,)).fetchall()
+    else:
+        vencidos = conn.execute("""SELECT id, origem, telefone, lead_id, criado_em, responsavel_id
+            FROM whatsapp_extensao_fila
+            WHERE status IN ('pendente','enviando')""").fetchall()
+    n_venc = 0
+    for v in [dict(x) for x in vencidos]:
+        dono = v.get('responsavel_id') or usuario_id
+        limite_min = _wa_fila_validade_min(v.get('origem'))
+        nasceu = _parse_dt_seguro(v.get('criado_em'))
+        if not nasceu:
+            continue
+        if nasceu.tzinfo is None:
+            nasceu = TZ_SP.localize(nasceu)
+        idade_min = (agora - nasceu).total_seconds() / 60.0
+        if idade_min < limite_min:
+            continue
+        conn.execute("""UPDATE whatsapp_extensao_fila SET status='cancelado_atraso', erro=?
+            WHERE id=? AND status IN ('pendente','enviando')""",
+            (f'Não enviado: passou de {limite_min} min na fila. Mensagem atrasada '
+             'chega descolada da conversa, então o JOB prefere não mandar. '
+             'Se ainda faz sentido, mande na mão.', v['id']))
+        n_venc += 1
+        try:
+            tel = str(v.get('telefone') or '').strip()
+            eh_abertura = str(v.get('origem') or '') == 'lead_pago'
+            _pendencia_abrir(
+                conn,
+                chave=f"wa_fila_venceu:{v['id']}",
+                titulo=('Lead pago não recebeu a mensagem de abertura'
+                        if eh_abertura else 'Uma mensagem não chegou ao cliente'),
+                descricao=(f'Ficou {int(idade_min)} min na fila sem sair e venceu '
+                           f'(o limite deste tipo é {limite_min} min). '
+                           f'Telefone: {tel or "sem telefone"}.'),
+                como_resolver=('Fale com essa pessoa agora, na mão. Ela pediu cotação e '
+                               'está sem resposta desde então.' if eh_abertura else
+                               'Se a mensagem ainda faz sentido, mande na mão pela conversa.'),
+                link=(f'/crm/lead/{v["lead_id"]}' if v.get('lead_id') else '/configuracoes'),
+                severidade=('erro' if eh_abertura else 'atencao'),
+                usuario_id=dono)
+        except Exception as e:
+            app.logger.warning(f"[WA_FILA] pendencia do item {v['id']}: {e}")
+    return n_venc
 
 
 @app.route('/api/whatsapp/fila/proximo', methods=['GET', 'OPTIONS'])
@@ -25452,46 +25528,7 @@ def api_whatsapp_fila_proximo():
         # vencimento vira pendencia no sino com o telefone do cliente. O
         # consultor pode nao conseguir mandar na hora — mas nunca mais fica
         # sem saber.
-        vencidos = conn.execute("""SELECT id, origem, telefone, lead_id, criado_em
-            FROM whatsapp_extensao_fila
-            WHERE responsavel_id=? AND status IN ('pendente','enviando')""",
-            (usuario_id,)).fetchall()
-        n_venc = 0
-        for v in [dict(x) for x in vencidos]:
-            limite_min = _wa_fila_validade_min(v.get('origem'))
-            nasceu = _parse_dt_seguro(v.get('criado_em'))
-            if not nasceu:
-                continue
-            if nasceu.tzinfo is None:
-                nasceu = TZ_SP.localize(nasceu)
-            idade_min = (agora - nasceu).total_seconds() / 60.0
-            if idade_min < limite_min:
-                continue
-            conn.execute("""UPDATE whatsapp_extensao_fila SET status='cancelado_atraso', erro=?
-                WHERE id=? AND status IN ('pendente','enviando')""",
-                (f'Nao enviado: passou de {limite_min} min na fila. Mensagem atrasada '
-                 'chega descolada da conversa, entao o JOB prefere nao mandar. '
-                 'Se ainda faz sentido, mande na mao.', v['id']))
-            n_venc += 1
-            try:
-                tel = str(v.get('telefone') or '').strip()
-                eh_abertura = str(v.get('origem') or '') == 'lead_pago'
-                _pendencia_abrir(
-                    conn,
-                    chave=f"wa_fila_venceu:{v['id']}",
-                    titulo=('Lead pago não recebeu a mensagem de abertura'
-                            if eh_abertura else 'Uma mensagem não chegou ao cliente'),
-                    descricao=(f'Ficou {int(idade_min)} min na fila sem sair e venceu '
-                               f'(o limite deste tipo é {limite_min} min). '
-                               f'Telefone: {tel or "sem telefone"}.'),
-                    como_resolver=('Fale com essa pessoa agora, na mão. Ela pediu cotação e '
-                                   'está sem resposta desde então.' if eh_abertura else
-                                   'Se a mensagem ainda faz sentido, mande na mão pela conversa.'),
-                    link=(f'/crm/lead/{v["lead_id"]}' if v.get('lead_id') else '/configuracoes'),
-                    severidade=('erro' if eh_abertura else 'atencao'),
-                    usuario_id=usuario_id)
-            except Exception as e:
-                app.logger.warning(f"[WA_FILA] pendencia do item {v['id']}: {e}")
+        n_venc = _wa_fila_vencer_atrasados(conn, usuario_id, agora)
         if n_venc:
             conn.commit()
             app.logger.warning(f"[WA_FILA] {n_venc} item(ns) vencido(s) do consultor "
@@ -28964,9 +29001,10 @@ def api_whatsapp_enviar_direto():
         close_db(conn)
         return _wa_cors(jsonify({"ok": False, "erro": "Mensagem vazia"})), 400
     conn.execute("""INSERT INTO whatsapp_extensao_fila
-        (lead_id, responsavel_id, telefone, chat_id, tipo, texto, midia_arquivo, origem, criado_por)
-        VALUES (?,?,?,?,?,?,?,'extensao_direto',?)""",
-        (lead_id, usuario_id, telefone, chat_id, tipo, texto, midia_arquivo, usuario_id))
+        (lead_id, responsavel_id, telefone, chat_id, tipo, texto, midia_arquivo, origem, criado_por, criado_em)
+        VALUES (?,?,?,?,?,?,?,'extensao_direto',?,?)""",
+        (lead_id, usuario_id, telefone, chat_id, tipo, texto, midia_arquivo, usuario_id,
+         _agora_sp()))
     fila_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
                else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
     # Contabiliza uso do modelo (pra "mais usadas" na biblioteca).
@@ -29981,10 +30019,11 @@ def api_whatsapp_extensao_funil_disparar(fid):
         cur = conn.cursor()
         cur.execute("""INSERT INTO whatsapp_extensao_fila
             (lead_id, responsavel_id, telefone, chat_id, tipo, texto, midia_arquivo,
-             origem, criado_por, liberar_em)
-            VALUES (?,?,?,?,?,?,?,'funil_manual',?,?)""",
+             origem, criado_por, liberar_em, criado_em)
+            VALUES (?,?,?,?,?,?,?,'funil_manual',?,?,?)""",
             (lead_id, usuario_id, telefone, chat_id, tipo, (pd['corpo_texto'] or '')[:4000],
-             (pd['midia_arquivo'] if tipo != 'texto' else None), usuario_id, liberar))
+             (pd['midia_arquivo'] if tipo != 'texto' else None), usuario_id, liberar,
+             _agora_sp()))
         ids.append(_last_insert_id(cur))
     conn.execute("UPDATE whatsapp_funis SET vezes_disparado = COALESCE(vezes_disparado,0) + 1 WHERE id=?", (fid,))
     if lead_id:
@@ -45997,6 +46036,40 @@ def _fluxo_executar_passo(conn, passo, lead):
     return False, f'Canal desconhecido: {canal}', modelo_id
 
 
+def _varrer_fila_vencida():
+    """Vence a fila de envio sem depender de nenhuma extensao estar viva.
+
+    O vencimento sempre existiu, mas morava DENTRO de /fila/proximo — a rota
+    que a extensao chama. Consequencia perversa: exatamente o consultor cuja
+    extensao parou (o caso que mais importa) nunca disparava a checagem. As
+    mensagens dele ficavam 'pendente' pra sempre: nao saiam, nao venciam e nao
+    avisavam ninguem.
+
+    Foi assim que 5 aberturas de lead pago da Aline e da Bianca ficaram de 8 a
+    15 horas paradas — leads pagos sem primeira mensagem, e ninguem sabendo.
+
+    Roda de 5 em 5 minutos, varre todo mundo, e cada vencimento vira pendencia
+    no sino com o telefone de quem ficou sem resposta.
+    """
+    try:
+        conn = db()
+    except Exception as e:
+        app.logger.warning(f"[FILA_VARRE] sem banco: {e}")
+        return
+    try:
+        n = _wa_fila_vencer_atrasados(conn)
+        if n:
+            conn.commit()
+            app.logger.warning(f"[FILA_VARRE] {n} item(ns) vencido(s) — pendencia aberta pra cada um")
+    except Exception as e:
+        app.logger.warning(f"[FILA_VARRE] {e}")
+        try: conn.rollback()
+        except Exception: pass
+    finally:
+        try: close_db(conn)
+        except Exception: pass
+
+
 def _processar_fluxos_pendentes():
     """Motor de disparo: roda 1x/dia (+ fallback por request) e envia o passo
     pendente de cada inscrição ativa cujo proximo_envio_em já chegou.
@@ -48645,6 +48718,39 @@ def _enviar_conversoes_automatico():
         app.logger.warning(f"[ADS] envio automático falhou: {e}")
 
 
+_ULTIMA_VARREDURA_FILA = 0.0
+_VARREDURA_FILA_INTERVALO = 300  # 5 min, igual ao agendador
+
+
+def _varrer_fila_throttled():
+    """Rede de seguranca da varredura da fila, no mesmo molde do import de leads.
+
+    O APScheduler deste processo morre em restart (ver CLAUDE.md), e a Railway
+    reinicia sozinha. Se a varredura existisse SO no agendador, bastava um
+    restart pra ela sumir sem ninguem notar — e a fila voltaria a apodrecer em
+    silencio, que e exatamente o problema que ela veio resolver.
+
+    Roda no maximo 1x a cada 5 min, em thread, e nunca derruba a requisicao.
+    """
+    global _ULTIMA_VARREDURA_FILA
+    if MODO_TESTE:
+        return
+    agora = time.time()
+    if agora - _ULTIMA_VARREDURA_FILA < _VARREDURA_FILA_INTERVALO:
+        return
+    _ULTIMA_VARREDURA_FILA = agora
+
+    def _run():
+        try:
+            _varrer_fila_vencida()
+        except Exception as e:
+            app.logger.warning(f"[FILA_VARRE] thread: {e}")
+    try:
+        threading.Thread(target=_run, daemon=True).start()
+    except Exception as e:
+        app.logger.warning(f"[FILA_VARRE] nao consegui criar a thread: {e}")
+
+
 def _auto_pull_leads_throttled():
     global _ULTIMO_AUTO_PULL
     if MODO_TESTE:
@@ -48785,6 +48891,11 @@ def _iniciar_scheduler_backup():
         sched.add_job(_revisar_leads_do_dia, 'cron', hour=19, minute=0, max_instances=1)
         # Fluxos de nutrição do CRM: dispara os passos pendentes 1x/dia às 08:00 SP
         sched.add_job(_processar_fluxos_pendentes, 'cron', hour=8, minute=0, max_instances=1)
+        # Vencimento da fila de envio: de 5 em 5 min, INDEPENDENTE de extensao.
+        # Ficava dentro de /fila/proximo, entao consultor com extensao parada
+        # nunca vencia nada — as mensagens dele apodreciam em silencio.
+        sched.add_job(_varrer_fila_vencida, 'interval', minutes=5, max_instances=1,
+                      id='varrer_fila_vencida', replace_existing=True)
         # Envio das conversões: de hora em hora. O par (scheduler + gatilho por
         # request) é o mesmo do import de leads, e pelo mesmo motivo — o
         # APScheduler morre em restart, então nenhum dos dois sozinho basta.
@@ -50130,6 +50241,54 @@ def _migrar_motivo_recusa_corretor():
             try: conn.rollback()
             except Exception: pass
         print(f"[MOTIVO_RECUSA] migração pulada: {e}")
+    finally:
+        if conn is not None:
+            close_db(conn)
+
+    # FILA: conserta o carimbo de hora das mensagens que ainda nao sairam.
+    #
+    # criado_em vinha do default do banco (CURRENT_TIMESTAMP = UTC), mas o
+    # vencimento compara com horario de Sao Paulo. Resultado: mensagem recem
+    # criada aparecia com idade NEGATIVA e ficava ~3h imune ao prazo — a trava
+    # que nasceu do incidente de 18/08 so comecava a valer 3h depois do devido.
+    # Os inserts agora carimbam em SP; aqui ficam as linhas ja gravadas.
+    #
+    # Toca so no que ainda pode sair (pendente/enviando) e so no que esta no
+    # futuro (sinal inequivoco do desvio). Historico fica como esta.
+    conn = None
+    try:
+        conn = db()
+        ja = conn.execute("SELECT 1 FROM meta_flags WHERE k='fila_criado_em_utc_20260819'").fetchone()
+        if not ja:
+            agora_sp = datetime.now(TZ_SP)
+            n_fix = 0
+            pend = conn.execute("""SELECT id, criado_em FROM whatsapp_extensao_fila
+                WHERE status IN ('pendente','enviando')""").fetchall()
+            for r in [dict(x) for x in pend]:
+                nasceu = _parse_dt_seguro(r.get('criado_em'))
+                if not nasceu:
+                    continue
+                if nasceu.tzinfo is None:
+                    nasceu = TZ_SP.localize(nasceu)
+                # so o que esta no futuro: nenhuma mensagem nasce depois de agora
+                if nasceu <= agora_sp:
+                    continue
+                # O valor gravado era hora UTC, mas foi lido como se fosse SP.
+                # SP e UTC-3, entao somar o offset (negativo) devolve o instante
+                # real: 02:31 lido como SP + (-3h) = 23:31, que e quando de fato
+                # nasceu. Somar +3 dobraria o erro em vez de desfaze-lo.
+                corrigido = nasceu + agora_sp.utcoffset()
+                conn.execute("UPDATE whatsapp_extensao_fila SET criado_em=? WHERE id=?",
+                             (corrigido.strftime('%Y-%m-%d %H:%M:%S'), r['id']))
+                n_fix += 1
+            conn.execute("INSERT INTO meta_flags (k) VALUES ('fila_criado_em_utc_20260819')")
+            conn.commit()
+            print(f"[FILA_TZ] {n_fix} mensagem(ns) pendente(s) com carimbo de hora corrigido")
+    except Exception as e:
+        if conn is not None:
+            try: conn.rollback()
+            except Exception: pass
+        print(f"[FILA_TZ] migração pulada: {e}")
     finally:
         if conn is not None:
             try: close_db(conn)
