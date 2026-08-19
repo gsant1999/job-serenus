@@ -30247,7 +30247,7 @@ _deck_seq = 0
 def _deck_presenca(uid):
     return _DECK_PRESENCA.setdefault(int(uid), {
         'visto_em': 0.0, 'chat': None, 'modelos': [], 'funis': [],
-        'ipad_em': 0.0, 'intervalo': 2, 'rascunho': [],
+        'ipad_em': 0.0, 'intervalo': 2, 'rascunho': [], 'conversas': [],
     })
 
 
@@ -30299,6 +30299,16 @@ def api_deck_sincronizar():
         # As últimas falas da conversa aberta, para o iPad mostrar com quem você
         # está falando antes de disparar. Fica SÓ em memória: é conversa de
         # cliente de plano de saúde, não vira registro por causa de uma tela.
+        if isinstance(d.get('conversas'), list):
+            # Os nomes com quem o consultor falou nos últimos dias, para ele
+            # escolher o destino sem voltar ao computador. Só em memória.
+            pres['conversas'] = [
+                {'chatId': str(c.get('chatId') or '')[:80],
+                 'nome': str(c.get('nome') or '')[:80],
+                 'em': int(c.get('em') or 0)}
+                for c in d['conversas'][:40]
+                if isinstance(c, dict) and c.get('chatId')
+            ]
         if pres['chat'] is None:
             pres['rascunho'] = []
         elif isinstance(d.get('rascunho'), list):
@@ -30399,6 +30409,7 @@ def api_deck_whatsapp():
                 "ligada": _deck_ligada(pres),
                 "chat": pres['chat'],
                 "rascunho": pres['rascunho'],
+                "conversas": pres['conversas'],
                 "modelos": pres['modelos'],
                 "funis": pres['funis'],
             },
@@ -30425,10 +30436,29 @@ def api_deck_comando():
         if not _deck_ligada(pres):
             return jsonify({"erro": "A extensão do JOB não está falando com o deck. "
                                     "Abra o WhatsApp Web no Chrome."}), 409
-        if not pres['chat']:
-            return jsonify({"erro": "Nenhuma conversa aberta no WhatsApp Web."}), 409
+        # O DESTINO PODE SER ESCOLHIDO NA LISTA.
+        #
+        # Sem `chatId` no pedido vale a conversa aberta, que é o caso comum. Com
+        # ele, o iPad escolheu alguém da lista: a extensão abre aquela conversa
+        # antes de enviar, e confere que trocou mesmo antes de mandar.
+        alvo = str(d.get('chatId') or '').strip()
+        if alvo:
+            conhecidos = {c['chatId'] for c in pres['conversas']}
+            if pres['chat']:
+                conhecidos.add(pres['chat'].get('chatId'))
+            if alvo not in conhecidos:
+                return jsonify({"erro": "Essa conversa saiu da lista. "
+                                        "Atualize a tela e escolha de novo."}), 404
+            nome_alvo = next((c['nome'] for c in pres['conversas'] if c['chatId'] == alvo),
+                             None) or (pres['chat'] or {}).get('nome') or 'a conversa escolhida'
+        elif pres['chat']:
+            alvo = pres['chat'].get('chatId')
+            nome_alvo = pres['chat'].get('nome') or 'a conversa aberta'
+        else:
+            return jsonify({"erro": "Nenhuma conversa aberta no WhatsApp Web, e nenhuma "
+                                    "escolhida na lista."}), 409
 
-        dados = {"chatId": pres['chat'].get('chatId')}
+        dados = {"chatId": alvo}
         if tipo == 'modelo':
             mid = str(d.get('id') or '')
             modelo = next((m for m in pres['modelos'] if str(m.get('id')) == mid), None)
@@ -30459,7 +30489,7 @@ def api_deck_comando():
         fila = _DECK_COMANDOS.setdefault(int(uid), [])
         fila.append(item)
         del fila[:-_DECK_TETO_COMANDOS]
-        para = (pres['chat'].get('nome') or 'a conversa aberta')
+        para = nome_alvo
 
     return jsonify({"comando": _deck_publico(item), "para": para})
 
