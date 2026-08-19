@@ -1364,12 +1364,43 @@
   let _itensDebounce = null;
   let _itensObs = null;
 
+  // SELETORES COM ESCADA DE QUEDA.
+  //
+  // Se nenhum casar, a tira simplesmente não existe — e antes disso acontecia em
+  // silêncio, o pior jeito de falhar (ver a régua do repositório sobre falha
+  // silenciosa). Agora, quando nada casa, fica registrado UMA vez no console
+  // com os candidatos testados; sem isso o diagnóstico vira adivinhação.
+  let _itensAvisouCampo = false;
+  let _itensAvisouRodape = false;
+  const _ITENS_SEL_CAMPO = [
+    '#main footer div[contenteditable="true"][role="textbox"]',
+    '#main footer div[contenteditable="true"]',
+    'footer div[contenteditable="true"][role="textbox"]',
+    'footer div[contenteditable="true"]',
+    '#main div[contenteditable="true"][data-tab]',
+    'div[contenteditable="true"][data-tab="10"]',
+  ];
+  const _ITENS_SEL_RODAPE = [
+    '#main footer',
+    '#main > footer',
+    'footer.copyable-area',
+    'footer',
+  ];
   function _itensCampo() {
-    return _qsRemoto('campoMensagem',
-      ['#main footer div[contenteditable="true"]', 'footer div[contenteditable="true"]']);
+    const el = _qsRemoto('campoMensagem', _ITENS_SEL_CAMPO);
+    if (!el && !_itensAvisouCampo) {
+      _itensAvisouCampo = true;
+      try { console.warn('[JOB] campo de mensagem não encontrado. Testados:', _ITENS_SEL_CAMPO); } catch (e) {}
+    } else if (el) { _itensAvisouCampo = false; }
+    return el;
   }
   function _itensRodape() {
-    return _qsRemoto('rodapeConversa', ['#main footer', 'footer.copyable-area', '#main > footer']);
+    const el = _qsRemoto('rodapeConversa', _ITENS_SEL_RODAPE);
+    if (!el && !_itensAvisouRodape) {
+      _itensAvisouRodape = true;
+      try { console.warn('[JOB] rodapé da conversa não encontrado. Testados:', _ITENS_SEL_RODAPE); } catch (e) {}
+    } else if (el) { _itensAvisouRodape = false; }
+    return el;
   }
   function _itensMain() {
     return _qsRemoto('mainContainer', ['#main']);
@@ -1529,6 +1560,8 @@
   // Religa o onkeyup quando o WhatsApp recria o campo — é o `!e.onkeyup` deles.
   function _itensLigarCampo() {
     const campo = _itensCampo();
+    // A marca vive NO elemento. Se o WhatsApp criou um campo novo, ele vem sem
+    // marca e é religado; o antigo já foi pro lixo com o ouvinte dele.
     if (!campo || campo._jobLigado) return;
     campo._jobLigado = true;
     campo.addEventListener('keyup', () => {
@@ -1561,6 +1594,35 @@
     _itensSumir();   // conversa nova começa limpa: nada carregado, nada na tela
   }
 
+  // RELIGAR O CAMPO SEM OBSERVER.
+  //
+  // O WhatsApp recria o campo de digitar a toda hora (troca de conversa, envio,
+  // re-render). Quando isso acontece o ouvinte morre junto, e na 4.108.0 nada o
+  // religava: eu tinha removido o MutationObserver (que travava o WhatsApp) e
+  // deixei só o evento de troca de conversa — que nem dispara pra uma conversa
+  // JÁ aberta quando a extensão carrega. Resultado: a tira nunca aparecia.
+  //
+  // A correção é por EVENTO, não por vigilância:
+  //   - `focusin` dispara quando alguém clica no campo. É exatamente o instante
+  //     em que o campo precisa estar ligado, e custa uma comparação por clique
+  //     — nada a ver com o observer, que disparava a cada mensagem renderizada.
+  //   - o relógio lento é só rede de segurança pro caso de foco programático:
+  //     um querySelector a cada 1,5s é ruído perto do que o WhatsApp já faz.
+  function _itensVigiarCampo() {
+    const aoFocar = (ev) => {
+      const alvo = ev && ev.target;
+      if (!alvo || !alvo.closest) return;
+      // só reage a foco DENTRO do rodapé; ignora o resto da página
+      if (alvo.closest('footer') || alvo.isContentEditable) _itensLigarCampo();
+    };
+    document.addEventListener('focusin', aoFocar, true);
+    const relogio = setInterval(_itensLigarCampo, 1500);
+    _aoLimpar(() => {
+      try { document.removeEventListener('focusin', aoFocar, true); } catch (e) {}
+      clearInterval(relogio);
+    });
+  }
+
   function iniciarBarraItens() {
     // Primeiro desfaz a reserva da versão anterior (ver _itensReservar), senão
     // quem só apertou ↻ continua com a conversa espremida.
@@ -1568,6 +1630,7 @@
     try { chrome.storage.local.get(['jobItensSoFav'], (c) => { _itensSoFav = !!(c && c.jobItensSoFav); }); }
     catch (e) {}
     _itensSincronizar();
+    _itensVigiarCampo();
     // NADA DE OBSERVER NO #main. NUNCA.
     //
     // Eu tinha posto um MutationObserver no #main com subtree:true — ou seja,
