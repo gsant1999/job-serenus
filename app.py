@@ -30101,7 +30101,7 @@ _deck_seq = 0
 def _deck_presenca(uid):
     return _DECK_PRESENCA.setdefault(int(uid), {
         'visto_em': 0.0, 'chat': None, 'modelos': [], 'funis': [],
-        'ipad_em': 0.0, 'intervalo': 2,
+        'ipad_em': 0.0, 'intervalo': 2, 'rascunho': [],
     })
 
 
@@ -30150,6 +30150,18 @@ def api_deck_sincronizar():
         pres['visto_em'] = time.time()
         chat = d.get('chat') or None
         pres['chat'] = chat if (isinstance(chat, dict) and chat.get('chatId')) else None
+        # As últimas falas da conversa aberta, para o iPad mostrar com quem você
+        # está falando antes de disparar. Fica SÓ em memória: é conversa de
+        # cliente de plano de saúde, não vira registro por causa de uma tela.
+        if pres['chat'] is None:
+            pres['rascunho'] = []
+        elif isinstance(d.get('rascunho'), list):
+            pres['rascunho'] = [
+                {'de': str(m.get('de') or '')[:20],
+                 'hora': str(m.get('hora') or '')[:8],
+                 'texto': str(m.get('texto') or '')[:300]}
+                for m in d['rascunho'][-6:] if isinstance(m, dict)
+            ]
         cat = d.get('catalogo') or {}
         if isinstance(cat.get('modelos'), list):
             pres['modelos'] = cat['modelos'][:400]
@@ -30203,11 +30215,28 @@ def api_deck_resultado():
     return _wa_cors(jsonify({"ok": True}))
 
 
+def _deck_versao_estatica():
+    """Carimbo que muda quando a tela muda.
+
+    O iPad guarda o deck na tela de início e o Safari segura CSS e JS por
+    bastante tempo. Sem este carimbo na URL, o consultor atualiza e continua
+    vendo a tela velha — exatamente a queixa que já custou uma manhã com a
+    extensão.
+    """
+    marca = 0
+    for nome in ('deck.js', 'deck.css'):
+        try:
+            marca = max(marca, int(os.path.getmtime(os.path.join(app.static_folder, nome))))
+        except OSError:
+            pass
+    return str(marca)
+
+
 @app.route('/deck')
 @login_required
 def deck():
     """O deck do iPad, agora como tela do JOB: sem PIN, sem IP, sem mesma rede."""
-    return render_template('deck.html')
+    return render_template('deck.html', v=_deck_versao_estatica())
 
 
 @app.route('/api/deck/whatsapp')
@@ -30223,6 +30252,7 @@ def api_deck_whatsapp():
             "extensao": {
                 "ligada": _deck_ligada(pres),
                 "chat": pres['chat'],
+                "rascunho": pres['rascunho'],
                 "modelos": pres['modelos'],
                 "funis": pres['funis'],
             },

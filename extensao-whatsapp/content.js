@@ -14179,11 +14179,37 @@
   // pelo Chrome). Daqui saem duas coisas: o que ele precisa saber (qual
   // conversa, qual biblioteca) e a execução do que o iPad pediu.
 
+  let _deckUltimoChat = '';
+  let _deckRascunho = [];
+
   async function _deckInfo(comCatalogo) {
-    const info = { chat: null, catalogo: null };
+    const info = { chat: null, catalogo: null, rascunho: null };
     try {
       const chatId = await pedirChatId();
-      if (chatId) info.chat = { chatId, nome: nomeDoContato() || '' };
+      if (chatId) {
+        info.chat = { chatId, nome: nomeDoContato() || '' };
+        // O RASCUNHO SÓ É LIDO QUANDO A CONVERSA MUDA.
+        //
+        // Ler a conversa é rotina pesada: enquanto ela roda, a navegação da aba
+        // fica travada. Fazer isso a cada 2 segundos por causa do deck seria o
+        // trabalhador de 14/08 com outro nome. Trocou de conversa, lê uma vez;
+        // no resto do tempo repete o que já tinha.
+        if (chatId !== _deckUltimoChat) {
+          _deckUltimoChat = chatId;
+          let msgs = [];
+          try { msgs = await pedirMensagensWpp(60); } catch (e) { msgs = []; }
+          // Só as últimas, e cortadas: isto vai para a memória do servidor para
+          // o iPad desenhar — não é histórico, é o suficiente para reconhecer
+          // com quem você está falando antes de disparar.
+          _deckRascunho = (msgs || []).slice(-6).map((m) => ({
+            de: m.de, hora: m.hora || '', texto: String(m.texto || '').slice(0, 300),
+          }));
+        }
+        info.rascunho = _deckRascunho;
+      } else {
+        _deckUltimoChat = '';
+        _deckRascunho = [];
+      }
     } catch (e) { /* nenhuma conversa aberta é estado normal, não é erro */ }
     if (comCatalogo) {
       try {
@@ -14191,8 +14217,12 @@
         const res = await buscarFunis(false);
         info.catalogo = {
           modelos: (modelos || []).map((m) => ({
-            id: m.id, titulo: m.titulo || '', texto: m.texto || '',
-            midia_tipo: m.midia_tipo || null, categoria: m.categoria || '', pasta: m.pasta || '',
+            // O servidor chama de `nome`; o painel daqui também. Mandar
+            // `m.titulo` deixava todo cartão do iPad com "Sem título".
+            id: m.id, titulo: m.nome || m.titulo || '', texto: m.texto || '',
+            midia_tipo: m.midia_tipo || null, midia_url: m.midia_url || null,
+            favorito: !!m.favorito,
+            categoria: m.categoria || '', pasta: m.pasta || '',
           })),
           funis: (((res && res.funis) || [])).map((f) => ({
             id: f.id, nome: f.nome || '',

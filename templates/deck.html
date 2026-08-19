@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Deck">
 <meta name="theme-color" content="#0e0f12">
 <title>Deck — JOB Serenus</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='deck.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='deck.css', v=v) }}">
 </head>
 <body>
 
@@ -33,6 +33,8 @@
     <button class="zap-secao" type="button" role="tab" data-secao="funis">Funis</button>
   </div>
 
+  <div class="zap-pastas" id="zap-pastas" hidden></div>
+
   <input class="zap-busca" id="zap-busca" type="search" autocomplete="off"
          placeholder="Buscar na biblioteca" aria-label="Buscar na biblioteca" hidden>
 
@@ -53,6 +55,6 @@
   </footer>
 </section>
 
-<script src="{{ url_for('static', filename='deck.js') }}"></script>
+<script src="{{ url_for('static', filename='deck.js', v=v) }}"></script>
 </body>
 </html>

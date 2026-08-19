@@ -12,9 +12,14 @@ const tela = {
   folhaConfirmar: el('folha-confirmar'),
 };
 
-let zap = { consultado: false, ligada: false, chat: null, modelos: [], funis: [], comandos: [] };
+let zap = { consultado: false, ligada: false, chat: null, rascunho: [],
+            modelos: [], funis: [], comandos: [] };
 let zapSecao = localStorage.getItem('deck_zap_secao') || 'mensagens';
 let zapBusca = '';
+// null = todas as pastas; '' = os que não estão em pasta nenhuma; texto = a pasta.
+// Antes isto usava um caractere nulo como sentinela: funcionava e era ilegível,
+// e ilegível em condição de filtro é bug esperando acontecer.
+let zapPasta = null;
 let zapEsperando = null;   // { id, chave } do comando que este iPad disparou
 let confirmando = null;
 
@@ -56,9 +61,26 @@ function pintar() {
   tela.topo.innerHTML = parado
     ? '<span class="zap-pulso"></span><div><p class="zap-rot">Sem conversa para enviar</p>'
       + '<p class="zap-motivo">' + escapar(parado) + '</p></div>'
-    : '<span class="zap-pulso"></span><div><p class="zap-rot">Vai para a conversa aberta no computador</p>'
-      + '<h2 class="zap-nome">' + escapar(zap.chat.nome || 'Conversa sem nome salvo') + '</h2></div>';
+    : '<span class="zap-pulso"></span><div style="flex:1;min-width:0">'
+      + '<p class="zap-rot">Vai para a conversa aberta no computador</p>'
+      + '<h2 class="zap-nome">' + escapar(zap.chat.nome || 'Conversa sem nome salvo') + '</h2>'
+      + rascunhoHtml() + '</div>';
   pintarLista();
+}
+
+// As últimas falas da conversa. Nome no topo não basta: duas Marias existem, a
+// conversa não — e é ela que diz se você está prestes a disparar no lugar certo.
+function rascunhoHtml() {
+  const falas = zap.rascunho || [];
+  if (!falas.length) {
+    return '<div class="zap-conversa"><p class="vazio">Sem mensagens de texto recentes '
+         + 'nesta conversa.</p></div>';
+  }
+  return '<div class="zap-conversa">' + falas.map((f) =>
+    '<div class="zap-fala" data-de="' + (f.de === 'consultor' ? 'consultor' : 'lead') + '">'
+    + escapar(f.texto)
+    + (f.hora ? '<span class="hora">' + escapar(f.hora) + '</span>' : '')
+    + '</div>').join('') + '</div>';
 }
 
 // A condição que governa a tela, dita com todas as letras — e com o que fazer.
@@ -77,9 +99,14 @@ function motivoDeNaoEnviar() {
 
 function pintarLista() {
   const travado = Boolean(motivoDeNaoEnviar());
+  pintarPastas();
+  let base = zapSecao === 'funis' ? zap.funis : zap.modelos;
+  if (zapSecao !== 'funis' && zapPasta !== null) {
+    base = base.filter((m) => (m.pasta || '') === zapPasta);
+  }
   const itens = zapSecao === 'funis'
-    ? filtrar(zap.funis, (f) => String(f.nome || '').toLowerCase())
-    : filtrar(zap.modelos, (m) => [m.titulo, m.texto, m.categoria, m.pasta].join(' ').toLowerCase());
+    ? filtrar(base, (f) => String(f.nome || '').toLowerCase())
+    : filtrar(base, (m) => [m.titulo, m.texto, m.categoria, m.pasta].join(' ').toLowerCase());
 
   if (!itens.length) {
     tela.lista.innerHTML = '<p class="zap-vazio">' + escapar(textoDeListaVazia()) + '</p>';
@@ -90,8 +117,34 @@ function pintarLista() {
     zapSecao === 'funis' ? cartaoFunil(item, travado) : cartaoModelo(item, travado)));
 }
 
+// A biblioteca tem centenas de itens; sem pasta, achar um áudio no iPad é
+// rolagem infinita. As pastas só aparecem quando existe mais de uma — uma linha
+// de filtro com uma opção só é ruído.
+function pintarPastas() {
+  const caixa = el('zap-pastas');
+  if (zapSecao === 'funis') { caixa.hidden = true; return; }
+  const pastas = [...new Set(zap.modelos.map((m) => m.pasta || '').filter(Boolean))].sort();
+  if (pastas.length < 2) { caixa.hidden = true; zapPasta = null; return; }
+  caixa.hidden = false;
+  const semPasta = zap.modelos.some((m) => !(m.pasta || ''));
+  const opcoes = [{ id: null, nome: 'Todas' }]
+    .concat(pastas.map((n) => ({ id: n, nome: n })))
+    .concat(semPasta ? [{ id: '', nome: 'Sem pasta' }] : []);
+  caixa.innerHTML = '';
+  opcoes.forEach((o) => {
+    const b = document.createElement('button');
+    b.className = 'zap-pasta';
+    b.type = 'button';
+    b.textContent = o.nome;
+    b.setAttribute('aria-pressed', String(zapPasta === o.id));
+    b.addEventListener('click', () => { zapPasta = o.id; pintarLista(); });
+    caixa.appendChild(b);
+  });
+}
+
 function textoDeListaVazia() {
   if (zapBusca) return 'Nada com esse nome na biblioteca.';
+  if (zapPasta !== null) return 'Nenhuma mensagem nesta pasta.';
   if (!zap.consultado) return 'Carregando a biblioteca.';
   if (!zap.ligada) return 'A biblioteca aparece quando a extensão se conectar.';
   return zapSecao === 'funis'
@@ -151,6 +204,7 @@ function quandoDoPasso(acumulado) {
 
 function abrirFolha(o) {
   tela.folhaTitulo.textContent = o.titulo;
+  desenharMidia(o.midia);
   tela.folhaTexto.textContent = o.texto || '';
   tela.folhaTexto.hidden = !o.texto;
   desenharLista(o.lista);
@@ -162,6 +216,30 @@ function abrirFolha(o) {
     tela.cortina.classList.add('aberta');
     tela.folha.classList.add('aberta');
   });
+}
+
+// Ouvir o áudio ANTES de mandar. Áudio errado não tem desfazer do outro lado —
+// e no iPad, sem player, o consultor só descobre qual era depois de enviar.
+function desenharMidia(midia) {
+  let caixa = el('folha-midia');
+  if (!midia || !midia.url) {
+    if (caixa) { caixa.innerHTML = ''; caixa.remove(); }
+    return;
+  }
+  if (!caixa) {
+    caixa = document.createElement('div');
+    caixa.id = 'folha-midia';
+    caixa.className = 'zap-midia';
+    tela.folhaTitulo.parentElement.insertAdjacentElement('afterend', caixa);
+  }
+  if (midia.tipo === 'audio') {
+    caixa.innerHTML = '<audio controls preload="none" src="' + escapar(midia.url) + '"></audio>';
+  } else if (midia.tipo === 'imagem') {
+    caixa.innerHTML = '<img alt="" src="' + escapar(midia.url) + '">';
+  } else {
+    caixa.innerHTML = '<p class="arquivo">' + escapar(ROTULO_MIDIA[midia.tipo] || 'Arquivo')
+      + ' — vai anexado à mensagem</p>';
+  }
 }
 
 // Passos do funil: o consultor precisa ver o que vai sair e quando, antes de
@@ -181,6 +259,7 @@ function desenharLista(itens) {
 
 function fecharFolha() {
   confirmando = null;
+  desenharMidia(null);   // sem isto o áudio continua tocando com a folha fechada
   tela.cortina.classList.remove('aberta');
   tela.folha.classList.remove('aberta');
   setTimeout(() => { tela.folha.hidden = true; tela.cortina.hidden = true; }, 280);
@@ -191,8 +270,8 @@ function confirmarModelo(m, card) {
   confirmando = { tipo: 'modelo', id: m.id, chave: card.dataset.chave };
   abrirFolha({
     titulo: m.titulo || 'Enviar mensagem',
+    midia: m.midia_tipo ? { tipo: m.midia_tipo, url: m.midia_url } : null,
     texto: m.texto || (m.midia_tipo ? ROTULO_MIDIA[m.midia_tipo] + ' sem legenda.' : ''),
-    lista: m.midia_tipo ? [{ quando: ROTULO_MIDIA[m.midia_tipo], texto: 'Vai junto com a mensagem' }] : null,
     confirmar: 'Enviar para ' + nome,
   });
 }
@@ -209,6 +288,7 @@ function confirmarFunil(f, card) {
   confirmando = { tipo: 'funil', id: f.id, chave: card.dataset.chave };
   abrirFolha({
     titulo: f.nome || 'Disparar funil',
+    midia: null,
     texto: passos.length + (passos.length === 1 ? ' mensagem' : ' mensagens') + ' para ' + nome
          + (acumulado ? ', ' + duracao(acumulado) + '.' : ', tudo agora.'),
     lista,
@@ -270,12 +350,13 @@ async function bater(deVolta) {
   if (document.hidden && !deVolta) { setTimeout(bater, 3000); return; }
   try {
     const r = await chamar('/api/deck/whatsapp');
-    const antes = JSON.stringify([zap.consultado, zap.ligada, zap.chat,
+    const antes = JSON.stringify([zap.consultado, zap.ligada, zap.chat, zap.rascunho,
       zap.modelos.length, zap.funis.length]);
     zap = {
       consultado: true,
       ligada: r.extensao.ligada,
       chat: r.extensao.chat,
+      rascunho: r.extensao.rascunho || [],
       modelos: r.extensao.modelos || [],
       funis: r.extensao.funis || [],
       comandos: r.comandos || [],
@@ -283,7 +364,7 @@ async function bater(deVolta) {
     conferirComando();
     // Só repinta quando algo mudou: repintar a cada 2,5s mataria o toque em
     // curso e piscaria a tela na cara de quem está usando.
-    if (JSON.stringify([zap.consultado, zap.ligada, zap.chat,
+    if (JSON.stringify([zap.consultado, zap.ligada, zap.chat, zap.rascunho,
         zap.modelos.length, zap.funis.length]) !== antes) pintar();
     conexao(true);
   } catch (e) {

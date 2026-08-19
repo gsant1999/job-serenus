@@ -4,6 +4,11 @@
    opacity animam, nada de transition: all, nada de ease-in. */
 
 :root {
+  /* Faz os controles do próprio sistema — o player de áudio, a barra de rolagem,
+     o campo de busca — nascerem no tema certo. Sem isto o player do áudio vem
+     branco no meio de uma folha escura, e a tela parece remendada. */
+  color-scheme: light dark;
+
   --fundo: #0e0f12;
   --tijolo: #17191e;
   --tijolo-toque: #1e222a;
@@ -262,7 +267,9 @@ a.secundario {
 /* Cartão de estado: quem vai receber, ou por que ninguém vai. */
 .zap-topo {
   display: flex;
-  align-items: center;
+  /* Com o rascunho da conversa dentro, o cartão ficou alto: centralizar deixava
+     o ponto de estado boiando no meio, longe da frase que ele qualifica. */
+  align-items: flex-start;
   gap: 12px;
   padding: 14px 16px;
   margin-bottom: var(--gap);
@@ -275,6 +282,7 @@ a.secundario {
 .zap-pulso {
   width: 9px; height: 9px;
   flex-shrink: 0;
+  margin-top: 5px;   /* na linha do rótulo, não no topo absoluto da caixa */
   border-radius: 50%;
   background: var(--ok);
 }
@@ -459,4 +467,103 @@ a.secundario {
 
 @media (prefers-reduced-motion: reduce) {
   .zap-recado { transform: none; transition: opacity 200ms var(--ease-saida); }
+}
+
+
+/* ═══════════════ Rascunho da conversa ═══════════════ */
+/* Saber COM QUEM você vai falar é a diferença entre disparar e disparar certo.
+   O nome no topo não basta: duas Marias existem, a conversa não. */
+
+.zap-conversa {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--borda);
+}
+
+.zap-fala {
+  max-width: 82%;
+  padding: 8px 11px;
+  border-radius: 12px;
+  background: var(--tijolo-toque);
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+.zap-fala[data-de="consultor"] {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--acento) 16%, transparent);
+}
+.zap-fala .hora {
+  display: block;
+  margin-top: 3px;
+  font-size: 10.5px;
+  color: var(--texto-fraco);
+  font-variant-numeric: tabular-nums;
+}
+.zap-conversa .vazio {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--texto-fraco);
+}
+
+/* ═══════════════ Pastas da biblioteca ═══════════════ */
+
+.zap-pastas {
+  display: flex;
+  gap: 6px;
+  margin-bottom: var(--gap);
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.zap-pastas::-webkit-scrollbar { display: none; }
+
+.zap-pasta {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--borda);
+  border-radius: 999px;
+  color: var(--texto-fraco);
+  font-size: 13.5px;
+  font-weight: 500;
+  padding: 8px 14px;
+  min-height: 40px;
+  white-space: nowrap;
+  transition: transform 140ms var(--ease-saida);
+}
+.zap-pasta:active { transform: scale(.97); }
+.zap-pasta[aria-pressed="true"] {
+  background: var(--tijolo);
+  border-color: var(--borda-forte);
+  color: var(--texto);
+  font-weight: 600;
+}
+
+/* ═══════════════ Mídia no preview ═══════════════ */
+/* Ouvir o áudio ANTES de mandar. Sem isso o consultor manda o áudio errado e
+   não tem desfazer do outro lado. */
+
+.zap-midia {
+  margin: 0 0 14px;
+  padding: 12px;
+  background: var(--fundo);
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+}
+.zap-midia audio { width: 100%; display: block; }
+.zap-midia img {
+  display: block;
+  max-width: 100%;
+  max-height: 220px;
+  border-radius: 8px;
+  margin: 0 auto;
+}
+.zap-midia .arquivo {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13.5px;
+  color: var(--texto-fraco);
 }
