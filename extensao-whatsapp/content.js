@@ -14225,9 +14225,15 @@
     if (cmd.tipo === 'funil') {
       const r = await dispararFunil(cmd.funilId, { semPergunta: true });
       if (r && r.ok) {
+        // O "não começou agora" mudou de significado quando o funil passou a
+        // morar no servidor: antes era outro funil ocupando a conversa, agora é
+        // o limite de ritmo do WhatsApp segurando o primeiro passo. A frase no
+        // iPad tem que dizer o motivo certo, senão o consultor fica esperando a
+        // coisa errada.
         return { ok: true, estado: 'rodando', mensagem: r.comecaAgora
           ? ('Disparando: ' + r.passos + (r.passos === 1 ? ' mensagem' : ' mensagens') + ' para ' + r.nome + '.')
-          : ('Na fila: começa assim que o funil anterior terminar em ' + r.nome + '.') };
+          : ('Na fila: os ' + r.passos + ' passos estão no servidor e o primeiro sai '
+             + 'assim que o WhatsApp liberar o ritmo.') };
       }
       return { ok: false, mensagem: (r && r.erro) || 'Não consegui disparar o funil.' };
     }
