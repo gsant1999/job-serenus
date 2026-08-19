@@ -759,6 +759,148 @@ async function baixarMidiaDataUrl(url) {
 // Uma só: cotar é ação de um consultor por vez, não fila.
 let _abaQuePediuCotacao = null;
 
+// O DECK MUDOU DE ENDERECO: AGORA ELE E UMA TELA DO JOB.
+//
+// Ate 19/08/2026 isto apontava para um servidor rodando no proprio Mac
+// (127.0.0.1:8765), e o consultor tinha que ligar o deck na maquina, descobrir
+// o IP e digitar um PIN no iPad — que ainda por cima mudava a cada partida.
+// Agora quem guarda os comandos e o JOB: o iPad abre /deck com o login normal,
+// de qualquer lugar, inclusive fora do escritorio.
+//
+// Devolve SEMPRE um objeto, nunca lanca: quem chama e um laco e nao pode
+// quebrar porque ninguem abriu o deck hoje — que e o estado normal do dia.
+async function deckPonte(rota, corpo) {
+  try {
+    const r = await chamarJob(rota, 'POST', corpo || {}, 8000);
+    if (!r || !r.ok) return { ok: false, erro: (r && r.erro) || 'o JOB nao respondeu' };
+    return { ok: true, dados: r };
+  } catch (e) {
+    return { ok: false, erro: 'o JOB nao respondeu' };
+  }
+}
+
+// ═══════════════ Laço do deck do iPad ═══════════════
+//
+// POR QUE O LAÇO MORA AQUI E NÃO NO CONTENT SCRIPT.
+//
+// O consultor usa o deck justamente quando NÃO está olhando o Chrome — a aba do
+// WhatsApp Web fica atrás o dia inteiro. O Chrome estrangula setTimeout de aba
+// escondida para uma vez por minuto: um laço de 2s lá viraria um laço de 60s, e
+// o botão do iPad pareceria quebrado.
+//
+// POR QUE ELE DORME, E COMO.
+//
+// Em 14/08/2026 um trabalhador deste mesmo service worker ficava acordado 55s
+// de cada minuto consultando a fila a cada 2s. O renderer chegou a 4,4 GB e
+// RESULT_CODE_HUNG. A regra que saiu dali vale aqui inteira:
+//
+//   1. Deck desligado (o normal do dia) = UMA batida por minuto, pelo alarme,
+//      e nada mais. Sem porta aberta, sem service worker de pé, sem perguntar
+//      nada para a aba do WhatsApp.
+//   2. A busca é um fetch pelado em 127.0.0.1. Falhou, dormiu. Só depois de o
+//      deck responder é que a aba passa a ser consultada.
+//   3. O ritmo rápido é o DECK quem manda, e ele só pede pressa enquanto o iPad
+//      está de fato com a tela aberta. Deck ligado e esquecido na mesa volta
+//      sozinho para o ritmo lento.
+//   4. Três falhas seguidas e o laço encerra. O alarme reencontra depois.
+
+const DECK_BEAT_PADRAO = 2000;      // enquanto o iPad está olhando
+const DECK_BEAT_OCIOSO = 15000;     // deck ligado, iPad guardado
+const DECK_FALHAS_ATE_DORMIR = 3;   // depois disso o laço encerra e o alarme assume
+let _deckLacoVivo = false;
+let _deckFalhas = 0;
+let _deckCatalogoEm = 0;
+let _deckKickEm = 0;
+
+function _deckPrecisaCatalogo() { return (Date.now() - _deckCatalogoEm) > 120000; }
+
+// A aba do WhatsApp Web onde o envio vai acontecer. Com duas abertas, manda na
+// que está na frente — é a conversa que o consultor tem em mente.
+async function _deckAba() {
+  try {
+    const abas = await chrome.tabs.query({ url: 'https://web.whatsapp.com/*' });
+    if (!abas.length) return null;
+    return (abas.find((a) => a.active) || abas[abas.length - 1]).id;
+  } catch (e) { return null; }
+}
+
+// chrome.tabs.sendMessage fica pendurado se o content script morreu (aba
+// recarregando, extensão atualizada). Sem este teto, o laço inteiro trava.
+function _deckPerguntarAba(tabId, msg, tetoMs) {
+  return new Promise((resolve) => {
+    let respondeu = false;
+    const corta = setTimeout(() => { if (!respondeu) { respondeu = true; resolve(null); } }, tetoMs || 8000);
+    try {
+      chrome.tabs.sendMessage(tabId, msg, (resp) => {
+        void chrome.runtime.lastError;
+        if (respondeu) return;
+        respondeu = true; clearTimeout(corta); resolve(resp || null);
+      });
+    } catch (e) {
+      if (!respondeu) { respondeu = true; clearTimeout(corta); resolve(null); }
+    }
+  });
+}
+
+// Uma batida: conta ao deck qual conversa está aberta e executa o que ele pediu.
+// Devolve o intervalo até a próxima, ou 0 para encerrar o laço.
+async function _deckBatida() {
+  const tabId = await _deckAba();
+  if (!tabId) return 0;                       // sem WhatsApp Web não há o que enviar
+  const info = await _deckPerguntarAba(tabId,
+    { type: 'deck_info', comCatalogo: _deckPrecisaCatalogo() }, 9000) || {};
+  const r = await deckPonte('/api/whatsapp/extensao/deck/sincronizar',
+    { chat: info.chat || null, catalogo: info.catalogo || null });
+  if (!r.ok) {
+    _deckFalhas++;
+    return _deckFalhas >= DECK_FALHAS_ATE_DORMIR ? 0 : DECK_BEAT_OCIOSO;
+  }
+  _deckFalhas = 0;
+  if (info.catalogo) _deckCatalogoEm = Date.now();
+  for (const cmd of ((r.dados && r.dados.comandos) || [])) {
+    // Um comando de cada vez: dois envios simultâneos na mesma conversa é
+    // exatamente o jeito de o cliente receber tudo fora de ordem.
+    const res = await _deckPerguntarAba(tabId, { type: 'deck_executar', cmd }, 120000);
+    await deckPonte('/api/whatsapp/extensao/deck/resultado', {
+      id: cmd.id,
+      ok: !!(res && res.ok),
+      estado: (res && res.estado) || '',
+      mensagem: (res && res.mensagem) || 'A aba do WhatsApp Web não respondeu. Não enviei nada.',
+    });
+  }
+  const pedido = Number(r.dados && r.dados.intervalo) || 2;
+  return Math.max(DECK_BEAT_PADRAO, Math.min(DECK_BEAT_OCIOSO, pedido * 1000));
+}
+
+async function _deckLaco() {
+  if (_deckLacoVivo) return;
+  _deckLacoVivo = true;
+  _deckFalhas = 0;
+  try {
+    for (;;) {
+      let proxima = 0;
+      try { proxima = await _deckBatida(); } catch (e) { proxima = 0; }
+      if (!proxima) break;                    // dorme: o alarme reencontra o deck
+      await new Promise((res) => setTimeout(res, proxima));
+    }
+  } finally {
+    _deckLacoVivo = false;
+  }
+}
+
+// A busca de um minuto em um minuto: uma chamada curta, sem envolver a aba. É o
+// único trabalho de fundo que sobra quando ninguém está com o deck aberto.
+async function _deckProcurar() {
+  if (_deckLacoVivo) return;
+  const r = await deckPonte('/api/whatsapp/extensao/deck/sincronizar', { chat: null, catalogo: null });
+  if (r.ok) _deckLaco();
+}
+
+chrome.alarms.create('deck_procurar', { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener((a) => {
+  if (a && a.name === 'deck_procurar') _deckProcurar();
+});
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'ping') {
     chamarJob('/api/whatsapp/ping', 'GET', null, 15000).then(sendResponse);
@@ -1059,6 +1201,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg && msg.type === 'listar_funis') {
     chamarJob('/api/whatsapp/extensao/funis', 'GET', null, 15000).then(sendResponse);
+    return true;
+  }
+  // PONTE COM O DECK DO IPAD.
+  //
+  // O deck e um servidor que roda no PROPRIO Mac (127.0.0.1:8765) e serve uma
+  // pagina de botoes para o iPad. Quando o consultor toca "enviar" la, quem
+  // executa e esta extensao, na conversa aberta do WhatsApp Web.
+  //
+  // O fetch mora AQUI, no service worker, e nao no content script: a pagina do
+  // WhatsApp e https e publica, e o Chrome trata pedido de pagina publica para
+  // endereco da rede local com desconfianca (Private Network Access). O service
+  // worker tem host_permissions e nao passa por essa peneira.
+  // A aba avisa que o consultor chegou nela: vale uma busca na hora, em vez de
+  // esperar a virada do minuto. É evento de usuário, não relógio de fundo.
+  if (msg && msg.type === 'deck_procurar_agora') {
+    if (Date.now() - _deckKickEm > 20000) { _deckKickEm = Date.now(); _deckProcurar(); }
+    sendResponse({ ok: true });
+    return true;
+  }
+  if (msg && msg.type === 'deck_ponte') {
+    deckPonte(msg.rota, msg.corpo).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'salvar_funil') {

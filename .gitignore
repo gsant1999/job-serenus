@@ -39,3 +39,7 @@ tabelas-operadoras/
 # querer num commit e trave tudo de novo. Precisando de outro workflow, crie
 # pela interface do GitHub.
 .github/
+
+# Deck do iPad: segredo do pareamento e registro local, nao versionar
+deck-ipad/.token
+deck-ipad/registro.log

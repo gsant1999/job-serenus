@@ -1,0 +1,635 @@
+/* Deck do JOB — a tela de envio pelo iPad, dentro do site.
+   Nasceu de deck-ipad/web/deck.css: mesma régua, sem os botões de máquina.
+   Regras da casa: sem emoji, uma acao principal por tela, so transform e
+   opacity animam, nada de transition: all, nada de ease-in. */
+
+:root {
+  /* Faz os controles do próprio sistema — o player de áudio, a barra de rolagem,
+     o campo de busca — nascerem no tema certo. Sem isto o player do áudio vem
+     branco no meio de uma folha escura, e a tela parece remendada. */
+  color-scheme: light dark;
+
+  --fundo: #0e0f12;
+  --tijolo: #17191e;
+  --tijolo-toque: #1e222a;
+  --borda: #2a2e37;
+  --borda-forte: #3a404c;
+  --texto: #f2f3f5;
+  --texto-fraco: #99a1ad;
+  --acento: #5b93ff;
+  --ok: #35c07f;
+  --erro: #ff6f6f;
+  --cuidado: #eaa64d;
+
+  --raio: 14px;
+  --gap: 12px;
+
+  --ease-saida: cubic-bezier(.23, 1, .32, 1);
+  --ease-mov:   cubic-bezier(.77, 0, .175, 1);
+  --ease-folha: cubic-bezier(.32, .72, 0, 1);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --fundo: #f1f2f5;
+    --tijolo: #ffffff;
+    --tijolo-toque: #e9ebf0;
+    --borda: #dcdfe6;
+    --borda-forte: #c3c8d2;
+    --texto: #14161a;
+    --texto-fraco: #5d6673;
+    --acento: #1f6feb;
+    --ok: #1d8f5b;
+    --erro: #c53434;
+    --cuidado: #a9640a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--fundo);
+  color: var(--texto);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+body {
+  padding:
+    max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+    max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+}
+
+button { font: inherit; color: inherit; cursor: pointer; }
+[hidden] { display: none !important; }
+
+/* ---------------------------------------------------------------- topo */
+
+/* O topo é uma camada, não uma faixa opaca: o conteúdo corre por baixo dele.
+   É o que faz a tela parecer profunda em vez de recortada. */
+.topo {
+  position: sticky;
+  top: calc(-1 * max(16px, env(safe-area-inset-top)));
+  z-index: 5;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--gap);
+  margin: calc(-1 * max(16px, env(safe-area-inset-top))) calc(-1 * max(16px, env(safe-area-inset-right)))
+          18px calc(-1 * max(16px, env(safe-area-inset-left)));
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+           14px max(16px, env(safe-area-inset-left));
+  background: color-mix(in srgb, var(--fundo) 78%, transparent);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .topo { background: var(--fundo); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+
+.titulo h1 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.conexao {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--texto-fraco);
+}
+.conexao.caiu { color: var(--erro); }
+
+.acoes-topo { display: flex; gap: 8px; flex-shrink: 0; }
+
+.secundario {
+  background: transparent;
+  border: 1px solid var(--borda);
+  border-radius: 10px;
+  color: var(--texto-fraco);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 9px 13px;
+  min-height: 40px;
+  transition: transform 140ms var(--ease-saida), opacity 140ms var(--ease-saida);
+}
+.secundario:active { transform: scale(.97); }
+
+/* O botão de voltar ao JOB é um link, mas tem que se parecer com os irmãos:
+   coisa igual se parece igual. Sublinhado de link cru aqui denuncia remendo. */
+a.secundario {
+  display: inline-flex;
+  align-items: center;
+  color: var(--texto-fraco);
+  text-decoration: none;
+}
+
+.principal {
+  background: var(--acento);
+  border: none;
+  border-radius: 12px;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  padding: 14px 20px;
+  min-height: 50px;
+  transition: transform 140ms var(--ease-saida), opacity 140ms var(--ease-saida);
+}
+.principal:active { transform: scale(.97); }
+.principal:disabled { opacity: .5; }
+
+.link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* --------------------------------------------------------------- avisos */
+
+.aviso {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--cuidado);
+  border-radius: 12px;
+  color: var(--cuidado);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.aviso .link { color: inherit; }
+
+/* --------------------------------------------------------------- folha */
+
+.cortina {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .5);
+  opacity: 0;
+  transition: opacity 240ms var(--ease-saida);
+  z-index: 10;
+}
+.cortina.aberta { opacity: 1; }
+
+.folha {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 20px calc(20px + env(safe-area-inset-bottom));
+  background: var(--tijolo);
+  border-top: 1px solid var(--borda);
+  border-radius: 20px 20px 0 0;
+  transform: translateY(100%);
+  transition: transform 280ms var(--ease-folha);
+  z-index: 11;
+}
+.folha.aberta { transform: translateY(0); }
+
+.puxador {
+  width: 40px; height: 4px;
+  margin: 0 auto 14px;
+  border-radius: 999px;
+  background: var(--borda-forte);
+}
+.folha-topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.folha-topo h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.folha-texto {
+  margin: 0 0 14px;
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--texto-fraco);
+}
+.saida {
+  flex: 1;
+  min-height: 120px;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  background: var(--fundo);
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.folha-acoes {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-top: 18px;
+}
+.folha-acoes .secundario { flex: 1; min-height: 50px; font-size: 16px; }
+.folha-acoes .principal { flex: 1; }
+/* a acao de risco fica longe do dedo que ia so fechar */
+.folha-acoes .principal.risco { background: var(--erro); }
+
+/* ------------------------------------------------- movimento reduzido */
+
+@media (prefers-reduced-motion: reduce) {
+  .folha { transition: opacity 200ms var(--ease-saida); transform: none; opacity: 0; }
+  .folha.aberta { opacity: 1; }
+  .tijolo:active, .principal:active, .secundario:active, .aba:active { transform: none; }
+  .tijolo[data-estado="rodando"] .andamento { animation: none; transform: scaleX(1); }
+}
+
+
+/* ═══════════════ Tela do WhatsApp ═══════════════ */
+
+.zap { padding-bottom: 28px; }
+
+/* Cartão de estado: quem vai receber, ou por que ninguém vai. */
+.zap-topo {
+  display: flex;
+  /* Com o rascunho da conversa dentro, o cartão ficou alto: centralizar deixava
+     o ponto de estado boiando no meio, longe da frase que ele qualifica. */
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  margin-bottom: var(--gap);
+  background: var(--tijolo);
+  border: 1px solid var(--borda);
+  border-radius: var(--raio);
+}
+.zap-topo[data-estado="parado"] { border-color: var(--cuidado); }
+
+.zap-pulso {
+  width: 9px; height: 9px;
+  flex-shrink: 0;
+  margin-top: 5px;   /* na linha do rótulo, não no topo absoluto da caixa */
+  border-radius: 50%;
+  background: var(--ok);
+}
+.zap-topo[data-estado="parado"] .zap-pulso { background: var(--cuidado); }
+
+.zap-rot {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--texto-fraco);
+}
+.zap-nome {
+  margin: 2px 0 0;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+.zap-motivo {
+  margin: 3px 0 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--cuidado);
+}
+
+/* Segmentado: duas seções, uma escolha. */
+.zap-secoes {
+  display: flex;
+  max-width: 420px;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: var(--gap);
+  background: var(--tijolo);
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+}
+.zap-secao {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-radius: 9px;
+  color: var(--texto-fraco);
+  font-size: 15px;
+  font-weight: 600;
+  padding: 10px;
+  min-height: 44px;
+  transition: transform 140ms var(--ease-saida);
+}
+.zap-secao:active { transform: scale(.97); }
+.zap-secao[aria-selected="true"] { background: var(--tijolo-toque); color: var(--texto); }
+
+.zap-busca {
+  width: 100%;
+  padding: 13px 15px;
+  margin-bottom: var(--gap);
+  background: var(--tijolo);
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+  color: var(--texto);
+  font-size: 16px;   /* 16px evita o zoom automático do Safari no foco */
+}
+.zap-busca::placeholder { color: var(--texto-fraco); }
+.zap-busca:focus { outline: 2px solid var(--acento); outline-offset: 1px; }
+
+.zap-lista {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 10px;
+  /* O painel rebaixado é o corpo do aparelho: sem ele as teclas flutuam soltas
+     na página e a mesa vira lista de novo. */
+  padding: 12px;
+  background: color-mix(in srgb, #000 22%, var(--fundo));
+  border: 1px solid var(--borda);
+  border-radius: 18px;
+}
+
+@media (prefers-color-scheme: light) {
+  .zap-lista { background: color-mix(in srgb, var(--borda) 45%, var(--fundo)); }
+}
+
+/* A TECLA.
+   Isto é uma mesa, não uma lista: toda tecla tem o mesmo tamanho, o mesmo peso
+   e o mesmo lugar, e o dedo aprende onde as coisas ficam. O que muda entre uma
+   e outra é o ícone e o rótulo — nunca a forma. */
+.zap-tecla {
+  position: relative;
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 8px;
+  background: var(--tijolo);
+  border: 1px solid var(--borda);
+  border-radius: 15px;
+  overflow: hidden;
+  text-align: center;
+  transition: transform 130ms var(--ease-saida), opacity 130ms var(--ease-saida);
+}
+
+/* O brilho de cima é o que faz a tecla parecer teclada e não desenhada. Ele
+   some quando o dedo aperta — luz que vira sombra, como no aparelho de verdade. */
+.zap-tecla::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--texto) 9%, transparent) 0%,
+    transparent 42%,
+    color-mix(in srgb, #000 12%, transparent) 100%);
+  opacity: .55;
+  transition: opacity 130ms var(--ease-saida);
+  pointer-events: none;
+}
+
+.zap-tecla:active { transform: scale(.94); }
+.zap-tecla:active::before { opacity: .15; }
+.zap-tecla:disabled { opacity: .38; }
+.zap-tecla:disabled::before { opacity: .2; }
+
+@media (hover: hover) and (pointer: fine) {
+  .zap-tecla:hover:not(:disabled) { border-color: var(--borda-forte); }
+}
+
+.zap-tecla .icone { color: var(--texto-fraco); flex-shrink: 0; }
+
+.zap-tecla .rotulo {
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.22;
+  letter-spacing: -0.01em;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.zap-tecla .marca {
+  position: absolute;
+  top: 7px; right: 9px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  color: var(--texto-fraco);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Cor por tipo: achar o áudio certo numa mesa de 300 teclas é trabalho de cor,
+   não de leitura. Fica no ícone e num véu fraco — a tecla continua neutra. */
+.zap-tecla[data-tipo="audio"] .icone { color: #a78bfa; }
+.zap-tecla[data-tipo="imagem"] .icone { color: #5ec8b0; }
+.zap-tecla[data-tipo="documento"] .icone { color: #e0a961; }
+.zap-tecla[data-tipo="video"] .icone { color: #7aa8ff; }
+.zap-tecla[data-tipo="funil"] .icone { color: var(--acento); }
+
+.zap-tecla[data-estado="indo"] { border-color: var(--acento); }
+.zap-tecla[data-estado="indo"] .icone,
+.zap-tecla[data-estado="indo"] .marca { color: var(--acento); }
+
+/* A barra de andamento na base da tecla, como a luz do aparelho. */
+.zap-andamento {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 3px;
+  background: var(--acento);
+  transform: scaleX(0);
+  transform-origin: left;
+  opacity: 0;
+}
+.zap-tecla[data-estado="indo"] .zap-andamento {
+  opacity: 1;
+  animation: tecla-correndo 1.4s var(--ease-mov) infinite;
+}
+@keyframes tecla-correndo {
+  0%   { transform: scaleX(0); transform-origin: left; }
+  50%  { transform: scaleX(1); transform-origin: left; }
+  51%  { transform: scaleX(1); transform-origin: right; }
+  100% { transform: scaleX(0); transform-origin: right; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zap-tecla:active { transform: none; }
+  .zap-tecla[data-estado="indo"] .zap-andamento { animation: none; transform: scaleX(1); }
+}
+
+.zap-vazio {
+  grid-column: 1 / -1;
+  padding: 26px 16px;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--texto-fraco);
+}
+
+
+
+
+
+/* Passos do funil, dentro da folha de confirmação. */
+.zap-passos { margin: 0 0 4px; padding: 0; list-style: none; }
+.zap-passos li {
+  display: flex;
+  gap: 10px;
+  padding: 9px 0;
+  border-top: 1px solid var(--borda);
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+.zap-passos li:first-child { border-top: none; }
+.zap-passos .quando {
+  flex-shrink: 0;
+  min-width: 74px;
+  color: var(--texto-fraco);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Aviso do último envio: entra por baixo e sai pelo mesmo caminho. */
+.zap-recado {
+  position: fixed;
+  left: max(16px, env(safe-area-inset-left));
+  right: max(16px, env(safe-area-inset-right));
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 16px;
+  background: color-mix(in srgb, var(--tijolo) 88%, transparent);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  border: 1px solid var(--borda-forte);
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.4;
+  transform: translateY(140%);
+  opacity: 0;
+  transition: transform 280ms var(--ease-folha), opacity 200ms var(--ease-saida);
+}
+.zap-recado.aberto { transform: translateY(0); opacity: 1; }
+.zap-recado[data-tom="erro"] { border-color: var(--erro); color: var(--erro); }
+.zap-recado[data-tom="ok"] { border-color: var(--ok); }
+.zap-recado[data-tom="espera"] { border-color: var(--acento); }
+
+@media (prefers-reduced-motion: reduce) {
+  .zap-recado { transform: none; transition: opacity 200ms var(--ease-saida); }
+}
+
+
+/* ═══════════════ Rascunho da conversa ═══════════════ */
+/* Saber COM QUEM você vai falar é a diferença entre disparar e disparar certo.
+   O nome no topo não basta: duas Marias existem, a conversa não. */
+
+.zap-conversa {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--borda);
+}
+
+.zap-fala {
+  max-width: 82%;
+  padding: 8px 11px;
+  border-radius: 12px;
+  background: var(--tijolo-toque);
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+.zap-fala[data-de="consultor"] {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--acento) 16%, transparent);
+}
+.zap-fala .hora {
+  display: block;
+  margin-top: 3px;
+  font-size: 10.5px;
+  color: var(--texto-fraco);
+  font-variant-numeric: tabular-nums;
+}
+.zap-conversa .vazio {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--texto-fraco);
+}
+
+/* ═══════════════ Pastas da biblioteca ═══════════════ */
+
+.zap-pastas {
+  display: flex;
+  gap: 6px;
+  margin-bottom: var(--gap);
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.zap-pastas::-webkit-scrollbar { display: none; }
+
+.zap-pasta {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--borda);
+  border-radius: 999px;
+  color: var(--texto-fraco);
+  font-size: 13.5px;
+  font-weight: 500;
+  padding: 8px 14px;
+  min-height: 40px;
+  white-space: nowrap;
+  transition: transform 140ms var(--ease-saida);
+}
+.zap-pasta:active { transform: scale(.97); }
+.zap-pasta[aria-pressed="true"] {
+  background: var(--tijolo);
+  border-color: var(--borda-forte);
+  color: var(--texto);
+  font-weight: 600;
+}
+
+/* ═══════════════ Mídia no preview ═══════════════ */
+/* Ouvir o áudio ANTES de mandar. Sem isso o consultor manda o áudio errado e
+   não tem desfazer do outro lado. */
+
+.zap-midia {
+  margin: 0 0 14px;
+  padding: 12px;
+  background: var(--fundo);
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+}
+.zap-midia audio { width: 100%; display: block; }
+.zap-midia img {
+  display: block;
+  max-width: 100%;
+  max-height: 220px;
+  border-radius: 8px;
+  margin: 0 auto;
+}
+.zap-midia .arquivo {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13.5px;
+  color: var(--texto-fraco);
+}

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Deck">
+<meta name="theme-color" content="#0e0f12">
+<title>Deck — JOB Serenus</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='deck.css', v=v) }}">
+</head>
+<body>
+
+{# Tela cheia de propósito: no iPad o deck é usado como aplicativo (Compartilhar >
+   Adicionar à Tela de Início), e a barra de navegação do JOB só tomaria altura
+   de quem está com o dedo na tela. A volta para o sistema fica no topo. #}
+<header class="topo">
+  <div class="titulo">
+    <h1>Deck</h1>
+    <p id="conexao" class="conexao">Conectando</p>
+  </div>
+  <div class="acoes-topo">
+    <a class="secundario" href="/crm">Ir para o CRM</a>
+  </div>
+</header>
+
+<main class="zap">
+  <div class="zap-topo" id="zap-topo"></div>
+
+  <div class="zap-secoes" id="zap-secoes" role="tablist">
+    <button class="zap-secao" type="button" role="tab" data-secao="mensagens">Mensagens</button>
+    <button class="zap-secao" type="button" role="tab" data-secao="funis">Funis</button>
+  </div>
+
+  <div class="zap-pastas" id="zap-pastas" hidden></div>
+
+  <input class="zap-busca" id="zap-busca" type="search" autocomplete="off"
+         placeholder="Buscar na biblioteca" aria-label="Buscar na biblioteca" hidden>
+
+  <div class="zap-lista" id="zap-lista"></div>
+</main>
+
+<div id="cortina" class="cortina" hidden></div>
+<section id="folha" class="folha" role="dialog" aria-modal="true" hidden>
+  <div class="puxador" aria-hidden="true"></div>
+  <header class="folha-topo">
+    <h2 id="folha-titulo"></h2>
+    <button id="fechar-folha" class="secundario" type="button">Fechar</button>
+  </header>
+  <p id="folha-texto" class="folha-texto"></p>
+  <footer id="folha-acoes" class="folha-acoes" hidden>
+    <button id="folha-cancelar" class="secundario" type="button">Não fazer</button>
+    <button id="folha-confirmar" class="principal" type="button"></button>
+  </footer>
+</section>
+
+<script src="{{ url_for('static', filename='deck.js', v=v) }}"></script>
+</body>
+</html>

@@ -30221,6 +30221,249 @@ def api_whatsapp_extensao_funil_disparado(fid):
     return _wa_cors(jsonify({"ok": True}))
 
 
+# ═══════════════════════ Deck do iPad ═══════════════════════
+#
+# O deck é a tela de botões que o consultor abre no iPad. Ele não fala com o
+# WhatsApp: enfileira um pedido aqui, e QUEM EXECUTA é a extensão, na conversa
+# que está aberta no Chrome daquele consultor. O deck só pede.
+#
+# POR QUE ISSO MORA EM MEMÓRIA E NÃO EM TABELA.
+#
+# Tudo aqui vale segundos: qual conversa está aberta agora, qual biblioteca
+# aquele usuário tem hoje, e um comando que expira em 90s. Nada disso deveria
+# sobreviver a um deploy — pelo contrário: comando que atravessa reinício é
+# mensagem que chega fora de hora, que foi exatamente o incidente de 18/08. O
+# gunicorn roda com um worker só (ver Procfile), então o dicionário é o mesmo
+# para todo mundo que chega.
+
+_DECK_VALIDADE_S = 90          # comando não pego nesse prazo morre na fila
+_DECK_TETO_COMANDOS = 40       # histórico por usuário
+_deck_trava = threading.Lock()
+_DECK_PRESENCA = {}            # usuario_id -> o que a extensão contou por último
+_DECK_COMANDOS = {}            # usuario_id -> [comando, ...]
+_deck_seq = 0
+
+
+def _deck_presenca(uid):
+    return _DECK_PRESENCA.setdefault(int(uid), {
+        'visto_em': 0.0, 'chat': None, 'modelos': [], 'funis': [],
+        'ipad_em': 0.0, 'intervalo': 2, 'rascunho': [],
+    })
+
+
+def _deck_ligada(pres):
+    """A extensão está falando com o deck?
+
+    A janela ACOMPANHA o intervalo pedido: com valor fixo, assim que o ritmo
+    caísse para o modo ocioso a extensão passaria a parecer desligada e o iPad
+    acusaria um problema que não existe.
+    """
+    return (time.time() - (pres.get('visto_em') or 0)) < (pres.get('intervalo', 2) * 2.5 + 5)
+
+
+def _deck_vencer(uid):
+    """Mata na fila o que passou da validade. Silêncio aqui vira mensagem fora de hora."""
+    agora_ts = time.time()
+    for c in _DECK_COMANDOS.get(int(uid), []):
+        if c['estado'] == 'na_fila' and agora_ts - c['criado_em'] > _DECK_VALIDADE_S:
+            c['estado'] = 'expirado'
+            c['mensagem'] = ('A extensão não pegou a tempo. Não enviei nada — abra o '
+                             'WhatsApp Web no Chrome e toque de novo.')
+            c['atualizado_em'] = agora_ts
+
+
+def _deck_publico(c):
+    return {k: v for k, v in c.items() if k != 'dados'}
+
+
+@app.route('/api/whatsapp/extensao/deck/sincronizar', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
+def api_deck_sincronizar():
+    """A extensão bate aqui: conta a conversa aberta e leva o que o iPad pediu.
+
+    De carona ela entrega a biblioteca daquele consultor, para o iPad desenhar a
+    tela sem precisar de credencial própria — quem tem sessão é a extensão.
+    """
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    uid = getattr(g, 'usuario_id', None)
+    if not uid:
+        return _wa_cors(jsonify({"ok": False, "erro": "Entre no JOB pelo popup da extensão"})), 401
+    d = request.get_json(silent=True) or {}
+
+    with _deck_trava:
+        pres = _deck_presenca(uid)
+        pres['visto_em'] = time.time()
+        chat = d.get('chat') or None
+        pres['chat'] = chat if (isinstance(chat, dict) and chat.get('chatId')) else None
+        # As últimas falas da conversa aberta, para o iPad mostrar com quem você
+        # está falando antes de disparar. Fica SÓ em memória: é conversa de
+        # cliente de plano de saúde, não vira registro por causa de uma tela.
+        if pres['chat'] is None:
+            pres['rascunho'] = []
+        elif isinstance(d.get('rascunho'), list):
+            pres['rascunho'] = [
+                {'de': str(m.get('de') or '')[:20],
+                 'hora': str(m.get('hora') or '')[:8],
+                 'texto': str(m.get('texto') or '')[:300]}
+                for m in d['rascunho'][-6:] if isinstance(m, dict)
+            ]
+        cat = d.get('catalogo') or {}
+        if isinstance(cat.get('modelos'), list):
+            pres['modelos'] = cat['modelos'][:400]
+        if isinstance(cat.get('funis'), list):
+            pres['funis'] = cat['funis'][:100]
+
+        # Ritmo rápido só enquanto o iPad está de fato com a tela aberta. Deck
+        # esquecido na mesa não vale uma batida a cada 2s no Chrome de ninguém.
+        olhando = (time.time() - (pres.get('ipad_em') or 0)) < 30
+        pres['intervalo'] = 2 if olhando else 10
+
+        _deck_vencer(uid)
+        saindo = []
+        for c in _DECK_COMANDOS.get(int(uid), []):
+            if c['estado'] != 'na_fila':
+                continue
+            c['estado'] = 'entregue'
+            c['mensagem'] = 'A extensão pegou. Enviando pelo WhatsApp.'
+            c['atualizado_em'] = time.time()
+            saindo.append({'id': c['id'], 'tipo': c['tipo'], **c['dados']})
+        intervalo = pres['intervalo']
+
+    return _wa_cors(jsonify({"ok": True, "comandos": saindo, "intervalo": intervalo}))
+
+
+@app.route('/api/whatsapp/extensao/deck/resultado', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
+def api_deck_resultado():
+    """A extensão diz como terminou. Sem isso o cartão do iPad fica girando."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    uid = getattr(g, 'usuario_id', None)
+    if not uid:
+        return _wa_cors(jsonify({"ok": False, "erro": "sem usuário"})), 401
+    d = request.get_json(silent=True) or {}
+    try:
+        cid = int(d.get('id'))
+    except (TypeError, ValueError):
+        return _wa_cors(jsonify({"ok": False, "erro": "id inválido"})), 400
+
+    with _deck_trava:
+        alvo = next((c for c in _DECK_COMANDOS.get(int(uid), []) if c['id'] == cid), None)
+        if not alvo:
+            return _wa_cors(jsonify({"ok": False, "erro": "comando não existe mais"})), 404
+        ok = bool(d.get('ok'))
+        alvo['estado'] = (str(d.get('estado') or '').strip()
+                          or ('pronto' if ok else 'falhou'))
+        alvo['mensagem'] = (str(d.get('mensagem') or '')[:400]
+                            or ('Enviado pelo WhatsApp.' if ok else 'Não consegui enviar.'))
+        alvo['atualizado_em'] = time.time()
+    return _wa_cors(jsonify({"ok": True}))
+
+
+def _deck_versao_estatica():
+    """Carimbo que muda quando a tela muda.
+
+    O iPad guarda o deck na tela de início e o Safari segura CSS e JS por
+    bastante tempo. Sem este carimbo na URL, o consultor atualiza e continua
+    vendo a tela velha — exatamente a queixa que já custou uma manhã com a
+    extensão.
+    """
+    marca = 0
+    for nome in ('deck.js', 'deck.css'):
+        try:
+            marca = max(marca, int(os.path.getmtime(os.path.join(app.static_folder, nome))))
+        except OSError:
+            pass
+    return str(marca)
+
+
+@app.route('/deck')
+@login_required
+def deck():
+    """O deck do iPad, agora como tela do JOB: sem PIN, sem IP, sem mesma rede."""
+    return render_template('deck.html', v=_deck_versao_estatica())
+
+
+@app.route('/api/deck/whatsapp')
+@login_required
+def api_deck_whatsapp():
+    """O que o iPad desenha: a conversa aberta, a biblioteca e os últimos envios."""
+    uid = session['user_id']
+    with _deck_trava:
+        pres = _deck_presenca(uid)
+        pres['ipad_em'] = time.time()   # é isto que acelera a batida da extensão
+        _deck_vencer(uid)
+        dados = {
+            "extensao": {
+                "ligada": _deck_ligada(pres),
+                "chat": pres['chat'],
+                "rascunho": pres['rascunho'],
+                "modelos": pres['modelos'],
+                "funis": pres['funis'],
+            },
+            "comandos": [_deck_publico(c) for c in
+                         sorted(_DECK_COMANDOS.get(int(uid), []),
+                                key=lambda c: c['id'], reverse=True)[:12]],
+        }
+    return jsonify(dados)
+
+
+@app.route('/api/deck/comando', methods=['POST'])
+@login_required
+def api_deck_comando():
+    """O iPad pediu um envio. Quem executa é a extensão, no Chrome do consultor."""
+    global _deck_seq
+    uid = session['user_id']
+    d = request.get_json(silent=True) or {}
+    tipo = str(d.get('tipo') or '')
+    if tipo not in ('modelo', 'funil', 'texto'):
+        return jsonify({"erro": "tipo de envio desconhecido"}), 400
+
+    with _deck_trava:
+        pres = _deck_presenca(uid)
+        if not _deck_ligada(pres):
+            return jsonify({"erro": "A extensão do JOB não está falando com o deck. "
+                                    "Abra o WhatsApp Web no Chrome."}), 409
+        if not pres['chat']:
+            return jsonify({"erro": "Nenhuma conversa aberta no WhatsApp Web."}), 409
+
+        dados = {"chatId": pres['chat'].get('chatId')}
+        if tipo == 'modelo':
+            mid = str(d.get('id') or '')
+            modelo = next((m for m in pres['modelos'] if str(m.get('id')) == mid), None)
+            if not modelo:
+                return jsonify({"erro": "Esse modelo não está mais na biblioteca."}), 404
+            dados['modeloId'] = mid
+            rotulo = modelo.get('titulo') or 'modelo'
+        elif tipo == 'funil':
+            fid = str(d.get('id') or '')
+            funil = next((f for f in pres['funis'] if str(f.get('id')) == fid), None)
+            if not funil:
+                return jsonify({"erro": "Esse funil não existe mais."}), 404
+            dados['funilId'] = fid
+            rotulo = funil.get('nome') or 'funil'
+        else:
+            texto = str(d.get('texto') or '').strip()
+            if not texto:
+                return jsonify({"erro": "A mensagem está vazia."}), 400
+            dados['texto'] = texto[:4000]
+            rotulo = texto[:60]
+
+        _deck_seq += 1
+        item = {
+            'id': _deck_seq, 'tipo': tipo, 'rotulo': rotulo, 'dados': dados,
+            'estado': 'na_fila', 'mensagem': 'Esperando a extensão pegar.',
+            'criado_em': time.time(), 'atualizado_em': time.time(),
+        }
+        fila = _DECK_COMANDOS.setdefault(int(uid), [])
+        fila.append(item)
+        del fila[:-_DECK_TETO_COMANDOS]
+        para = (pres['chat'].get('nome') or 'a conversa aberta')
+
+    return jsonify({"comando": _deck_publico(item), "para": para})
+
+
 @app.route('/api/whatsapp/funil/progresso', methods=['POST', 'OPTIONS'])
 @requer('crm:escrever')
 def api_whatsapp_funil_progresso():

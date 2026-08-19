@@ -1,0 +1,497 @@
+/* Deck do JOB — folha unica de estilo.
+   Regras da casa: sem emoji, uma acao principal por tela, so transform e
+   opacity animam, nada de transition: all, nada de ease-in. */
+
+:root {
+  --fundo: #0e0f12;
+  --tijolo: #17191e;
+  --tijolo-toque: #1e222a;
+  --borda: #2a2e37;
+  --borda-forte: #3a404c;
+  --texto: #f2f3f5;
+  --texto-fraco: #99a1ad;
+  --acento: #5b93ff;
+  --ok: #35c07f;
+  --erro: #ff6f6f;
+  --cuidado: #eaa64d;
+
+  --raio: 14px;
+  --gap: 12px;
+
+  --ease-saida: cubic-bezier(.23, 1, .32, 1);
+  --ease-mov:   cubic-bezier(.77, 0, .175, 1);
+  --ease-folha: cubic-bezier(.32, .72, 0, 1);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --fundo: #f1f2f5;
+    --tijolo: #ffffff;
+    --tijolo-toque: #e9ebf0;
+    --borda: #dcdfe6;
+    --borda-forte: #c3c8d2;
+    --texto: #14161a;
+    --texto-fraco: #5d6673;
+    --acento: #1f6feb;
+    --ok: #1d8f5b;
+    --erro: #c53434;
+    --cuidado: #a9640a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--fundo);
+  color: var(--texto);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+body {
+  padding:
+    max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+    max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+}
+
+button { font: inherit; color: inherit; cursor: pointer; }
+[hidden] { display: none !important; }
+
+/* ---------------------------------------------------------------- topo */
+
+/* O topo é uma camada, não uma faixa opaca: o conteúdo corre por baixo dele.
+   É o que faz a tela parecer profunda em vez de recortada. */
+.topo {
+  position: sticky;
+  top: calc(-1 * max(16px, env(safe-area-inset-top)));
+  z-index: 5;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--gap);
+  margin: calc(-1 * max(16px, env(safe-area-inset-top))) calc(-1 * max(16px, env(safe-area-inset-right)))
+          18px calc(-1 * max(16px, env(safe-area-inset-left)));
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+           14px max(16px, env(safe-area-inset-left));
+  background: color-mix(in srgb, var(--fundo) 78%, transparent);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .topo { background: var(--fundo); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+
+.titulo h1 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.conexao {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--texto-fraco);
+}
+.conexao.caiu { color: var(--erro); }
+
+.acoes-topo { display: flex; gap: 8px; flex-shrink: 0; }
+
+.secundario {
+  background: transparent;
+  border: 1px solid var(--borda);
+  border-radius: 10px;
+  color: var(--texto-fraco);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 9px 13px;
+  min-height: 40px;
+  transition: transform 140ms var(--ease-saida), opacity 140ms var(--ease-saida);
+}
+.secundario:active { transform: scale(.97); }
+
+.principal {
+  background: var(--acento);
+  border: none;
+  border-radius: 12px;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  padding: 14px 20px;
+  min-height: 50px;
+  transition: transform 140ms var(--ease-saida), opacity 140ms var(--ease-saida);
+}
+.principal:active { transform: scale(.97); }
+.principal:disabled { opacity: .5; }
+
+.link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* --------------------------------------------------------------- avisos */
+
+.aviso {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--cuidado);
+  border-radius: 12px;
+  color: var(--cuidado);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.aviso .link { color: inherit; }
+
+/* ----------------------------------------------------------------- abas */
+
+.abas {
+  display: flex;
+  gap: 6px;
+  margin-bottom: var(--gap);
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.abas::-webkit-scrollbar { display: none; }
+
+.aba {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--texto-fraco);
+  font-size: 15px;
+  font-weight: 500;
+  padding: 10px 16px;
+  min-height: 44px;
+  white-space: nowrap;
+  transition: transform 140ms var(--ease-saida);
+}
+.aba:active { transform: scale(.97); }
+.aba[aria-selected="true"] {
+  background: var(--tijolo);
+  border-color: var(--borda);
+  color: var(--texto);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- mesa */
+
+.grade {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 10px;
+  padding: 12px;
+  margin-bottom: 24px;
+  background: color-mix(in srgb, #000 22%, var(--fundo));
+  border: 1px solid var(--borda);
+  border-radius: 18px;
+}
+
+@media (prefers-color-scheme: light) {
+  .grade { background: color-mix(in srgb, var(--borda) 45%, var(--fundo)); }
+}
+
+/* A TECLA. Mesmo tamanho, mesmo peso, mesmo lugar: o dedo aprende a mesa. */
+.tijolo {
+  position: relative;
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 8px;
+  background: var(--tijolo);
+  border: 1px solid var(--borda);
+  border-radius: 15px;
+  overflow: hidden;
+  text-align: center;
+  transition: transform 130ms var(--ease-saida), opacity 130ms var(--ease-saida);
+}
+
+/* O brilho de cima some quando o dedo aperta — luz que vira sombra, como no
+   aparelho de verdade. */
+.tijolo::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--texto) 9%, transparent) 0%,
+    transparent 42%,
+    color-mix(in srgb, #000 12%, transparent) 100%);
+  opacity: .55;
+  transition: opacity 130ms var(--ease-saida);
+  pointer-events: none;
+}
+
+.tijolo:active { transform: scale(.94); }
+.tijolo:active::before { opacity: .15; }
+.tijolo:disabled { cursor: default; }
+
+@media (hover: hover) and (pointer: fine) {
+  .tijolo:hover { border-color: var(--borda-forte); }
+}
+
+.tijolo .icone { color: var(--texto-fraco); flex-shrink: 0; }
+
+.tijolo .rotulo {
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.22;
+  letter-spacing: -0.01em;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+/* A dica saiu da tecla: nao cabe, e tecla com tres textos deixa de ser tecla.
+   Ela vive no `title` e na folha de confirmacao de quem tem consequencia. */
+.tijolo .dica { display: none; }
+
+.tijolo[data-estado="rodando"] { border-color: var(--acento); }
+.tijolo[data-estado="rodando"] .icone { color: var(--acento); }
+.tijolo[data-estado="pronto"] { border-color: var(--ok); }
+.tijolo[data-estado="pronto"] .icone { color: var(--ok); }
+.tijolo[data-estado="falhou"] { border-color: var(--erro); }
+.tijolo[data-estado="falhou"] .icone { color: var(--erro); }
+.tijolo[data-cuidado="1"] .icone { color: var(--cuidado); }
+
+.tijolo[data-ligado="1"] {
+  background: var(--tijolo-toque);
+  border-color: var(--cuidado);
+}
+.tijolo[data-ligado="1"] .icone { color: var(--cuidado); }
+
+.andamento {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 3px;
+  background: var(--acento);
+  transform: scaleX(0);
+  transform-origin: left;
+  opacity: 0;
+}
+.tijolo[data-estado="rodando"] .andamento {
+  opacity: 1;
+  animation: correndo 1.4s var(--ease-mov) infinite;
+}
+@keyframes correndo {
+  0%   { transform: scaleX(0); transform-origin: left; }
+  50%  { transform: scaleX(1); transform-origin: left; }
+  51%  { transform: scaleX(1); transform-origin: right; }
+  100% { transform: scaleX(0); transform-origin: right; }
+}
+
+.selo {
+  position: absolute;
+  top: 7px; right: 8px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--texto-fraco);
+}
+.tijolo[data-estado="rodando"] .selo { color: var(--acento); }
+.tijolo[data-estado="pronto"]  .selo { color: var(--ok); }
+.tijolo[data-estado="falhou"]  .selo { color: var(--erro); }
+
+/* --------------------------------------------------------- deslizante */
+
+.tijolo.deslizante {
+  grid-column: span 2;
+  aspect-ratio: 2 / 1;
+  justify-content: space-between;
+  align-items: stretch;
+  padding: 12px;
+  gap: 6px;
+}
+.tijolo.deslizante .rotulo { -webkit-line-clamp: 1; text-align: left; }
+.tijolo.deslizante:active { transform: none; }
+
+.valor {
+  margin-left: auto;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.linha-icone { display: flex; align-items: center; gap: 8px; width: 100%; }
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 30px;
+  background: transparent;
+  margin: 0;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--tijolo-toque);
+  border: 1px solid var(--borda);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 30px; height: 30px;
+  margin-top: -12px;
+  border-radius: 50%;
+  background: var(--acento);
+  border: none;
+}
+
+/* ---------------------------------------------------------- pareamento */
+
+.pareamento {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 80vh;
+}
+.cartao {
+  width: min(420px, 100%);
+  padding: 28px;
+  background: var(--tijolo);
+  border: 1px solid var(--borda);
+  border-radius: 18px;
+}
+.cartao h1 {
+  margin: 0 0 10px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.explica {
+  margin: 0 0 20px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--texto-fraco);
+}
+.pin {
+  width: 100%;
+  padding: 16px;
+  margin-bottom: 14px;
+  background: var(--fundo);
+  border: 1px solid var(--borda-forte);
+  border-radius: 12px;
+  color: var(--texto);
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: .35em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.pin:focus { outline: 2px solid var(--acento); outline-offset: 2px; }
+.erro-pin {
+  margin: -6px 0 14px;
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: var(--erro);
+}
+.cartao .principal { width: 100%; }
+
+/* --------------------------------------------------------------- folha */
+
+.cortina {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .5);
+  opacity: 0;
+  transition: opacity 240ms var(--ease-saida);
+  z-index: 10;
+}
+.cortina.aberta { opacity: 1; }
+
+.folha {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 20px calc(20px + env(safe-area-inset-bottom));
+  background: var(--tijolo);
+  border-top: 1px solid var(--borda);
+  border-radius: 20px 20px 0 0;
+  transform: translateY(100%);
+  transition: transform 280ms var(--ease-folha);
+  z-index: 11;
+}
+.folha.aberta { transform: translateY(0); }
+
+.puxador {
+  width: 40px; height: 4px;
+  margin: 0 auto 14px;
+  border-radius: 999px;
+  background: var(--borda-forte);
+}
+.folha-topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.folha-topo h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.folha-texto {
+  margin: 0 0 14px;
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--texto-fraco);
+}
+.saida {
+  flex: 1;
+  min-height: 120px;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  background: var(--fundo);
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.folha-acoes {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-top: 18px;
+}
+.folha-acoes .secundario { flex: 1; min-height: 50px; font-size: 16px; }
+.folha-acoes .principal { flex: 1; }
+/* a acao de risco fica longe do dedo que ia so fechar */
+.folha-acoes .principal.risco { background: var(--erro); }
+
+/* ------------------------------------------------- movimento reduzido */
+
+@media (prefers-reduced-motion: reduce) {
+  .folha { transition: opacity 200ms var(--ease-saida); transform: none; opacity: 0; }
+  .folha.aberta { opacity: 1; }
+  .tijolo:active, .principal:active, .secundario:active, .aba:active { transform: none; }
+  .tijolo[data-estado="rodando"] .andamento { animation: none; transform: scaleX(1); }
+}
