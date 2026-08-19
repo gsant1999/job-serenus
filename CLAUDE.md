@@ -49,8 +49,24 @@ trafego era ferramenta trabalhando, nao codigo do Guilherme.
   normalmente. Nao substitua o link por pasta de verdade.
 - `.claude/worktrees` e `.git` tem `.metadata_never_index` dentro: desliga o Spotlight nessas
   pastas. Se o arquivo sumir, o Spotlight volta a indexar tudo. Recriar com `touch`.
-- **Apague o worktree quando terminar a tarefa** (`git worktree remove --force <caminho>`). Cada
-  worktree e uma copia de ~70 MB e ~570 arquivos. Doze deles acumulados foi o que estourou a maquina.
+- **Apague o worktree quando terminar a tarefa.** Cada um e ~70 MB e ~570 arquivos; doze
+  acumulados foi o que estourou a maquina. Mas **antes de apagar, confira se alguma sessao ainda
+  esta usando** — em 19/08 apaguei worktrees de sessoes vivas e elas quebraram com
+  `[Errno 2] No such file or directory`:
+
+  ```bash
+  ps -Ao pid,etime,args | grep "claude-code/.*MacOS/claude" | grep -v grep   # sessoes abertas
+  git worktree list                                                          # quem usa o que
+  ```
+
+- **Apagar worktree nao perde trabalho** — o conteudo mora no `.git`, a pasta e descartavel.
+  Se uma sessao reclamar que o caminho sumiu, recrie no mesmo lugar:
+
+  ```bash
+  git worktree add ~/Desktop/job-serenus/.claude/worktrees/<nome> claude/<nome>
+  ```
+
+  Confira depois que o commit bate com o GitHub. Se a branch so existir local, publique antes.
 
 **Cuidado ao copiar ou mover o repo:** 11.615 arquivos estao *so na nuvem* (dataless), a maior
 parte em `video-ads/` (1,1 GB). Qualquer `cp`, `ditto` ou `rsync` da pasta inteira forca o download
