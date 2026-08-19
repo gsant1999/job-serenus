@@ -45786,6 +45786,15 @@ def configuracoes():
     varr_cfg, varr_consultores, api_chaves, canario = None, [], [], None
     varr_saude = None
     fila_saude = None
+    # ESTES DOIS FALTAVAM, E A PAGINA INTEIRA CAIA PRA QUEM NAO E ADMIN.
+    #
+    # Os dois so eram atribuidos dentro do `if perfil == 'admin'`, mas o
+    # render_template la embaixo os passa sempre — entao a consultora abria
+    # /configuracoes e levava erro 500, sem nem conseguir trocar o som da
+    # notificacao, que e a parte da pagina que e dela. O bloco de admin some
+    # sozinho no template; o que nao pode e a variavel sumir junto.
+    desempenho = None
+    api_usuarios = []
     if session.get('perfil') == 'admin':
         conn2 = db()
         try:
