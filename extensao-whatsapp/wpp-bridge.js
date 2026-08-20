@@ -1551,27 +1551,95 @@
   // das formas existir, isto devolve 'sem_suporte' — e o servidor registra que a
   // conversa NÃO foi arquivada. Prometer arquivamento e não arquivar em silêncio
   // seria pior do que não ter o recurso.
+  // MATERIALIZA O CHAT ANTES DE ARQUIVAR — é o mesmo remédio de getMessages
+  // (ver o comentário longo lá em cima) e ele foi preciso pelo mesmo motivo.
+  //
+  // Em 20/08/2026 a campanha MEDSÊNIOR mandou 10 mensagens e não arquivou uma.
+  // O log de produção dizia "Chat not found for 5511993147884@c.us" — e a
+  // mensagem TINHA saído pra esse mesmo número. A explicação está na wa-js:
+  // sendFileMessage usa assertFindChat (`await chat.find`), que ACHA OU CRIA o
+  // modelo; archive usa assertGetChat, que é ChatStore.get SÍNCRONO e não cria
+  // nada. Lead frio, primeiro contato: a conversa não está no store sob o wid
+  // @c.us que o JOB monta pelo telefone. Envio passa, arquivamento não.
+  //
+  // Então find primeiro, e arquiva pelo wid que o store DE FATO guarda — que
+  // pode ser @lid, e é por isso que não dá pra reaproveitar a string do
+  // servidor.
+  //
+  // `get` ANTES de `find`, e a ordem é o conserto.
+  //
+  // `find` ACHA OU CRIA. Pedir find de um `@c.us` numa conta que guarda tudo
+  // como `@lid` fabricaria uma conversa vazia, arquivaria ELA, e a conferência
+  // logo abaixo confirmaria: "arquivado". A conversa de verdade seguiria na
+  // caixa de entrada e o JOB juraria que arquivou. Trocar "não arquiva e
+  // avisa" por "não arquiva e mente" é piorar.
+  //
+  // Então: primeiro olha o que JÁ existe no store (sem criar). Só cai no find
+  // quando o store não tem nada — aí não há conversa real pra confundir com
+  // fantasma. O servidor agora manda o `@lid` do wa_chat_lead quando conhece,
+  // então na prática o get acerta de primeira.
+  function _chatDoStore(chatId) {
+    try {
+      const S = window.WPP.whatsapp && window.WPP.whatsapp.ChatStore;
+      return (S && S.get && S.get(chatId)) || null;
+    } catch (e) { return null; }
+  }
+
+  async function _acharChatPraArquivar(chatId) {
+    const W = window.WPP && window.WPP.chat;
+    if (!W) return null;
+    const jaTem = _chatDoStore(chatId);
+    if (jaTem) return jaTem;
+    try {
+      if (typeof W.find === 'function') {
+        const c = await W.find(chatId);
+        if (c) return c;
+      }
+    } catch (e) { /* segue com o wid cru */ }
+    return null;
+  }
+
   async function arquivarConversa(chatId, arquivar) {
     const W = window.WPP && window.WPP.chat;
     if (!W || !chatId) return { erro: 'wpp_ausente' };
     const querArquivar = arquivar !== false;
+    const chat = await _acharChatPraArquivar(chatId);
+    if (!chat) return { erro: 'conversa nao encontrada no WhatsApp: ' + String(chatId).slice(0, 60) };
+    const alvo = (chat.id && (chat.id._serialized || chat.id)) || chatId;
+
+    // ok:true NÃO PROVA ARQUIVAMENTO. No módulo de archive da wa-js o retorno é
+    // `Cmd.archiveChat(...) : await setArchive(...), {wid, archive}` — operador
+    // vírgula, e o ramo do Cmd NÃO é aguardado. A promise resolve mesmo que o
+    // comando falhe logo depois. Reler o modelo é a diferença entre "não
+    // arquivou e avisou" e "não arquivou e mentiu".
+    const confere = async () => {
+      for (let i = 0; i < 6; i++) {
+        await new Promise(r => setTimeout(r, 120));
+        try {
+          // Relê do store, sem find: aqui a conversa já existe por construção.
+          const c = _chatDoStore(alvo);
+          if (c && !!c.archive === querArquivar) return true;
+        } catch (e) { /* tenta de novo */ }
+      }
+      return false;
+    };
+
     try {
-      if (querArquivar && typeof W.archive === 'function') {
-        await W.archive(chatId); return { ok: true, via: 'archive' };
-      }
-      if (!querArquivar && typeof W.unarchive === 'function') {
-        await W.unarchive(chatId); return { ok: true, via: 'unarchive' };
-      }
+      let via = null;
+      if (querArquivar && typeof W.archive === 'function') { await W.archive(alvo); via = 'archive'; }
+      else if (!querArquivar && typeof W.unarchive === 'function') { await W.unarchive(alvo); via = 'unarchive'; }
       // Algumas versões expõem uma função só, com o estado por parâmetro.
-      if (typeof W.setArchive === 'function') {
-        await W.setArchive(chatId, querArquivar); return { ok: true, via: 'setArchive' };
-      }
-      if (typeof W.archive === 'function') {
-        await W.archive(chatId, querArquivar); return { ok: true, via: 'archive2' };
-      }
-      return { erro: 'sem_suporte' };
+      else if (typeof W.setArchive === 'function') { await W.setArchive(alvo, querArquivar); via = 'setArchive'; }
+      else if (typeof W.archive === 'function') { await W.archive(alvo, querArquivar); via = 'archive2'; }
+      else return { erro: 'sem_suporte' };
+
+      if (await confere()) return { ok: true, via: via, wid: alvo };
+      return { erro: 'pedi ' + via + ' e a conversa nao mudou de estado', wid: alvo };
     } catch (e) {
-      return { erro: String((e && e.message) || e).slice(0, 120) };
+      const msg = String((e && e.message) || e);
+      // "already archived" é a promessa já cumprida, não uma falha.
+      if (/already\s*archived/i.test(msg)) return { ok: true, via: 'ja_estava', wid: alvo };
+      return { erro: msg.slice(0, 120), wid: alvo };
     }
   }
 

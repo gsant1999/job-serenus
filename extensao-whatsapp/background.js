@@ -1323,7 +1323,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/fila/' + encodeURIComponent(msg.fila_id) + '/confirmar', 'POST',
       { ok: msg.ok, erro: msg.erro, wpp_msg_id: msg.wpp_msg_id,
         // Arquivou de verdade? Vai junto pra o servidor não assumir que sim.
-        arquivou: msg.arquivou, arquivo_erro: msg.arquivo_erro }, 15000).then(sendResponse);
+        arquivou: msg.arquivou, arquivo_erro: msg.arquivo_erro,
+        // A VERSÃO SEPARA DOIS SILÊNCIOS IDÊNTICOS. "Extensão velha nem pediu
+        // pra arquivar" e "pediu e a wa-js recusou" chegavam iguais aqui —
+        // arquivou ausente, erro ausente — e o diagnóstico virava adivinhação.
+        versao: (chrome.runtime.getManifest() || {}).version || '' }, 15000).then(sendResponse);
     return true;
   }
   // Resposta a uma campanha da BASE (motor separado do MEI): marca, etiqueta,
@@ -2124,8 +2128,14 @@ async function _aparar(blob) {
 //
 // Aqui fica o que morre de verdade na recarga da extensão: a ponte do mundo
 // ISOLADO, que perde a ligação com o chrome.* e tem trava com prova de vida.
+//
+// O CSS ENTRA JUNTO. Reinjetar só o script deixava um estado que ninguém
+// consegue diagnosticar: o content.js volta e desenha a etiqueta da campanha na
+// lista de conversas, mas a folha que dá forma ao `.job-etq` ficou com a versão
+// antiga da extensão. O elemento existe no DOM e é invisível na tela. Quem olha
+// jura que o recurso não funciona; quem lê o log não vê erro nenhum.
 const _REINJETAR = [
-  { host: 'web.whatsapp.com',                        isolado: ['content.js'] },
+  { host: 'web.whatsapp.com',                        isolado: ['content.js'],       css: ['content.css'] },
   { host: 'paineldocorretor.com.br',                 isolado: ['painel-bridge.js'] },
   { host: 'job-serenus-production.up.railway.app',   isolado: ['site-bridge.js'] },
 ];
@@ -2138,6 +2148,17 @@ async function _reinjetarNasAbasAbertas(motivo) {
     const alvo = _REINJETAR.filter((x) => aba.url.indexOf(x.host) >= 0)[0];
     if (!alvo) continue;
     if (!alvo.isolado || !alvo.isolado.length) continue;
+    // CSS antes do script: se o script pintar primeiro, existe uma janela em
+    // que o elemento está lá sem estilo. Curta, mas é a janela que faz o
+    // consultor dizer "piscou alguma coisa e sumiu".
+    if (alvo.css && alvo.css.length) {
+      try {
+        await chrome.scripting.insertCSS({
+          target: { tabId: aba.id, allFrames: false },
+          files: alvo.css,
+        });
+      } catch (e) { /* já inserido, ou aba sem permissão */ }
+    }
     try {
       await chrome.scripting.executeScript({
         target: { tabId: aba.id, allFrames: false },
