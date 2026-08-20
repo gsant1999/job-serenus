@@ -25,7 +25,7 @@
 .cons-row { display:grid; grid-template-columns:1.5fr .7fr .7fr .8fr auto; gap:12px; align-items:center; padding:12px 18px; border-bottom:1px solid var(--borda); font-size:13.5px; }
 .cons-row:last-child { border-bottom:none; }
 .cons-head { font-size:10.5px; color:var(--cinza-2); font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
-.msgvar { background:var(--fundo-2,#12121a); border:1px solid var(--borda); border-radius:8px; padding:9px 12px; font-size:13px; margin:6px 0; }
+.msgvar { background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:9px 12px; font-size:13px; margin:6px 0; }
 .ct-row { display:grid; grid-template-columns:1.4fr 1fr .8fr auto; gap:10px; padding:9px 18px; border-bottom:1px solid var(--borda); font-size:12.5px; align-items:center; }
 .st { font-size:11px; padding:2px 9px; border-radius:12px; font-weight:600; }
 .st.pendente { background:rgba(148,163,184,.15); color:var(--cinza); }
@@ -180,7 +180,7 @@
 
     <label style="font-size:11.5px;color:var(--cinza-2);font-weight:600;display:block;margin:10px 0 5px;">Modelos de saudação — marque os que quer usar</label>
     {% if modelos_saudacao %}
-    <div style="max-height:200px;overflow:auto;border:1px solid var(--borda);border-radius:9px;padding:6px;background:var(--fundo-2,#12121a);">
+    <div style="max-height:200px;overflow:auto;border:1px solid var(--borda);border-radius:9px;padding:6px;background:var(--panel-2);">
       {% set ns = namespace(cat='__none__') %}
       {% for m in modelos_saudacao %}
         {% if m.categoria != ns.cat %}{% set ns.cat = m.categoria %}
@@ -197,12 +197,12 @@
     {% endif %}
 
     <label style="font-size:11.5px;color:var(--cinza-2);font-weight:600;display:block;margin:12px 0 5px;">Ou variações inline (se não marcar modelos acima)</label>
-    <textarea id="ec-mensagens" style="width:100%;box-sizing:border-box;min-height:80px;padding:9px 11px;font-size:12.5px;background:var(--fundo-2,#12121a);border:1px solid var(--borda);border-radius:8px;color:var(--texto);resize:vertical;" placeholder="Bom dia, {nome}! Tudo bem?&#10;---&#10;Oi {nome}, bom dia!">{% for m in mensagens_atuais %}{{ m }}{% if not loop.last %}
+    <textarea id="ec-mensagens" style="width:100%;box-sizing:border-box;min-height:80px;padding:9px 11px;font-size:12.5px;background:var(--input-bg);border:1px solid var(--borda);border-radius:8px;color:var(--texto);resize:vertical;" placeholder="Bom dia, {nome}! Tudo bem?&#10;---&#10;Oi {nome}, bom dia!">{% for m in mensagens_atuais %}{{ m }}{% if not loop.last %}
 ---
 {% endif %}{% endfor %}</textarea>
 
     <label style="font-size:11.5px;color:var(--cinza-2);font-weight:600;display:block;margin:12px 0 5px;">Funil de resposta</label>
-    <select id="ec-funil" style="width:100%;box-sizing:border-box;padding:9px 11px;font-size:12.5px;background:var(--fundo-2,#12121a);border:1px solid var(--borda);border-radius:8px;color:var(--texto);">
+    <select id="ec-funil" style="width:100%;box-sizing:border-box;padding:9px 11px;font-size:12.5px;background:var(--input-bg);border:1px solid var(--borda);border-radius:8px;color:var(--texto);">
       <option value="">— nenhum —</option>
       {% for f in funis %}<option value="{{ f.id }}" {% if funil and funil.id==f.id %}selected{% endif %}>{{ f.nome }}{% if f.categoria %} · {{ f.categoria }}{% endif %}</option>{% endfor %}
     </select>
