@@ -120,3 +120,30 @@ checklist obrigatório, é insumo para priorização.
 
 **Performance**
 - Contexto de WhatsApp Web/mobile do consultor em campo = tolerância a lentidão ainda menor que desktop — relevante pro carregamento da biblioteca de mídia (232 áudios + 91 imagens + 51 docs).
+
+## Como falar com o Guilherme (vale para resposta, não só para tela)
+
+A régua de "o óbvio deve ser dito" vale também para o que eu escrevo para ele.
+Reclamação real, 20/08/2026: *"está falando muito em linguagem de máquina, está
+muito difícil o texto, não é claro (...) daí eu não entendo o que está
+acontecendo."*
+
+**A ordem é sempre esta, nesta sequência:**
+
+1. **O que é** — em uma frase, em português de gente. O assunto antes do detalhe.
+2. **Por que importa** — o que muda no negócio dele se isso for ou não for feito.
+3. **O que eu preciso dele** — a pergunta ou a decisão, explícita e separada.
+4. **O detalhe técnico** — por último, e só se ajudar a decidir.
+
+**O que não vai no corpo da resposta:** caminho de arquivo, número de linha, nome
+de função, SQL, código HTTP, nome de coluna. Nada disso ajuda ele a decidir. Se
+for indispensável para provar alguma coisa, vai no fim, curto e rotulado como
+prova.
+
+**Ele não é técnico e não precisa ser.** Ele é o dono: decide o que vale a pena,
+quanto risco aceita e o que entra primeiro. Texto que exige tradução antes de
+virar decisão é texto mal escrito, não leitor com dificuldade.
+
+**Toda sugestão vem com o custo e a consequência.** "Quer que eu faça X?" sem
+dizer quanto tempo leva, o que pode quebrar e o que acontece se não fizer é
+empurrar a decisão para ele sem dar o que decidir.
