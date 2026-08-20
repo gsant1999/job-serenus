@@ -4017,6 +4017,15 @@ def init_db():
         # detecção erraria em "vou parar de pagar o plano" e apagaria um cliente
         # da base por engano. Quem bloqueia é uma pessoa, num clique.
         ("disparo_campanha_alvo", "quer_parar", "INTEGER DEFAULT 0"),
+        # As colunas que vieram na planilha, guardadas na criação. Sem isto a
+        # tela não tem como dizer quais variáveis existem, e o admin escreve
+        # {mensalidade} achando que existe porque a coluna chama "Valor da
+        # Mensalidade" — o alvo para e ele não entende por quê.
+        ("disparo_campanha", "colunas_json", "TEXT"),
+        # Variáveis FIXAS da campanha, criadas no JOB: valem igual pra todo
+        # mundo da lista. {operadora}=MedSênior não precisa virar uma coluna
+        # repetida 300 vezes na planilha.
+        ("disparo_campanha", "variaveis_fixas", "TEXT"),
         ("campanha_contato", "excluido_em", "TIMESTAMP"),
         # Janela (dias) sem resposta até o contato virar 'sem_resposta' (varredura).
         # SAÚDE DA CONFERÊNCIA DE RESPOSTAS, por consultor. Sem estes quatro
@@ -12538,7 +12547,18 @@ def _disparo_modelo_do_consultor(conn, campanha_id, consultor_id):
     return dict(_rnd.choice(rows)) if rows else None
 
 
-def _disparo_texto(conn, alvo, modelo, agora=None):
+def _disparo_variaveis_fixas(conn, campanha_id):
+    """As variáveis criadas no JOB pra esta campanha. Valem pra todo mundo da
+    lista — é o que evita repetir a mesma informação em 300 linhas de planilha."""
+    import json as _json
+    try:
+        r = conn.execute("SELECT variaveis_fixas FROM disparo_campanha WHERE id=?", (campanha_id,)).fetchone()
+        return _json.loads((r['variaveis_fixas'] if r else '') or '{}') or {}
+    except Exception:
+        return {}
+
+
+def _disparo_texto(conn, alvo, modelo, agora=None, fixas=None):
     """Monta a mensagem: {nome} e {saudacao} como no resto do sistema, mais as
     colunas da planilha entre chaves. Devolve (texto, faltando).
 
@@ -12552,7 +12572,11 @@ def _disparo_texto(conn, alvo, modelo, agora=None):
         variaveis = _json.loads(alvo['variaveis_json'] or '{}')
     except Exception:
         variaveis = {}
-    for chave, valor in (variaveis or {}).items():
+    # A da LINHA ganha da fixa: se a planilha trouxe a coluna, o valor de cada
+    # pessoa é mais específico que o valor único da campanha.
+    juntas = dict(fixas or {})
+    juntas.update(variaveis or {})
+    for chave, valor in juntas.items():
         txt = txt.replace('{' + chave + '}', str(valor))
     faltando = sorted(set(_re.findall(r'\{([a-z0-9_]+)\}', txt)))
     return txt, faltando
@@ -12650,6 +12674,7 @@ def _disparo_enfileirar(conn, campanha_id, agora=None):
     if not pode:
         return {'enfileirados': 0, 'motivo': motivo}
 
+    fixas = _disparo_variaveis_fixas(conn, campanha_id)
     aptos = {p['id'] for p in _consultores_presenca(conn) if p['apto']}
     teto = max(1, int(camp['teto_dia'] or 10))
     hoje = agora.strftime('%Y-%m-%d')
@@ -12687,10 +12712,12 @@ def _disparo_enfileirar(conn, campanha_id, agora=None):
             if not chat_id:
                 conn.execute("UPDATE disparo_campanha_alvo SET status='invalido' WHERE id=?", (alvo['id'],))
                 continue
-            texto, faltando = _disparo_texto(conn, alvo, modelo, agora)
+            texto, faltando = _disparo_texto(conn, alvo, modelo, agora, fixas)
             if faltando:
+                # "faltou na planilha" mentiria agora: a variável também pode vir
+                # das fixas criadas no JOB. O que falta é VALOR, venha de onde vier.
                 conn.execute("UPDATE disparo_campanha_alvo SET status='sem_variavel', texto_enviado=? WHERE id=?",
-                             (('faltou na planilha: ' + ', '.join(faltando))[:300], alvo['id']))
+                             (('sem valor: ' + ', '.join(faltando))[:300], alvo['id']))
                 sem_variavel += 1
                 continue
             tipo = modelo.get('midia_tipo') if modelo.get('midia_tipo') in ('audio', 'imagem', 'video', 'documento') else 'texto'
@@ -12933,7 +12960,7 @@ def disparo_campanha_criar():
     ini = (d.get('hora_inicio') or '08:00')[:5]
     fim = (d.get('hora_fim') or '18:00')[:5]
     dias = ','.join([x for x in (d.getlist('dias_semana') or []) if x.isdigit()]) or '1,2,3,4,5'
-    contatos, _cols = _disparo_parse_planilha(request.files.get('planilha'))
+    contatos, colunas = _disparo_parse_planilha(request.files.get('planilha'))
     conn = db()
     conn.execute("""INSERT INTO disparo_campanha
         (nome, publico, fonte, teto_dia, hora_inicio, hora_fim, dias_semana, status, criado_por, criado_em)
@@ -12943,6 +12970,12 @@ def disparo_campanha_criar():
            else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
     if contatos:
         _disparo_importar(conn, cid, contatos, publico)
+    if colunas:
+        import json as _json
+        # Só as que viram variável: a do telefone não entra no texto.
+        uteis = [c for c in colunas if c not in _DISPARO_COL_TEL]
+        conn.execute("UPDATE disparo_campanha SET colunas_json=? WHERE id=?",
+                     (_json.dumps(uteis, ensure_ascii=False), cid))
     conn.commit(); close_db(conn)
     return redirect(url_for('disparo_campanha_detalhe', cid=cid))
 
@@ -13001,13 +13034,34 @@ def disparo_campanha_detalhe(cid):
     escolhidos = {}
     for r in conn.execute("SELECT consultor_id, modelo_id FROM disparo_campanha_modelo WHERE campanha_id=?", (cid,)).fetchall():
         escolhidos.setdefault(r['consultor_id'], []).append(r['modelo_id'])
+    # AS VARIÁVEIS QUE EXISTEM, com um exemplo de valor de verdade. Sem isto o
+    # admin escrevia {mensalidade} porque a coluna se chama "Valor da
+    # Mensalidade", o alvo parava em "falta coluna" e ele não tinha como
+    # descobrir o nome certo sem abrir a planilha.
+    import json as _json2
+    try:
+        colunas = _json2.loads(camp['colunas_json'] or '[]') or []
+    except Exception:
+        colunas = []
+    exemplos = {}
+    ex = conn.execute("""SELECT variaveis_json FROM disparo_campanha_alvo
+        WHERE campanha_id=? AND COALESCE(variaveis_json,'{}')<>'{}' LIMIT 1""", (cid,)).fetchone()
+    if ex:
+        try:
+            exemplos = _json2.loads(ex['variaveis_json'] or '{}') or {}
+        except Exception:
+            exemplos = {}
+    if not colunas and exemplos:
+        colunas = sorted(exemplos.keys())   # campanha criada antes de guardarmos as colunas
+    fixas = _disparo_variaveis_fixas(conn, cid)
     janela_ok, janela_motivo = _disparo_janela_aberta(camp)
     close_db(conn)
     return render_template('disparo_campanha_detalhe.html', camp=dict(camp), resumo=resumo,
                            responderam=responderam,
                            rotulos=_DISPARO_STATUS_LABEL, porcons=porcons, orfaos=orfaos,
                            problemas=problemas, consultores=consultores, modelos=modelos,
-                           escolhidos=escolhidos, janela_ok=janela_ok, janela_motivo=janela_motivo)
+                           escolhidos=escolhidos, janela_ok=janela_ok, janela_motivo=janela_motivo,
+                           colunas=colunas, exemplos=exemplos, fixas=fixas)
 
 
 @app.route('/disparos/campanha/<int:cid>/status', methods=['POST'])
@@ -13062,6 +13116,46 @@ def disparo_campanha_ritmo(cid):
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "teto_dia": teto, "hora_inicio": ini, "hora_fim": fim, "dias_semana": dias,
                     "arquivar": arquivar, "avisar_fora_horario": avisar_fora})
+
+
+@app.route('/disparos/campanha/<int:cid>/variaveis', methods=['POST'])
+@login_required
+@admin_required
+def disparo_campanha_variaveis(cid):
+    """Variáveis criadas no JOB, valendo pra toda a campanha.
+
+    A planilha resolve o que MUDA por pessoa (mensalidade, vencimento). Isto
+    resolve o que é IGUAL pra todo mundo — operadora, prazo, nome do plano — sem
+    obrigar o admin a repetir a mesma informação em trezentas linhas.
+
+    Nome vira minúsculo com underline, igual ao cabeçalho da planilha: é o mesmo
+    formato que ele já escreve entre chaves, e duas regras de nome seria uma a
+    mais do que o necessário.
+    """
+    import json as _json
+    itens = (request.json or {}).get('variaveis') or []
+    fixas, erros = {}, []
+    for it in itens[:40]:
+        nome = _disparo_slug((it or {}).get('nome'))
+        valor = str((it or {}).get('valor') or '').strip()[:300]
+        if not nome:
+            continue
+        if not valor:
+            erros.append(nome)
+            continue
+        fixas[nome] = valor
+    if erros:
+        return jsonify({"ok": False,
+                        "erro": "Sem valor: " + ", ".join(erros) + ". Variável vazia deixaria a chave crua na tela do cliente."}), 400
+    conn = db()
+    conn.execute("UPDATE disparo_campanha SET variaveis_fixas=? WHERE id=?",
+                 (_json.dumps(fixas, ensure_ascii=False), cid))
+    # Alvo que tinha parado por falta de variável merece nova chance: pode ser
+    # exatamente a que acabou de ser criada.
+    conn.execute("""UPDATE disparo_campanha_alvo SET status='pendente', texto_enviado=NULL
+        WHERE campanha_id=? AND status='sem_variavel'""", (cid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "variaveis": len(fixas)})
 
 
 @app.route('/disparos/campanha/<int:cid>/modelos', methods=['POST'])

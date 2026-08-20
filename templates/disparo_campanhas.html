@@ -104,6 +104,35 @@ details.dc-guardado > summary .seta { color:var(--cinza); font-size:11px; transi
 details.dc-guardado[open] > summary .seta { transform:rotate(90deg); }
 .dc-vazio { padding:26px 20px; text-align:center; color:var(--cinza); font-size:var(--t-corpo); }
 
+/* ── O MAPA DO PROCESSO ───────────────────────────────────────────────
+   Seis passos numerados, ligados por um fio. Serve pra quem abre a tela
+   pela primeira vez e não sabe o que vai acontecer com a planilha dele —
+   e para de servir depois, por isso nasce recolhido quando já existe
+   campanha. A coluna do número é fixa: os fios de todos os passos ficam
+   na mesma vertical, que é o que faz seis caixas virarem um caminho. */
+.dc-mapa { padding:0; margin-bottom:16px; }
+.dc-mapa > summary { list-style:none; cursor:pointer; padding:15px 20px; display:flex; align-items:center;
+  gap:10px; font-size:var(--t-h2); font-weight:700; font-family:'Sora',sans-serif; }
+.dc-mapa > summary::-webkit-details-marker { display:none; }
+.dc-mapa > summary .seta { color:var(--cinza); font-size:11px; transition:transform 160ms var(--ease-saida); }
+.dc-mapa[open] > summary .seta { transform:rotate(90deg); }
+.dc-mapa-sub { margin-left:auto; font-size:var(--t-apoio); color:var(--cinza);
+  font-weight:400; font-family:'Inter',sans-serif; }
+.dc-fluxo { padding:4px 20px 6px; }
+.dc-etapa-mapa { display:flex; gap:14px; align-items:flex-start; }
+.dc-no { display:flex; flex-direction:column; align-items:center; flex-shrink:0; align-self:stretch; }
+.dc-no i { width:26px; height:26px; border-radius:50%; background:var(--panel-3); color:var(--texto);
+  font-size:var(--t-apoio); font-weight:700; font-style:normal; font-family:'Sora',sans-serif;
+  display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
+.dc-fio { flex:1; width:1px; background:var(--borda-2); margin:4px 0 0; min-height:14px; }
+.dc-no-txt { padding-bottom:16px; }
+.dc-no-txt b { display:block; font-size:var(--t-corpo); margin-bottom:2px; }
+.dc-no-txt span { font-size:var(--t-apoio); color:var(--cinza); line-height:1.55; display:block; max-width:600px; }
+.dc-mapa-rodape { padding:12px 20px 16px; margin-top:2px; border-top:1px solid var(--borda);
+  font-size:var(--t-apoio); color:var(--cinza); line-height:1.6; }
+.dc-mapa-rodape b { color:var(--texto); }
+@media (prefers-reduced-motion: reduce) { .dc-mapa > summary .seta { transition:none; } }
+
 @media (prefers-reduced-motion: reduce) {
   .dc-op, .dc-dia, .dc-solta, .dc-bolha i, details.dc-guardado > summary .seta { transition:none; }
   .dc-op:active, .dc-dia:active { transform:none; }
@@ -126,6 +155,36 @@ details.dc-guardado[open] > summary .seta { transform:rotate(90deg); }
       <a href="/disparos/medicao" class="btn-outline" style="text-decoration:none;white-space:nowrap;">Resultado</a>
     </div>
   </div>
+
+  <details class="card dc-mapa" {{ 'open' if not campanhas }}>
+    <summary><span class="seta">&#9656;</span> Como funciona, do começo ao fim
+      <span class="dc-mapa-sub">6 passos &mdash; leva 2 minutos de leitura</span></summary>
+    <div class="dc-fluxo">
+      {% for n, titulo, texto in [
+        (1, 'Você sobe a planilha',
+            'Uma pessoa por linha, com o telefone. É você quem escolhe quem entra na campanha.'),
+        (2, 'O JOB acha o dono de cada um',
+            'Casa cada telefone com a sua base e descobre qual consultor já fala com aquela pessoa. Quem não tem dono fica separado, esperando você resolver.'),
+        (3, 'Você escolhe o texto de cada consultor',
+            'Cada um manda um texto próprio. Sete pessoas mandando a mesma frase no mesmo dia é o que o WhatsApp lê como robô.'),
+        (4, 'A mensagem sai pelo WhatsApp do dono',
+            'No ritmo que você definiu e dentro do horário. Nunca em rodízio: quem fala é quem o cliente já conhece.'),
+        (5, 'A conversa é arquivada',
+            'Some da caixa de entrada do consultor. Sem isso, quem dispara 100 contatos abre o WhatsApp com 100 conversas mudas na frente.'),
+        (6, 'O cliente responde e o corretor assume',
+            'A conversa volta sozinha, o dono é avisado, o lead ganha etiqueta e nota no histórico. E a campanha para de mandar pra ele.'),
+      ] %}
+      <div class="dc-etapa-mapa">
+        <div class="dc-no"><i>{{ n }}</i>{% if not loop.last %}<span class="dc-fio"></span>{% endif %}</div>
+        <div class="dc-no-txt"><b>{{ titulo }}</b><span>{{ texto }}</span></div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="dc-mapa-rodape">
+      <b>O que a campanha nunca faz:</b> mandar sequência automática depois que o cliente responde. Ali ele está
+      falando com uma pessoa, e quem continua a conversa é o consultor.
+    </div>
+  </details>
 
   {% for c in campanhas %}
   <div class="card dc-card">
