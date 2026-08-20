@@ -12,8 +12,25 @@ Legenda: [ ] pendente · [~] em andamento · [x] feito · (?) aguardando decisã
 - [ ] Rotacionar chaves expostas (Postgres, ASAAS_API_KEY, BREVO_API_KEY) — ação manual no painel Railway, não é mudança de código
 - [ ] **Taxa de resposta 0% no disparo — descobrir se é a saudação ou a detecção** (visto em 03/08/2026 na campanha #4, "CAMPANHA MEI 6 MESES - CAMPINAS - CONTINUAÇÃO": 52 enviados, 0 respostas em 3 dias). Guilherme pediu pra registrar e **não atacar agora**. Duas hipóteses, e é preciso MEDIR antes de mexer em qualquer uma:
   - **(A) a saudação não funciona** — problema de copy. Como medir: abrir 8-10 das conversas disparadas no WhatsApp e ver se o contato leu e ignorou. Se leu e ignorou em massa, é a mensagem.
-  - **(B) a detecção de resposta não pega** — problema técnico, e mais provável de passar despercebido. Marcar "respondeu" depende da extensão estar aberta na aba do WhatsApp do consultor (`checarInbound` em `extensao-whatsapp/wpp-bridge.js` → `campanha_contato.respondeu_em`). Consultor que fechou o WhatsApp Web recebe a resposta no celular e o JOB nunca fica sabendo. Como medir: comparar `respondeu_em` com as conversas reais, e conferir se os 5 consultores estavam "Aptos" na janela do disparo.
+  - **(B) a detecção de resposta não pega** — problema técnico, e mais provável de passar despercebido. Marcar "respondeu" depende da extensão estar aberta na aba do WhatsApp do consultor (a conferência em `extensao-whatsapp/wpp-bridge.js` → `campanha_contato.respondeu_em`; era `checarInbound`, hoje `checarRespostasCampanha`). Consultor que fechou o WhatsApp Web recebe a resposta no celular e o JOB nunca fica sabendo. Como medir: comparar `respondeu_em` com as conversas reais, e conferir se os 5 consultores estavam "Aptos" na janela do disparo.
   - **Por que importa:** se for (B), a taxa de resposta de **todas** as campanhas está subestimada, e qualquer decisão de copy tomada em cima desse número foi tomada em cima de dado errado.
+  - **ATUALIZAÇÃO 20/08/2026 — a hipótese (B) foi atacada e o motivo era pior do que se pensava.**
+    A checagem de resposta (`checarInbound`) só aceitava "respondeu" quando a gente tinha
+    mandado **uma única** mensagem na vida daquele chat — regra desenhada pro disparo frio,
+    onde o "bom dia" é a primeira mensagem da história. Em qualquer conversa que já existia,
+    a conta dava 2+ e a resposta **nunca** era reconhecida. Ela também custava caro: 15
+    chamadas de `getMessages` por rodada, de minuto em minuto, cada uma carregando histórico
+    do servidor — o mesmo caminho do estouro de memória de 11/08.
+    Substituída por marca d'água (a hora do nosso envio vai do servidor; é resposta o que
+    entrou depois dela), lida do que a wa-js já tem em memória, numa passada só. Junto:
+    casamento por telefone (chat em `@lid` era perdido), hora da mensagem do cliente em vez
+    da hora da descoberta, `detectado_por` pra separar o que veio ao vivo do que veio da
+    conferência, e conversa fora da memória virando "sem leitura" em vez de "sem resposta".
+    Extensão **4.116.0**.
+    **O que falta pra fechar este item:** depois que todos atualizarem, a conferência varre
+    sozinha os contatos antigos da campanha #4. Se aparecerem respostas, era (B). Se não
+    aparecer nenhuma, era (A) e a copy precisa mudar. **Só então este item se fecha** — e aí
+    sim com número que vale.
   - **ATUALIZAÇÃO 18/08/2026 — a hipótese (B) ganhou um suspeito concreto.** A auditoria achou que `checarCampanhaAguardando()` (a rotina que reporta resposta de lead ao JOB) estava **desligada** para quem entrou pelo login de e-mail/senha: ela exigia a chave antiga `extKey`, que o login novo nunca grava. Mesma trava matava o batimento de presença, então o consultor ainda contava como offline na roleta. Corrigido na extensão **4.98.0** — mas **o número só volta a ser confiável depois que todos atualizarem**. Não tomar decisão de copy com dado anterior a isso. Ver a seção de 18/08 no fim deste arquivo.
 
 ## CRM (feedback Danilo — checklist atualizado 03/07/2026)
