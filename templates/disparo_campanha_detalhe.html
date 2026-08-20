@@ -86,6 +86,9 @@
   cursor:pointer; font-family:inherit; color:var(--texto);
   transition:border-color 140ms var(--ease-saida), transform 140ms var(--ease-saida); }
 .dd-var b { font-family:ui-monospace,Menlo,monospace; font-size:var(--t-apoio); color:var(--info); }
+.dd-var.sistema b { color:var(--verde); }
+.dd-var.fixa b { color:var(--amarelo); }
+.dd-var.fixa span { color:var(--amarelo); opacity:.85; }
 .dd-var span { font-size:11px; color:var(--cinza); max-width:210px; overflow:hidden;
   text-overflow:ellipsis; white-space:nowrap; }
 .dd-var:active { transform:scale(.97); }
@@ -293,21 +296,33 @@ label.dd-pessoa { cursor:pointer; transition:background 120ms var(--ease-saida);
   {# ── VARIÁVEIS ─────────────────────────────────────────────────────── #}
   <div class="card dd-bloco" id="variaveis">
     <div class="dd-cab"><h3>Variáveis do texto</h3>
-      <span class="n">{{ (colunas|length) + (fixas|length) }} disponíve{{ 'is' if ((colunas|length) + (fixas|length)) != 1 else 'l' }}</span></div>
+      <span class="n">{{ (colunas|length) + (fixas|length) + (vars_sistema|length) }} disponíveis</span></div>
     <div class="dd-nota">
       Escreva a variável entre chaves no texto e ela vira o valor de cada pessoa na hora do envio.
       Clique numa delas pra copiar.
     </div>
-    {% if colunas %}
     <div class="dd-vars">
+      {#  O sistema resolve estas sozinho. Aparecem primeiro porque servem em
+          qualquer campanha e são as que mais se erra — {consultor} fixo era o
+          engano que assinava a mensagem da Karen com outro nome. #}
+      {% for c, oque in vars_sistema.items() %}
+      <button type="button" class="dd-var sistema" onclick="copiarVar(this,'{{ c }}')" title="{{ oque }}">
+        <b>{{ '{' }}{{ c }}{{ '}' }}</b><span>{{ oque }}</span>
+      </button>
+      {% endfor %}
       {% for c in colunas %}
       <button type="button" class="dd-var" onclick="copiarVar(this,'{{ c }}')">
         <b>{{ '{' }}{{ c }}{{ '}' }}</b>
         <span>{{ exemplos.get(c) or 'da planilha' }}</span>
       </button>
       {% endfor %}
+      {% for c, v in fixas.items() %}
+      <button type="button" class="dd-var fixa" onclick="copiarVar(this,'{{ c }}')"
+              title="Valor fixo: todo mundo desta campanha recebe {{ v }}">
+        <b>{{ '{' }}{{ c }}{{ '}' }}</b><span>{{ v }} &mdash; igual pra todos</span>
+      </button>
+      {% endfor %}
     </div>
-    {% endif %}
     <div class="dd-nota" style="padding-top:4px;">
       <b>Variáveis fixas</b> valem igual pra todo mundo desta campanha — servem pro que não muda de pessoa
       pra pessoa (a operadora, o prazo, o nome do plano). Não precisam virar coluna na planilha.
