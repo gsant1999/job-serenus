@@ -119,6 +119,39 @@ class LeadBuscarInput(Entrada):
     termo: str = Field(min_length=2, max_length=200)
 
 
+class CrmEtapasListarInput(Entrada):
+    lead_id: int | None = Field(
+        default=None, gt=0,
+        description="Opcional. Com um lead real, a resposta também traz os motivos de perda "
+                    "cadastrados. Sem ele, vem só a configuração de etapas e de campos.",
+    )
+
+
+class LeadMoverEtapaInput(Entrada):
+    lead_id: int = Field(gt=0)
+    etapa: str = Field(
+        min_length=1, max_length=60,
+        description="Slug da etapa de destino, exatamente como vem em crm_etapas_listar. "
+                    "Não invente o slug: as etapas são configuráveis pelo administrador.",
+    )
+    campos: dict[str, str] = Field(
+        default_factory=dict,
+        description="Só quando a etapa de ORIGEM exige campo preenchido (ex.: motivo_perda para "
+                    "sair de negociacao_perdida). ATENÇÃO: o JOB grava estes campos ANTES de "
+                    "avaliar a etapa, então eles ficam salvos mesmo se a mudança for recusada.",
+    )
+    usuario_id: int | None = Field(
+        default=None, gt=0,
+        description="Consultor em nome de quem a mudança é feita. Enviado, o JOB recusa mover "
+                    "lead de outro consultor. Omitido, essa trava não existe.",
+    )
+    usuario_nome: str = Field(
+        default="Agente MCP", max_length=80,
+        description="Autor que aparece no histórico do lead. O padrão diz a verdade: sem isso "
+                    "o CRM assina a movimentação como 'Extensão'.",
+    )
+
+
 class LeadCriarInput(Entrada):
     nome: str = Field(min_length=1, max_length=200)
     telefone: str = Field(min_length=10, max_length=40)

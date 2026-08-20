@@ -55,6 +55,8 @@ administrador. Ambas precisam dos escopos `cotacao:ler`, `cotacao:escrever`,
 | `cotacoes_imagem_obter` | leitura | `{"cotacao_id":80}` |
 | `leads_buscar` | leitura | `{"termo":"19999999999"}` |
 | `leads_criar` | escrita | `{"nome":"Cliente","telefone":"19999999999","origem":"Site"}` |
+| `crm_etapas_listar` | leitura | `{}` |
+| `leads_mover_etapa` | alteração | `{"lead_id":45,"etapa":"cotacao_enviada"}` |
 | `cotacoes_email_enviar` | escrita externa | `{"cotacao_id":80,"email":"cliente@example.com"}` |
 | `cotacoes_nova_versao` | escrita | `{"cotacao_id":80,"idades":[43,40],"planos":[10,11]}` |
 | `cotacoes_agravo_aplicar` | admin | `{"cotacao_id":80,"versao":0,"ajustes":{"0":{"39-43":599.9}}}` |
@@ -67,6 +69,28 @@ administrador. Ambas precisam dos escopos `cotacao:ler`, `cotacao:escrever`,
 
 A exclusão total de tabelas não é exposta. Alterar uma cotação por agravo nunca
 mexe na tabela-base; criar nova versão sempre gera outro registro e outro token.
+
+### Mover o lead de etapa
+
+`leads_mover_etapa` existe para o funil do corretor andar sozinho. Duas coisas
+que o agente precisa saber:
+
+- **Liste antes.** Os slugs de etapa são configuráveis pelo administrador, então
+  `crm_etapas_listar` é obrigatório antes de mover. Ela devolve as etapas, o tipo
+  de cada uma (normal, ganho, perdido) e os campos que travam a saída.
+- **Algumas etapas exigem campo preenchido para sair.** Hoje são quatro:
+  `motivo_perda` (sair de `negociacao_perdida`), `status_proposta_lead` (sair de
+  `emissao_proposta`), `gatilho_retorno` e `data_retorno` (sair de `nutricao`).
+  A tool devolve `ok: false` dizendo qual campo mandar em `campos`.
+
+A rota do JOB por trás dela responde HTTP 200 com `ok: true` mesmo quando recusa
+a mudança — o motivo real fica em `etapa_ok`/`etapa_erro`. A tool não repassa
+isso cru: ela confere se o lead voltou na etapa pedida antes de dizer que moveu.
+Sem essa conferência, o agente avisaria o corretor de um avanço que não houve.
+
+`usuario_id` é opcional. Enviado, o JOB recusa mover lead de outro consultor;
+omitido, essa trava não existe — é operação de back-office. O histórico do lead
+é assinado com `usuario_nome`, que por padrão vai como "Agente MCP".
 
 ## Variáveis de ambiente
 
