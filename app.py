@@ -12558,7 +12558,19 @@ def _disparo_variaveis_fixas(conn, campanha_id):
         return {}
 
 
-def _disparo_texto(conn, alvo, modelo, agora=None, fixas=None):
+# NOMES QUE O SISTEMA JÁ RESOLVE. Criar uma variável fixa com um destes seria
+# ou inútil ({nome} já é trocado antes) ou perigoso: {consultor} fixo assinaria
+# a mensagem da Karen com o nome do Guilherme, porque a campanha sai por VÁRIOS
+# consultores. Quem tenta é barrado com o motivo.
+_DISPARO_VARS_SISTEMA = {
+    'nome': 'o primeiro nome de quem recebe, tirado do CRM',
+    'saudacao': 'Bom dia / Boa tarde / Boa noite, pela hora real do envio',
+    'consultor': 'o primeiro nome de QUEM ESTÁ MANDANDO — muda por consultor',
+    'consultor_completo': 'o nome completo de quem está mandando',
+}
+
+
+def _disparo_texto(conn, alvo, modelo, agora=None, fixas=None, consultor=None):
     """Monta a mensagem: {nome} e {saudacao} como no resto do sistema, mais as
     colunas da planilha entre chaves. Devolve (texto, faltando).
 
@@ -12567,14 +12579,30 @@ def _disparo_texto(conn, alvo, modelo, agora=None, fixas=None):
     não sai — ele aparece na tela dizendo qual coluna faltou.
     """
     import json as _json, re as _re
-    txt = _preencher_texto((modelo or {}).get('corpo_texto') or '', alvo['nome'], agora)
+    # O nome vem da planilha; se ela não trouxe coluna de nome, o CRM sabe quem
+    # é. Sem esta volta, uma planilha só de telefones mandaria "Oi tudo bem?"
+    # pra gente que a Serenus conhece pelo nome há dois anos.
+    quem = (alvo['nome'] or '').strip()
+    if not quem and alvo['lead_id']:
+        try:
+            _l = conn.execute("SELECT nome FROM crm_leads WHERE id=?", (alvo['lead_id'],)).fetchone()
+            quem = (_l['nome'] or '').strip() if _l else ''
+        except Exception:
+            quem = ''
+    txt = _preencher_texto((modelo or {}).get('corpo_texto') or '', quem, agora)
     try:
         variaveis = _json.loads(alvo['variaveis_json'] or '{}')
     except Exception:
         variaveis = {}
-    # A da LINHA ganha da fixa: se a planilha trouxe a coluna, o valor de cada
-    # pessoa é mais específico que o valor único da campanha.
-    juntas = dict(fixas or {})
+    # PRECEDÊNCIA, do mais geral pro mais específico: o que o sistema resolve
+    # perde pra fixa da campanha, que perde pra coluna da linha. O valor mais
+    # específico sobre aquela pessoa é sempre o que vale.
+    juntas = {}
+    if consultor:
+        primeiro = (consultor or '').strip().split(' ')[0]
+        juntas['consultor'] = _nome_pra_pessoa(primeiro) or primeiro
+        juntas['consultor_completo'] = consultor
+    juntas.update(fixas or {})
     juntas.update(variaveis or {})
     for chave, valor in juntas.items():
         txt = txt.replace('{' + chave + '}', str(valor))
@@ -12675,6 +12703,9 @@ def _disparo_enfileirar(conn, campanha_id, agora=None):
         return {'enfileirados': 0, 'motivo': motivo}
 
     fixas = _disparo_variaveis_fixas(conn, campanha_id)
+    # Nome de cada consultor, pra {consultor} sair certo em cada envio.
+    nomes_cons = {r['id']: r['nome'] for r in
+                  conn.execute("SELECT id, nome FROM usuarios WHERE ativo=1").fetchall()}
     aptos = {p['id'] for p in _consultores_presenca(conn) if p['apto']}
     teto = max(1, int(camp['teto_dia'] or 10))
     hoje = agora.strftime('%Y-%m-%d')
@@ -12712,7 +12743,7 @@ def _disparo_enfileirar(conn, campanha_id, agora=None):
             if not chat_id:
                 conn.execute("UPDATE disparo_campanha_alvo SET status='invalido' WHERE id=?", (alvo['id'],))
                 continue
-            texto, faltando = _disparo_texto(conn, alvo, modelo, agora, fixas)
+            texto, faltando = _disparo_texto(conn, alvo, modelo, agora, fixas, nomes_cons.get(cid))
             if faltando:
                 # "faltou na planilha" mentiria agora: a variável também pode vir
                 # das fixas criadas no JOB. O que falta é VALOR, venha de onde vier.
@@ -13061,7 +13092,8 @@ def disparo_campanha_detalhe(cid):
                            rotulos=_DISPARO_STATUS_LABEL, porcons=porcons, orfaos=orfaos,
                            problemas=problemas, consultores=consultores, modelos=modelos,
                            escolhidos=escolhidos, janela_ok=janela_ok, janela_motivo=janela_motivo,
-                           colunas=colunas, exemplos=exemplos, fixas=fixas)
+                           colunas=colunas, exemplos=exemplos, fixas=fixas,
+                           vars_sistema=_DISPARO_VARS_SISTEMA)
 
 
 @app.route('/disparos/campanha/<int:cid>/status', methods=['POST'])
@@ -13134,16 +13166,24 @@ def disparo_campanha_variaveis(cid):
     """
     import json as _json
     itens = (request.json or {}).get('variaveis') or []
-    fixas, erros = {}, []
+    fixas, erros, reservados = {}, [], []
     for it in itens[:40]:
         nome = _disparo_slug((it or {}).get('nome'))
         valor = str((it or {}).get('valor') or '').strip()[:300]
         if not nome:
             continue
+        if nome in _DISPARO_VARS_SISTEMA:
+            reservados.append(nome)
+            continue
         if not valor:
             erros.append(nome)
             continue
         fixas[nome] = valor
+    if reservados:
+        n = reservados[0]
+        return jsonify({"ok": False,
+                        "erro": f"{{{n}}} o sistema já preenche sozinho — é {_DISPARO_VARS_SISTEMA[n]}. "
+                                f"Criar uma fixa com esse nome mandaria o mesmo valor pra todo mundo."}), 400
     if erros:
         return jsonify({"ok": False,
                         "erro": "Sem valor: " + ", ".join(erros) + ". Variável vazia deixaria a chave crua na tela do cliente."}), 400
