@@ -1345,8 +1345,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg && msg.type === 'campanha_resposta') {
+    // detectado_por: 'evento' (visto ao vivo) ou 'ronda' (achado na conferência).
+    // respondeu_ts: carimbo da mensagem DO CLIENTE — a resposta pode ter chegado
+    // de madrugada e só ser vista de manhã, e é a hora do fato que mede.
     chamarJob('/api/whatsapp/campanha/resposta', 'POST',
-      { telefone: msg.telefone, usuario_id: msg.usuario_id }, 15000).then(sendResponse);
+      { telefone: msg.telefone, usuario_id: msg.usuario_id,
+        detectado_por: msg.detectado_por || 'evento', respondeu_ts: msg.respondeu_ts || 0 },
+      15000).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'campanha_excluir') {
@@ -1946,7 +1951,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg && msg.type === 'presenca') {
     chamarJob('/api/whatsapp/presenca', 'POST',
-      { usuario_id: msg.usuario_id, versao: msg.versao, numero: msg.numero, wpp_ok: msg.wpp_ok },
+      { usuario_id: msg.usuario_id, versao: msg.versao, numero: msg.numero, wpp_ok: msg.wpp_ok,
+        ronda: msg.ronda || null },   // saúde da última conferência de respostas
       10000, null, { repetivel: true }).then(sendResponse);   // só atualiza estado, repetir é inócuo
     return true;
   }

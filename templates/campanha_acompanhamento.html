@@ -22,6 +22,11 @@
 .linha:last-child { border-bottom:none; }
 .linha .quem { font-weight:600; }
 .linha .meta { color:var(--cinza); font-size:11px; white-space:nowrap; }
+/* Conferência: mesma linha da fila por consultor — são irmãos, então mesma
+   altura, mesma margem e mesmo tamanho de letra. */
+.conf-row { grid-template-columns:1.4fr .9fr .7fr .7fr; }
+.conf-nota { padding:11px 18px 0; color:var(--cinza); font-size:12px; line-height:1.5; }
+.conf-nunca { color:var(--rosa); }
 </style>
 {% endblock %}
 
@@ -56,6 +61,35 @@
     </div>
     {% else %}
     <div style="padding:18px;color:var(--cinza);">Nenhum consultor ativo.</div>
+    {% endfor %}
+  </div>
+
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-header"><h3>Conferência de respostas</h3></div>
+    <div class="conf-nota">A conferência só roda com o WhatsApp Web aberto na aba do consultor. Quem está com a aba fechada
+      não é conferido — e conversa não conferida não quer dizer cliente sem responder.
+      {% if det %}<br>Respostas encontradas: {{ det.get('evento', 0) }} ao vivo · {{ det.get('ronda', 0) }} na conferência{% if det.get('antes') %} · {{ det.get('antes') }} antes desta medição{% endif %}.{% endif %}
+    </div>
+    <div class="cons-row conf-row cons-head" style="margin-top:11px;">
+      <div>Consultor</div>
+      <div>Última conferência</div>
+      <div>Conferidas</div>
+      <div>Sem leitura<button type="button" class="job-i" aria-label="O que é este número"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">Conversas que o WhatsApp ainda não tinha carregado na hora da conferência. Não dá pra afirmar nada sobre elas: pode ter resposta esperando. Some sozinho quando o consultor rola a lista de conversas.</span></button></div>
+    </div>
+    {% for p in presenca %}
+    <div class="cons-row conf-row">
+      <div><span class="pill" style="background:{{ 'var(--teal)' if p.ronda_min is not none and p.ronda_min < 5 else 'var(--cinza-2,#6b7280)' }};"></span>{{ p.nome }}</div>
+      <div>
+        {%- if p.ronda_min is none %}<span class="conf-nunca">nunca conferiu</span>
+        {%- elif p.ronda_min < 1 %}agora
+        {%- elif p.ronda_min < 60 %}há {{ p.ronda_min }} min
+        {%- else %}há {{ (p.ronda_min // 60) }} h{% endif %}
+      </div>
+      <div>{{ p.ronda_conferidos or 0 }}<span style="color:var(--cinza);"> de {{ p.ronda_vigiados or 0 }}</span></div>
+      <div style="color:{{ 'var(--rosa)' if p.ronda_sem_memoria else 'var(--cinza)' }};font-weight:{{ '600' if p.ronda_sem_memoria else '400' }};">{{ p.ronda_sem_memoria or 0 }}</div>
+    </div>
+    {% else %}
+    <div style="padding:18px;color:var(--cinza);">Nenhum consultor participando do disparo.</div>
     {% endfor %}
   </div>
 

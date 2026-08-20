@@ -14406,8 +14406,12 @@
   // responde, avisa o JOB (o lead fica quente). Os que não respondem no prazo o
   // JOB marca como 'sem_resposta' e a extensão oferece apagar a conversa — sempre
   // com o consultor clicando, nunca automático (é irreversível no WhatsApp).
-  const _campWatch = new Map();  // chatId -> { telefone, contato_id }
-  let _campExcluir = [];         // [{ chat_id, telefone, contato_id }]
+  const _campWatch = new Map();  // chatId -> { telefone, contato_id, desde }
+  let _campExcluir = [];         // [{ chat_id, telefone, contato_id, desde }]
+  // Saúde da última conferência de respostas, pra ir junto no bate-ponto. Sem
+  // isto, "nenhuma resposta" e "não consegui olhar" chegam iguais no servidor —
+  // e foi assim que uma campanha inteira passou por fracasso de copy.
+  let _campRonda = null;         // { vigiados, conferidos, sem_memoria, chats, em }
 
   function pedirApagarConversa(chatId) {
     return new Promise((resolve) => {
@@ -14476,19 +14480,24 @@
     }
 
     if (d.tipo !== 'inbound') return;
+    // Chat em @lid não casa por id aqui (o servidor endereça por '55...@c.us');
+    // quem pega esses é a conferência de 60s, que casa por telefone.
     const alvo = _campWatch.get(d.chatId);
-    if (!alvo) return;
-    // Confirma pela leitura antes de reportar: só se a última é do contato E a gente
-    // só mandou a saudação (não respondeu manual). Evita disparar funil quando um
-    // humano já assumiu (mesmo pelo celular).
-    let ok = false;
-    try { ok = await pedirChecarInbound(d.chatId); } catch (e) { ok = false; }
-    if (!ok) return;
+    if (!alvo || !alvo.desde) return;
+    // Confirma pela MARCA D'ÁGUA antes de reportar: o evento dispara pra qualquer
+    // mensagem que entra, inclusive numa conversa que já estava rolando antes da
+    // campanha. Só é resposta o que chegou DEPOIS da nossa mensagem.
+    let achou = null;
+    try {
+      const r = await pedirChecarRespostas([{ telefone: alvo.telefone, contato_id: alvo.contato_id, desde: alvo.desde }]);
+      achou = (r && r.respostas && r.respostas[0]) || null;
+    } catch (e) { achou = null; }
+    if (!achou) return;
     _campWatch.delete(d.chatId);
     try {
       const { usuarioId } = await _safeStorageGet(['usuarioId']);
-      await chrome.runtime.sendMessage({ type: 'campanha_resposta', telefone: alvo.telefone, usuario_id: usuarioId });
-    } catch (e) { /* próxima varredura reconcilia */ }
+      await reportarRespostaCampanha(alvo.telefone, achou.em, 'evento', usuarioId);
+    } catch (e) { /* próxima conferência reconcilia */ }
   });
 
   let DICIONARIO_CACA_DOCS = [];
@@ -14575,20 +14584,35 @@
     }, 15000);
   }
 
-  function pedirChecarInbound(chatId) {
+  // Pergunta a TODOS os números de campanha de uma vez: entrou mensagem do
+  // contato depois da hora em que a nossa saiu? A ponte responde lendo o que o
+  // WhatsApp já tem em memória — uma passada, sem carregar histórico. Era uma
+  // chamada POR conversa, e cada uma puxava histórico do servidor.
+  function pedirChecarRespostas(alvos) {
     return new Promise((resolve) => {
-      const reqId = 'ci' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      const reqId = 'cr' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
       let pronto = false;
       function onMsg(ev) {
         if (ev.source !== window) return;
         const d = ev.data;
         if (!d || d.source !== 'JOB_EXT_RESP' || d.reqId !== reqId) return;
-        pronto = true; window.removeEventListener('message', onMsg); resolve(!!(d && d.inbound));
+        pronto = true; window.removeEventListener('message', onMsg); resolve(d);
       }
       window.addEventListener('message', onMsg);
-      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'checar_inbound', reqId, chatId }, '*');
-      setTimeout(() => { if (!pronto) { window.removeEventListener('message', onMsg); resolve(false); } }, 8000);
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'checar_respostas_campanha', reqId, alvos }, '*');
+      setTimeout(() => { if (!pronto) { window.removeEventListener('message', onMsg); resolve(null); } }, 8000);
     });
+  }
+
+  // Avisa o JOB que este número respondeu. `em` é o carimbo da mensagem DO
+  // CLIENTE (não a hora em que a gente descobriu) e `origem` diz se veio do
+  // evento ao vivo ou da conferência — os dois viram medida lá.
+  async function reportarRespostaCampanha(telefone, em, origem, usuarioId) {
+    try {
+      await chrome.runtime.sendMessage({ type: 'campanha_resposta', telefone,
+        usuario_id: usuarioId, detectado_por: origem, respondeu_ts: em || 0 });
+      return true;
+    } catch (e) { return false; }   // a próxima rodada reconcilia
   }
 
   async function checarCampanhaAguardando() {
@@ -14603,12 +14627,52 @@
     if (!resp || !resp.ok) return;
     _campWatch.clear();
     (resp.aguardando || []).forEach((a) => {
-      if (a.chat_id) _campWatch.set(a.chat_id, { telefone: a.telefone, contato_id: a.contato_id });
+      if (a.chat_id) _campWatch.set(a.chat_id, { telefone: a.telefone, contato_id: a.contato_id, desde: a.desde });
     });
     _campExcluir = (resp.excluir || []).filter((e) => e.chat_id);
-    // Dedup por chat_id também aqui (defesa em profundidade — o servidor já
-    // deduplica, mas um backend velho não pode duplicar o aviso; chat_id
-    // normaliza '5519...' e '19...' pro mesmo chat).
+    // CONFERÊNCIA DE RESPOSTAS. É o que sustenta o número: o evento ao vivo só
+    // existe com a aba aberta na hora exata, e ninguém fica com o WhatsApp Web
+    // aberto 24h. Aqui a pergunta vai pra todos os números de uma vez e a ponte
+    // responde lendo a memória do WhatsApp — sem teto de 15 por rodada, porque
+    // não custa mais uma chamada por conversa.
+    //
+    // Os candidatos a "apagar conversa" entram na mesma pergunta de propósito:
+    // oferecer apagar a conversa de quem RESPONDEU é destruir a prova de que a
+    // campanha funcionou. Reconferir antes é o que impede isso.
+    const alvos = [];
+    for (const a of _campWatch.values()) {
+      if (a.desde) alvos.push({ telefone: a.telefone, contato_id: a.contato_id, desde: a.desde });
+    }
+    for (const e of _campExcluir) {
+      if (e.desde) alvos.push({ telefone: e.telefone, contato_id: e.contato_id, desde: e.desde });
+    }
+    let r = null;
+    try { r = await pedirChecarRespostas(alvos); } catch (e) { r = null; }
+    const _responderam = new Set();
+    if (r && r.respostas) {
+      for (const item of r.respostas) {
+        if (await reportarRespostaCampanha(item.telefone, item.em, 'ronda', usuarioId)) {
+          _responderam.add(String(item.telefone));
+        }
+      }
+    }
+    // Guarda a saúde da rodada pro bate-ponto levar ao servidor. `sem_memoria` é
+    // o número que interessa: são as conversas sobre as quais NÃO dá pra afirmar
+    // nada. Contá-las como "sem resposta" é o que fazia campanha parecer fracasso.
+    _campRonda = r && !r.erro
+      ? { vigiados: r.vigiados || 0, conferidos: r.conferidos || 0,
+          sem_memoria: r.sem_memoria || 0, chats: r.chats || 0, em: Date.now() }
+      : { vigiados: alvos.length, conferidos: 0, sem_memoria: alvos.length, chats: 0, em: Date.now() };
+    if (_responderam.size) {
+      for (const [chatId, a] of _campWatch) {
+        if (_responderam.has(String(a.telefone))) _campWatch.delete(chatId);
+      }
+      _campExcluir = _campExcluir.filter((e) => !_responderam.has(String(e.telefone)));
+    }
+
+    // Dedup por chat_id (defesa em profundidade — o servidor já deduplica, mas um
+    // backend velho não pode duplicar o aviso; chat_id normaliza '5519...' e
+    // '19...' pro mesmo chat).
     const _chatsVistos = new Set();
     _campExcluir = _campExcluir.filter((e) => {
       if (_chatsVistos.has(e.chat_id)) return false;
@@ -14623,21 +14687,6 @@
       const bx = document.getElementById('job-aviso-limpeza'); if (bx) bx.remove();
     } else {
       mostrarAvisoLimpeza(_campExcluir, _assin);
-    }
-    // POLLING de resposta (fallback do evento): lê cada chat vigiado e, se o contato
-    // já respondeu, reporta ao JOB. Cap por rodada pra não pesar. Confiável mesmo
-    // quando o evento chat.new_message não dispara.
-    let checados = 0;
-    for (const [chatId, alvo] of _campWatch) {
-      if (checados >= 15) break;
-      checados++;
-      try {
-        const respondeu = await pedirChecarInbound(chatId);
-        if (respondeu) {
-          _campWatch.delete(chatId);
-          await chrome.runtime.sendMessage({ type: 'campanha_resposta', telefone: alvo.telefone, usuario_id: usuarioId });
-        }
-      } catch (e) { /* próxima rodada tenta de novo */ }
     }
   }
   _registrarTimeout(_soComAbaVisivel(checarCampanhaAguardando), 8000);
@@ -14656,7 +14705,8 @@
     let versao = ''; try { versao = chrome.runtime.getManifest().version; } catch (e) {}
     let numero = ''; try { numero = await pedirMeuNumero(); } catch (e) {}
     try {
-      await chrome.runtime.sendMessage({ type: 'presenca', usuario_id: usuarioId, versao, numero, wpp_ok: !!numero });
+      await chrome.runtime.sendMessage({ type: 'presenca', usuario_id: usuarioId, versao, numero,
+                                         wpp_ok: !!numero, ronda: _campRonda });
     } catch (e) { /* próxima batida tenta de novo */ }
   }
   function _agendarPresenca(ms) {
