@@ -18148,6 +18148,14 @@ def usuarios():
     rows = conn.execute("SELECT * FROM usuarios ORDER BY id").fetchall()
     funis_l = [dict(r) for r in conn.execute(
         "SELECT id, nome, categoria FROM whatsapp_funis WHERE COALESCE(ativo,1)=1 ORDER BY nome").fetchall()]
+    # O NÚMERO QUE A EXTENSÃO VÊ LOGADO, pra tela poder comparar com o cadastro.
+    # Três dos sete estavam errados em 20/08/2026 e ninguém tinha como saber:
+    # a ficha dizia uma coisa, o aparelho outra, e o JOB acreditava na ficha.
+    try:
+        vistos = {r['usuario_id']: r['numero'] for r in conn.execute(
+            "SELECT usuario_id, numero FROM consultor_wpp_status WHERE COALESCE(numero,'')<>''").fetchall()}
+    except Exception:
+        vistos = {}
     close_db(conn)
     # dict simples: Row do SQLite não é serializável pelo |tojson do template,
     # e o hash de senha não deve ir para o HTML
@@ -18156,6 +18164,15 @@ def usuarios():
         d = dict(r)
         d['senha_hash'] = bool(d.get('senha_hash'))
         d.pop('reset_token', None)
+        # `wpp_visto` é o número logado; `wpp_bate` diz se o cadastro concorda.
+        # Comparação por sufixo de 8, o mesmo critério do resto do sistema —
+        # senão "5519..." e "(19) 9..." pareceriam pessoas diferentes.
+        visto = _waspeed_normaliza_fone(vistos.get(d.get('id')) or '') or ''
+        cad = _normalizar_telefone(str(d.get('telefone') or ''))
+        d['wpp_visto'] = visto
+        d['wpp_visto_br'] = _formatar_telefone(visto) if visto else ''
+        d['wpp_bate'] = bool(visto and cad and len(cad) >= 8 and
+                             _normalizar_telefone(visto)[-8:] == cad[-8:])
         usuarios_l.append(d)
     return render_template('usuarios.html', usuarios=usuarios_l, host=request.host_url.rstrip('/'),
                            modulos=MODULOS, funis=funis_l)
@@ -33629,12 +33646,7 @@ def api_whatsapp_analisar():
     usuario_zap = None
     zap_consultor = _normalizar_telefone(str(d.get('whatsapp_consultor') or ''))
     if zap_consultor and len(zap_consultor) >= 8:
-        suf_zap = zap_consultor[-8:]
-        for u in conn.execute("SELECT id, nome, telefone FROM usuarios WHERE ativo=1").fetchall():
-            tel_u = _normalizar_telefone(str(u['telefone'] or ''))
-            if tel_u and len(tel_u) >= 8 and tel_u[-8:] == suf_zap:
-                usuario_zap = u
-                break
+        usuario_zap = _consultor_por_whatsapp(conn, zap_consultor)
     usuario_popup = None
     usuario_id_raw = d.get('usuario_id')
     if usuario_id_raw:
@@ -33649,16 +33661,27 @@ def api_whatsapp_analisar():
         responsavel_extensao = usuario_zap['id']
         consultor_nome = usuario_zap['nome']
         if usuario_popup and usuario_popup['id'] != usuario_zap['id']:
-            aviso_consultor = (f"Este WhatsApp é de {usuario_zap['nome']}, mas a extensão está configurada "
-                               f"como {usuario_popup['nome']} — o lead fica com {usuario_zap['nome']}. "
-                               "Ajuste o consultor no popup da extensão.")
+            # O AVISO PRECISA DIZER DE ONDE VEIO A DECISÃO, senão vira briga.
+            # Quando é o WhatsApp logado que manda, a pessoa entende na hora
+            # ("estou no aparelho do outro"). Quando é o cadastro, o conselho é
+            # o oposto — abrir o WhatsApp com a extensão e deixar ela avisar.
+            if usuario_zap.get('como') == 'extensao':
+                aviso_consultor = (f"Quem está logado neste WhatsApp é {usuario_zap['nome']}, mas o popup "
+                                   f"da extensão diz {usuario_popup['nome']} — o lead fica com "
+                                   f"{usuario_zap['nome']}, que é de onde a mensagem sai. Se o aparelho é "
+                                   f"seu mesmo, ajuste o consultor no popup.")
+            else:
+                aviso_consultor = (f"Este número está cadastrado em {usuario_zap['nome']} no JOB, mas o popup "
+                                   f"diz {usuario_popup['nome']} — o lead fica com {usuario_zap['nome']}. "
+                                   f"Se o cadastro é que está velho, é só {usuario_popup['nome']} abrir o "
+                                   f"WhatsApp com a extensão: ela avisa o número certo sozinha.")
     elif usuario_popup:
         responsavel_extensao = usuario_popup['id']
         consultor_nome = usuario_popup['nome']
         if zap_consultor:
-            aviso_consultor = (f"O número deste WhatsApp não está cadastrado em nenhum consultor — usando "
-                               f"{usuario_popup['nome']} (escolhido no popup). Cadastre o telefone do consultor "
-                               "em Usuários no JOB pra atribuição automática.")
+            aviso_consultor = (f"Ninguém no JOB usa este WhatsApp — nem pelo que a extensão já viu, nem pelo "
+                               f"cadastro. O lead ficou com {usuario_popup['nome']} (escolhido no popup). "
+                               f"Se o aparelho é dele, basta abrir o WhatsApp com a extensão ligada uma vez.")
 
     # LEAD_ID EXPLICITO GANHA DO CASAMENTO POR TELEFONE.
     #
@@ -46820,6 +46843,80 @@ def _enviar_whatsapp_waspeed(token, fone, mensagem):
 NUMERO_WHATSAPP_SERENUS = '5519936196877'
 CONSULTORAS_CANAL_OFICIAL = ('Prisciele Azevedo', 'Juliana Azevedo', 'Jenifer Aparecida Lobregat dos Santos')
 
+# ── DE QUAL WHATSAPP ESSE CONSULTOR FALA ─────────────────────────────────────
+#
+# Durante muito tempo a resposta foi `usuarios.telefone`, um campo digitado à
+# mão. Em 20/08/2026 conferimos contra o que a extensão vê logado e três dos
+# sete estavam errados — e o cadastro da Aline guardava o WhatsApp REAL da
+# Karen. Isso não é descuido de quem cadastrou: consultor troca de chip, o
+# gestor cadastra o próprio número pra receber teste, alguém entra com o
+# aparelho de outro. Campo digitado à mão envelhece; é o que ele faz.
+#
+# A extensão não tem esse problema. Ela pergunta pro próprio WhatsApp quem
+# está logado (WPP.conn.getMyUserId) e bate ponto com esse número. É o único
+# lugar do sistema que SABE, em vez de lembrar.
+#
+# Então a ordem passa a ser: o que a extensão viu primeiro, o cadastro só como
+# último recurso pra quem nunca conectou. O cadastro continua existindo — ele
+# serve pra ligar, mandar SMS, achar a pessoa — só perdeu o direito de
+# responder "de onde sai a mensagem".
+def _whatsapp_visto_do_consultor(conn, usuario_id):
+    """O número que a extensão VIU logada. None se ela nunca conectou."""
+    if not usuario_id:
+        return None
+    try:
+        r = conn.execute("SELECT numero FROM consultor_wpp_status WHERE usuario_id=?",
+                         (usuario_id,)).fetchone()
+    except Exception:
+        return None
+    return _waspeed_normaliza_fone((r['numero'] if r else '') or '') or None
+
+
+def _whatsapp_de_quem_manda(conn, usuario_id):
+    """O WhatsApp de onde a mensagem desse consultor sai de verdade.
+
+    Sem prazo de validade de propósito: o último número que a extensão viu é
+    melhor palpite que um cadastro de meses atrás, mesmo se ela está offline
+    agora. Consultor de férias continua sendo dono do número dele.
+    """
+    visto = _whatsapp_visto_do_consultor(conn, usuario_id)
+    if visto:
+        return visto
+    try:
+        r = conn.execute("SELECT telefone FROM usuarios WHERE id=?", (usuario_id,)).fetchone()
+    except Exception:
+        return None
+    return _waspeed_normaliza_fone((r['telefone'] if r else '') or '') or None
+
+
+def _consultor_por_whatsapp(conn, numero):
+    """De quem é este WhatsApp. Pergunta pra extensão ANTES do cadastro.
+
+    Era isto que mandava lead da Karen pro nome da Aline: o casamento olhava
+    só `usuarios.telefone`, e o número que a Karen usa está cadastrado na
+    Aline. Quem está logado no aparelho ganha de quem está escrito na ficha.
+    """
+    alvo = _normalizar_telefone(str(numero or ''))
+    if not alvo or len(alvo) < 8:
+        return None
+    suf = alvo[-8:]
+    try:
+        vistos = conn.execute("""SELECT s.usuario_id, s.numero, u.nome FROM consultor_wpp_status s
+                                 JOIN usuarios u ON u.id=s.usuario_id
+                                 WHERE u.ativo=1 AND COALESCE(s.numero,'')<>''""").fetchall()
+    except Exception:
+        vistos = []
+    for r in vistos:
+        t = _normalizar_telefone(str(r['numero'] or ''))
+        if t and len(t) >= 8 and t[-8:] == suf:
+            return {'id': r['usuario_id'], 'nome': r['nome'], 'como': 'extensao'}
+    for r in conn.execute("SELECT id, nome, telefone FROM usuarios WHERE ativo=1").fetchall():
+        t = _normalizar_telefone(str(r['telefone'] or ''))
+        if t and len(t) >= 8 and t[-8:] == suf:
+            return {'id': r['id'], 'nome': r['nome'], 'como': 'cadastro'}
+    return None
+
+
 def _whatsapp_do_consultor(conn, responsavel_id):
     """Retorna o número (só dígitos, com 55) que o LEAD deve chamar pra falar com
     o consultor responsável. Prisciele/Juliana/Jenifer atendem pelo WhatsApp
@@ -46830,7 +46927,10 @@ def _whatsapp_do_consultor(conn, responsavel_id):
             rd = dict(row)
             if rd['nome'] in CONSULTORAS_CANAL_OFICIAL:
                 return NUMERO_WHATSAPP_SERENUS
-            fone = _waspeed_normaliza_fone(rd.get('telefone') or '')
+            # O que a extensão viu ganha do cadastro — ver a nota grande acima.
+            # Antes, quem pedia pra falar com a Aline recebia o WhatsApp da
+            # Karen, porque era o número que estava na ficha dela.
+            fone = _whatsapp_de_quem_manda(conn, responsavel_id)
             if fone:
                 return fone
     return NUMERO_WHATSAPP_SERENUS

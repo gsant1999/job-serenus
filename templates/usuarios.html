@@ -526,6 +526,7 @@
           <label>WhatsApp / Telefone</label>
           <input type="text" name="telefone" id="e-telefone" placeholder="(19) 99999-9999">
           <div class="hint">Recebe notificações do JOB e vira o link "chamar corretor" nos e-mails</div>
+          <div class="hint" id="e-wpp-visto" hidden></div>
         </div>
       </div>
       <div class="form-row form-row-2" style="margin-bottom:12px;">
@@ -685,6 +686,16 @@ function uploadFoto(inputElement) {
     .catch(() => { preview.style.opacity = '1'; toast('Erro ao fazer upload', 'err'); });
 }
 
+// Copia pro campo, mas NAO salva sozinho: o cadastro tambem serve pra ligar e
+// pra notificacao, e trocar o telefone de alguem sem a pessoa saber e ruim.
+// Quem clica esta dizendo "e esse mesmo" — depois ainda tem que salvar.
+function usarWppVisto(numero) {
+  var i = document.getElementById('e-telefone');
+  if (i) { i.value = numero; i.focus(); }
+  var box = document.getElementById('e-wpp-visto');
+  if (box) box.innerHTML = '<span style="color:var(--verde);">Copiado. Clique em salvar pra valer.</span>';
+}
+
 function editar(u) {
   _editandoUid = u.id;
   document.getElementById('form-editar').action = '/usuario/editar/' + u.id;
@@ -694,6 +705,25 @@ function editar(u) {
   document.getElementById('e-cpf').value    = u.cpf  || '';
   document.getElementById('e-email').value  = u.email || '';
   document.getElementById('e-telefone').value = u.telefone || '';
+  // O NUMERO QUE A EXTENSAO VIU LOGADO. E ele quem manda pro sistema; este
+  // campo serve pra ligar e notificar. Quando os dois discordam, quem abre
+  // esta tela precisa saber — senao continua acreditando na ficha, e foi
+  // assim que o cadastro da Aline ficou com o WhatsApp real da Karen.
+  (function () {
+    var box = document.getElementById('e-wpp-visto');
+    if (!box) return;
+    box.hidden = false;
+    if (!u.wpp_visto) {
+      box.innerHTML = 'Nunca abriu o WhatsApp com a extensao — ate la, o sistema usa este numero.';
+    } else if (u.wpp_bate) {
+      box.innerHTML = '<span style="color:var(--verde);">Confere com o WhatsApp onde a extensao esta logada.</span>';
+    } else {
+      box.innerHTML = '<span style="color:var(--amarelo);">A extensao esta logada em <b>'
+        + u.wpp_visto_br + '</b> — e de la que as mensagens saem.</span> '
+        + '<a href="#" style="color:var(--info);" onclick="usarWppVisto(\''
+        + u.wpp_visto_br + '\');return false;">usar este aqui tambem</a>';
+    }
+  })();
   document.getElementById('e-waspeed-token').value = u.waspeed_token || '';
   document.getElementById('e-funil-atendimento').value = u.funil_atendimento_id || '';
   document.getElementById('e-perfil').value = u.perfil || 'consultor';
