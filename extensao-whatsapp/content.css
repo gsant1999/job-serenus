@@ -4300,3 +4300,31 @@ body[data-job-tema="claro"] .job-cot-prev-txt { color-scheme: light; }
 .job-itens-painel:focus-visible { outline: 2px solid var(--job-acento); outline-offset: 1px; }
 .job-itens-painel:active { transform: scale(.97); }
 @media (prefers-reduced-motion: reduce) { .job-itens-painel:active { transform: none; } }
+
+/* ── ETIQUETA DA CAMPANHA NA LISTA DE CONVERSAS ──────────────────────────
+   Selo pequeno ao lado do nome, na linha da conversa. Ele divide espaço com
+   o WhatsApp, então: não empurra layout (position/flex do WhatsApp intactos),
+   corta o texto em vez de esticar a linha, e não tem animação nenhuma — é
+   elemento que aparece dezenas de vezes numa lista rolando. */
+.job-etq {
+  display: inline-block;
+  max-width: 108px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  background: rgba(59, 130, 246, .16);
+  color: #6ea8fe;
+  /* A lista do WhatsApp muda de cor com o tema dele, não com o do JOB: cor
+     própria com contraste que funciona nos dois fundos. */
+}
+.job-etq.respondeu {
+  background: rgba(31, 216, 164, .18);
+  color: #2ee6b0;
+}

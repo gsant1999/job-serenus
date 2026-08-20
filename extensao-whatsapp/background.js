@@ -1352,6 +1352,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       { repetivel: true }).then(sendResponse);
     return true;
   }
+  // Quem, na lista deste consultor, está em campanha da carteira. A extensão
+  // guarda por minutos: pintar não pode virar uma chamada por rolagem.
+  if (msg && msg.type === 'disparo_etiquetas') {
+    chamarJob('/api/whatsapp/disparo/etiquetas?usuario_id=' + encodeURIComponent(msg.usuario_id || ''),
+      'GET', null, 15000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'campanha_aguardando') {
     chamarJob('/api/whatsapp/campanha/aguardando?usuario_id=' + encodeURIComponent(msg.usuario_id || ''), 'GET', null, 15000).then(sendResponse);
     return true;

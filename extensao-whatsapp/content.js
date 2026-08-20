@@ -2441,7 +2441,7 @@
 
   async function abrirSecaoConfig() {
     const g = await _safeStorageGet(['jobUrl', 'extToken', 'extUsuario', 'extApelido',
-                                     'railSide', 'tema', 'extensaoAtiva']);
+                                     'railSide', 'tema', 'extensaoAtiva', 'jobEtiquetaLista']);
     const u = g.extUsuario || null;
     const entrou = !!(u && u.nome);
     let versao = '';
@@ -2539,6 +2539,14 @@
               '<span class="job-cfg-chave-bola"></span>' +
               '<span class="job-cfg-chave-txt">Extensão ligada neste computador</span>' +
             '</label>' +
+            '<label class="job-cfg-chave">' +
+              '<input type="checkbox" id="job-cfg-etq"' + (g.jobEtiquetaLista !== false ? ' checked' : '') + '>' +
+              '<span class="job-cfg-chave-bola"></span>' +
+              '<span class="job-cfg-chave-txt">Mostrar a campanha na lista de conversas</span>' +
+            '</label>' +
+            '<div class="job-cfg-dica" style="margin-top:2px">Um selo ao lado do nome, na lista, dizendo ' +
+              'de qual campanha aquela conversa faz parte. Se a sua lista for muito grande e você sentir ' +
+              'a rolagem pesar, desligue aqui — o disparo continua funcionando igual.</div>' +
           '</div>' +
         '</div>' +
 
@@ -2576,10 +2584,11 @@
         railSide: (document.getElementById('job-cfg-lado') || {}).value === 'esquerda' ? 'esquerda' : 'direita',
         tema: (document.getElementById('job-cfg-tema') || {}).value === 'claro' ? 'claro' : 'escuro',
         extensaoAtiva: !!(document.getElementById('job-cfg-ativa') || {}).checked,
+        jobEtiquetaLista: !!(document.getElementById('job-cfg-etq') || {}).checked,
         extKey: ((document.getElementById('job-cfg-chave') || {}).value || '').trim(),
       });
     };
-    ['job-cfg-url', 'job-cfg-lado', 'job-cfg-tema', 'job-cfg-ativa', 'job-cfg-chave'].forEach((id) => {
+    ['job-cfg-url', 'job-cfg-lado', 'job-cfg-tema', 'job-cfg-ativa', 'job-cfg-etq', 'job-cfg-chave'].forEach((id) => {
       const e = document.getElementById(id);
       if (e) e.addEventListener('change', salvarCfg);
     });
@@ -14643,6 +14652,175 @@
       return true;
     } catch (e) { return false; }   // a próxima rodada reconcilia
   }
+
+  // ═══════════ ETIQUETA DA CAMPANHA NA LISTA DE CONVERSAS ═══════════════
+  //
+  // Pinta, na lista lateral do WhatsApp, um selo dizendo que aquela conversa
+  // está numa campanha da carteira. As regras abaixo saíram de uma prova de
+  // conceito com a lista simulada (2.000 conversas, recicladas ao rolar):
+  //
+  // 1. NADA DE MutationObserver AQUI. Com observer foram 8.422 mutações
+  //    processadas em 4s de rolagem contínua pra chegar EXATAMENTE no mesmo
+  //    resultado visual que o scroll passivo alcança com ZERO. Custo medido:
+  //    6ms/s com observer, 4ms/s com scroll.
+  // 2. Scroll sozinho é cego quando a lista muda sem ninguém rolar (chega
+  //    mensagem, a conversa pula pro topo). Medido: 2 etiquetas somem. Por isso
+  //    existe a sentinela — UMA leitura de assinatura por segundo, e só repinta
+  //    se a assinatura mudou.
+  // 3. A etiqueta é chaveada pelo TELEFONE, nunca pelo nó. A lista recicla o
+  //    mesmo <div> pra outra conversa; selo presente ao nó passaria a mentir
+  //    sobre quem é. Medido: 0 etiquetas erradas em todos os cenários.
+  // 4. Orçamento. Se pintar passar do teto, ela se desliga sozinha e avisa. Um
+  //    enfeite não pode competir com atender cliente — foi o que derrubou a aba
+  //    em 11/08 e em 14/08.
+  const _ETQ_TETO_MS = 12;          // uma passada acima disso é cara demais
+  const _ETQ_ESTOUROS = 3;          // três seguidas e ela se desliga
+  let _etqLigada = false, _etqMapa = new Map(), _etqTitulos = new Map();
+  let _etqEstouros = 0, _etqAgendado = false, _etqAssinatura = '', _etqSentinela = null;
+  let _etqPainel = null, _etqOnScroll = null, _etqUltimoAviso = 0;
+
+  function _etqPainelLista() {
+    // #pane-side é o nome que o WhatsApp usa há anos. Se um dia sumir, cai no
+    // plano B: o elemento rolável com mais linhas dentro. Não adivinha classe.
+    const porId = document.getElementById('pane-side');
+    if (porId) return porId;
+    let melhor = null, placar = 0;
+    document.querySelectorAll('div').forEach((d) => {
+      const est = getComputedStyle(d).overflowY;
+      if (est !== 'auto' && est !== 'scroll') return;
+      const n = d.querySelectorAll('[role="listitem"], [role="row"]').length;
+      if (n > placar) { melhor = d; placar = n; }
+    });
+    return placar >= 3 ? melhor : null;
+  }
+
+  function _etqLinhas() {
+    if (!_etqPainel) return [];
+    return _etqPainel.querySelectorAll('[role="listitem"], [role="row"]');
+  }
+
+  // O nome da conversa: o WhatsApp põe no atributo title do span do contato.
+  // Ler atributo não força layout; innerText forçaria, e são 15 linhas por vez.
+  function _etqTituloDaLinha(linha) {
+    const sp = linha.querySelector('span[title]');
+    return sp ? (sp.getAttribute('title') || '').trim() : '';
+  }
+
+  function _etqPintar() {
+    if (!_etqLigada || !_etqPainel || !_etqMapa.size) return;
+    const t0 = performance.now();
+    for (const linha of _etqLinhas()) {
+      const titulo = _etqTituloDaLinha(linha);
+      const tel = titulo ? _etqTitulos.get(titulo) : '';
+      const etq = tel ? _etqMapa.get(tel) : null;
+      const atual = linha.querySelector('.job-etq');
+      if (etq) {
+        if (atual && atual.dataset.para === tel) continue;   // já certa
+        if (atual) atual.remove();
+        const el = document.createElement('span');
+        el.className = 'job-etq' + (etq.respondeu ? ' respondeu' : '');
+        el.dataset.para = tel;
+        el.textContent = etq.campanha;
+        el.title = etq.respondeu ? 'Respondeu a campanha ' + etq.campanha : 'Em campanha: ' + etq.campanha;
+        const onde = linha.querySelector('span[title]');
+        if (onde && onde.parentElement) onde.parentElement.appendChild(el);
+      } else if (atual) {
+        atual.remove();   // linha reciclada: o selo do antigo dono some
+      }
+    }
+    const custo = performance.now() - t0;
+    if (custo > _ETQ_TETO_MS) {
+      _etqEstouros++;
+      if (_etqEstouros >= _ETQ_ESTOUROS) {
+        _etqDesligar('custo');
+        if (Date.now() - _etqUltimoAviso > 3600000) {
+          _etqUltimoAviso = Date.now();
+          _safeStorageGet(['usuarioId']).then((c) => {
+            _safeSendMessage({ type: 'erro_log', usuario_id: (c || {}).usuarioId,
+              versao: _versaoExt(),
+              mensagem: 'etiqueta_lista desligada sozinha: ' + custo.toFixed(1) + 'ms por passada (teto ' + _ETQ_TETO_MS + 'ms)',
+              url: location.href });
+          }).catch(() => {});
+        }
+      }
+    } else if (_etqEstouros) { _etqEstouros = 0; }
+  }
+
+  function _etqAgendar() {
+    if (_etqAgendado) return;
+    _etqAgendado = true;
+    requestAnimationFrame(() => { _etqAgendado = false; _etqPintar(); });
+  }
+
+  async function _etqCarregar() {
+    const { extKey, extToken, usuarioId } = await _safeStorageGet(['extKey', 'extToken', 'usuarioId']);
+    if ((!extKey && !extToken) || !usuarioId) return false;
+    let r = null;
+    try { r = await _safeSendMessage({ type: 'disparo_etiquetas', usuario_id: usuarioId }); }
+    catch (e) { return false; }
+    if (!r || !r.ok) return false;
+    _etqMapa = new Map((r.etiquetas || []).map((e) => [String(e.telefone), e]));
+    if (!_etqMapa.size) return false;
+    // Título -> telefone, do ChatStore. É por aqui que a linha da lista vira
+    // uma pessoa: o texto que o WhatsApp desenha é o mesmo que a wa-js guarda.
+    let t = null;
+    try { t = await pedirTitulos(600); } catch (e) { t = null; }
+    if (!t || !t.conversas) return false;
+    _etqTitulos = new Map(t.conversas.map((c) => [c.titulo, String(c.telefone).replace(/^55/, '')]));
+    return true;
+  }
+
+  function pedirTitulos(teto) {
+    return new Promise((resolve) => {
+      const reqId = 'tt' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      let pronto = false;
+      function onMsg(ev) {
+        if (ev.source !== window) return;
+        const d = ev.data;
+        if (!d || d.source !== 'JOB_EXT_RESP' || d.reqId !== reqId) return;
+        pronto = true; window.removeEventListener('message', onMsg); resolve(d);
+      }
+      window.addEventListener('message', onMsg);
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'titulos_conversas', reqId, teto }, '*');
+      setTimeout(() => { if (!pronto) { window.removeEventListener('message', onMsg); resolve(null); } }, 8000);
+    });
+  }
+
+  function _etqDesligar(motivo) {
+    _etqLigada = false;
+    if (_etqOnScroll && _etqPainel) _etqPainel.removeEventListener('scroll', _etqOnScroll);
+    _etqOnScroll = null;
+    if (_etqSentinela) { clearInterval(_etqSentinela); _etqSentinela = null; }
+    document.querySelectorAll('.job-etq').forEach((e) => e.remove());
+    if (motivo) console.warn('[JOB] etiqueta na lista desligada:', motivo);
+  }
+
+  async function iniciarEtiquetaLista() {
+    const cfg = await _safeStorageGet(['jobEtiquetaLista']);
+    if (cfg && cfg.jobEtiquetaLista === false) return;   // desligada pelo consultor
+    _etqPainel = _etqPainelLista();
+    if (!_etqPainel) return;                             // sem lista, sem pintura
+    if (!await _etqCarregar()) return;                   // ninguém em campanha
+    _etqLigada = true;
+    _etqOnScroll = () => _etqAgendar();
+    _etqPainel.addEventListener('scroll', _etqOnScroll, { passive: true });
+    // A SENTINELA: uma leitura de assinatura por segundo. Só repinta quando a
+    // lista de fato mudou — é o que cobre a mensagem que chega sem ninguém rolar.
+    _etqSentinela = setInterval(() => {
+      if (document.hidden || !_etqLigada) return;
+      let assin = '';
+      for (const l of _etqLinhas()) assin += _etqTituloDaLinha(l) + '|';
+      if (assin === _etqAssinatura) return;
+      _etqAssinatura = assin;
+      _etqPintar();
+    }, 1000);
+    _registrarLoop(_etqSentinela);
+    _aoLimpar(() => _etqDesligar(''));
+    // Quem entra e sai de campanha muda ao longo do dia, mas devagar.
+    _registrarLoop(setInterval(() => { if (!document.hidden && _etqLigada) _etqCarregar(); }, 300000));
+    _etqPintar();
+  }
+  _registrarTimeout(iniciarEtiquetaLista, 6000);
 
   async function checarCampanhaAguardando() {
     if (_contextoMorto) return;

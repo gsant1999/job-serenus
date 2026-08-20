@@ -13545,6 +13545,46 @@ def api_whatsapp_disparo_resposta():
                              "avisado": bool(pode)}))
 
 
+@app.route('/api/whatsapp/disparo/etiquetas', methods=['GET', 'OPTIONS'])
+@requer('whatsapp:ler')
+def api_whatsapp_disparo_etiquetas():
+    """Quem, na lista do consultor, está em campanha — pra extensão pintar a
+    etiqueta na conversa dentro do WhatsApp Web.
+
+    Só o que ELE precisa: os alvos dele, das campanhas que não estão encerradas.
+    Nome da campanha e nada mais — nem telefone de terceiro, nem lead de outro
+    consultor. A lista é curta por natureza (é a campanha do mês), e a extensão
+    guarda por alguns minutos: pintar não pode virar uma chamada por rolagem.
+    """
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    uid = request.args.get('usuario_id', type=int)
+    if not uid:
+        return _wa_cors(jsonify({"ok": True, "etiquetas": []}))
+    conn = db()
+    try:
+        rows = conn.execute("""SELECT a.telefone_norm, a.status, c.nome campanha
+            FROM disparo_campanha_alvo a JOIN disparo_campanha c ON c.id=a.campanha_id
+            WHERE a.consultor_id=? AND COALESCE(c.status,'') <> 'concluida'
+              AND a.status IN ('pendente','enfileirado','enviado','respondeu')
+              AND COALESCE(a.telefone_norm,'') <> ''
+            ORDER BY a.id DESC LIMIT 2000""", (uid,)).fetchall()
+    except Exception:
+        rows = []   # banco sem as tabelas novas não pode derrubar a extensão
+    close_db(conn)
+    # Um telefone pode estar em duas campanhas: fica a mais recente, que é a que
+    # o consultor tem na cabeça quando olha a conversa.
+    vistos, saida = set(), []
+    for r in rows:
+        tel = r['telefone_norm']
+        if tel in vistos:
+            continue
+        vistos.add(tel)
+        saida.append({"telefone": tel, "campanha": (r['campanha'] or '')[:40],
+                      "respondeu": r['status'] == 'respondeu'})
+    return _wa_cors(jsonify({"ok": True, "etiquetas": saida}))
+
+
 @app.route('/api/whatsapp/campanha/aguardando', methods=['GET', 'OPTIONS'])
 @requer('whatsapp:ler')
 def api_whatsapp_campanha_aguardando():
