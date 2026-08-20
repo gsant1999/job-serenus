@@ -1319,6 +1319,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/fila/proximo?usuario_id=' + encodeURIComponent(msg.usuario_id || ''), 'GET', null, 15000).then(sendResponse);
     return true;
   }
+  // "Os arquivos novos ja estao na pasta?" — quem pergunta e o aviso de versao,
+  // pra decidir se mostra um botao de um clique ou o caminho de baixar o zip.
+  if (msg && msg.type === 'estado_atualizacao') {
+    _estadoDaAtualizacao().then(sendResponse);
+    return true;
+  }
+  // O CIRCULINHO, DE DENTRO DA EXTENSAO. Marca primeiro, recarrega depois: o
+  // reload mata este worker no meio da funcao, e e a proxima encarnacao que
+  // religa as abas do WhatsApp (ver o bloco no topo do arquivo).
+  if (msg && msg.type === 'atualizar_extensao') {
+    (async () => {
+      try {
+        await chrome.storage.local.set({ [_MARCA_RELOAD]: 1 });
+        sendResponse({ ok: true });
+        // Fora do await do sendResponse: se recarregar antes de responder, a
+        // tela fica esperando pra sempre uma resposta que morreu junto.
+        setTimeout(() => { try { chrome.runtime.reload(); } catch (e) {} }, 120);
+      } catch (e) {
+        sendResponse({ ok: false, erro: String((e && e.message) || e) });
+      }
+    })();
+    return true;
+  }
   if (msg && msg.type === 'fila_confirmar') {
     chamarJob('/api/whatsapp/fila/' + encodeURIComponent(msg.fila_id) + '/confirmar', 'POST',
       { ok: msg.ok, erro: msg.erro, wpp_msg_id: msg.wpp_msg_id,
@@ -2171,6 +2194,57 @@ async function _reinjetarNasAbasAbertas(motivo) {
 
 // Atualização da extensão e recarga do service worker são os dois momentos em
 // que as abas ficam órfãs.
+// ── ATUALIZAR A EXTENSAO DE DENTRO DELA ──────────────────────────────────────
+//
+// "Antigamente era so clicar no circulinho e atualizava. Agora fica com essa
+// frescura." — Guilherme, 20/08/2026. Ele tinha razao: o botao "Atualizar
+// agora" do aviso nao atualizava nada, abria uma PAGINA DE INSTRUCOES. E o
+// caminho de verdade eram tres passos em tres lugares diferentes (git pull no
+// terminal, o circulinho em chrome://extensions, F5 na aba do WhatsApp), com
+// uma armadilha no meio: depois do circulinho a aba do WhatsApp continua
+// rodando o script velho, entao o chrome://extensions diz 4.119 e o JOB ainda
+// ouve 4.118 da aba. Da pra jurar que o botao parou de funcionar.
+//
+// `chrome.runtime.reload()` E o circulinho. So que ele mata o service worker
+// no meio — quem chamou nao sobrevive pra recarregar as abas depois. Por isso
+// a marca fica no storage ANTES, e quem termina o trabalho e a proxima
+// encarnacao do worker, no topo deste arquivo.
+const _MARCA_RELOAD = 'jobReloadPedido';
+
+// UNPACKED LE DO DISCO A CADA FETCH. `getManifest()` devolve o que esta
+// CARREGADO; `fetch(getURL('manifest.json'))` devolve o arquivo como ele esta
+// na pasta AGORA. Quando os dois discordam, os arquivos novos ja chegaram e um
+// reload resolve sozinho — sem baixar nada, sem chrome://extensions.
+//
+// Se o fetch falhar (copia empacotada, permissao, sei la), devolve null em vez
+// de chutar: quem pergunta trata "nao sei" diferente de "nao tem".
+async function _versaoNoDisco() {
+  try {
+    const r = await fetch(chrome.runtime.getURL('manifest.json'), { cache: 'no-store' });
+    const j = await r.json();
+    return (j && j.version) || null;
+  } catch (e) { return null; }
+}
+
+async function _estadoDaAtualizacao() {
+  let rodando = '';
+  try { rodando = chrome.runtime.getManifest().version || ''; } catch (e) { return { ok: false }; }
+  const disco = await _versaoNoDisco();
+  return { ok: true, rodando, disco, prontoPraReload: !!(disco && disco !== rodando) };
+}
+
+// Assim que o worker nasce: se a encarnacao anterior pediu reload, termina o
+// servico religando as abas do WhatsApp. Sem isto o consultor ainda teria que
+// dar F5 — que e metade da frescura que este bloco existe pra matar.
+(async () => {
+  try {
+    const g = await chrome.storage.local.get([_MARCA_RELOAD]);
+    if (!g || !g[_MARCA_RELOAD]) return;
+    await chrome.storage.local.remove([_MARCA_RELOAD]);
+    await _reinjetarNasAbasAbertas('atualizacao_pedida');
+  } catch (e) { /* aba morta ou storage indisponivel: nao trava o boot */ }
+})();
+
 chrome.runtime.onInstalled.addListener((d) => _reinjetarNasAbasAbertas(d && d.reason));
 chrome.runtime.onStartup.addListener(() => _reinjetarNasAbasAbertas('startup'));
 
