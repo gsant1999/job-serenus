@@ -147,6 +147,11 @@
     width:100%; background:var(--input-bg); border:1px solid var(--borda-2); border-radius:9px;
     padding:9px 11px; font:inherit; font-size:13px; color:var(--texto); }
   .bib-folha-card textarea { min-height:96px; resize:vertical; }
+  .bib-vars { font-size:11.5px; color:var(--cinza); line-height:1.7; margin:-4px 0 12px;
+    border-left:2px solid var(--borda-2); padding-left:11px; }
+  .bib-vars b { color:var(--texto); }
+  .bib-vars code { background:var(--panel-3); padding:1px 5px; border-radius:4px;
+    font-size:11px; color:var(--info); }
   .bib-folha-acoes { display:flex; justify-content:flex-end; gap:8px; margin-top:18px; flex-wrap:wrap; }
   .bib-destino { max-height:230px; overflow:auto; border:1px solid var(--borda); border-radius:10px; padding:6px; margin-top:6px; }
   .bib-consequencia { background:var(--panel-2); border:1px solid var(--borda); border-radius:10px;
@@ -1120,6 +1125,17 @@ function bibFolhaNovoCanal(canal) {
   } else {
     campos += '<label class="campo" for="bib-n-texto">Texto da mensagem</label>' +
       '<textarea id="bib-n-texto" placeholder="Oi {{ '{{nome}}' }}, tudo bem?"></textarea>' +
+      // O TEXTO É ESCRITO AQUI, mas até agora nada nesta tela dizia que existem
+      // variáveis. O consultor escrevia {mensalidade} de cabeça, a campanha
+      // parava lá na frente por "sem valor", e ele não tinha como ligar as duas
+      // pontas. A explicação mora onde a mão está.
+      '<div class="bib-vars">' +
+        '<b>Variáveis</b> viram o dado de cada pessoa na hora do envio:<br>' +
+        '<code>{{ '{{nome}}' }}</code> primeiro nome · <code>{{ '{{saudacao}}' }}</code> Bom dia / Boa tarde / Boa noite, pela hora real.<br>' +
+        'Num <b>disparo pela carteira</b>, cada coluna da sua planilha também vira variável: uma coluna ' +
+        '"Valor da Mensalidade" permite escrever <code>{{ '{{valor_da_mensalidade}}' }}</code>. ' +
+        'A lista do que existe aparece na tela da campanha.' +
+      '</div>' +
       '<label class="campo" for="bib-n-midia">Arquivo (opcional: imagem, áudio, vídeo ou PDF)</label>' +
       '<input type="file" id="bib-n-midia" accept="image/*,audio/*,video/*,application/pdf">' +
       '<div class="bib-consequencia">Com arquivo, o texto vai como legenda. Áudio sai como nota de voz.</div>';

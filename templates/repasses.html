@@ -16,6 +16,10 @@
 .inp-tot { width:90px; padding:7px; text-align:center; font-family:'Sora',sans-serif; }
 .inp-regua { width:100%; padding:7px 10px; font-family:monospace; font-size:12.5px; }
 .lbl-mini { font-size:10px; color:var(--cinza-2); text-transform:uppercase; letter-spacing:.4px; margin-bottom:3px; }
+.rp-vazio { border:1px dashed var(--borda-2); border-radius:12px; padding:34px 24px; text-align:center;
+  margin-top:14px; }
+.rp-vazio-titulo { font-family:'Sora',sans-serif; font-size:15px; font-weight:700; margin-bottom:6px; }
+.rp-vazio-txt { font-size:12.5px; color:var(--cinza); line-height:1.6; max-width:520px; margin:0 auto; }
 .taxa-toggle { font-size:10px; padding:4px 9px; border-radius:6px; cursor:pointer; user-select:none; background:var(--panel-3); color:var(--cinza); white-space:nowrap; }
 .taxa-toggle.on { background:rgba(250,204,21,.15); color:var(--am); }
 .plano-tabs { display:flex; gap:8px; margin-bottom:16px; }
@@ -62,6 +66,18 @@
     <div class="plano-tab" data-plano="ADESAO" onclick="trocarPlano('ADESAO')">Adesão</div>
   </div>
 
+  {#  ESTADO VAZIO COM SAÍDA. Antes a tela abria com um select e o resto em
+      branco: parecia quebrada, e não dizia o que fazer nem quantas operadoras
+      existem. Estado vazio que não aponta a próxima ação é tela morta. #}
+  <div id="vazio-repasses" class="rp-vazio">
+    <div class="rp-vazio-titulo">Escolha uma operadora acima</div>
+    <div class="rp-vazio-txt">
+      A régua de repasse é por operadora: escolha uma e a tabela de PME, PF e Adesão aparece aqui,
+      pronta pra editar.
+      {% if operadoras %}São {{ operadoras|length }} cadastradas.{% else %}
+      Nenhuma cadastrada ainda — use <b>+ Nova operadora</b> no topo.{% endif %}
+    </div>
+  </div>
   <div id="conteudo"></div>
 
 </div>
@@ -83,6 +99,8 @@ function carregar() {
   document.getElementById('plano-tabs').style.display = v ? 'flex' : 'none';
   document.getElementById('btn-ren').style.display = v ? '' : 'none';
   document.getElementById('btn-del').style.display = v ? '' : 'none';
+  const vazio = document.getElementById('vazio-repasses');
+  if (vazio) vazio.style.display = v ? 'none' : '';
   if (!v) { document.getElementById('conteudo').innerHTML = ''; return; }
   render();
 }

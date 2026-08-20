@@ -3,7 +3,19 @@
 
 {% block head %}
 <style>
-  .score-page { max-width:900px; margin:0 auto; }
+  .score-page { max-width:1400px; }
+  /* GRADE DAS SEÇÕES, NÃO DAS PESSOAS. A graça desta tela é comparar, e barra
+     alinhada em coluna é um gráfico de barras: espalhar cada pessoa num cartão
+     encheria o monitor e destruiria a comparação. Então quem vira coluna é o
+     GRUPO — Administração de um lado, Consultores do outro —, e dentro de cada
+     um as barras continuam alinhadas. */
+  @media (min-width:1200px) {
+    .score-grade { display:grid; grid-template-columns:1fr 1fr; gap:22px; align-items:start; }
+    .score-grade > .score-coluna { min-width:0; }
+    .score-card { margin-bottom:0; }
+    .score-nome { width:130px; }
+    .score-detalhe { padding-left:184px; }
+  }
   .score-secao-titulo { font-family:'Sora',sans-serif; font-size:13px; font-weight:700; color:var(--texto); margin:0 0 10px; text-transform:uppercase; letter-spacing:.4px; }
   .score-card { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 20px; margin-bottom:22px; }
   .score-row { display:flex; align-items:center; gap:16px; padding:14px 0; border-bottom:1px solid var(--borda); }
@@ -46,7 +58,9 @@
 </div>
 
 <div class="page score-page">
+  <div class="score-grade">
   {% for perfil, lista in ranking_por_perfil.items() %}
+  <div class="score-coluna">
   <div class="score-secao-titulo">{{ 'Administração' if perfil == 'admin' else 'Consultores' if perfil == 'consultor' else perfil|title }}</div>
   <div class="score-card">
     {% for r in lista %}
@@ -72,9 +86,11 @@
     </div>
     {% endfor %}
   </div>
+  </div>{# fim da coluna do grupo #}
   {% else %}
   <div class="score-card" style="text-align:center; padding:30px; color:var(--cinza-2); font-size:13px;">Nenhum usuário ativo cadastrado.</div>
   {% endfor %}
+  </div>{# fim da grade #}
 
   <div class="score-legenda">
     Score = soma ponderada de cada ação do período (login, tempo ativo real no navegador, ações no CRM, propostas, cotações).
