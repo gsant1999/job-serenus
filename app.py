@@ -1384,6 +1384,39 @@ def init_db():
             # NUNCA MAIS. Quem pediu pra parar não entra em campanha nenhuma, de
             # nenhum consultor, nem se o telefone vier na planilha que o admin
             # subiu. A lista é por telefone porque é o telefone que recebe.
+            # COSTURA DE CANAIS. Uma campanha vira uma SEQUÊNCIA: WhatsApp hoje,
+            # SMS em dois dias pra quem não respondeu, e-mail em quatro. Cada
+            # passo só pega quem ainda não respondeu — quem respondeu saiu da
+            # campanha e o atendimento é do consultor.
+            #
+            # WhatsApp sai pela extensão (fila, pelo dono do lead). SMS e e-mail
+            # saem DO SERVIDOR: funcionam com o consultor de WhatsApp fechado,
+            # o que é justamente o buraco que o disparo tinha.
+            """CREATE TABLE IF NOT EXISTS disparo_campanha_passo (
+                id SERIAL PRIMARY KEY,
+                campanha_id INTEGER NOT NULL,
+                ordem INTEGER NOT NULL DEFAULT 1,
+                canal TEXT NOT NULL DEFAULT 'whatsapp',
+                apos_dias INTEGER NOT NULL DEFAULT 0,
+                assunto TEXT,
+                texto TEXT,
+                ativo INTEGER NOT NULL DEFAULT 1
+            )""",
+            # Um registro por (alvo, passo): é o que impede mandar duas vezes o
+            # mesmo SMS quando a varredura roda de novo, e é onde a medição lê
+            # quanto saiu por canal.
+            """CREATE TABLE IF NOT EXISTS disparo_campanha_envio (
+                id SERIAL PRIMARY KEY,
+                alvo_id INTEGER NOT NULL,
+                passo_id INTEGER NOT NULL,
+                canal TEXT NOT NULL,
+                destino TEXT,
+                texto TEXT,
+                ok INTEGER NOT NULL DEFAULT 0,
+                erro TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(alvo_id, passo_id)
+            )""",
             """CREATE TABLE IF NOT EXISTS disparo_bloqueio (
                 id SERIAL PRIMARY KEY,
                 telefone_norm TEXT NOT NULL UNIQUE,
@@ -2713,6 +2746,30 @@ def init_db():
             consultor_id INTEGER NOT NULL,
             modelo_id INTEGER NOT NULL,
             UNIQUE(campanha_id, consultor_id, modelo_id)
+        );
+        -- COSTURA DE CANAIS: a campanha vira uma sequência (WhatsApp, depois
+        -- SMS, depois e-mail), e cada passo só pega quem não respondeu antes.
+        CREATE TABLE IF NOT EXISTS disparo_campanha_passo (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campanha_id INTEGER NOT NULL,
+            ordem INTEGER NOT NULL DEFAULT 1,
+            canal TEXT NOT NULL DEFAULT 'whatsapp',
+            apos_dias INTEGER NOT NULL DEFAULT 0,
+            assunto TEXT,
+            texto TEXT,
+            ativo INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE IF NOT EXISTS disparo_campanha_envio (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            alvo_id INTEGER NOT NULL,
+            passo_id INTEGER NOT NULL,
+            canal TEXT NOT NULL,
+            destino TEXT,
+            texto TEXT,
+            ok INTEGER NOT NULL DEFAULT 0,
+            erro TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(alvo_id, passo_id)
         );
         CREATE TABLE IF NOT EXISTS disparo_bloqueio (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -12567,10 +12624,15 @@ _DISPARO_VARS_SISTEMA = {
     'saudacao': 'Bom dia / Boa tarde / Boa noite, pela hora real do envio',
     'consultor': 'o primeiro nome de QUEM ESTÁ MANDANDO — muda por consultor',
     'consultor_completo': 'o nome completo de quem está mandando',
+    # Link cravado no texto manda TODO MUNDO pro mesmo WhatsApp, mesmo quando a
+    # campanha sai por sete pessoas. Estas duas resolvem pelo número de quem
+    # está mandando — e são o que faz SMS e e-mail terem pra onde voltar.
+    'consultor_whatsapp': 'o número de WhatsApp de quem está mandando',
+    'consultor_link': 'o link wa.me pro WhatsApp de quem está mandando',
 }
 
 
-def _disparo_texto(conn, alvo, modelo, agora=None, fixas=None, consultor=None):
+def _disparo_texto(conn, alvo, modelo, agora=None, fixas=None, consultor=None, fone_consultor=None):
     """Monta a mensagem: {nome} e {saudacao} como no resto do sistema, mais as
     colunas da planilha entre chaves. Devolve (texto, faltando).
 
@@ -12602,6 +12664,13 @@ def _disparo_texto(conn, alvo, modelo, agora=None, fixas=None, consultor=None):
         primeiro = (consultor or '').strip().split(' ')[0]
         juntas['consultor'] = _nome_pra_pessoa(primeiro) or primeiro
         juntas['consultor_completo'] = consultor
+    if fone_consultor:
+        _f = _waspeed_normaliza_fone(fone_consultor)
+        if _f:
+            # (19) 98318-9498 — como se escreve pra gente ler, não 5519983189498.
+            _n = _f[2:] if _f.startswith('55') else _f
+            juntas['consultor_whatsapp'] = (f'({_n[:2]}) {_n[2:-4]}-{_n[-4:]}' if len(_n) in (10, 11) else _f)
+            juntas['consultor_link'] = 'wa.me/' + _f
     juntas.update(fixas or {})
     juntas.update(variaveis or {})
     for chave, valor in juntas.items():
@@ -12683,6 +12752,163 @@ def _disparo_decorrido(de, ate=None):
     return f'{d} dia' + ('s' if d > 1 else '')
 
 
+# ─── COSTURA DE CANAIS: SMS e e-mail depois do WhatsApp ───────────────────
+#
+# O WhatsApp depende do consultor estar com a aba aberta. SMS e e-mail saem DO
+# SERVIDOR — chegam mesmo com todo mundo de WhatsApp fechado, que é justamente
+# o buraco medido nesta semana (4 de 7 consultores fora do ar às 11h).
+#
+# A regra que faz isso ser costura e não spam: cada passo só pega quem NÃO
+# respondeu. Quem respondeu saiu da campanha, e o atendimento é do consultor.
+
+_DISPARO_SMS_TETO = int(os.environ.get('DISPARO_SMS_TETO_DIA', '300'))   # SMS custa por envio
+
+
+def _disparo_canais_rotulo(canal):
+    return {'whatsapp': 'WhatsApp', 'sms': 'SMS', 'email': 'E-mail'}.get(canal, canal)
+
+
+def _disparo_passos(conn, campanha_id):
+    """Os passos da campanha, em ordem. Sem passo cadastrado, o comportamento é
+    o de sempre: um único envio por WhatsApp, no dia zero."""
+    try:
+        rows = conn.execute("""SELECT * FROM disparo_campanha_passo
+            WHERE campanha_id=? AND COALESCE(ativo,1)=1 ORDER BY ordem, id""", (campanha_id,)).fetchall()
+    except Exception:
+        return []
+    return [dict(r) for r in rows]
+
+
+def _disparo_email_do_alvo(conn, alvo):
+    """O e-mail de quem vai receber: da planilha, se veio; senão do CRM."""
+    import json as _json
+    try:
+        v = _json.loads(alvo['variaveis_json'] or '{}') or {}
+    except Exception:
+        v = {}
+    for chave in ('email', 'e_mail', 'e_mail_1', 'email_1'):
+        if v.get(chave) and '@' in str(v[chave]):
+            return str(v[chave]).strip()
+    if alvo['lead_id']:
+        try:
+            r = conn.execute("SELECT email FROM crm_leads WHERE id=?", (alvo['lead_id'],)).fetchone()
+            if r and r['email'] and '@' in r['email']:
+                return r['email'].strip()
+        except Exception:
+            pass
+    return ''
+
+
+def _disparo_rodar_passos(conn=None, agora=None, so_campanha=None):
+    """Manda os passos de SMS e e-mail que já venceram a espera.
+
+    Roda no servidor, de tempos em tempos. Para cada campanha ativa, cada passo
+    que não seja WhatsApp: pega quem RECEBEU o WhatsApp há tempo suficiente, não
+    respondeu, não está bloqueado, e ainda não recebeu ESTE passo.
+
+    Devolve o resumo — e nunca estoura: um erro num contato não pode parar a
+    varredura dos outros.
+    """
+    fechar = conn is None
+    if conn is None:
+        try:
+            conn = db()
+        except Exception:
+            return {'enviados': 0, 'erro': 'sem banco'}
+    agora = agora or datetime.now(TZ_SP)
+    resumo = {'sms': 0, 'email': 0, 'falhas': 0, 'pulados': 0}
+    try:
+        q = "SELECT * FROM disparo_campanha WHERE status='ativa'"
+        args = ()
+        if so_campanha:
+            q += " AND id=?"; args = (so_campanha,)
+        campanhas = [dict(c) for c in conn.execute(q, args).fetchall()]
+    except Exception:
+        if fechar: close_db(conn)
+        return resumo
+
+    sms_hoje = 0
+    for camp in campanhas:
+        pode, _motivo = _disparo_janela_aberta(camp, agora)
+        if not pode:
+            continue
+        fixas = _disparo_variaveis_fixas(conn, camp['id'])
+        nomes = {r['id']: r['nome'] for r in conn.execute("SELECT id, nome FROM usuarios WHERE ativo=1").fetchall()}
+        try:
+            fones = {r['usuario_id']: r['numero'] for r in
+                     conn.execute("SELECT usuario_id, numero FROM consultor_wpp_status").fetchall()}
+        except Exception:
+            fones = {}
+        for passo in _disparo_passos(conn, camp['id']):
+            if passo['canal'] == 'whatsapp':
+                continue      # WhatsApp sai pela fila da extensão, não daqui
+            corte = (agora - timedelta(days=int(passo['apos_dias'] or 0))).strftime('%Y-%m-%d %H:%M:%S')
+            alvos = conn.execute("""SELECT a.* FROM disparo_campanha_alvo a
+                WHERE a.campanha_id=? AND a.status='enviado' AND a.respondeu_em IS NULL
+                  AND a.enviado_em IS NOT NULL AND CAST(a.enviado_em AS TEXT) <= ?
+                  AND NOT EXISTS (SELECT 1 FROM disparo_campanha_envio e
+                                  WHERE e.alvo_id=a.id AND e.passo_id=?)
+                ORDER BY a.id LIMIT 400""", (camp['id'], corte, passo['id'])).fetchall()
+            for alvo in [dict(a) for a in alvos]:
+                if _disparo_bloqueado(conn, alvo['telefone_norm']):
+                    resumo['pulados'] += 1
+                    continue
+                modelo = {'corpo_texto': passo['texto'] or ''}
+                texto, faltando = _disparo_texto(conn, alvo, modelo, agora, fixas,
+                                                 nomes.get(alvo['consultor_id']),
+                                                 fones.get(alvo['consultor_id']))
+                if faltando:
+                    resumo['pulados'] += 1
+                    continue
+                if passo['canal'] == 'sms':
+                    if sms_hoje >= _DISPARO_SMS_TETO:
+                        resumo['pulados'] += 1
+                        continue
+                    destino = alvo['telefone_norm'] or alvo['telefone']
+                    ok, erro = _enviar_sms(destino, texto)
+                    sms_hoje += 1
+                    resumo['sms' if ok else 'falhas'] += 1
+                else:
+                    destino = _disparo_email_do_alvo(conn, alvo)
+                    if not destino:
+                        resumo['pulados'] += 1
+                        # registra pra não tentar de novo toda varredura
+                        _disparo_registrar_envio(conn, alvo['id'], passo, '', texto, False, 'sem e-mail')
+                        continue
+                    assunto, _f2 = _disparo_texto(conn, alvo, {'corpo_texto': passo['assunto'] or ''},
+                                                  agora, fixas, nomes.get(alvo['consultor_id']),
+                                                  fones.get(alvo['consultor_id']))
+                    corpo = '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#222;">' \
+                            + texto.replace('\n', '<br>') + '</div>'
+                    ok, erro = _enviar_email(destino, assunto or 'Mensagem da Serenus', corpo,
+                                             remetente_nome='Serenus Corretora', sincrono=True)
+                    resumo['email' if ok else 'falhas'] += 1
+                _disparo_registrar_envio(conn, alvo['id'], passo, destino, texto, ok, erro)
+                if ok:
+                    _disparo_nota(conn, alvo['lead_id'],
+                                  f"{_disparo_canais_rotulo(passo['canal'])} da campanha \"{camp['nome']}\": {texto[:200]}")
+        conn.commit()
+    if fechar:
+        close_db(conn)
+    return resumo
+
+
+def _disparo_registrar_envio(conn, alvo_id, passo, destino, texto, ok, erro):
+    """Um registro por (alvo, passo). O UNIQUE é o que impede mandar o mesmo SMS
+    duas vezes quando a varredura roda de novo — e SMS mandado duas vezes é
+    dinheiro gasto e cliente irritado."""
+    try:
+        conn.execute("""INSERT INTO disparo_campanha_envio
+            (alvo_id, passo_id, canal, destino, texto, ok, erro, criado_em)
+            VALUES (?,?,?,?,?,?,?,?)""",
+            (alvo_id, passo['id'], passo['canal'], (destino or '')[:120], (texto or '')[:600],
+             1 if ok else 0, (erro or '')[:200] or None, _agora_sp()))
+    except Exception:
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+
+
 def _disparo_enfileirar(conn, campanha_id, agora=None):
     """Empurra pra fila da extensão o que pode sair agora, por consultor.
 
@@ -12706,6 +12932,12 @@ def _disparo_enfileirar(conn, campanha_id, agora=None):
     # Nome de cada consultor, pra {consultor} sair certo em cada envio.
     nomes_cons = {r['id']: r['nome'] for r in
                   conn.execute("SELECT id, nome FROM usuarios WHERE ativo=1").fetchall()}
+    # O WhatsApp de cada um, pro {consultor_link} apontar pra pessoa certa.
+    try:
+        fones_cons = {r['usuario_id']: r['numero'] for r in
+                      conn.execute("SELECT usuario_id, numero FROM consultor_wpp_status").fetchall()}
+    except Exception:
+        fones_cons = {}
     aptos = {p['id'] for p in _consultores_presenca(conn) if p['apto']}
     teto = max(1, int(camp['teto_dia'] or 10))
     hoje = agora.strftime('%Y-%m-%d')
@@ -12743,7 +12975,8 @@ def _disparo_enfileirar(conn, campanha_id, agora=None):
             if not chat_id:
                 conn.execute("UPDATE disparo_campanha_alvo SET status='invalido' WHERE id=?", (alvo['id'],))
                 continue
-            texto, faltando = _disparo_texto(conn, alvo, modelo, agora, fixas, nomes_cons.get(cid))
+            texto, faltando = _disparo_texto(conn, alvo, modelo, agora, fixas,
+                                             nomes_cons.get(cid), fones_cons.get(cid))
             if faltando:
                 # "faltou na planilha" mentiria agora: a variável também pode vir
                 # das fixas criadas no JOB. O que falta é VALOR, venha de onde vier.
@@ -13034,6 +13267,11 @@ def disparo_campanha_detalhe(cid):
         d = dict(r)
         p = presenca.get(d['consultor_id']) or {}
         d['apto'] = bool(p.get('apto'))
+        # O número que a EXTENSÃO reportou — o que está logado no WhatsApp Web
+        # dele agora, não o do cadastro do JOB (que costuma ser o pessoal).
+        # É daqui que sai {consultor_whatsapp}; sem ele, o texto que usa a
+        # variável para, e a tela precisa dizer isso ANTES de ativar.
+        d['numero'] = (p.get('numero') or '')
         d['modelos'] = [dict(m) for m in conn.execute("""SELECT m.id, m.nome FROM disparo_campanha_modelo dm
             JOIN modelos_conteudo m ON m.id=dm.modelo_id
             WHERE dm.campanha_id=? AND dm.consultor_id=?""", (cid, d['consultor_id'])).fetchall()]
@@ -13085,6 +13323,17 @@ def disparo_campanha_detalhe(cid):
     if not colunas and exemplos:
         colunas = sorted(exemplos.keys())   # campanha criada antes de guardarmos as colunas
     fixas = _disparo_variaveis_fixas(conn, cid)
+    passos = _disparo_passos(conn, cid)
+    # Quanto já saiu por canal — o SMS custa por envio, e o admin precisa ver
+    # o número antes de aumentar o teto ou acrescentar mais um passo.
+    try:
+        por_canal = {r['canal']: {'ok': r['ok_n'], 'falhou': r['falhou']} for r in conn.execute(
+            """SELECT e.canal, SUM(CASE WHEN e.ok=1 THEN 1 ELSE 0 END) ok_n,
+                      SUM(CASE WHEN e.ok=0 THEN 1 ELSE 0 END) falhou
+               FROM disparo_campanha_envio e JOIN disparo_campanha_alvo a ON a.id=e.alvo_id
+               WHERE a.campanha_id=? GROUP BY e.canal""", (cid,)).fetchall()}
+    except Exception:
+        por_canal = {}
     janela_ok, janela_motivo = _disparo_janela_aberta(camp)
     close_db(conn)
     return render_template('disparo_campanha_detalhe.html', camp=dict(camp), resumo=resumo,
@@ -13093,7 +13342,8 @@ def disparo_campanha_detalhe(cid):
                            problemas=problemas, consultores=consultores, modelos=modelos,
                            escolhidos=escolhidos, janela_ok=janela_ok, janela_motivo=janela_motivo,
                            colunas=colunas, exemplos=exemplos, fixas=fixas,
-                           vars_sistema=_DISPARO_VARS_SISTEMA)
+                           vars_sistema=_DISPARO_VARS_SISTEMA,
+                           passos=passos, por_canal=por_canal)
 
 
 @app.route('/disparos/campanha/<int:cid>/status', methods=['POST'])
@@ -13148,6 +13398,58 @@ def disparo_campanha_ritmo(cid):
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "teto_dia": teto, "hora_inicio": ini, "hora_fim": fim, "dias_semana": dias,
                     "arquivar": arquivar, "avisar_fora_horario": avisar_fora})
+
+
+@app.route('/disparos/campanha/<int:cid>/passos', methods=['POST'])
+@login_required
+@admin_required
+def disparo_campanha_passos(cid):
+    """Salva a sequência de canais da campanha.
+
+    Regra que faz isso ser costura e não metralhadora: o WhatsApp é sempre o
+    passo 1 (é por ele que a campanha começa, pelo dono do lead), e os outros
+    contam os dias A PARTIR do envio dele — só pegando quem não respondeu.
+    """
+    d = request.json or {}
+    passos = (d.get('passos') or [])[:6]
+    limpos, erros = [], []
+    for i, p in enumerate(passos):
+        canal = str((p or {}).get('canal') or '').strip()
+        if canal not in ('whatsapp', 'sms', 'email'):
+            continue
+        texto = str((p or {}).get('texto') or '').strip()
+        assunto = str((p or {}).get('assunto') or '').strip()
+        try:
+            dias = max(0, min(60, int((p or {}).get('apos_dias') or 0)))
+        except (TypeError, ValueError):
+            dias = 0
+        if canal == 'whatsapp':
+            limpos.append({'canal': canal, 'apos_dias': 0, 'texto': '', 'assunto': ''})
+            continue
+        if not texto:
+            erros.append(f"O {_disparo_canais_rotulo(canal)} está sem texto.")
+            continue
+        if canal == 'sms' and len(texto) > 320:
+            erros.append(f"O SMS tem {len(texto)} caracteres. O limite é 320 — acima disso a operadora quebra em vários e cobra por cada.")
+            continue
+        if canal == 'email' and not assunto:
+            erros.append("O e-mail está sem assunto — sem ele vai direto pro spam.")
+            continue
+        if dias < 1:
+            erros.append(f"O {_disparo_canais_rotulo(canal)} precisa esperar pelo menos 1 dia depois do WhatsApp. "
+                         "Dois canais no mesmo dia é o que faz o cliente sentir perseguição.")
+            continue
+        limpos.append({'canal': canal, 'apos_dias': dias, 'texto': texto, 'assunto': assunto})
+    if erros:
+        return jsonify({"ok": False, "erro": erros[0]}), 400
+    conn = db()
+    conn.execute("DELETE FROM disparo_campanha_passo WHERE campanha_id=?", (cid,))
+    for i, p in enumerate(limpos):
+        conn.execute("""INSERT INTO disparo_campanha_passo
+            (campanha_id, ordem, canal, apos_dias, assunto, texto, ativo) VALUES (?,?,?,?,?,?,1)""",
+            (cid, i + 1, p['canal'], p['apos_dias'], p['assunto'] or None, p['texto'] or None))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "passos": len(limpos)})
 
 
 @app.route('/disparos/campanha/<int:cid>/variaveis', methods=['POST'])
@@ -51115,6 +51417,11 @@ def _iniciar_scheduler_backup():
         # que prometeu.
         sched.add_job(_disparo_avisos_pendentes, 'interval', minutes=5, max_instances=1,
                       id='disparo_avisos', replace_existing=True)
+        # SMS e e-mail da costura de canais. No servidor de propósito: é o que
+        # faz a campanha continuar andando com todo consultor de WhatsApp
+        # fechado — o buraco que o WhatsApp sozinho tem.
+        sched.add_job(_disparo_rodar_passos, 'interval', minutes=10, max_instances=1,
+                      id='disparo_passos', replace_existing=True)
         sched.add_job(_varrer_fila_vencida, 'interval', minutes=5, max_instances=1,
                       id='varrer_fila_vencida', replace_existing=True)
         # Envio das conversões: de hora em hora. O par (scheduler + gatilho por

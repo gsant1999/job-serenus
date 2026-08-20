@@ -93,6 +93,25 @@
 .mt-corpo { display:block; color:var(--cinza); font-size:11.5px; line-height:1.45; margin-top:2px;
   overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
 .mt-nada { padding:18px 0; color:var(--cinza); font-size:var(--t-apoio); }
+/* A COSTURA. Cada canal é uma faixa, na ordem em que acontece, com a espera
+   escrita — é a linha do tempo do que o cliente vai receber. */
+.dd-passos { padding:4px 20px 8px; }
+.dd-passo-fixo, .dd-passo { display:flex; align-items:center; gap:10px; padding:11px 0;
+  border-bottom:1px solid var(--borda); font-size:var(--t-corpo); flex-wrap:wrap; }
+.dd-passo-fixo span:nth-child(2) { color:var(--cinza); font-size:var(--t-apoio); }
+.dd-canal { font-size:var(--t-selo); font-weight:700; text-transform:uppercase; letter-spacing:.4px;
+  padding:3px 9px; border-radius:20px; white-space:nowrap; }
+.dd-canal.wpp { background:var(--verde-soft); color:var(--verde); }
+.dd-canal.sms { background:rgba(59,130,246,.14); color:var(--info); }
+.dd-canal.email { background:rgba(139,92,246,.16); color:var(--roxo); }
+.dd-passo-num { margin-left:auto; color:var(--cinza); font-size:var(--t-apoio); }
+.dd-passo-corpo { flex-basis:100%; display:flex; flex-direction:column; gap:7px; padding:2px 0 4px; }
+.dd-passo-corpo textarea, .dd-passo-corpo input[type=text] { width:100%; box-sizing:border-box;
+  background:var(--input-bg); border:1px solid var(--borda); border-radius:9px; color:var(--texto);
+  padding:9px 11px; font-size:var(--t-apoio); font-family:inherit; resize:vertical; }
+.dd-passo-corpo textarea { min-height:74px; }
+.dd-conta { font-size:11px; color:var(--cinza); }
+.dd-conta.longo { color:var(--rosa); font-weight:600; }
 .dd-vars { display:flex; gap:8px; flex-wrap:wrap; padding:0 20px 12px; }
 .dd-var { display:flex; flex-direction:column; align-items:flex-start; gap:2px; text-align:left;
   border:1px solid var(--borda-2); border-radius:9px; padding:7px 11px; background:var(--panel-2);
@@ -136,6 +155,7 @@ a.dd-chip { transition:border-color 140ms var(--ease-saida); }
 .dd-quem b { font-weight:600; }
 .dd-estado { font-size:var(--t-apoio); margin-top:2px; }
 .dd-estado.on { color:var(--verde); } .dd-estado.off { color:var(--cinza); }
+.dd-estado.alerta { color:var(--amarelo); }
 .dd-texto-off { color:var(--rosa); font-weight:600; }
 
 /* ── Listas de pessoas ── */
@@ -279,6 +299,13 @@ label.dd-pessoa { cursor:pointer; transition:background 120ms var(--ease-saida);
           <div class="dd-estado {{ 'on' if p.apto else 'off' }}">
             {{ 'WhatsApp aberto, pronto pra enviar' if p.apto else 'WhatsApp fechado — os contatos esperam' }}
           </div>
+          {% if p.numero %}
+          <div class="dd-estado off" title="Número logado no WhatsApp Web dele — é o que {consultor_whatsapp} usa">
+            manda pelo {{ p.numero|replace('55','',1) }}
+          </div>
+          {% else %}
+          <div class="dd-estado alerta">nunca conectou a extensão — {{ '{consultor_whatsapp}' }} não funciona pra ele</div>
+          {% endif %}
         </div>
         <div>
           {% if p.modelos %}
@@ -304,6 +331,31 @@ label.dd-pessoa { cursor:pointer; transition:background 120ms var(--ease-saida);
     {% else %}
     <div class="dd-vazio">Ninguém ainda: resolva os contatos sem consultor acima e eles aparecem aqui.</div>
     {% endif %}
+  </div>
+
+  {# ── CANAIS ────────────────────────────────────────────────────────── #}
+  <div class="card dd-bloco" id="canais">
+    <div class="dd-cab"><h3>Passo 3 &mdash; O que fazer com quem não responder</h3>
+      <span class="n">{{ (passos|length - 1) if passos else 0 }} canal{{ 'is' if (passos|length - 1) != 1 }} depois do WhatsApp</span></div>
+    <div class="dd-nota">
+      A campanha começa sempre pelo WhatsApp, pelo dono do lead. Aqui você costura o que vem depois, para
+      <b>quem não respondeu</b> — SMS e e-mail saem <b>do servidor</b>, então continuam andando mesmo com todo
+      mundo de WhatsApp fechado. Quem responde sai da costura na hora: o atendimento passa a ser do consultor.
+    </div>
+    <div class="dd-passos">
+      <div class="dd-passo-fixo">
+        <span class="dd-canal wpp">WhatsApp</span>
+        <span>no dia do disparo, pelo consultor dono do lead</span>
+        {% if por_canal.get('whatsapp') %}<span class="dd-passo-num">{{ por_canal['whatsapp']['ok'] }} enviados</span>{% endif %}
+      </div>
+      <div id="canais-lista"></div>
+      <div class="dd-rodape" style="border-top:none;padding-left:0;padding-right:0;">
+        <button class="btn-outline btn-sm" type="button" onclick="novoCanal('sms')">Acrescentar SMS</button>
+        <button class="btn-outline btn-sm" type="button" onclick="novoCanal('email')">Acrescentar e-mail</button>
+        <button class="btn-outline btn-sm" onclick="salvarCanais(this)">Salvar a costura</button>
+        <span id="cn-eco" class="dd-eco" role="status" aria-live="polite" style="margin:0;"></span>
+      </div>
+    </div>
   </div>
 
   {# ── VARIÁVEIS ─────────────────────────────────────────────────────── #}
@@ -645,6 +697,73 @@ label.dd-pessoa { cursor:pointer; transition:background 120ms var(--ease-saida);
 
   // Bloquear é para sempre e vale em todas as campanhas: pede confirmação no
   // próprio botão, sem alerta do navegador (o projeto tirou os nativos).
+  // ── Canais: a costura ──────────────────────────────────────────────────
+  var PASSOS = {{ passos|tojson }};
+  var ENVIADOS = {{ por_canal|tojson }};
+
+  function linhaCanal(p) {
+    var canal = p.canal, d = document.createElement('div');
+    d.className = 'dd-passo'; d.dataset.canal = canal;
+    var rot = canal === 'sms' ? 'SMS' : 'E-mail';
+    var envio = ENVIADOS[canal];
+    d.innerHTML =
+      '<span class="dd-canal ' + canal + '">' + rot + '</span>' +
+      '<span style="color:var(--cinza);font-size:var(--t-apoio);">só pra quem não respondeu, </span>' +
+      '<input type="number" class="campo cn-dias" min="1" max="60" value="' + (p.apos_dias || 2) + '" style="width:70px;">' +
+      '<span style="color:var(--cinza);font-size:var(--t-apoio);">dia(s) depois do WhatsApp</span>' +
+      (envio ? '<span class="dd-passo-num">' + envio.ok + ' enviados' + (envio.falhou ? ' · ' + envio.falhou + ' falharam' : '') + '</span>' : '') +
+      '<button type="button" class="tira" title="Tirar este canal" style="margin-left:auto;background:none;border:none;color:var(--cinza);font-size:18px;cursor:pointer;">&times;</button>' +
+      '<div class="dd-passo-corpo">' +
+        (canal === 'email' ? '<input type="text" class="cn-assunto" placeholder="Assunto do e-mail (sem ele vai pro spam)">' : '') +
+        '<textarea class="cn-texto" placeholder="' + (canal === 'sms'
+          ? 'SMS é curto e sem formatação. Use {consultor_link} pra ele ter como voltar.'
+          : 'Texto do e-mail. Uma quebra de linha vira parágrafo.') + '"></textarea>' +
+        (canal === 'sms' ? '<span class="dd-conta"><b class="cn-conta">0</b> de 320 caracteres</span>' : '') +
+      '</div>';
+    d.querySelector('.cn-texto').value = p.texto || '';
+    if (canal === 'email' && d.querySelector('.cn-assunto')) d.querySelector('.cn-assunto').value = p.assunto || '';
+    d.querySelector('.tira').onclick = function () { d.remove(); };
+    if (canal === 'sms') {
+      var ta = d.querySelector('.cn-texto'), c = d.querySelector('.cn-conta');
+      var contar = function () {
+        c.textContent = ta.value.length;
+        c.parentElement.classList.toggle('longo', ta.value.length > 320);
+      };
+      ta.addEventListener('input', contar); contar();
+    }
+    return d;
+  }
+  function novoCanal(canal) {
+    document.getElementById('canais-lista').appendChild(linhaCanal({ canal: canal, apos_dias: canal === 'sms' ? 2 : 4 }));
+  }
+  (function () {
+    var alvo = document.getElementById('canais-lista');
+    if (!alvo) return;
+    PASSOS.filter(function (p) { return p.canal !== 'whatsapp'; }).forEach(function (p) {
+      alvo.appendChild(linhaCanal(p));
+    });
+  })();
+
+  function salvarCanais(btn) {
+    var lista = [{ canal: 'whatsapp' }];
+    document.querySelectorAll('#canais-lista .dd-passo').forEach(function (d) {
+      var ass = d.querySelector('.cn-assunto');
+      lista.push({ canal: d.dataset.canal,
+                   apos_dias: parseInt(d.querySelector('.cn-dias').value, 10) || 0,
+                   assunto: ass ? ass.value : '',
+                   texto: d.querySelector('.cn-texto').value });
+    });
+    var alvo = document.getElementById('cn-eco'), rot = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Salvando…';
+    post('/disparos/campanha/' + CID + '/passos', { passos: lista }).then(function (r) {
+      if (!r || !r.ok) { btn.disabled = false; btn.textContent = rot; eco(alvo, (r && r.erro) || 'Não consegui salvar.', 'err'); return; }
+      recarregarCom('Costura salva. O servidor cuida do SMS e do e-mail sozinho.');
+    }).catch(function () {
+      btn.disabled = false; btn.textContent = rot;
+      eco(alvo, 'Sem conexão com o servidor. Nada foi salvo.', 'err');
+    });
+  }
+
   // ── Variáveis ──────────────────────────────────────────────────────────
   var FIXAS = {{ fixas|tojson }};
   // O que esta campanha SABE preencher: colunas da planilha + variáveis fixas +
