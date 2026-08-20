@@ -17,6 +17,18 @@ select.campo:focus { outline:none; border-color:var(--verde); }
 .dm-num span { font-size:12px; color:var(--cinza); }
 .dm-num.bom b { color:var(--verde); } .dm-num.alerta b { color:var(--rosa); }
 .dm-nota { padding:0 20px 16px; font-size:12px; color:var(--cinza); line-height:1.55; }
+.dm-parada { border:1px solid var(--amarelo); border-radius:12px; background:var(--panel-2);
+  padding:14px 18px; margin-bottom:18px; }
+.dm-parada h3 { font-size:13px; margin:0 0 6px; }
+.dm-parada p { font-size:12.5px; color:var(--cinza); line-height:1.6; margin:0 0 6px; }
+.dm-parada p:last-child { margin-bottom:0; }
+.dm-parada strong { color:var(--texto); font-weight:650; }
+/* Sem cor própria: o azul padrão do navegador dá contraste 1.81 sobre o painel
+   escuro. A cor do texto com sublinhado lê como link e passa nos dois temas. */
+.dm-parada a { color:var(--texto); text-decoration:underline; text-underline-offset:2px; }
+@media (hover:hover) and (pointer:fine) {
+  .dm-parada a:hover { color:var(--verde); }
+}
 .dm-tab { overflow-x:auto; }
 .dm-linha { display:grid; grid-template-columns:1.6fr .7fr .7fr .7fr .9fr; gap:10px; align-items:center;
   padding:11px 20px; border-bottom:1px solid var(--borda); font-size:13px; min-width:560px; }
@@ -45,6 +57,22 @@ select.campo:focus { outline:none; border-color:var(--verde); }
       <a href="/disparos/campanhas" class="btn-outline" style="text-decoration:none;white-space:nowrap;">Voltar</a>
     </div>
   </div>
+
+  {% if paradas %}
+  <div class="dm-parada">
+    <h3>{% if paradas|length == 1 %}Esta campanha não está enviando{% else %}Campanhas que não estão enviando{% endif %}</h3>
+    {% for p in paradas %}
+    <p>
+      {% if paradas|length > 1 %}<strong>{{ p.nome }}</strong>: {% endif %}está
+      <strong>{{ p.status_texto }}</strong>, e o envio automático só roda em campanha ativa.
+      {{ p.parados }} contato{{ '' if p.parados == 1 else 's' }} não
+      {{ 'vai' if p.parados == 1 else 'vão' }} sair enquanto ela ficar assim — nem com o
+      consultor online, nem dentro do horário.
+      <a href="/disparos/campanha/{{ p.id }}">Abrir a campanha para reativar</a>.
+    </p>
+    {% endfor %}
+  </div>
+  {% endif %}
 
   <div class="card dm-camada">
     <div class="card-header"><h3>O que saiu</h3></div>
