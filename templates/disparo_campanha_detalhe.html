@@ -17,8 +17,21 @@
 /* ── ESCALA. Cinco tamanhos, não onze. Cada um com um trabalho: título da
    página, título de bloco, corpo, apoio, e o selo em caixa alta. Antes esta
    tela tinha onze tamanhos convivendo, e é isso que o olho lê como bagunça. */
-.dd { --t-h1:22px; --t-h2:15px; --t-corpo:13px; --t-apoio:12px; --t-selo:10.5px;
-      max-width:1000px; }
+.dd { --t-h1:22px; --t-h2:15px; --t-corpo:13px; --t-apoio:12px; --t-selo:10.5px; }
+/* Leitura tem limite; caixa não. Linha de texto larga demais faz o olho
+   perder a volta — o card ocupa o monitor, o parágrafo dentro dele não. */
+.dd-nota, .dd-falta > div, .dd-vazio { max-width:760px; }
+
+/* DUAS COLUNAS EM TELA LARGA. A esquerda é o trabalho (os dois passos e a
+   ativação); a direita é consulta (o resumo da lista e o ritmo). Antes tudo
+   era uma coluna só de 1000px, com o resto do monitor vazio. */
+@media (min-width: 1200px) {
+  .dd-grade { display:grid; grid-template-columns: minmax(0,1fr) 340px; gap:16px; align-items:start; }
+  .dd-lado { position:sticky; top:16px; }
+  .dd-lado .dd-bloco, .dd-lado .dd-conf { margin-bottom:16px; }
+  .dd-num-linha { gap:20px; }
+  .dd-num b { font-size:23px; }
+}
 
 /* ── Cabeçalho ── */
 .dd-topo { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; flex-wrap:wrap; }
@@ -190,28 +203,8 @@ label.dd-pessoa { cursor:pointer; transition:background 120ms var(--ease-saida);
   </div>
   {% endif %}
 
-  {# ── 1. A LISTA ─────────────────────────────────────────────────────── #}
-  <div class="card dd-bloco">
-    <div class="dd-cab"><h3>A sua lista</h3></div>
-    <div class="dd-num-linha">
-      <div class="dd-num"><b>{{ resumo.get('pendente', 0) + resumo.get('enfileirado', 0) }}</b><span>ainda vão receber</span></div>
-      <div class="dd-num feito"><b>{{ resumo.get('enviado', 0) + resumo.get('respondeu', 0) }}</b><span>já receberam</span></div>
-      <div class="dd-num feito"><b>{{ resumo.get('respondeu', 0) }}</b><span>responderam</span></div>
-    </div>
-    {% if n_sem_dono or n_problema %}
-    <div class="dd-atencao">
-      {% if n_sem_dono %}<a class="dd-chip alerta" href="#dono"><b>{{ n_sem_dono }}</b> sem consultor</a>{% endif %}
-      {% if resumo.get('sem_variavel') %}<a class="dd-chip alerta" href="#fora"><b>{{ resumo.get('sem_variavel') }}</b> sem valor de variável</a>{% endif %}
-      {% if resumo.get('travado') %}<a class="dd-chip alerta" href="#fora"><b>{{ resumo.get('travado') }}</b> não saíram em 3 tentativas</a>{% endif %}
-      {% if resumo.get('invalido') %}<a class="dd-chip alerta" href="#fora"><b>{{ resumo.get('invalido') }}</b> telefone inválido</a>{% endif %}
-      {% if resumo.get('bloqueado') %}<span class="dd-chip"><b>{{ resumo.get('bloqueado') }}</b> não querem receber</span>{% endif %}
-    </div>
-    {% endif %}
-    {% if not resumo %}
-    <div class="dd-vazio">Esta campanha está sem lista. A planilha entra na criação da campanha —
-      crie uma nova e suba o arquivo lá.</div>
-    {% endif %}
-  </div>
+  <div class="dd-grade">
+  <div class="dd-principal">
 
   {# ── 2. PRECISAM DE DONO ────────────────────────────────────────────── #}
   <div class="card dd-bloco" id="dono">
@@ -361,7 +354,33 @@ label.dd-pessoa { cursor:pointer; transition:background 120ms var(--ease-saida);
   </div>
   {% endif %}
 
-  {# ── 4. RITMO (ajuste, não tarefa: nasce recolhido) ─────────────────── #}
+  </div>{# fim da coluna principal #}
+
+  <div class="dd-lado">
+  {# ── 1. A LISTA (some pra coluna lateral em tela larga) ─────────────── #}
+  <div class="card dd-bloco">
+    <div class="dd-cab"><h3>A sua lista</h3></div>
+    <div class="dd-num-linha">
+      <div class="dd-num"><b>{{ resumo.get('pendente', 0) + resumo.get('enfileirado', 0) }}</b><span>ainda vão receber</span></div>
+      <div class="dd-num feito"><b>{{ resumo.get('enviado', 0) + resumo.get('respondeu', 0) }}</b><span>já receberam</span></div>
+      <div class="dd-num feito"><b>{{ resumo.get('respondeu', 0) }}</b><span>responderam</span></div>
+    </div>
+    {% if n_sem_dono or n_problema %}
+    <div class="dd-atencao">
+      {% if n_sem_dono %}<a class="dd-chip alerta" href="#dono"><b>{{ n_sem_dono }}</b> sem consultor</a>{% endif %}
+      {% if resumo.get('sem_variavel') %}<a class="dd-chip alerta" href="#fora"><b>{{ resumo.get('sem_variavel') }}</b> sem valor de variável</a>{% endif %}
+      {% if resumo.get('travado') %}<a class="dd-chip alerta" href="#fora"><b>{{ resumo.get('travado') }}</b> não saíram em 3 tentativas</a>{% endif %}
+      {% if resumo.get('invalido') %}<a class="dd-chip alerta" href="#fora"><b>{{ resumo.get('invalido') }}</b> telefone inválido</a>{% endif %}
+      {% if resumo.get('bloqueado') %}<span class="dd-chip"><b>{{ resumo.get('bloqueado') }}</b> não querem receber</span>{% endif %}
+    </div>
+    {% endif %}
+    {% if not resumo %}
+    <div class="dd-vazio">Esta campanha está sem lista. A planilha entra na criação da campanha —
+      crie uma nova e suba o arquivo lá.</div>
+    {% endif %}
+  </div>
+
+  {# ── RITMO (ajuste, não tarefa: nasce recolhido) ────────────────────── #}
   <details class="card dd-conf">
     <summary>
       <span class="seta">&#9656;</span> Ritmo e horário
@@ -403,6 +422,9 @@ label.dd-pessoa { cursor:pointer; transition:background 120ms var(--ease-saida);
       <span id="r-eco" class="dd-eco" role="status" aria-live="polite" style="margin:0;"></span>
     </div>
   </details>
+
+  </div>{# fim da coluna lateral #}
+  </div>{# fim da grade #}
 
   <h2 class="dd-secao">Acompanhamento</h2>
 
