@@ -3872,6 +3872,15 @@ def init_db():
         ("campanha_contato", "detectado_por", "TEXT"),
         ("campanha_contato", "excluido_em", "TIMESTAMP"),
         # Janela (dias) sem resposta até o contato virar 'sem_resposta' (varredura).
+        # SAÚDE DA CONFERÊNCIA DE RESPOSTAS, por consultor. Sem estes quatro
+        # números, o painel não sabe a diferença entre "ninguém respondeu" e
+        # "ninguém olhou" — e foi essa confusão que fez uma campanha inteira
+        # passar por fracasso de copy. `sem_memoria` é o que mais importa: são
+        # as conversas sobre as quais NÃO dá pra afirmar nada.
+        ("consultor_wpp_status", "ronda_em", "TIMESTAMP"),
+        ("consultor_wpp_status", "ronda_vigiados", "INTEGER"),
+        ("consultor_wpp_status", "ronda_conferidos", "INTEGER"),
+        ("consultor_wpp_status", "ronda_sem_memoria", "INTEGER"),
         ("campanha", "dias_sem_resposta", "INTEGER DEFAULT 2"),
         # Saudação vinda dos Modelos (pasta/categoria de textos, rodízio aleatório)
         # e Funil de conteúdo disparado quando o lead responde (fica quente).
@@ -11873,9 +11882,20 @@ def campanhas_acompanhamento():
     ult_env = conn.execute("""SELECT cc.nome, cc.enviado_em, u.nome consultor, c.nome campanha, c.id cid
         FROM campanha_contato cc JOIN campanha c ON c.id=cc.campanha_id LEFT JOIN usuarios u ON u.id=cc.consultor_id
         WHERE cc.enviado_em IS NOT NULL ORDER BY cc.enviado_em DESC LIMIT 12""").fetchall()
+    # SAÚDE DA CONFERÊNCIA. O painel dizia quantos responderam e nunca se alguém
+    # tinha olhado: "ninguém respondeu" chegava igual a "ninguém conferiu", e foi
+    # essa confusão que fez a campanha #4 passar por fracasso de copy.
+    presenca = _consultores_presenca(conn)
+    try:
+        det = {(r['origem'] or 'antes'): r['n'] for r in conn.execute(
+            """SELECT COALESCE(detectado_por,'antes') origem, COUNT(*) n
+               FROM campanha_contato WHERE status='respondeu'
+               GROUP BY COALESCE(detectado_por,'antes')""").fetchall()}
+    except Exception:
+        det = {}
     close_db(conn)
     return render_template('campanha_acompanhamento.html', g=dict(g),
-                           porcons=[dict(r) for r in porcons],
+                           porcons=[dict(r) for r in porcons], presenca=presenca, det=det,
                            ult_resp=[dict(r) for r in ult_resp], ult_env=[dict(r) for r in ult_env])
 
 
@@ -24816,6 +24836,20 @@ def api_whatsapp_presenca():
     else:
         conn.execute("""INSERT OR REPLACE INTO consultor_wpp_status (usuario_id, versao, numero, wpp_ok, visto_em)
             VALUES (?,?,?,?,?)""", (uid, versao, numero, wpp_ok, agora))
+    # Saúde da última conferência de respostas (extensão 4.116+). Vai em UPDATE
+    # separado de propósito: extensão velha não manda `ronda`, e nesse caso os
+    # números antigos ficam como estão em vez de virarem zero — zero mentiria
+    # dizendo "conferi e não achei nada".
+    ronda = d.get('ronda') or None
+    if isinstance(ronda, dict):
+        try:
+            conn.execute("""UPDATE consultor_wpp_status
+                SET ronda_em=?, ronda_vigiados=?, ronda_conferidos=?, ronda_sem_memoria=?
+                WHERE usuario_id=?""",
+                (agora, int(ronda.get('vigiados') or 0), int(ronda.get('conferidos') or 0),
+                 int(ronda.get('sem_memoria') or 0), uid))
+        except (TypeError, ValueError):
+            pass
     conn.commit(); close_db(conn)
     return _wa_cors(jsonify({"ok": True}))
 
@@ -24889,8 +24923,19 @@ def api_whatsapp_inbox_atender():
 def _consultores_presenca(conn):
     """Aptidão de cada consultor ativo pro disparo: online (bateu ponto < 3min),
     versão OK (>= mínima), WhatsApp conectado. 'apto' = os três verdes."""
-    stt = {r['usuario_id']: dict(r) for r in
-           conn.execute("SELECT usuario_id, versao, numero, wpp_ok, visto_em FROM consultor_wpp_status").fetchall()}
+    try:
+        stt = {r['usuario_id']: dict(r) for r in conn.execute(
+            """SELECT usuario_id, versao, numero, wpp_ok, visto_em,
+                      ronda_em, ronda_vigiados, ronda_conferidos, ronda_sem_memoria
+               FROM consultor_wpp_status""").fetchall()}
+    except Exception:
+        # Banco ainda sem as colunas da conferência (deploy no meio do caminho):
+        # a aptidão do disparo não pode cair por causa de um dado de diagnóstico.
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+        stt = {r['usuario_id']: dict(r) for r in
+               conn.execute("SELECT usuario_id, versao, numero, wpp_ok, visto_em FROM consultor_wpp_status").fetchall()}
     ver_atual = _extensao_versao()
     out = []
     for u in _campanha_consultores_ativos(conn):
@@ -24908,6 +24953,13 @@ def _consultores_presenca(conn):
             'online': online, 'versao': versao, 'versao_ok': versao_ok, 'atualizada': atualizada,
             'numero': (s or {}).get('numero') or '', 'wpp_ok': wpp_ok,
             'apto': bool(online and versao_ok and wpp_ok),
+            # Conferência de respostas: quando rodou pela última vez e o que ela
+            # conseguiu olhar. `ronda_min` em minutos; None = nunca conferiu.
+            'ronda_min': (lambda seg: int(seg // 60) if seg is not None else None)(
+                _wa_segundos_desde((s or {}).get('ronda_em')) if (s or {}).get('ronda_em') else None),
+            'ronda_vigiados': (s or {}).get('ronda_vigiados') or 0,
+            'ronda_conferidos': (s or {}).get('ronda_conferidos') or 0,
+            'ronda_sem_memoria': (s or {}).get('ronda_sem_memoria') or 0,
         })
     return out
 

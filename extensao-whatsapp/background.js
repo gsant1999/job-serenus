@@ -1951,7 +1951,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg && msg.type === 'presenca') {
     chamarJob('/api/whatsapp/presenca', 'POST',
-      { usuario_id: msg.usuario_id, versao: msg.versao, numero: msg.numero, wpp_ok: msg.wpp_ok },
+      { usuario_id: msg.usuario_id, versao: msg.versao, numero: msg.numero, wpp_ok: msg.wpp_ok,
+        ronda: msg.ronda || null },   // saúde da última conferência de respostas
       10000, null, { repetivel: true }).then(sendResponse);   // só atualiza estado, repetir é inócuo
     return true;
   }
