@@ -1933,7 +1933,7 @@
     if (nova && _cmpVersao(minha, nova) < 0) {
       el.innerHTML = '<span class="job-trilho-versao-num">v' + esc(minha) + '</span>' +
         '<span class="job-trilho-versao-nova">nova: ' + esc(nova) + '</span>';
-      el.title = 'Instalada: ' + minha + ' — disponível: ' + nova + ' (feche e reabra o WhatsApp Web pra atualizar)';
+      el.title = 'Instalada: ' + minha + ' — disponível: ' + nova + ' (o aviso no canto tem o botão de atualizar)';
       el.classList.add('tem-nova');
     } else {
       el.innerHTML = '<span class="job-trilho-versao-num">v' + esc(minha) + '</span>';
@@ -14207,9 +14207,11 @@
         '<div class="job-aviso-versao-nota">' +
           'A sua continua funcionando. Atualizar leva cerca de um minuto.' +
         '</div>' +
-        '<div class="job-aviso-versao-acoes">' +
-          '<a class="job-aviso-versao-bt" href="' + esc(_SITE_BASE_URL_EXT + '/extensao/instalar') + '" ' +
-            'target="_blank" rel="noopener">Atualizar agora</a>' +
+        // AS ACOES SAO DESENHADAS DEPOIS, quando o background responder se os
+        // arquivos novos ja estao na pasta. Ate la fica so o "Depois": prometer
+        // "Atualizar agora" e abrir uma pagina de instrucoes foi exatamente a
+        // frescura que este bloco existe pra matar.
+        '<div class="job-aviso-versao-acoes" id="job-aviso-versao-acoes">' +
           '<button type="button" class="job-aviso-versao-depois">Depois</button>' +
         '</div>' +
       '</div>';
@@ -14228,6 +14230,60 @@
     };
     box.querySelector('.job-aviso-versao-x').addEventListener('click', sair);
     box.querySelector('.job-aviso-versao-depois').addEventListener('click', sair);
+    _desenharAcoesDoAviso(box, sair);
+  }
+
+  // DUAS SITUACOES DIFERENTES, DUAS TELAS DIFERENTES.
+  //
+  // Quem tem a pasta ligada no git (o Guilherme) ja puxou os arquivos novos: o
+  // que falta e um reload, e reload e um clique. Quem nao tem git (as
+  // consultoras, cada uma na maquina dela) ainda precisa dos arquivos.
+  //
+  // A extensao consegue saber em qual dos dois casos esta: basta comparar a
+  // versao CARREGADA com a que esta no manifest.json da pasta agora. Sem essa
+  // pergunta, a tela teria que mostrar o caminho longo pra todo mundo — e o
+  // caminho longo pra quem so precisava de um clique e o que faz a pessoa
+  // achar que a ferramenta piorou.
+  async function _desenharAcoesDoAviso(box, sair) {
+    const acoes = box.querySelector('#job-aviso-versao-acoes');
+    if (!acoes) return;
+    let est = null;
+    try { est = await chrome.runtime.sendMessage({ type: 'estado_atualizacao' }); } catch (e) { est = null; }
+    const depois = acoes.querySelector('.job-aviso-versao-depois');
+
+    if (est && est.ok && est.prontoPraReload) {
+      const bt = document.createElement('button');
+      bt.type = 'button';
+      bt.className = 'job-aviso-versao-bt';
+      bt.textContent = 'Atualizar agora';
+      bt.addEventListener('click', async () => {
+        bt.disabled = true;
+        bt.textContent = 'Atualizando…';
+        try { await chrome.runtime.sendMessage({ type: 'atualizar_extensao' }); } catch (e) { /* o reload derruba a ponte: esperado */ }
+        // A extensao morre e renasce aqui. A proxima encarnacao religa esta aba
+        // sozinha; a mensagem cobre o segundo em que nada acontece na tela.
+        bt.textContent = 'Pronto — recarregando';
+      });
+      acoes.insertBefore(bt, depois);
+      const nota = box.querySelector('.job-aviso-versao-nota');
+      if (nota) nota.textContent = 'Os arquivos novos ja estao na sua pasta. Um clique e acabou.';
+      return;
+    }
+
+    // Arquivos ainda velhos (ou nao deu pra saber): o zip primeiro. O link
+    // continua sendo link de verdade — abrir em aba nova e o que o consultor
+    // espera de um download.
+    const a = document.createElement('a');
+    a.className = 'job-aviso-versao-bt';
+    a.href = _SITE_BASE_URL_EXT + '/extensao/instalar';
+    a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = 'Baixar os arquivos';
+    acoes.insertBefore(a, depois);
+    const nota = box.querySelector('.job-aviso-versao-nota');
+    if (nota) {
+      nota.textContent = 'A sua continua funcionando. Baixe os arquivos novos por cima da pasta atual — '
+        + 'depois disso a extensao termina sozinha, num clique.';
+    }
   }
 
   // ── Detecta troca de conversa (o WhatsApp Web é uma SPA — não navega, só

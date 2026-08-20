@@ -27282,11 +27282,16 @@ def extensao_instalar():
   <li>Pronto: abra o <b>WhatsApp Web</b> e dê <b>F5</b>. O painel do JOB aparece na lateral.</li>
 </ol>
 
-<div class="aviso"><b>Quando sair uma atualização:</b> volte nesta mesma página e clique em
-<b>"Instalar automaticamente"</b> de novo, escolhendo a <b>mesma pasta</b> — os arquivos são
-regravados por cima, sem duplicar nada. Depois, em <code>chrome://extensions</code>, clique no
-<b>&#8635; (recarregar)</b> da extensão + <b>F5</b> no WhatsApp. (Quando a Chrome Web Store aprovar,
-isso passa a ser automático e este passo some.)</div>
+<div class="aviso"><b>Quando sair uma atualização, são dois cliques:</b>
+<ol style="margin:8px 0 0">
+  <li>Volte nesta página e clique em <b>"Instalar automaticamente"</b>, escolhendo a
+      <b>mesma pasta</b> de sempre. Os arquivos são regravados por cima, sem duplicar nada.</li>
+  <li>Vá pro WhatsApp Web: o aviso da extensão no canto vai estar com o botão
+      <b>"Atualizar agora"</b>. Clique nele e acabou.</li>
+</ol>
+<div style="margin-top:8px;color:#6b7280">Não precisa mais abrir <code>chrome://extensions</code>,
+nem clicar no &#8635;, nem dar F5 &mdash; a extensão faz as duas coisas sozinha depois do clique.</div>
+</div>
 
 <div class="aviso" style="background:#eff6ff;border-color:#93c5fd">
   <b>Deu erro "Não foi possível carregar ... para o script"?</b> É pasta incompleta ou arquivo
