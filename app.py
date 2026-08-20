@@ -42997,11 +42997,23 @@ def api_v1_crm_leads_buscar():
         close_db(conn); return _api_erro('nao_autenticado', 'Usuário da chave inválido ou inativo', 401)
     digitos = re.sub(r'\D', '', termo)
     like = '%' + termo.lower() + '%'
+    alvo = digitos or termo
+    cond = ["LOWER(COALESCE(nome,'')) LIKE ?", "COALESCE(telefone,'') LIKE ?",
+            "COALESCE(telefone_norm,'') LIKE ?", "LOWER(COALESCE(email,'')) LIKE ?"]
+    params = [like, '%' + alvo + '%', '%' + alvo + '%', like]
+    # O número que chega do WhatsApp vem com o DDI ('5519...') e o banco guarda o
+    # telefone canonizado SEM o 55: buscar cru devolvia zero em 98,5% da base.
+    # A forma canônica entra como condição A MAIS — nunca no lugar da comparação
+    # crua. A comparação crua é o que sustenta a busca parcial: trocá-la por LIKE
+    # ancorado no canônico (como faz a rota interna /crm/leads/buscar) derrubaria
+    # o acerto em termo parcial de 10 dígitos de 100% para 3,7%.
+    tel_can = _normalizar_telefone(termo) if digitos else ''
+    if tel_can and tel_can != digitos:
+        cond.append("COALESCE(telefone_norm,'') LIKE ?"); params.append('%' + tel_can + '%')
+        cond.append("COALESCE(telefone,'') LIKE ?"); params.append('%' + tel_can + '%')
     q = """SELECT id, nome, telefone, telefone_norm, email, empresa, origem, etapa, responsavel_id
              FROM crm_leads
-            WHERE (LOWER(COALESCE(nome,'')) LIKE ? OR COALESCE(telefone,'') LIKE ?
-                   OR COALESCE(telefone_norm,'') LIKE ? OR LOWER(COALESCE(email,'')) LIKE ?)"""
-    params = [like, '%' + (digitos or termo) + '%', '%' + (digitos or termo) + '%', like]
+            WHERE (""" + " OR ".join(cond) + ")"
     if not _api_usuario_eh_admin(usuario):
         q += " AND responsavel_id=?"; params.append(usuario['id'])
     q += " ORDER BY atualizado_em DESC, id DESC LIMIT 20"
