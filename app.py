@@ -13007,6 +13007,44 @@ def _disparo_enfileirar(conn, campanha_id, agora=None):
             'inaptos': nomes(list(inaptos)), 'sem_variavel': sem_variavel}
 
 
+def _disparo_enfileirar_automatico(conn=None, agora=None):
+    """Empurra sozinho o que pode sair agora, de TODA campanha ativa.
+
+    Sem isto a campanha era um botão, não um motor: o Guilherme ligava a
+    campanha e ela ficava muda até alguém abrir a tela e clicar em
+    "enfileirar". Foi exatamente o que aconteceu com a MEDSÊNIOR — ativa às
+    11:41, 43 alvos, zero mensagens três horas depois. "Ativa" tem que
+    significar andando.
+
+    Roda no scheduler E por request (o APScheduler morre em restart), e o
+    próprio `_disparo_enfileirar` já é a trava: teto do dia, janela de
+    horário, consultor apto e o que já está na fila. Chamar de novo fora de
+    hora não manda nada — só volta com o motivo.
+    """
+    prop = conn is None
+    conn = conn or db()
+    total, tocadas = 0, 0
+    try:
+        ativas = [r['id'] for r in conn.execute(
+            "SELECT id FROM disparo_campanha WHERE status='ativa' ORDER BY id").fetchall()]
+        for cid in ativas:
+            try:
+                r = _disparo_enfileirar(conn, cid, agora)
+            except Exception as e:
+                app.logger.warning(f"[DISPARO_AUTO] campanha {cid} falhou: {e}")
+                continue
+            n = int(r.get('enfileirados') or 0)
+            total += n
+            if n:
+                tocadas += 1
+        if total:
+            app.logger.info(f"[DISPARO_AUTO] {total} na fila, {tocadas} campanha(s)")
+    finally:
+        if prop:
+            close_db(conn)
+    return {'enfileirados': total, 'campanhas': tocadas}
+
+
 # ─── Telas do disparo para campanhas ──────────────────────────────────────
 # Só admin, como o MEI. E moram sob /disparos pra dividir o mesmo item de menu
 # com ele: o menu já tem 25 itens e tela nova não ganha entrada própria.
@@ -51316,6 +51354,12 @@ def _auto_pull_leads_throttled():
             # tela que não chama — e o clique tem prazo: passados 90 dias, o
             # Google recusa a conversão inteira. A fila apodrecia em silêncio.
             # Antes de enviar, casa os cliques que chegaram na frente do lead.
+            # Mesma rede de segurança da conversão, pelo mesmo motivo: o
+            # scheduler morre em restart e a campanha ficaria muda sem avisar.
+            try:
+                _disparo_enfileirar_automatico()
+            except Exception:
+                pass
             try:
                 _clique_casar_pendentes()
             except Exception:
@@ -51415,6 +51459,12 @@ def _iniciar_scheduler_backup():
         # Mesmo intervalo da varredura da fila: os dois existem pelo mesmo motivo
         # — não depender de nenhuma extensão estar viva pra o sistema cumprir o
         # que prometeu.
+        # Enfileiramento da campanha. É o que faz "ativa" querer dizer andando:
+        # sem este job, ligar a campanha não mandava nada até alguém abrir a
+        # tela e clicar. Roda junto dos avisos porque tem o mesmo motivo — o
+        # sistema cumpre o que prometeu sem depender de ninguém estar olhando.
+        sched.add_job(_disparo_enfileirar_automatico, 'interval', minutes=5, max_instances=1,
+                      id='disparo_enfileirar', replace_existing=True)
         sched.add_job(_disparo_avisos_pendentes, 'interval', minutes=5, max_instances=1,
                       id='disparo_avisos', replace_existing=True)
         # SMS e e-mail da costura de canais. No servidor de propósito: é o que
