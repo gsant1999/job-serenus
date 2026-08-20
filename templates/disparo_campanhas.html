@@ -1,0 +1,169 @@
+{% extends 'base.html' %}
+{% block title %}Campanhas na base{% endblock %}
+
+{% block head %}
+<style>
+.dc-wrap { max-width:1040px; }
+.dc-hero { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
+.dc-hero h1 { font-size:26px; }
+.dc-sub { color:var(--cinza); font-size:13.5px; margin:4px 0 22px; line-height:1.55; max-width:640px; }
+.dc-card { padding:0; overflow:hidden; margin-bottom:12px; }
+.dc-top { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:15px 20px; }
+.dc-top a.nome { font-size:16px; font-weight:700; color:var(--texto); text-decoration:none; }
+.dc-top a.nome:hover { color:var(--teal); }
+.dc-meta { font-size:11.5px; color:var(--cinza); margin-top:2px; }
+.dc-nums { display:flex; gap:22px; font-size:12px; color:var(--cinza); text-align:center; }
+.dc-nums b { font-family:'Sora',sans-serif; font-size:17px; display:block; color:var(--texto); }
+.dc-nums .alerta b { color:var(--rosa); }
+.dc-badge { font-size:10.5px; padding:3px 10px; border-radius:20px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; white-space:nowrap; }
+.dc-badge.ativa { background:rgba(31,216,164,.12); color:var(--teal); }
+.dc-badge.pausada { background:rgba(245,158,11,.14); color:#f59e0b; }
+.dc-badge.rascunho { background:rgba(148,163,184,.15); color:var(--cinza); }
+.dc-badge.concluida { background:rgba(148,163,184,.15); color:var(--cinza); }
+.dc-form { padding:22px; }
+.dc-form h3 { font-size:15px; margin:0 0 4px; }
+.dc-passo { margin-bottom:20px; }
+.dc-passo > label, .dc-rot { display:block; font-size:12.5px; font-weight:600; margin-bottom:6px; }
+.dc-hint { font-size:12px; color:var(--cinza); line-height:1.55; margin:0 0 10px; }
+input.campo, select.campo { background:var(--input-bg); border:1px solid var(--borda); border-radius:9px;
+  color:var(--texto); padding:10px 12px; font-size:13px; font-family:inherit; }
+input.campo:focus, select.campo:focus { outline:none; border-color:var(--teal); }
+.dc-linha { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; }
+.dc-dias { display:flex; gap:6px; flex-wrap:wrap; }
+.dc-dia { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--borda); border-radius:8px;
+  padding:7px 10px; font-size:12.5px; cursor:pointer; user-select:none;
+  transition:border-color 140ms var(--ease-saida,ease), color 140ms var(--ease-saida,ease); }
+.dc-dia:has(input:checked) { border-color:var(--teal); color:var(--teal); }
+.dc-dia input { width:14px; height:14px; }
+.dc-escolha { display:flex; gap:10px; flex-wrap:wrap; }
+.dc-op { flex:1; min-width:210px; border:1px solid var(--borda); border-radius:10px; padding:12px 14px; cursor:pointer;
+  transition:border-color 140ms var(--ease-saida,ease); }
+.dc-op:has(input:checked) { border-color:var(--teal); }
+.dc-op b { display:block; font-size:13px; margin-bottom:2px; }
+.dc-op span { font-size:11.5px; color:var(--cinza); line-height:1.45; }
+.dc-arquivo { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.dc-arquivo .nome-arq { font-size:12.5px; color:var(--teal); }
+.dc-vazio { padding:30px; text-align:center; color:var(--cinza); }
+/* Botão não ganha estilo próprio aqui: .btn e .btn-outline moram em base.html e
+   já trazem o hover, o :active e o reduced-motion. Reescrever aqui faria estas
+   duas telas se comportarem diferente do resto do JOB — que é exatamente o
+   defeito que deixou a interface remendada antes. */
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page dc-wrap">
+  <div class="dc-hero">
+    <div>
+      <h1>Campanhas na base</h1>
+    </div>
+    <a href="/campanhas" class="btn-outline" style="text-decoration:none;white-space:nowrap;">Lista fria (MEI)</a>
+  </div>
+  <div class="dc-sub">
+    Aqui a mensagem sai pelo WhatsApp do <b>consultor dono do lead</b> — não em rodízio. Você sobe uma planilha
+    com quem quer atingir, o sistema casa cada telefone com a base e descobre por quem falar.
+    Nada é enviado até você ativar a campanha.
+  </div>
+
+  {% for c in campanhas %}
+  <div class="card dc-card">
+    <div class="dc-top">
+      <div>
+        <a class="nome" href="/disparos/campanha/{{ c.id }}">{{ c.nome }}</a>
+        <div class="dc-meta">
+          {{ 'Clientes com venda' if c.publico == 'vendas' else 'Leads' }}
+          · até {{ c.teto_dia }} por consultor/dia
+          · {{ c.hora_inicio }} às {{ c.hora_fim }}
+        </div>
+      </div>
+      <div class="dc-nums">
+        <div><b>{{ c.total or 0 }}</b>na lista</div>
+        <div><b>{{ c.enviados or 0 }}</b>enviados</div>
+        <div><b>{{ c.respondeu or 0 }}</b>responderam</div>
+        <div class="{{ 'alerta' if c.sem_dono else '' }}"><b>{{ c.sem_dono or 0 }}</b>sem dono</div>
+      </div>
+      <span class="dc-badge {{ c.status }}">{{ c.status }}</span>
+    </div>
+  </div>
+  {% else %}
+  <div class="card dc-vazio">Nenhuma campanha na base ainda. A primeira se cria aqui embaixo.</div>
+  {% endfor %}
+
+  <div class="card dc-form" style="margin-top:24px;">
+    <h3>Nova campanha</h3>
+    <p class="dc-hint">A campanha nasce como rascunho: você confere a lista antes de qualquer mensagem sair.</p>
+
+    <form method="POST" action="/disparos/campanha/criar" enctype="multipart/form-data" id="form-nova">
+      <div class="dc-passo">
+        <label for="dc-nome">Nome da campanha</label>
+        <p class="dc-hint">É como ela aparece na etiqueta do lead e no histórico. Use algo que você reconheça daqui a três meses.</p>
+        <input class="campo" id="dc-nome" name="nome" required style="width:380px;max-width:100%;"
+               placeholder="Ex: MedSênior — reajuste de setembro">
+      </div>
+
+      <div class="dc-passo">
+        <span class="dc-rot">Quem vai receber<button type="button" class="job-i" aria-label="Qual a diferença"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">Muda quem o sistema considera dono. Em Leads, o dono é o consultor responsável no CRM. Em clientes com venda, é quem fechou a proposta — é com essa pessoa que o cliente falou por último.</span></button></span>
+        <div class="dc-escolha">
+          <label class="dc-op"><input type="radio" name="publico" value="leads" checked>
+            <b>Leads</b><span>Sai pelo consultor responsável no CRM.</span></label>
+          <label class="dc-op"><input type="radio" name="publico" value="vendas">
+            <b>Clientes com venda</b><span>Sai por quem fechou a proposta.</span></label>
+        </div>
+      </div>
+
+      <div class="dc-passo">
+        <span class="dc-rot">A lista</span>
+        <p class="dc-hint">
+          Planilha com uma pessoa por linha e <b>a primeira linha com os títulos das colunas</b>. Precisa ter uma coluna de telefone.
+          As outras colunas viram variáveis da mensagem: uma coluna "Valor da Mensalidade" permite escrever
+          <code>{valor_da_mensalidade}</code> no texto. Aceita .xlsx e .csv.
+        </p>
+        <div class="dc-arquivo">
+          <button type="button" class="btn-outline btn-sm" onclick="document.getElementById('dc-planilha').click()">Escolher planilha</button>
+          <input type="file" id="dc-planilha" name="planilha" accept=".xlsx,.xlsm,.csv" style="display:none;">
+          <span class="nome-arq" id="dc-arq-nome"></span>
+          <a href="/disparos/campanha/modelo-planilha" style="font-size:12px;color:var(--cinza);">Baixar planilha de exemplo</a>
+        </div>
+      </div>
+
+      <div class="dc-passo">
+        <span class="dc-rot">Ritmo</span>
+        <p class="dc-hint">Tudo isto continua editável depois.</p>
+        <div class="dc-linha">
+          <div>
+            <label for="dc-teto" style="font-weight:400;font-size:12px;color:var(--cinza);">Por consultor, por dia<button type="button" class="job-i" aria-label="Por que existe um teto"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">Falar com muita gente nova em sequência é o que faz o WhatsApp bloquear um número. O teto espalha a campanha por vários dias em vez de concentrar tudo num. Comece baixo e suba conforme for medindo.</span></button></label>
+            <input class="campo" id="dc-teto" name="teto_dia" type="number" min="1" max="200" value="10" style="width:110px;display:block;">
+          </div>
+          <div>
+            <label for="dc-ini" style="font-weight:400;font-size:12px;color:var(--cinza);">Das</label>
+            <input class="campo" id="dc-ini" name="hora_inicio" type="time" value="08:00" style="width:120px;display:block;">
+          </div>
+          <div>
+            <label for="dc-fim" style="font-weight:400;font-size:12px;color:var(--cinza);">Até</label>
+            <input class="campo" id="dc-fim" name="hora_fim" type="time" value="18:00" style="width:120px;display:block;">
+          </div>
+        </div>
+        <div class="dc-dias" style="margin-top:12px;">
+          {% for d, rot in [(1,'Seg'),(2,'Ter'),(3,'Qua'),(4,'Qui'),(5,'Sex'),(6,'Sáb'),(7,'Dom')] %}
+          <label class="dc-dia"><input type="checkbox" name="dias_semana" value="{{ d }}" {% if d < 6 %}checked{% endif %}>{{ rot }}</label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <button class="btn" type="submit" id="dc-enviar">Criar campanha e conferir a lista</button>
+    </form>
+  </div>
+</div>
+
+<script>
+  document.getElementById('dc-planilha').addEventListener('change', function () {
+    document.getElementById('dc-arq-nome').textContent = this.files.length ? this.files[0].name : '';
+  });
+  // Planilha grande demora a subir. Sem travar, o admin clica de novo e cria
+  // duas campanhas iguais — foi assim que nasceu proposta duplicada no JOB.
+  document.getElementById('form-nova').addEventListener('submit', function () {
+    var b = document.getElementById('dc-enviar');
+    b.disabled = true; b.textContent = 'Lendo a planilha e procurando os donos…';
+  });
+</script>
+{% endblock %}

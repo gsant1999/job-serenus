@@ -12624,6 +12624,270 @@ def _disparo_enfileirar(conn, campanha_id, agora=None):
             'inaptos': nomes(list(inaptos)), 'sem_variavel': sem_variavel}
 
 
+# ─── Telas do disparo para campanhas ──────────────────────────────────────
+# Só admin, como o MEI. E moram sob /disparos pra dividir o mesmo item de menu
+# com ele: o menu já tem 25 itens e tela nova não ganha entrada própria.
+
+_DISPARO_STATUS_LABEL = {
+    'pendente': 'Prontos pra sair', 'enfileirado': 'Na fila agora', 'enviado': 'Enviados',
+    'respondeu': 'Responderam', 'sem_dono': 'Sem dono', 'sem_lead': 'Fora da base',
+    'sem_modelo': 'Sem modelo', 'sem_variavel': 'Falta coluna na planilha',
+    'bloqueado': 'Não querem receber', 'invalido': 'Telefone inválido',
+}
+
+
+def _disparo_resumo(conn, campanha_id):
+    """Quantos alvos em cada destino. É o que a tela mostra no lugar de um
+    '300 importados' que esconde que 120 não casaram com ninguém."""
+    out = {}
+    for r in conn.execute("""SELECT status, COUNT(*) n FROM disparo_campanha_alvo
+        WHERE campanha_id=? GROUP BY status""", (campanha_id,)).fetchall():
+        out[r['status']] = r['n']
+    return out
+
+
+@app.route('/disparos/campanhas')
+@login_required
+@admin_required
+def disparo_campanhas():
+    conn = db()
+    rows = conn.execute("""SELECT c.*,
+        (SELECT COUNT(*) FROM disparo_campanha_alvo a WHERE a.campanha_id=c.id) total,
+        (SELECT COUNT(*) FROM disparo_campanha_alvo a WHERE a.campanha_id=c.id AND a.enviado_em IS NOT NULL) enviados,
+        (SELECT COUNT(*) FROM disparo_campanha_alvo a WHERE a.campanha_id=c.id AND a.status='respondeu') respondeu,
+        (SELECT COUNT(*) FROM disparo_campanha_alvo a WHERE a.campanha_id=c.id AND a.status IN ('sem_dono','sem_lead')) sem_dono
+        FROM disparo_campanha c ORDER BY c.id DESC""").fetchall()
+    close_db(conn)
+    return render_template('disparo_campanhas.html', campanhas=[dict(r) for r in rows])
+
+
+@app.route('/disparos/campanha/modelo-planilha')
+@login_required
+@admin_required
+def disparo_modelo_planilha():
+    """Planilha de exemplo. O cabeçalho aqui não é enfeite: é ele que vira a
+    variável usada na mensagem, então o exemplo já mostra duas colunas extras."""
+    import openpyxl, io as _io
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = 'Clientes'
+    ws.append(['Nome', 'Telefone', 'Valor da Mensalidade', 'Vencimento'])
+    ws.append(['Maria Silva', '19 99999-8888', 'R$ 890,00', '10/09'])
+    ws.append(['João Souza', '11 98888-7777', 'R$ 1.240,00', '15/09'])
+    for col, larg in zip('ABCD', (26, 20, 22, 16)):
+        ws.column_dimensions[col].width = larg
+    buf = _io.BytesIO(); wb.save(buf); buf.seek(0)
+    return Response(buf.getvalue(),
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': 'attachment; filename=modelo-campanha-base.xlsx'})
+
+
+@app.route('/disparos/campanha/criar', methods=['POST'])
+@login_required
+@admin_required
+def disparo_campanha_criar():
+    d = request.form
+    nome = (d.get('nome') or '').strip() or f"Campanha {_agora_sp()[:10]}"
+    publico = 'vendas' if (d.get('publico') == 'vendas') else 'leads'
+    try: teto = max(1, int(d.get('teto_dia') or 10))
+    except (TypeError, ValueError): teto = 10
+    ini = (d.get('hora_inicio') or '08:00')[:5]
+    fim = (d.get('hora_fim') or '18:00')[:5]
+    dias = ','.join([x for x in (d.getlist('dias_semana') or []) if x.isdigit()]) or '1,2,3,4,5'
+    contatos, _cols = _disparo_parse_planilha(request.files.get('planilha'))
+    conn = db()
+    conn.execute("""INSERT INTO disparo_campanha
+        (nome, publico, fonte, teto_dia, hora_inicio, hora_fim, dias_semana, status, criado_por, criado_em)
+        VALUES (?,?,'planilha',?,?,?,?,'rascunho',?,?)""",
+        (nome, publico, teto, ini, fim, dias, session.get('user_id'), _agora_sp()))
+    cid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
+           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    if contatos:
+        _disparo_importar(conn, cid, contatos, publico)
+    conn.commit(); close_db(conn)
+    return redirect(url_for('disparo_campanha_detalhe', cid=cid))
+
+
+@app.route('/disparos/campanha/<int:cid>')
+@login_required
+@admin_required
+def disparo_campanha_detalhe(cid):
+    conn = db()
+    camp = conn.execute("SELECT * FROM disparo_campanha WHERE id=?", (cid,)).fetchone()
+    if not camp:
+        close_db(conn); return "Campanha não encontrada", 404
+    resumo = _disparo_resumo(conn, cid)
+    presenca = {p['id']: p for p in _consultores_presenca(conn)}
+    porcons = []
+    for r in conn.execute("""SELECT a.consultor_id, u.nome,
+        COUNT(*) total,
+        SUM(CASE WHEN a.status='pendente' THEN 1 ELSE 0 END) pendente,
+        SUM(CASE WHEN a.status='enfileirado' THEN 1 ELSE 0 END) enfileirado,
+        SUM(CASE WHEN a.enviado_em IS NOT NULL THEN 1 ELSE 0 END) enviado,
+        SUM(CASE WHEN a.status='respondeu' THEN 1 ELSE 0 END) respondeu,
+        SUM(CASE WHEN a.status='sem_variavel' THEN 1 ELSE 0 END) sem_variavel
+        FROM disparo_campanha_alvo a JOIN usuarios u ON u.id=a.consultor_id
+        WHERE a.campanha_id=? GROUP BY a.consultor_id, u.nome ORDER BY u.nome""", (cid,)).fetchall():
+        d = dict(r)
+        p = presenca.get(d['consultor_id']) or {}
+        d['apto'] = bool(p.get('apto'))
+        d['modelos'] = [dict(m) for m in conn.execute("""SELECT m.id, m.nome FROM disparo_campanha_modelo dm
+            JOIN modelos_conteudo m ON m.id=dm.modelo_id
+            WHERE dm.campanha_id=? AND dm.consultor_id=?""", (cid, d['consultor_id'])).fetchall()]
+        porcons.append(d)
+    orfaos = [dict(r) for r in conn.execute("""SELECT id, nome, telefone, telefone_norm, status
+        FROM disparo_campanha_alvo WHERE campanha_id=? AND status IN ('sem_dono','sem_lead')
+        ORDER BY nome LIMIT 300""", (cid,)).fetchall()]
+    problemas = [dict(r) for r in conn.execute("""SELECT id, nome, telefone, status, texto_enviado
+        FROM disparo_campanha_alvo WHERE campanha_id=?
+          AND status IN ('sem_variavel','invalido','bloqueado') ORDER BY status, nome LIMIT 200""", (cid,)).fetchall()]
+    consultores = [dict(r) for r in conn.execute(
+        "SELECT id, nome FROM usuarios WHERE ativo=1 ORDER BY nome").fetchall()]
+    # Modelos de WhatsApp que cada consultor pode usar: os DELE ou os compartilhados.
+    # dono_nome junto: sem ele a tela chamava de "compartilhado" o texto PESSOAL
+    # de outro consultor, e o admin escolheria a voz da Karen pra Juliana sem
+    # perceber. Dizer de quem é o texto é o mínimo pra a escolha ser consciente.
+    modelos = [dict(r) for r in conn.execute("""SELECT m.id, m.nome, COALESCE(m.dono_consultor_id,0) dono,
+        COALESCE(u.nome,'') dono_nome, COALESCE(m.corpo_texto,'') corpo
+        FROM modelos_conteudo m LEFT JOIN usuarios u ON u.id = m.dono_consultor_id
+        WHERE m.tipo='whatsapp' AND COALESCE(m.ativo,1)=1 AND COALESCE(m.corpo_texto,'')<>''
+        ORDER BY m.nome""").fetchall()]
+    # LISTA, não set: isto vai pro template como JSON, e set não serializa.
+    escolhidos = {}
+    for r in conn.execute("SELECT consultor_id, modelo_id FROM disparo_campanha_modelo WHERE campanha_id=?", (cid,)).fetchall():
+        escolhidos.setdefault(r['consultor_id'], []).append(r['modelo_id'])
+    janela_ok, janela_motivo = _disparo_janela_aberta(camp)
+    close_db(conn)
+    return render_template('disparo_campanha_detalhe.html', camp=dict(camp), resumo=resumo,
+                           rotulos=_DISPARO_STATUS_LABEL, porcons=porcons, orfaos=orfaos,
+                           problemas=problemas, consultores=consultores, modelos=modelos,
+                           escolhidos=escolhidos, janela_ok=janela_ok, janela_motivo=janela_motivo)
+
+
+@app.route('/disparos/campanha/<int:cid>/status', methods=['POST'])
+@login_required
+@admin_required
+def disparo_campanha_status(cid):
+    novo = (request.json or {}).get('status', 'ativa')
+    if novo not in ('rascunho', 'ativa', 'pausada', 'concluida'):
+        return jsonify({"ok": False}), 400
+    conn = db()
+    conn.execute("UPDATE disparo_campanha SET status=? WHERE id=?", (novo, cid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "status": novo})
+
+
+@app.route('/disparos/campanha/<int:cid>/enfileirar', methods=['POST'])
+@login_required
+@admin_required
+def disparo_campanha_enfileirar(cid):
+    conn = db()
+    r = _disparo_enfileirar(conn, cid)
+    close_db(conn)
+    return jsonify({"ok": True, **r})
+
+
+@app.route('/disparos/campanha/<int:cid>/ritmo', methods=['POST'])
+@login_required
+@admin_required
+def disparo_campanha_ritmo(cid):
+    """Teto por dia, janela de horário e dias — editáveis com a campanha rodando.
+
+    O ritmo é a variável de negócio desta tela: com 3.685 leads, 10/dia por
+    consultor leva dois meses e 30/dia leva três semanas. Ter que recriar a
+    campanha pra mudar isso faria o admin escolher errado no primeiro dia e
+    conviver com a escolha."""
+    d = request.json or {}
+    try:
+        teto = max(1, min(500, int(d.get('teto_dia') or 10)))
+    except (TypeError, ValueError):
+        teto = 10
+    ini = str(d.get('hora_inicio') or '08:00')[:5]
+    fim = str(d.get('hora_fim') or '18:00')[:5]
+    dias = ','.join([str(x) for x in (d.get('dias_semana') or []) if str(x) in '1234567']) or '1,2,3,4,5'
+    if not (len(ini) == 5 and len(fim) == 5 and ini < fim):
+        return jsonify({"ok": False, "erro": "A hora de início precisa ser antes da hora de fim."}), 400
+    conn = db()
+    conn.execute("""UPDATE disparo_campanha SET teto_dia=?, hora_inicio=?, hora_fim=?, dias_semana=?
+        WHERE id=?""", (teto, ini, fim, dias, cid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "teto_dia": teto, "hora_inicio": ini, "hora_fim": fim, "dias_semana": dias})
+
+
+@app.route('/disparos/campanha/<int:cid>/modelos', methods=['POST'])
+@login_required
+@admin_required
+def disparo_campanha_modelos(cid):
+    """Quais modelos cada consultor usa NESTA campanha. Troca a lista inteira do
+    consultor de uma vez — mais simples de entender do que somar e subtrair."""
+    d = request.json or {}
+    try:
+        consultor_id = int(d.get('consultor_id'))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "erro": "consultor"}), 400
+    ids = [int(i) for i in (d.get('modelo_ids') or []) if str(i).isdigit()]
+    conn = db()
+    conn.execute("DELETE FROM disparo_campanha_modelo WHERE campanha_id=? AND consultor_id=?",
+                 (cid, consultor_id))
+    for mid in ids:
+        try:
+            conn.execute("INSERT INTO disparo_campanha_modelo (campanha_id, consultor_id, modelo_id) VALUES (?,?,?)",
+                         (cid, consultor_id, mid))
+        except Exception:
+            if DB_MODE == 'postgres':
+                try: conn.rollback()
+                except Exception: pass
+    # Alvo que tinha parado por falta de modelo pode voltar pra fila agora.
+    conn.execute("""UPDATE disparo_campanha_alvo SET status='pendente'
+        WHERE campanha_id=? AND consultor_id=? AND status='sem_modelo'""", (cid, consultor_id))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "modelos": len(ids)})
+
+
+@app.route('/disparos/campanha/<int:cid>/atribuir', methods=['POST'])
+@login_required
+@admin_required
+def disparo_campanha_atribuir(cid):
+    """Dá dono aos que estavam órfãos e devolve eles pra campanha.
+
+    Quem já tem lead na base só ganha responsável. Quem veio na planilha e NÃO
+    está na base vira lead de verdade — senão não haveria como disparar pra ele,
+    e a planilha do admin teria trazido gente que o sistema ignora em silêncio.
+    """
+    d = request.json or {}
+    try:
+        consultor_id = int(d.get('consultor_id'))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "erro": "consultor"}), 400
+    ids = [int(i) for i in (d.get('alvo_ids') or []) if str(i).isdigit()]
+    if not ids:
+        return jsonify({"ok": False, "erro": "Nenhum contato marcado."}), 400
+    conn = db()
+    if not conn.execute("SELECT 1 FROM usuarios WHERE id=? AND ativo=1", (consultor_id,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Consultor inválido."}), 400
+    marcadores = ','.join(['?'] * len(ids))
+    alvos = conn.execute(f"""SELECT id, lead_id, nome, telefone, telefone_norm FROM disparo_campanha_alvo
+        WHERE campanha_id=? AND id IN ({marcadores})""", (cid, *ids)).fetchall()
+    criados = 0
+    for a in alvos:
+        lead_id = a['lead_id']
+        if not lead_id:
+            lead = conn.execute("SELECT id FROM crm_leads WHERE telefone_norm=? ORDER BY id DESC LIMIT 1",
+                                (a['telefone_norm'],)).fetchone()
+            if lead:
+                lead_id = lead['id']
+            else:
+                conn.execute("""INSERT INTO crm_leads (nome, telefone, telefone_norm, origem, etapa,
+                    responsavel_id, criado_em, atualizado_em) VALUES (?,?,?,'campanha','primeiro_contato',?,?,?)""",
+                    ((a['nome'] or a['telefone_norm']), a['telefone'] or a['telefone_norm'],
+                     a['telefone_norm'], consultor_id, _agora_sp(), _agora_sp()))
+                lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
+                           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+                criados += 1
+        conn.execute("UPDATE crm_leads SET responsavel_id=? WHERE id=?", (consultor_id, lead_id))
+    n = _disparo_reprocessar_sem_dono(conn, cid)
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "atribuidos": n, "leads_criados": criados})
+
+
 @app.route('/api/whatsapp/campanha/resposta', methods=['POST', 'OPTIONS'])
 @requer('whatsapp:enviar')
 def api_whatsapp_campanha_resposta():

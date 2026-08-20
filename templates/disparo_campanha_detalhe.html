@@ -1,0 +1,362 @@
+{% extends 'base.html' %}
+{% block title %}{{ camp.nome }}{% endblock %}
+
+{% block head %}
+<style>
+.dd-wrap { max-width:1040px; }
+.dd-hero { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; flex-wrap:wrap; }
+.dd-hero h1 { font-size:24px; }
+.dd-meta { color:var(--cinza); font-size:12.5px; margin-top:3px; }
+.dd-acoes { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.dd-badge { font-size:10.5px; padding:3px 10px; border-radius:20px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; }
+.dd-badge.ativa { background:rgba(31,216,164,.12); color:var(--teal); }
+.dd-badge.pausada { background:rgba(245,158,11,.14); color:#f59e0b; }
+.dd-badge.rascunho, .dd-badge.concluida { background:rgba(148,163,184,.15); color:var(--cinza); }
+.dd-aviso { border:1px solid var(--borda); border-left:3px solid #f59e0b; border-radius:9px;
+  padding:11px 14px; font-size:12.5px; color:var(--cinza); line-height:1.55; margin:18px 0 0; }
+.dd-aviso b { color:var(--texto); }
+.dd-destinos { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; padding:16px 18px; }
+.dd-dest { border:1px solid var(--borda); border-radius:10px; padding:11px 13px; }
+.dd-dest b { font-family:'Sora',sans-serif; font-size:21px; display:block; line-height:1.1; }
+.dd-dest span { font-size:11px; color:var(--cinza); }
+.dd-dest.ruim { border-color:rgba(244,63,94,.35); } .dd-dest.ruim b { color:var(--rosa); }
+.dd-dest.bom b { color:var(--teal); }
+.dd-nota { padding:0 18px 16px; font-size:12px; color:var(--cinza); line-height:1.55; }
+/* Em tela estreita a tabela ROLA, não se desmonta: reempilhar em duas colunas
+   soltava o número do rótulo e "2" virava um dois sem dono. Coluna alinhada é o
+   que faz a linha ser lida como linha. */
+.cons-tabela { overflow-x:auto; }
+.cons-linha { display:grid; grid-template-columns:1.5fr .9fr .7fr .7fr .7fr auto; gap:10px; align-items:center;
+  padding:12px 18px; border-bottom:1px solid var(--borda); font-size:13px; min-width:660px; }
+.cons-linha:last-child { border-bottom:none; }
+.cons-head { font-size:10.5px; color:var(--cinza-2); font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
+.pill { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+.cons-modelos { font-size:11.5px; color:var(--cinza); }
+.cons-modelos.falta { color:var(--rosa); font-weight:600; }
+.orf-lista { max-height:320px; overflow:auto; border-top:1px solid var(--borda); }
+.orf-linha { display:flex; align-items:center; gap:10px; padding:9px 18px; border-bottom:1px solid var(--borda); font-size:12.5px; }
+.orf-linha:last-child { border-bottom:none; }
+.orf-linha .tel { color:var(--cinza); font-size:11.5px; }
+.orf-linha .tag { margin-left:auto; font-size:10.5px; color:var(--cinza); white-space:nowrap; }
+.orf-acao { display:flex; gap:10px; align-items:center; padding:14px 18px; flex-wrap:wrap; border-top:1px solid var(--borda); }
+select.campo, input.campo { background:var(--input-bg); border:1px solid var(--borda); border-radius:9px;
+  color:var(--texto); padding:9px 11px; font-size:13px; font-family:inherit; }
+select.campo:focus { outline:none; border-color:var(--teal); }
+.prob-linha { display:flex; gap:10px; padding:9px 18px; border-bottom:1px solid var(--borda); font-size:12.5px; align-items:baseline; }
+.prob-linha:last-child { border-bottom:none; }
+.prob-linha .motivo { margin-left:auto; color:var(--rosa); font-size:11.5px; text-align:right; }
+.dd-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:80; align-items:center; justify-content:center; padding:20px; }
+.dd-modal .caixa { background:var(--panel); border:1px solid var(--borda); border-radius:14px; width:520px; max-width:100%; max-height:82vh; display:flex; flex-direction:column; }
+.dd-modal .topo { padding:16px 18px 10px; } .dd-modal .topo h3 { font-size:15px; margin:0 0 3px; }
+.dd-modal .lista { overflow:auto; padding:0 18px; }
+.dd-modal .rodape { padding:14px 18px; display:flex; gap:8px; justify-content:flex-end; border-top:1px solid var(--borda); }
+.mod-item { display:flex; gap:9px; align-items:flex-start; padding:9px 0; border-bottom:1px solid var(--borda); font-size:12.5px; }
+.mod-item:last-child { border-bottom:none; }
+.mod-item input { width:15px; height:15px; margin-top:2px; flex-shrink:0; }
+.mod-item .corpo { color:var(--cinza); font-size:11.5px; line-height:1.45; display:block; margin-top:2px; }
+.dd-retorno { font-size:12.5px; color:var(--cinza); line-height:1.6; margin-top:10px; }
+.ritmo-linha { display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; padding:14px 18px; }
+.ritmo-linha label { display:block; font-size:12px; color:var(--cinza); margin-bottom:5px; }
+.dc-dias { display:flex; gap:6px; flex-wrap:wrap; }
+.dc-dia { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--borda); border-radius:8px;
+  padding:7px 10px; font-size:12.5px; cursor:pointer; user-select:none;
+  transition:border-color 140ms var(--ease-saida,ease), color 140ms var(--ease-saida,ease); }
+.dc-dia:has(input:checked) { border-color:var(--teal); color:var(--teal); }
+.dc-dia input { width:14px; height:14px; }
+/* Botão não ganha estilo próprio aqui: .btn e .btn-outline moram em base.html e
+   já trazem o hover, o :active e o reduced-motion. Reescrever aqui faria estas
+   duas telas se comportarem diferente do resto do JOB — que é exatamente o
+   defeito que deixou a interface remendada antes. */
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page dd-wrap">
+  <div class="dd-hero">
+    <div>
+      <h1>{{ camp.nome }} <span class="dd-badge {{ camp.status }}">{{ camp.status }}</span></h1>
+      <div class="dd-meta">
+        {{ 'Clientes com venda — sai por quem fechou' if camp.publico == 'vendas' else 'Leads — sai pelo responsável no CRM' }}
+        · até {{ camp.teto_dia }} por consultor/dia · {{ camp.hora_inicio }} às {{ camp.hora_fim }}
+      </div>
+    </div>
+    <div class="dd-acoes">
+      <a href="/disparos/campanhas" class="btn-outline" style="text-decoration:none;">Voltar</a>
+      {% if camp.status == 'ativa' %}
+      <button class="btn-outline" onclick="mudarStatus('pausada', this)">Pausar</button>
+      <button class="btn" onclick="enviarLote(this)">Enviar o lote de agora</button>
+      {% else %}
+      <button class="btn" onclick="mudarStatus('ativa', this)">Ativar campanha</button>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if camp.status == 'ativa' and not janela_ok %}
+  <div class="dd-aviso"><b>Nada sai agora:</b> {{ janela_motivo }} A campanha está ativa e volta a disparar sozinha
+    na próxima janela — não precisa fazer nada.</div>
+  {% elif camp.status != 'ativa' %}
+  <div class="dd-aviso"><b>Nenhuma mensagem sai enquanto a campanha não estiver ativa.</b>
+    Confira a lista abaixo, escolha os modelos de cada consultor e ative quando estiver pronto.</div>
+  {% endif %}
+
+  <div class="card" style="margin:18px 0;padding:0;">
+    <div class="card-header"><h3>O que aconteceu com a sua lista</h3></div>
+    <div class="dd-destinos">
+      {% for chave, rotulo in [('pendente','bom'), ('enfileirado',''), ('enviado',''), ('respondeu','bom'),
+                               ('sem_dono','ruim'), ('sem_lead','ruim'), ('sem_modelo','ruim'),
+                               ('sem_variavel','ruim'), ('bloqueado',''), ('invalido','ruim')] %}
+        {% if resumo.get(chave) %}
+        <div class="dd-dest {{ rotulo }}">
+          <b>{{ resumo.get(chave) }}</b><span>{{ rotulos.get(chave, chave) }}</span>
+        </div>
+        {% endif %}
+      {% endfor %}
+      {% if not resumo %}<div class="dd-nota" style="padding:0;">A lista está vazia. Suba uma planilha ao criar a campanha.</div>{% endif %}
+    </div>
+    <div class="dd-nota">
+      <b>Sem dono</b> é gente que está na base mas sem consultor responsável. <b>Fora da base</b> é gente que veio
+      na planilha e o JOB não conhece. Nenhum dos dois recebe nada até você resolver isso — logo abaixo.
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;padding:0;">
+    <div class="card-header"><h3>Por consultor</h3></div>
+    <div class="cons-tabela">
+    <div class="cons-linha cons-head">
+      <div>Consultor</div><div>Modelos</div><div>A sair</div><div>Enviados</div><div>Responderam</div><div></div>
+    </div>
+    {% for p in porcons %}
+    <div class="cons-linha">
+      <div>
+        <span class="pill" style="background:{{ 'var(--teal)' if p.apto else 'var(--cinza-2,#6b7280)' }};"></span>{{ p.nome }}
+        {% if not p.apto %}<div class="cons-modelos">WhatsApp fechado — os contatos esperam</div>{% endif %}
+      </div>
+      <div class="cons-modelos {{ 'falta' if not p.modelos else '' }}">
+        {{ p.modelos|length ~ ' escolhido(s)' if p.modelos else 'nenhum — não sai nada' }}
+      </div>
+      <div>{{ p.pendente or 0 }}{% if p.enfileirado %} <span style="color:var(--cinza);font-size:11px;">(+{{ p.enfileirado }} na fila)</span>{% endif %}</div>
+      <div>{{ p.enviado or 0 }}</div>
+      <div style="color:var(--teal);">{{ p.respondeu or 0 }}</div>
+      <div><button class="btn-outline btn-sm" onclick="abrirModelos({{ p.consultor_id }}, '{{ p.nome|e }}')">Escolher modelos</button></div>
+    </div>
+    {% else %}
+    <div style="padding:18px;color:var(--cinza);min-width:0;">Ninguém ainda: ou a lista está vazia, ou nenhum contato tem dono.</div>
+    {% endfor %}
+    </div>
+    <div class="dd-nota" style="padding:14px 18px;">
+      Cada consultor manda um texto <b>próprio</b>. Sete pessoas mandando a mesma frase no mesmo dia é assinatura de
+      robô e é o que derruba número. Consultor sem modelo escolhido não dispara nada — de propósito: o sistema
+      não escreve em nome de ninguém.
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;padding:0;">
+    <div class="card-header"><h3>Ritmo</h3></div>
+    <div class="dd-nota" style="padding:14px 18px 0;">
+      Vale a partir do próximo lote — o que já saiu não muda.
+      {% set a_sair = (resumo.get('pendente', 0) + resumo.get('enfileirado', 0)) %}
+      {% if porcons and a_sair %}
+        Faltam {{ a_sair }} contatos. No ritmo de agora ({{ camp.teto_dia }} por dia, {{ porcons|length }}
+        consultor{{ 'es' if porcons|length > 1 else '' }}), isso leva cerca de
+        {{ ((a_sair / (camp.teto_dia * porcons|length)) | round(0, 'ceil')) | int }} dia(s) de disparo.
+      {% endif %}
+    </div>
+    <div class="ritmo-linha">
+      <div>
+        <label for="r-teto">Por consultor, por dia<button type="button" class="job-i" aria-label="Por que existe um teto"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">Falar com muita gente nova em sequência é o que faz o WhatsApp bloquear um número. O teto espalha a campanha por vários dias. Comece baixo e suba conforme for medindo.</span></button></label>
+        <input class="campo" id="r-teto" type="number" min="1" max="500" value="{{ camp.teto_dia }}" style="width:110px;">
+      </div>
+      <div><label for="r-ini">Das</label><input class="campo" id="r-ini" type="time" value="{{ camp.hora_inicio }}" style="width:120px;"></div>
+      <div><label for="r-fim">Até</label><input class="campo" id="r-fim" type="time" value="{{ camp.hora_fim }}" style="width:120px;"></div>
+      <div class="dc-dias">
+        {% for dnum, drot in [(1,'Seg'),(2,'Ter'),(3,'Qua'),(4,'Qui'),(5,'Sex'),(6,'Sáb'),(7,'Dom')] %}
+        <label class="dc-dia"><input type="checkbox" class="r-dia" value="{{ dnum }}"
+          {% if dnum|string in camp.dias_semana.split(',') %}checked{% endif %}>{{ drot }}</label>
+        {% endfor %}
+      </div>
+      <button class="btn btn-sm" onclick="salvarRitmo(this)">Salvar ritmo</button>
+      <span id="r-retorno" class="dd-retorno" style="margin:0;"></span>
+    </div>
+  </div>
+
+  {% if orfaos %}
+  <div class="card" style="margin-bottom:18px;padding:0;">
+    <div class="card-header"><h3>Precisam de dono ({{ orfaos|length }})</h3></div>
+    <div class="dd-nota" style="padding:14px 18px 0;">
+      Estes não recebem nada enquanto não tiverem consultor. Marque, escolha por quem eles falam, e eles entram
+      na campanha sozinhos. Quem está como "fora da base" vira lead novo no CRM ao ser atribuído.
+    </div>
+    <div class="orf-lista">
+      {% for o in orfaos %}
+      <label class="orf-linha">
+        <input type="checkbox" class="orf-chk" value="{{ o.id }}" style="width:15px;height:15px;">
+        <span>{{ o.nome or 'Sem nome' }}</span>
+        <span class="tel">{{ o.telefone }}</span>
+        <span class="tag">{{ 'fora da base' if o.status == 'sem_lead' else 'sem consultor' }}</span>
+      </label>
+      {% endfor %}
+    </div>
+    <div class="orf-acao">
+      <button class="btn-outline btn-sm" type="button" onclick="marcarTodos(true)">Marcar todos</button>
+      <button class="btn-outline btn-sm" type="button" onclick="marcarTodos(false)">Desmarcar</button>
+      <select class="campo" id="orf-consultor">
+        <option value="">Escolha o consultor…</option>
+        {% for c in consultores %}<option value="{{ c.id }}">{{ c.nome }}</option>{% endfor %}
+      </select>
+      <button class="btn btn-sm" onclick="atribuir(this)">Atribuir e devolver pra campanha</button>
+      <span id="orf-retorno" class="dd-retorno" style="margin:0;"></span>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if problemas %}
+  <div class="card" style="margin-bottom:18px;padding:0;">
+    <div class="card-header"><h3>Não vão sair ({{ problemas|length }})</h3></div>
+    {% for p in problemas %}
+    <div class="prob-linha">
+      <span>{{ p.nome or 'Sem nome' }}</span>
+      <span style="color:var(--cinza);font-size:11.5px;">{{ p.telefone }}</span>
+      <span class="motivo">
+        {% if p.status == 'sem_variavel' %}{{ p.texto_enviado }}
+        {% elif p.status == 'bloqueado' %}pediu pra não receber
+        {% else %}telefone inválido{% endif %}
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div id="retorno-lote" class="dd-retorno"></div>
+</div>
+
+<div class="dd-modal" id="modal-modelos">
+  <div class="caixa">
+    <div class="topo">
+      <h3 id="mm-titulo">Modelos</h3>
+      <div style="font-size:12px;color:var(--cinza);line-height:1.5;">
+        Marque os textos que podem sair por esta pessoa nesta campanha. Com mais de um, o sistema sorteia a cada
+        envio — duas mensagens iguais seguidas é o que o WhatsApp lê como robô.
+      </div>
+    </div>
+    <div class="lista" id="mm-lista"></div>
+    <div class="rodape">
+      <button class="btn-outline" onclick="document.getElementById('modal-modelos').style.display='none'">Cancelar</button>
+      <button class="btn" id="mm-salvar" onclick="salvarModelos(this)">Salvar modelos</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  var CID = {{ camp.id }};
+  var MODELOS = {{ modelos|tojson }};
+  var ESCOLHIDOS = {{ escolhidos|tojson }};
+  var consultorAberto = null;
+
+  function post(url, dados) {
+    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(dados || {}) }).then(function (r) { return r.json(); });
+  }
+
+  function mudarStatus(novo, btn) {
+    btn.disabled = true; btn.textContent = novo === 'ativa' ? 'Ativando…' : 'Pausando…';
+    post('/disparos/campanha/' + CID + '/status', { status: novo }).then(function () {
+      location.reload();
+    }).catch(function () { btn.disabled = false; btn.textContent = 'Tentar de novo'; });
+  }
+
+  function enviarLote(btn) {
+    btn.disabled = true; btn.textContent = 'Colocando na fila…';
+    var alvo = document.getElementById('retorno-lote');
+    post('/disparos/campanha/' + CID + '/enfileirar').then(function (r) {
+      btn.disabled = false; btn.textContent = 'Enviar o lote de agora';
+      var partes = [];
+      if (r.enfileirados) partes.push('<b>' + r.enfileirados + '</b> mensagem(ns) entraram na fila dos consultores.');
+      else partes.push('Nenhuma mensagem entrou na fila.');
+      if (r.motivo) partes.push(r.motivo);
+      if (r.inaptos && r.inaptos.length) partes.push('Esperando o WhatsApp abrir: ' + r.inaptos.join(', ') + '.');
+      if (r.sem_modelo && r.sem_modelo.length) partes.push('Sem modelo escolhido, não dispararam: ' + r.sem_modelo.join(', ') + '.');
+      if (r.sem_variavel) partes.push(r.sem_variavel + ' contato(s) parados por falta de coluna na planilha.');
+      alvo.innerHTML = partes.join('<br>');
+      if (r.enfileirados) setTimeout(function () { location.reload(); }, 2500);
+    }).catch(function () {
+      btn.disabled = false; btn.textContent = 'Enviar o lote de agora';
+      alvo.textContent = 'Não consegui falar com o servidor. Tente de novo.';
+    });
+  }
+
+  function marcarTodos(v) {
+    document.querySelectorAll('.orf-chk').forEach(function (c) { c.checked = v; });
+  }
+
+  function atribuir(btn) {
+    var ids = Array.from(document.querySelectorAll('.orf-chk:checked')).map(function (c) { return parseInt(c.value, 10); });
+    var cons = document.getElementById('orf-consultor').value;
+    var ret = document.getElementById('orf-retorno');
+    if (!cons) { ret.textContent = 'Escolha primeiro por qual consultor eles falam.'; return; }
+    if (!ids.length) { ret.textContent = 'Marque pelo menos um contato.'; return; }
+    btn.disabled = true; btn.textContent = 'Atribuindo…';
+    post('/disparos/campanha/' + CID + '/atribuir', { consultor_id: parseInt(cons, 10), alvo_ids: ids })
+      .then(function (r) {
+        if (!r.ok) { ret.textContent = r.erro || 'Não deu certo.'; btn.disabled = false; btn.textContent = 'Atribuir e devolver pra campanha'; return; }
+        ret.textContent = r.atribuidos + ' voltaram pra campanha' + (r.leads_criados ? ' · ' + r.leads_criados + ' lead(s) criados no CRM' : '') + '.';
+        setTimeout(function () { location.reload(); }, 1200);
+      });
+  }
+
+  function salvarRitmo(btn) {
+    var dias = Array.from(document.querySelectorAll('.r-dia:checked')).map(function (c) { return parseInt(c.value, 10); });
+    var ret = document.getElementById('r-retorno');
+    if (!dias.length) { ret.textContent = 'Escolha pelo menos um dia da semana.'; return; }
+    btn.disabled = true; btn.textContent = 'Salvando…';
+    post('/disparos/campanha/' + CID + '/ritmo', {
+      teto_dia: parseInt(document.getElementById('r-teto').value, 10),
+      hora_inicio: document.getElementById('r-ini').value,
+      hora_fim: document.getElementById('r-fim').value,
+      dias_semana: dias
+    }).then(function (r) {
+      btn.disabled = false; btn.textContent = 'Salvar ritmo';
+      if (!r.ok) { ret.textContent = r.erro || 'Não deu certo.'; return; }
+      ret.textContent = 'Salvo. Vale a partir do próximo lote.';
+      setTimeout(function () { location.reload(); }, 900);
+    }).catch(function () {
+      btn.disabled = false; btn.textContent = 'Salvar ritmo';
+      ret.textContent = 'Não consegui falar com o servidor.';
+    });
+  }
+
+  function abrirModelos(consultorId, nome) {
+    consultorAberto = consultorId;
+    document.getElementById('mm-titulo').textContent = 'Modelos de ' + nome;
+    var marcados = ESCOLHIDOS[consultorId] || [];
+    // Os DELE primeiro: é o texto com a voz dele que deve estar no topo.
+    var lista = MODELOS.slice().sort(function (a, b) {
+      var pa = (a.dono === consultorId) ? 0 : 1, pb = (b.dono === consultorId) ? 0 : 1;
+      return pa - pb;
+    });
+    document.getElementById('mm-lista').innerHTML = lista.map(function (m) {
+      var chk = marcados.indexOf(m.id) >= 0 ? ' checked' : '';
+      // "compartilhado" só quando é de todo mundo. Texto pessoal de OUTRO
+      // consultor sai com o nome de quem escreveu — escolher a voz de outra
+      // pessoa pode até fazer sentido, mas tem que ser uma decisão, não um
+      // engano.
+      var dono = '';
+      if (m.dono !== consultorId) {
+        dono = ' <span style="color:var(--cinza);font-size:10.5px;">(' +
+               (m.dono ? 'de ' + (m.dono_nome || 'outro consultor') : 'compartilhado') + ')</span>';
+      }
+      return '<label class="mod-item"><input type="checkbox" class="mm-chk" value="' + m.id + '"' + chk + '>' +
+             '<span><b>' + m.nome.replace(/</g, '&lt;') + '</b>' + dono +
+             '<span class="corpo">' + (m.corpo || '').slice(0, 160).replace(/</g, '&lt;') + '</span></span></label>';
+    }).join('') || '<div style="padding:14px 0;color:var(--cinza);font-size:12.5px;">Nenhum modelo de WhatsApp cadastrado ainda. Crie em Biblioteca.</div>';
+    document.getElementById('modal-modelos').style.display = 'flex';
+  }
+
+  function salvarModelos(btn) {
+    var ids = Array.from(document.querySelectorAll('.mm-chk:checked')).map(function (c) { return parseInt(c.value, 10); });
+    btn.disabled = true; btn.textContent = 'Salvando…';
+    post('/disparos/campanha/' + CID + '/modelos', { consultor_id: consultorAberto, modelo_ids: ids })
+      .then(function () { location.reload(); })
+      .catch(function () { btn.disabled = false; btn.textContent = 'Tentar de novo'; });
+  }
+</script>
+{% endblock %}
