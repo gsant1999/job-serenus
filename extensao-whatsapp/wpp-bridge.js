@@ -1575,6 +1575,39 @@
     }
   }
 
+  // ── QUEM É CADA LINHA DA LISTA LATERAL ───────────────────────────────────
+  //
+  // A extensão nunca tocou no DOM da lista de conversas, e o WhatsApp não
+  // promete nome de classe nenhum. Então NÃO se adivinha seletor: a ponte
+  // devolve o que a wa-js já sabe — título da conversa e telefone — e quem
+  // pinta casa pelo TÍTULO, que é o texto que o WhatsApp desenha na linha.
+  //
+  // Custo: uma passada no ChatStore, que já está em memória. Sem rede, sem
+  // getMessages, sem hidratar nada.
+  function titulosDasConversas(teto) {
+    if (!window.WPP || !window.WPP.whatsapp) return { erro: 'wpp_ausente' };
+    let chats = [];
+    try {
+      const CS = window.WPP.whatsapp.ChatStore;
+      if (CS && CS.getModelsArray) chats = CS.getModelsArray() || [];
+    } catch (e) { return { erro: 'sem_chatstore' }; }
+    const out = [];
+    for (const c of chats.slice(0, Math.max(50, teto || 400))) {
+      try {
+        if (!c || !c.id || c.isGroup) continue;
+        const cid = c.id._serialized || '';
+        if (!cid || cid.indexOf('@g.us') > 0 || cid.indexOf('status@') === 0) continue;
+        let tel = '';
+        if (cid.indexOf('@c.us') > 0) tel = cid.split('@')[0];
+        else if (cid.indexOf('@lid') > 0) tel = _telLocalDoLid(c.id);
+        const titulo = (c.formattedTitle || c.name || '').trim();
+        if (!tel || !titulo) continue;
+        out.push({ titulo: titulo, telefone: tel });
+      } catch (e) { /* uma conversa problemática não derruba a lista */ }
+    }
+    return { conversas: out, total: chats.length };
+  }
+
   function checarRespostasCampanha(alvos) {
     if (!window.WPP || !window.WPP.whatsapp) return { erro: 'wpp_ausente' };
     const lista = Array.isArray(alvos) ? alvos : [];
@@ -1644,7 +1677,7 @@
     'ler_conversa_de', 'baixar_audios_ids', 'baixar_midia_ids', 'canario',
     'baixar_documentos', 'ler_mensagens', 'ler_conversa_completa',
     'obter_telefone', 'obter_meu_numero', 'obter_chat_id',
-    'checar_respostas_campanha',
+    'checar_respostas_campanha', 'titulos_conversas',
     // arquivar NÃO entra: é ação pedida, e mexe no estado da conversa.
     'medir_respostas',
   ]);
@@ -1679,6 +1712,7 @@
       else if (d.tipo === 'apagar_conversa') resp = await apagarConversa(d.chatId);
       else if (d.tipo === 'checar_respostas_campanha') resp = checarRespostasCampanha(d.alvos);
       else if (d.tipo === 'arquivar_conversa') resp = await arquivarConversa(d.chatId, d.arquivar);
+      else if (d.tipo === 'titulos_conversas') resp = titulosDasConversas(d.teto);
       else return;
     } catch (e) { resp = { erro: 'excecao' }; }
     finally {
