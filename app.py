@@ -4069,6 +4069,11 @@ def init_db():
         ("disparo_campanha", "arquivar", "INTEGER DEFAULT 1"),
         ("disparo_campanha", "avisar_fora_horario", "INTEGER DEFAULT 0"),
         ("disparo_campanha_alvo", "arquivado_em", "TIMESTAMP"),
+        # POR QUE NÃO ARQUIVOU. Só o carimbo de sucesso existia, então a falha
+        # virava um NULL mudo, igualzinho a "ainda não tentou". Os 10 alvos da
+        # MEDSÊNIOR ficaram assim, e a causa só apareceu depois de recuperar um
+        # deployment já apagado do Railway pra ler o WARNING.
+        ("disparo_campanha_alvo", "arquivo_erro", "TEXT"),
         ("disparo_campanha_alvo", "notificado_em", "TIMESTAMP"),
         # O cliente pediu pra parar? Marcado, não executado: bloquear na
         # detecção erraria em "vou parar de pagar o plano" e apagaria um cliente
@@ -12606,11 +12611,22 @@ def _disparo_modelo_do_consultor(conn, campanha_id, consultor_id):
 
 def _disparo_variaveis_fixas(conn, campanha_id):
     """As variáveis criadas no JOB pra esta campanha. Valem pra todo mundo da
-    lista — é o que evita repetir a mesma informação em 300 linhas de planilha."""
+    lista — é o que evita repetir a mesma informação em 300 linhas de planilha.
+
+    Filtra as chaves de remetente AQUI, na leitura, e não em cada consumidor. A
+    campanha MEDSÊNIOR tinha `consultor` gravado de antes da guarda existir, e o
+    estrago não foi só no envio: a tela desenhava a ficha "{consultor} — igual
+    pra todos" ao lado da ficha de sistema "{consultor} — quem está mandando",
+    duas fichas com o mesmo nome dizendo o contrário; e o editor pré-carregava a
+    linha proibida, que o POST recusa com 400 — travando o salvamento de
+    QUALQUER outra variável naquela campanha. Uma trava na leitura resolve os
+    três de uma vez.
+    """
     import json as _json
     try:
         r = conn.execute("SELECT variaveis_fixas FROM disparo_campanha WHERE id=?", (campanha_id,)).fetchone()
-        return _json.loads((r['variaveis_fixas'] if r else '') or '{}') or {}
+        d = _json.loads((r['variaveis_fixas'] if r else '') or '{}') or {}
+        return {k: v for k, v in d.items() if k not in _DISPARO_VARS_REMETENTE}
     except Exception:
         return {}
 
@@ -12630,6 +12646,14 @@ _DISPARO_VARS_SISTEMA = {
     'consultor_whatsapp': 'o número de WhatsApp de quem está mandando',
     'consultor_link': 'o link wa.me pro WhatsApp de quem está mandando',
 }
+
+# QUEM ESTÁ FALANDO. Este subconjunto não aceita valor fixo nem coluna de
+# planilha: uma fixa `consultor` sobrescrevia a identidade do remetente e a
+# mensagem saía do WhatsApp da Juliana dizendo "Meu nome é Guilherme".
+# Aconteceu com cliente do outro lado, na MEDSÊNIOR de 20/08/2026: 9 mensagens.
+# Sobre o CLIENTE a planilha sabe mais que o sistema; sobre o REMETENTE, nunca.
+_DISPARO_VARS_REMETENTE = ('consultor', 'consultor_completo',
+                           'consultor_whatsapp', 'consultor_link')
 
 
 def _disparo_texto(conn, alvo, modelo, agora=None, fixas=None, consultor=None, fone_consultor=None):
@@ -12674,22 +12698,15 @@ def _disparo_texto(conn, alvo, modelo, agora=None, fixas=None, consultor=None, f
             _n = _f[2:] if _f.startswith('55') else _f
             juntas['consultor_whatsapp'] = (f'({_n[:2]}) {_n[2:-4]}-{_n[-4:]}' if len(_n) in (10, 11) else _f)
             juntas['consultor_link'] = 'wa.me/' + _f
-    _remetente = dict(juntas)   # o que o SISTEMA sabe sobre quem manda
-    juntas.update(fixas or {})
-    juntas.update(variaveis or {})
-    # QUEM ESTÁ FALANDO NÃO É CONFIGURÁVEL. Isto vem depois do update de
-    # propósito: uma fixa (ou uma coluna da planilha) chamada `consultor`
-    # sobrescrevia a identidade de quem manda, e a mensagem saía do WhatsApp
-    # da Juliana dizendo "Meu nome é Guilherme". Aconteceu de verdade, com
-    # cliente do outro lado, na MEDSÊNIOR de 20/08/2026: 9 mensagens.
-    #
-    # Um valor fixo pra "quem sou eu" é sempre errado num motor cujo ponto
-    # inteiro é sair pela pessoa que o cliente conhece. Não tem caso de uso
-    # legítimo, então a tela não precisa avisar — o sistema simplesmente não
-    # deixa. As outras variáveis continuam livres.
-    for _k in ('consultor', 'consultor_completo', 'consultor_whatsapp', 'consultor_link'):
-        if _k in _remetente:
-            juntas[_k] = _remetente[_k]
+    # As chaves de remetente são DESCARTADAS da fixa e da planilha antes do
+    # merge, não reaplicadas depois. Reaplicar só funcionava quando o sistema
+    # tinha o valor: consultor sem número cadastrado herdaria o
+    # {consultor_whatsapp} fixado por outra pessoa, e o cliente ligaria pro
+    # WhatsApp errado. Descartando, o pior caso é a chave ficar crua e o alvo
+    # cair em 'sem_variavel' — que é não mandar, o comportamento certo.
+    _limpo = lambda d: {k: v for k, v in (d or {}).items() if k not in _DISPARO_VARS_REMETENTE}
+    juntas.update(_limpo(fixas))
+    juntas.update(_limpo(variaveis))
     for chave, valor in juntas.items():
         txt = txt.replace('{' + chave + '}', str(valor))
     faltando = sorted(set(_re.findall(r'\{([a-z0-9_]+)\}', txt)))
@@ -12988,7 +13005,33 @@ def _disparo_enfileirar(conn, campanha_id, agora=None):
             if _disparo_bloqueado(conn, alvo['telefone_norm']):
                 conn.execute("UPDATE disparo_campanha_alvo SET status='bloqueado' WHERE id=?", (alvo['id'],))
                 continue
-            chat_id = _wa_chat_id(alvo['telefone_norm'] or alvo['telefone'] or '')
+            # O ENDEREÇO REAL DA CONVERSA VEM DO MAPA, NÃO DO TELEFONE.
+            #
+            # `_wa_chat_id` monta `telefone@c.us`. O WhatsApp de hoje guarda a
+            # conversa sob `@lid` — em produção são 3.132 `@lid` contra 7
+            # `@c.us`. O ENVIO sobrevive a isso porque a wa-js resolve o
+            # endereço sozinha; qualquer outra ação, não. Foi assim que as 10
+            # mensagens da MEDSÊNIOR saíram e nenhuma conversa foi arquivada:
+            # "Chat not found for 5511993147884@c.us", enquanto a conversa
+            # existia como 125735301857360@lid.
+            #
+            # Mandar o telefone e contar com a wa-js consertar é apostar que
+            # toda função da ponte conserta — e arquivar não conserta. Pior:
+            # tentar "materializar" o @c.us criaria uma conversa fantasma,
+            # arquivaria ELA, e reportaria sucesso.
+            chat_id = None
+            if alvo['lead_id']:
+                try:
+                    _w = conn.execute(
+                        "SELECT chat_id FROM wa_chat_lead WHERE lead_id=? "
+                        "ORDER BY atualizado_em DESC LIMIT 1", (alvo['lead_id'],)).fetchone()
+                    if _w and _w['chat_id']:
+                        chat_id = _w['chat_id']
+                except Exception:
+                    chat_id = None
+            # Sem mapa (lead que ninguém nunca conversou) o telefone é o que há.
+            if not chat_id:
+                chat_id = _wa_chat_id(alvo['telefone_norm'] or alvo['telefone'] or '')
             if not chat_id:
                 conn.execute("UPDATE disparo_campanha_alvo SET status='invalido' WHERE id=?", (alvo['id'],))
                 continue
@@ -13343,6 +13386,15 @@ def disparo_campanha_detalhe(cid):
     problemas = [dict(r) for r in conn.execute("""SELECT id, nome, telefone, status, texto_enviado
         FROM disparo_campanha_alvo WHERE campanha_id=?
           AND status IN ('sem_variavel','invalido','bloqueado') ORDER BY status, nome LIMIT 200""", (cid,)).fetchall()]
+    # A PROMESSA QUEBRADA TEM QUE APARECER NA TELA. A campanha diz "arquiva a
+    # conversa"; quando não arquiva, o único rastro era um WARNING no Railway
+    # que some no deploy seguinte. Quem tocou a campanha ficava com 10 conversas
+    # abertas na caixa de entrada sem saber por quê.
+    nao_arquivou = [dict(r) for r in conn.execute("""SELECT a.id, a.nome, a.telefone,
+        COALESCE(a.arquivo_erro,'') motivo, COALESCE(u.nome,'') consultor
+        FROM disparo_campanha_alvo a LEFT JOIN usuarios u ON u.id=a.consultor_id
+        WHERE a.campanha_id=? AND a.enviado_em IS NOT NULL AND a.arquivado_em IS NULL
+        ORDER BY a.enviado_em DESC LIMIT 200""", (cid,)).fetchall()]
     consultores = [dict(r) for r in conn.execute(
         "SELECT id, nome FROM usuarios WHERE ativo=1 ORDER BY nome").fetchall()]
     # Modelos de WhatsApp que cada consultor pode usar: os DELE ou os compartilhados.
@@ -13394,7 +13446,8 @@ def disparo_campanha_detalhe(cid):
     return render_template('disparo_campanha_detalhe.html', camp=dict(camp), resumo=resumo,
                            responderam=responderam,
                            rotulos=_DISPARO_STATUS_LABEL, porcons=porcons, orfaos=orfaos,
-                           problemas=problemas, consultores=consultores, modelos=modelos,
+                           problemas=problemas, nao_arquivou=nao_arquivou,
+                           consultores=consultores, modelos=modelos,
                            escolhidos=escolhidos, janela_ok=janela_ok, janela_motivo=janela_motivo,
                            colunas=colunas, exemplos=exemplos, fixas=fixas,
                            vars_sistema=_DISPARO_VARS_SISTEMA,
@@ -27711,9 +27764,23 @@ def api_whatsapp_fila_confirmar(fid):
                 if d.get('arquivou'):
                     conn.execute("UPDATE disparo_campanha_alvo SET arquivado_em=? WHERE id=?",
                                  (_agora_sp(), alvo['id']))
-                elif d.get('arquivo_erro'):
-                    app.logger.warning(f"[DISPARO] conversa NÃO arquivada (alvo {alvo['id']}): "
-                                       f"{str(d.get('arquivo_erro'))[:120]}")
+                else:
+                    # GRAVA O MOTIVO, NÃO SÓ LOGA. A única testemunha de que 10
+                    # conversas não foram arquivadas era um WARNING do Railway
+                    # — que morre no deploy seguinte. Foi preciso recuperar um
+                    # deployment já removido pra descobrir a causa. O motivo
+                    # tem que caber na tela de quem tocou a campanha.
+                    motivo = str(d.get('arquivo_erro') or '')[:200]
+                    if not motivo:
+                        # Extensão velha não pede arquivamento e não manda erro:
+                        # chega igualzinho a "pedi e a wa-js recusou". Sem
+                        # separar os dois, o diagnóstico vira adivinhação.
+                        motivo = ('a extensão de quem mandou não sabe arquivar (versão anterior à 4.117.0)'
+                                  if (d.get('versao') and _cmp_versao(str(d.get('versao')), '4.117.0') < 0)
+                                  else 'a extensão não respondeu se arquivou')
+                    conn.execute("UPDATE disparo_campanha_alvo SET arquivo_erro=? WHERE id=?",
+                                 (motivo, alvo['id']))
+                    app.logger.warning(f"[DISPARO] conversa NÃO arquivada (alvo {alvo['id']}): {motivo[:120]}")
         # A campanha na base já escreveu a nota dela logo acima, com o nome da
         # campanha. Escrever a genérica também deixaria o histórico do lead com
         # duas linhas pro mesmo envio.
@@ -53118,6 +53185,54 @@ def _backfill_vinculo_proposta_lead():
 
 
 _backfill_vinculo_proposta_lead()
+
+
+def _backfill_fixas_reservadas():
+    """Apaga do variaveis_fixas gravado qualquer chave que o sistema já preenche.
+
+    A campanha MEDSÊNIOR tinha `{"consultor": "Guilherme"}` salvo de antes de a
+    guarda existir. O envio hoje ignora essa chave, mas a TELA não: o editor de
+    variáveis carrega o que está no banco, e o POST rejeita nome reservado com
+    400. Ou seja, quem abrisse aquela campanha não conseguiria salvar NENHUMA
+    variável — nem as novas — até apagar a linha na mão, sem entender o motivo.
+
+    Dado velho que o próprio sistema recusa é dado que precisa de migração, não
+    de aviso na tela.
+    """
+    import json as _json
+    conn = None
+    try:
+        conn = db()
+        rows = conn.execute("""SELECT id, variaveis_fixas FROM disparo_campanha
+                               WHERE COALESCE(variaveis_fixas,'') NOT IN ('', '{}')""").fetchall()
+        limpas, removidas = 0, []
+        for r in rows:
+            try:
+                d = _json.loads(r['variaveis_fixas'] or '{}') or {}
+            except Exception:
+                continue
+            sobra = {k: v for k, v in d.items() if k not in _DISPARO_VARS_SISTEMA}
+            if len(sobra) == len(d):
+                continue
+            removidas += [k for k in d if k not in sobra]
+            conn.execute("UPDATE disparo_campanha SET variaveis_fixas=? WHERE id=?",
+                         (_json.dumps(sobra, ensure_ascii=False), r['id']))
+            limpas += 1
+        if limpas:
+            conn.commit()
+            print(f"[FIXAS_RESERVADAS] {limpas} campanha(s) destravada(s); tirei {sorted(set(removidas))}")
+    except Exception as e:
+        if conn is not None:
+            try: conn.rollback()
+            except Exception: pass
+        print(f"[FIXAS_RESERVADAS] migração pulada: {e}")
+    finally:
+        if conn is not None:
+            try: close_db(conn)
+            except Exception: pass
+
+
+_backfill_fixas_reservadas()
 _backfill_notas_lead()
 
 

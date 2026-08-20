@@ -67,6 +67,29 @@
   // Injetando daqui, a gente injeta DE NOVO quando perceber que faltou. O
   // injetor decide o que carregar (a wa-js só se ela não estiver lá) e em que
   // ordem.
+  // O SINAL DE SAÚDE PRECISA ATRAVESSAR DUAS CASAS.
+  //
+  // `_saudePor` mora dentro de `_bootJobSerenus` (linha ~159 até o fim). Este
+  // listener mora FORA dele, no topo da IIFE — então chamá-lo daqui estourava
+  // "ReferenceError: _saudePor is not defined". 154 vezes só entre 19 e 20/08,
+  // em todos os consultores.
+  //
+  // O estrago não era cosmético. `_ponteConfirmada = true` acontece antes do
+  // throw, então a ponte funcionava e ninguém via problema — mas os TRÊS avisos
+  // que explicam por que a extensão não carregou (CSP, wa-js quebrada,
+  // WhatsApp que não subiu) morriam na mesma linha. Justamente o diagnóstico
+  // que existe pra dizer "é isso que está errado" era o que não chegava.
+  //
+  // Fila em vez de referência direta: o sinal pode chegar antes de o boot
+  // instalar o destinatário, e aviso de saúde perdido é o mesmo buraco de novo.
+  let _saudeDestino = null;
+  const _saudeEspera = [];
+  function _saudeSinal(chave, ok, texto) {
+    if (_saudeDestino) { try { _saudeDestino(chave, ok, texto); } catch (e) {} return; }
+    _saudeEspera.push([chave, ok, texto]);
+    if (_saudeEspera.length > 20) _saudeEspera.shift();
+  }
+
   let _ponteConfirmada = false;
   let _tentativasPonte = 0;
 
@@ -90,15 +113,15 @@
     // atualizacao do WhatsApp) — a unica informacao que existia sobre por que
     // nada funciona morria nesta linha.
     if (d.tipo === 'falhou') {
-      _saudePor('ponte', false, 'A extensao nao carregou dentro do WhatsApp: '
+      _saudeSinal('ponte', false, 'A extensao nao carregou dentro do WhatsApp: '
         + (d.erro || 'motivo desconhecido') + '. De F5 nesta aba.');
       return;
     }
     if (d.tipo === 'pronto' && d.temWPP === false) {
-      _saudePor('ponte', false, 'A biblioteca do WhatsApp nao carregou nesta aba. De F5 — '
+      _saudeSinal('ponte', false, 'A biblioteca do WhatsApp nao carregou nesta aba. De F5 — '
         + 'se continuar depois de uma atualizacao do WhatsApp, avise o suporte do JOB.');
     }
-    if (d.tipo === 'pronto' && d.temPonte) { _ponteConfirmada = true; _saudePor('ponte', true, ''); }
+    if (d.tipo === 'pronto' && d.temPonte) { _ponteConfirmada = true; _saudeSinal('ponte', true, ''); }
   });
 
   // Vigia barato: a cada 5s, enquanto a ponte não confirmar, tenta de novo.
@@ -115,7 +138,7 @@
         // consultor conclui "esta lento" e fica reclicando. Agora, quando o
         // vigia desiste depois de 1 minuto, ele diz o que fazer.
         if (!_ponteConfirmada) {
-          _saudePor('ponte', false, 'A extensao nao conseguiu se conectar ao WhatsApp Web nesta aba. '
+          _saudeSinal('ponte', false, 'A extensao nao conseguiu se conectar ao WhatsApp Web nesta aba. '
             + 'De F5 — se continuar, feche e reabra o WhatsApp Web.');
         }
         clearInterval(_vigia); _vigia = null; return;
@@ -4508,6 +4531,10 @@
     _SAUDE.set(chave, { ok: !!ok, texto: texto || '' });
     _bcSinalPintar();
   }
+  // Instala o destinatário e entrega o que chegou antes do boot.
+  _saudeDestino = _saudePor;
+  while (_saudeEspera.length) { const s = _saudeEspera.shift(); try { _saudePor(s[0], s[1], s[2]); } catch (e) {} }
+
   function _saudeRuins() {
     const r = [];
     _SAUDE.forEach((v) => { if (!v.ok && v.texto) r.push(v.texto); });
@@ -14795,12 +14822,34 @@
     if (motivo) console.warn('[JOB] etiqueta na lista desligada:', motivo);
   }
 
+  // TRÊS RETURNS QUE ERAM DEFINITIVOS E NÃO DEVIAM SER.
+  //
+  // Isto rodava uma vez, aos 6 s, e desistia calado. Dois dos três motivos de
+  // desistência são condições NORMAIS e passageiras: aos 6 s de um WhatsApp Web
+  // frio a wa-js muitas vezes ainda não subiu (a própria ponte insiste por 60 s,
+  // ver o vigia lá em cima), e "ninguém em campanha" é a resposta certa pra quem
+  // abriu o WhatsApp ANTES de a campanha ser criada — os alvos da MEDSÊNIOR
+  // nasceram 11:41 e o consultor que estava com a aba aberta desde as 9 h nunca
+  // mais teria etiqueta naquele dia.
+  //
+  // Só o desligamento explícito pelo consultor é definitivo. O resto tenta de
+  // novo, espaçando: 6 s, 20 s, 60 s, e depois de 5 em 5 min.
+  const _ETQ_TENTATIVAS = [6000, 20000, 60000, 300000];
+  let _etqTentativa = 0;
+
+  function _etqReagendar() {
+    const espera = _ETQ_TENTATIVAS[Math.min(_etqTentativa, _ETQ_TENTATIVAS.length - 1)];
+    _etqTentativa++;
+    _registrarTimeout(iniciarEtiquetaLista, espera);
+  }
+
   async function iniciarEtiquetaLista() {
+    if (_etqLigada || _contextoMorto) return;
     const cfg = await _safeStorageGet(['jobEtiquetaLista']);
-    if (cfg && cfg.jobEtiquetaLista === false) return;   // desligada pelo consultor
+    if (cfg && cfg.jobEtiquetaLista === false) return;   // desligada pelo consultor: definitivo
     _etqPainel = _etqPainelLista();
-    if (!_etqPainel) return;                             // sem lista, sem pintura
-    if (!await _etqCarregar()) return;                   // ninguém em campanha
+    if (!_etqPainel) return _etqReagendar();             // lista ainda não desenhou
+    if (!await _etqCarregar()) return _etqReagendar();   // ninguém em campanha AINDA
     _etqLigada = true;
     _etqOnScroll = () => _etqAgendar();
     _etqPainel.addEventListener('scroll', _etqOnScroll, { passive: true });
@@ -14820,7 +14869,7 @@
     _registrarLoop(setInterval(() => { if (!document.hidden && _etqLigada) _etqCarregar(); }, 300000));
     _etqPintar();
   }
-  _registrarTimeout(iniciarEtiquetaLista, 6000);
+  _registrarTimeout(iniciarEtiquetaLista, _ETQ_TENTATIVAS[0]);
 
   async function checarCampanhaAguardando() {
     if (_contextoMorto) return;
