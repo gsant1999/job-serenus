@@ -1,282 +1,426 @@
 {% extends 'base.html' %}
 {% block title %}{{ camp.nome }}{% endblock %}
 
+{#  ESTADO EM PALAVRA DE GENTE. "rascunho" e "concluida" são valores de coluna;
+    ninguém fora daqui sabe que rascunho quer dizer "ainda não manda nada".  #}
+{% set ROT_ESTADO = {'rascunho':'Rascunho', 'ativa':'Ativa',
+                     'pausada':'Pausada', 'concluida':'Encerrada'} %}
+{% set sem_texto   = porcons | rejectattr('modelos') | list %}
+{% set com_texto   = porcons | selectattr('modelos') | list %}
+{% set n_sem_dono  = (resumo.get('sem_dono', 0) + resumo.get('sem_lead', 0)) %}
+{% set n_problema  = (resumo.get('sem_variavel', 0) + resumo.get('invalido', 0)
+                      + resumo.get('bloqueado', 0) + resumo.get('travado', 0)) %}
+{% set falta       = (not porcons) or sem_texto %}
+
 {% block head %}
 <style>
-.dd-wrap { max-width:1040px; }
-.dd-hero { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; flex-wrap:wrap; }
-.dd-hero h1 { font-size:24px; }
-.dd-meta { color:var(--cinza); font-size:12.5px; margin-top:3px; }
+/* ── ESCALA. Cinco tamanhos, não onze. Cada um com um trabalho: título da
+   página, título de bloco, corpo, apoio, e o selo em caixa alta. Antes esta
+   tela tinha onze tamanhos convivendo, e é isso que o olho lê como bagunça. */
+.dd { --t-h1:22px; --t-h2:15px; --t-corpo:13px; --t-apoio:12px; --t-selo:10.5px;
+      max-width:1000px; }
+
+/* ── Cabeçalho ── */
+.dd-topo { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; flex-wrap:wrap; }
+.dd-topo h1 { font-size:var(--t-h1); letter-spacing:-.02em; line-height:1.2; margin:0; }
+.dd-ctx { color:var(--cinza); font-size:var(--t-apoio); margin-top:6px; line-height:1.5; }
+.dd-selo { font-size:var(--t-selo); padding:3px 10px; border-radius:20px; font-weight:700;
+  letter-spacing:.4px; text-transform:uppercase; white-space:nowrap; vertical-align:3px; margin-left:8px; }
+.dd-selo.ativa { background:var(--verde-soft); color:var(--verde); }
+.dd-selo.pausada { background:rgba(194,65,12,.14); color:var(--amarelo); }
+.dd-selo.rascunho, .dd-selo.concluida { background:rgba(148,163,184,.15); color:var(--cinza); }
 .dd-acoes { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-.dd-badge { font-size:10.5px; padding:3px 10px; border-radius:20px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; }
-.dd-badge.ativa { background:rgba(31,216,164,.12); color:var(--teal); }
-.dd-badge.pausada { background:rgba(245,158,11,.14); color:#f59e0b; }
-.dd-badge.rascunho, .dd-badge.concluida { background:rgba(148,163,184,.15); color:var(--cinza); }
-.dd-aviso { border:1px solid var(--borda); border-left:3px solid #f59e0b; border-radius:9px;
-  padding:11px 14px; font-size:12.5px; color:var(--cinza); line-height:1.55; margin:18px 0 0; }
-.dd-aviso b { color:var(--texto); }
-.dd-destinos { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; padding:16px 18px; }
-.dd-dest { border:1px solid var(--borda); border-radius:10px; padding:11px 13px; }
-.dd-dest b { font-family:'Sora',sans-serif; font-size:21px; display:block; line-height:1.1; }
-.dd-dest span { font-size:11px; color:var(--cinza); }
-.dd-dest.ruim { border-color:rgba(244,63,94,.35); } .dd-dest.ruim b { color:var(--rosa); }
-.dd-dest.bom b { color:var(--teal); }
-.dd-nota { padding:0 18px 16px; font-size:12px; color:var(--cinza); line-height:1.55; }
-/* Em tela estreita a tabela ROLA, não se desmonta: reempilhar em duas colunas
-   soltava o número do rótulo e "2" virava um dois sem dono. Coluna alinhada é o
-   que faz a linha ser lida como linha. */
-.cons-tabela { overflow-x:auto; }
-.cons-linha { display:grid; grid-template-columns:1.5fr .9fr .7fr .7fr .7fr auto; gap:10px; align-items:center;
-  padding:12px 18px; border-bottom:1px solid var(--borda); font-size:13px; min-width:660px; }
-.cons-linha:last-child { border-bottom:none; }
-.cons-head { font-size:10.5px; color:var(--cinza-2); font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
-.pill { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
-.cons-modelos { font-size:11.5px; color:var(--cinza); }
-.cons-modelos.falta { color:var(--rosa); font-weight:600; }
-.orf-lista { max-height:320px; overflow:auto; border-top:1px solid var(--borda); }
-.orf-linha { display:flex; align-items:center; gap:10px; padding:9px 18px; border-bottom:1px solid var(--borda); font-size:12.5px; }
-.orf-linha:last-child { border-bottom:none; }
-.orf-linha .tel { color:var(--cinza); font-size:11.5px; }
-.orf-linha .tag { margin-left:auto; font-size:10.5px; color:var(--cinza); white-space:nowrap; }
-.orf-acao { display:flex; gap:10px; align-items:center; padding:14px 18px; flex-wrap:wrap; border-top:1px solid var(--borda); }
-select.campo, input.campo { background:var(--input-bg); border:1px solid var(--borda); border-radius:9px;
-  color:var(--texto); padding:9px 11px; font-size:13px; font-family:inherit; }
-select.campo:focus { outline:none; border-color:var(--teal); }
-.prob-linha { display:flex; gap:10px; padding:9px 18px; border-bottom:1px solid var(--borda); font-size:12.5px; align-items:baseline; }
-.prob-linha:last-child { border-bottom:none; }
-.prob-linha .motivo { margin-left:auto; color:var(--rosa); font-size:11.5px; text-align:right; }
-.prob-linha { align-items:center; }
-.dd-parar { font-size:10.5px; color:#f59e0b; border:1px solid rgba(245,158,11,.4);
+/* Botão desligado tem que PARECER desligado. Com a cor cheia da ação principal
+   ele convida ao clique que não vai funcionar — e o admin fica achando que o
+   sistema travou. Vale em toda a tela, não só no cabeçalho. */
+.dd .btn[disabled], .dd .btn-outline[disabled] {
+  opacity:.45; cursor:not-allowed; filter:grayscale(.7); box-shadow:none; }
+.dd .btn[disabled]:hover, .dd .btn-outline[disabled]:hover {
+  transform:none; box-shadow:none; filter:grayscale(.7); }
+
+/* Retorno da ação fica GRUDADO no botão. Antes ele era escrito seis cards
+   abaixo: quem clicava em enviar não via a resposta sem rolar a tela toda. */
+.dd-eco { font-size:var(--t-apoio); line-height:1.5; margin-top:10px; min-height:0; }
+.dd-eco.ok { color:var(--verde); } .dd-eco.err { color:var(--rosa); font-weight:600; }
+
+/* ── O que falta pra ativar: o guia da tela ── */
+.dd-falta { border:1px solid var(--borda-2); border-left:3px solid var(--amarelo);
+  border-radius:10px; padding:14px 16px; margin:18px 0; background:var(--panel); }
+.dd-falta h4 { font-size:var(--t-h2); margin:0 0 8px; }
+.dd-falta ol { margin:0; padding-left:18px; font-size:var(--t-corpo); line-height:1.9; color:var(--texto); }
+.dd-falta a { color:var(--info); text-decoration:none; font-weight:600; }
+.dd-falta a:hover { text-decoration:underline; }
+.dd-pronta { border-left-color:var(--verde); }
+.dd-pronta h4 { color:var(--verde); }
+
+/* ── Blocos ── */
+.dd-bloco { margin-bottom:16px; padding:0; }
+.dd-cab { display:flex; align-items:baseline; gap:10px; padding:15px 20px 0; }
+.dd-cab h3 { font-size:var(--t-h2); margin:0; }
+.dd-cab .n { font-family:'Sora',sans-serif; font-size:var(--t-apoio); color:var(--cinza); }
+.dd-cab .passo { width:20px; height:20px; border-radius:50%; background:var(--panel-3); color:var(--cinza);
+  font-size:11px; font-weight:700; display:inline-flex; align-items:center; justify-content:center;
+  font-family:'Sora',sans-serif; flex-shrink:0; align-self:center; }
+.dd-cab .passo.fazer { background:var(--grad-frio); color:#fff; }
+.dd-nota { padding:6px 20px 14px; font-size:var(--t-apoio); color:var(--cinza); line-height:1.55; }
+.dd-nota b { color:var(--texto); }
+.dd-vazio { padding:14px 20px 16px; font-size:var(--t-corpo); color:var(--cinza); }
+/* Corte entre o que exige decisão e o que só se olha. Sem ele, os seis blocos
+   pareciam ter todos o mesmo peso — que é o que fazia a tela parecer bagunça. */
+.dd-secao { font-family:'Sora',sans-serif; font-size:10px; font-weight:700; color:var(--cinza);
+  text-transform:uppercase; letter-spacing:.07em; margin:28px 0 12px; }
+
+/* ── Números da lista ── */
+.dd-num-linha { display:flex; gap:36px; padding:14px 20px 16px; flex-wrap:wrap; }
+.dd-num b { font-family:'Sora',sans-serif; font-size:26px; line-height:1.1; display:block; letter-spacing:-.02em; }
+.dd-num span { font-size:var(--t-apoio); color:var(--cinza); }
+.dd-num.feito b { color:var(--verde); }
+.dd-atencao { display:flex; gap:8px; flex-wrap:wrap; padding:0 20px 16px; }
+.dd-chip { font-size:var(--t-apoio); border:1px solid var(--borda-2); border-radius:20px; padding:4px 11px;
+  color:var(--cinza); text-decoration:none; display:inline-flex; gap:6px; align-items:center; }
+.dd-chip b { color:var(--texto); font-weight:700; }
+.dd-chip.alerta { border-color:rgba(224,38,94,.45); } .dd-chip.alerta b { color:var(--rosa); }
+a.dd-chip { transition:border-color 140ms var(--ease-saida); }
+@media (hover:hover) and (pointer:fine) { a.dd-chip:hover { border-color:var(--cinza); } }
+
+/* ── Tabela por consultor ── */
+.dd-tab { overflow-x:auto; }
+.dd-linha { display:grid; grid-template-columns:1.6fr 1.5fr .6fr .6fr .6fr auto; gap:12px; align-items:center;
+  padding:12px 20px; border-top:1px solid var(--borda); font-size:var(--t-corpo); min-width:680px; }
+.dd-linha.cab { border-top:none; font-size:var(--t-selo); color:var(--cinza-2); font-weight:600;
+  text-transform:uppercase; letter-spacing:.5px; padding-top:14px; }
+.dd-quem b { font-weight:600; }
+.dd-estado { font-size:var(--t-apoio); margin-top:2px; }
+.dd-estado.on { color:var(--verde); } .dd-estado.off { color:var(--cinza); }
+.dd-texto-off { color:var(--rosa); font-weight:600; }
+
+/* ── Listas de pessoas ── */
+.dd-pessoas { max-height:330px; overflow:auto; }
+.dd-pessoa { display:flex; align-items:center; gap:10px; padding:9px 20px; border-top:1px solid var(--borda);
+  font-size:var(--t-corpo); }
+.dd-pessoa .tel { color:var(--cinza); font-size:var(--t-apoio); }
+.dd-pessoa .dir { margin-left:auto; color:var(--cinza); font-size:var(--t-apoio); text-align:right; white-space:nowrap; }
+.dd-pessoa input[type=checkbox] { width:15px; height:15px; flex-shrink:0; }
+label.dd-pessoa { cursor:pointer; transition:background 120ms var(--ease-saida); }
+@media (hover:hover) and (pointer:fine) { label.dd-pessoa:hover { background:var(--panel-2); } }
+.dd-sinal { font-size:var(--t-selo); color:var(--amarelo); border:1px solid rgba(194,65,12,.4);
   border-radius:20px; padding:2px 9px; white-space:nowrap; }
-.dd-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:80; align-items:center; justify-content:center; padding:20px; }
-.dd-modal .caixa { background:var(--panel); border:1px solid var(--borda); border-radius:14px; width:520px; max-width:100%; max-height:82vh; display:flex; flex-direction:column; }
-.dd-modal .topo { padding:16px 18px 10px; } .dd-modal .topo h3 { font-size:15px; margin:0 0 3px; }
-.dd-modal .lista { overflow:auto; padding:0 18px; }
-.dd-modal .rodape { padding:14px 18px; display:flex; gap:8px; justify-content:flex-end; border-top:1px solid var(--borda); }
-.mod-item { display:flex; gap:9px; align-items:flex-start; padding:9px 0; border-bottom:1px solid var(--borda); font-size:12.5px; }
-.mod-item:last-child { border-bottom:none; }
-.mod-item input { width:15px; height:15px; margin-top:2px; flex-shrink:0; }
-.mod-item .corpo { color:var(--cinza); font-size:11.5px; line-height:1.45; display:block; margin-top:2px; }
-.dd-retorno { font-size:12.5px; color:var(--cinza); line-height:1.6; margin-top:10px; }
-.ritmo-linha { display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; padding:14px 18px; }
-.ritmo-linha label { display:block; font-size:12px; color:var(--cinza); margin-bottom:5px; }
-.ritmo-chaves { flex-basis:100%; display:flex; gap:22px; flex-wrap:wrap; margin-top:2px; }
-.dd-chave { display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--texto);
-  margin-bottom:0; }
+.dd-rodape { display:flex; gap:10px; align-items:center; padding:14px 20px; flex-wrap:wrap;
+  border-top:1px solid var(--borda); }
+
+/* ── Ritmo: recolhido, porque é ajuste e não tarefa ── */
+.dd-conf { padding:0; margin-bottom:16px; }
+.dd-conf > summary { list-style:none; cursor:pointer; padding:15px 20px; display:flex; align-items:center;
+  gap:10px; font-size:var(--t-h2); font-weight:700; font-family:'Sora',sans-serif; }
+.dd-conf > summary::-webkit-details-marker { display:none; }
+.dd-conf > summary .resumo { margin-left:auto; font-size:var(--t-apoio); color:var(--cinza);
+  font-weight:400; font-family:'Inter',sans-serif; }
+.dd-conf > summary .seta { color:var(--cinza); font-size:11px; transition:transform 160ms var(--ease-saida); }
+.dd-conf[open] > summary .seta { transform:rotate(90deg); }
+.dd-campos { display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; padding:4px 20px 16px; }
+.dd-campos label { display:block; font-size:var(--t-apoio); color:var(--cinza); margin-bottom:5px; }
+.campo { background:var(--input-bg); border:1px solid var(--borda); border-radius:9px; color:var(--texto);
+  padding:9px 11px; font-size:var(--t-corpo); font-family:inherit; }
+.campo:focus { outline:none; border-color:var(--verde); }
+.dd-dias { display:flex; gap:6px; flex-wrap:wrap; }
+.dd-dia { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--borda); border-radius:8px;
+  padding:7px 10px; font-size:var(--t-apoio); cursor:pointer; user-select:none;
+  transition:border-color 140ms var(--ease-saida), color 140ms var(--ease-saida), transform 140ms var(--ease-saida); }
+.dd-dia:has(input:checked) { border-color:var(--verde); color:var(--verde); }
+.dd-dia:active { transform:scale(.97); }
+.dd-dia input { width:14px; height:14px; }
+.dd-chaves { flex-basis:100%; display:flex; gap:24px; flex-wrap:wrap; }
+.dd-chave { display:flex; align-items:center; gap:7px; font-size:var(--t-corpo); color:var(--texto); cursor:pointer; }
 .dd-chave input { width:15px; height:15px; }
-.dc-dias { display:flex; gap:6px; flex-wrap:wrap; }
-.dc-dia { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--borda); border-radius:8px;
-  padding:7px 10px; font-size:12.5px; cursor:pointer; user-select:none;
-  transition:border-color 140ms var(--ease-saida,ease), color 140ms var(--ease-saida,ease); }
-.dc-dia:has(input:checked) { border-color:var(--teal); color:var(--teal); }
-.dc-dia input { width:14px; height:14px; }
-/* Botão não ganha estilo próprio aqui: .btn e .btn-outline moram em base.html e
-   já trazem o hover, o :active e o reduced-motion. Reescrever aqui faria estas
-   duas telas se comportarem diferente do resto do JOB — que é exatamente o
-   defeito que deixou a interface remendada antes. */
+
+@media (prefers-reduced-motion: reduce) {
+  .dd-dia, .dd-conf > summary .seta, a.dd-chip, label.dd-pessoa { transition:none; }
+  .dd-dia:active { transform:none; }
+}
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="page dd-wrap">
-  <div class="dd-hero">
+<div class="page dd">
+
+  <div class="dd-topo">
     <div>
-      <h1>{{ camp.nome }} <span class="dd-badge {{ camp.status }}">{{ camp.status }}</span></h1>
-      <div class="dd-meta">
-        {{ 'Clientes com venda — sai por quem fechou' if camp.publico == 'vendas' else 'Leads — sai pelo responsável no CRM' }}
-        · até {{ camp.teto_dia }} por consultor/dia · {{ camp.hora_inicio }} às {{ camp.hora_fim }}
+      <h1>{{ camp.nome }}<span class="dd-selo {{ camp.status }}">{{ ROT_ESTADO.get(camp.status, camp.status) }}</span></h1>
+      <div class="dd-ctx">
+        {{ 'Sai por quem fechou a venda' if camp.publico == 'vendas' else 'Sai pelo consultor responsável no CRM' }}
+        · no máximo {{ camp.teto_dia }} por consultor por dia
+        · das {{ camp.hora_inicio }} às {{ camp.hora_fim }}
       </div>
     </div>
     <div class="dd-acoes">
       <a href="/disparos/campanhas" class="btn-outline" style="text-decoration:none;">Voltar</a>
+      <a href="/disparos/medicao?campanha={{ camp.id }}" class="btn-outline" style="text-decoration:none;">Resultado</a>
       {% if camp.status == 'ativa' %}
-      <button class="btn-outline" onclick="mudarStatus('pausada', this)">Pausar</button>
-      <button class="btn" onclick="enviarLote(this)">Enviar o lote de agora</button>
-      {% else %}
-      <button class="btn" onclick="mudarStatus('ativa', this)">Ativar campanha</button>
+        <button class="btn-outline" onclick="mudarEstado('pausada', this)">Pausar</button>
+        {% if janela_ok %}
+        <button class="btn" onclick="enviarAgora(this)">Enviar agora o que cabe hoje</button>
+        {% else %}
+        <button class="btn" disabled title="{{ janela_motivo }}">Fora do horário — nada sai agora</button>
+        {% endif %}
       {% endif %}
+      <div id="eco" class="dd-eco" role="status" aria-live="polite" style="flex-basis:100%;text-align:right;"></div>
     </div>
   </div>
 
   {% if camp.status == 'ativa' and not janela_ok %}
-  <div class="dd-aviso"><b>Nada sai agora:</b> {{ janela_motivo }} A campanha está ativa e volta a disparar sozinha
-    na próxima janela — não precisa fazer nada.</div>
-  {% elif camp.status != 'ativa' %}
-  <div class="dd-aviso"><b>Nenhuma mensagem sai enquanto a campanha não estiver ativa.</b>
-    Confira a lista abaixo, escolha os modelos de cada consultor e ative quando estiver pronto.</div>
+  <div class="dd-falta">
+    <h4>Nada sai agora</h4>
+    <div style="font-size:var(--t-corpo);line-height:1.6;">{{ janela_motivo }}
+      A campanha está ativa e volta a enviar sozinha na próxima janela — não precisa fazer nada.</div>
+  </div>
   {% endif %}
 
-  <div class="card" style="margin:18px 0;padding:0;">
-    <div class="card-header"><h3>O que aconteceu com a sua lista</h3></div>
-    <div class="dd-destinos">
-      {% for chave, rotulo in [('pendente','bom'), ('enfileirado',''), ('enviado',''), ('respondeu','bom'),
-                               ('sem_dono','ruim'), ('sem_lead','ruim'), ('sem_modelo','ruim'),
-                               ('sem_variavel','ruim'), ('bloqueado',''), ('invalido','ruim')] %}
-        {% if resumo.get(chave) %}
-        <div class="dd-dest {{ rotulo }}">
-          <b>{{ resumo.get(chave) }}</b><span>{{ rotulos.get(chave, chave) }}</span>
-        </div>
-        {% endif %}
-      {% endfor %}
-      {% if not resumo %}<div class="dd-nota" style="padding:0;">A lista está vazia. Suba uma planilha ao criar a campanha.</div>{% endif %}
+  {# ── 1. A LISTA ─────────────────────────────────────────────────────── #}
+  <div class="card dd-bloco">
+    <div class="dd-cab"><h3>A sua lista</h3></div>
+    <div class="dd-num-linha">
+      <div class="dd-num"><b>{{ resumo.get('pendente', 0) + resumo.get('enfileirado', 0) }}</b><span>ainda vão receber</span></div>
+      <div class="dd-num feito"><b>{{ resumo.get('enviado', 0) + resumo.get('respondeu', 0) }}</b><span>já receberam</span></div>
+      <div class="dd-num feito"><b>{{ resumo.get('respondeu', 0) }}</b><span>responderam</span></div>
     </div>
+    {% if n_sem_dono or n_problema %}
+    <div class="dd-atencao">
+      {% if n_sem_dono %}<a class="dd-chip alerta" href="#dono"><b>{{ n_sem_dono }}</b> sem consultor</a>{% endif %}
+      {% if resumo.get('sem_variavel') %}<a class="dd-chip alerta" href="#fora"><b>{{ resumo.get('sem_variavel') }}</b> falta coluna na planilha</a>{% endif %}
+      {% if resumo.get('travado') %}<a class="dd-chip alerta" href="#fora"><b>{{ resumo.get('travado') }}</b> não saíram em 3 tentativas</a>{% endif %}
+      {% if resumo.get('invalido') %}<a class="dd-chip alerta" href="#fora"><b>{{ resumo.get('invalido') }}</b> telefone inválido</a>{% endif %}
+      {% if resumo.get('bloqueado') %}<span class="dd-chip"><b>{{ resumo.get('bloqueado') }}</b> não querem receber</span>{% endif %}
+    </div>
+    {% endif %}
+    {% if not resumo %}
+    <div class="dd-vazio">Esta campanha está sem lista. A planilha entra na criação da campanha —
+      crie uma nova e suba o arquivo lá.</div>
+    {% endif %}
+  </div>
+
+  {# ── 2. PRECISAM DE DONO ────────────────────────────────────────────── #}
+  <div class="card dd-bloco" id="dono">
+    <div class="dd-cab">
+      <span class="passo {{ 'fazer' if n_sem_dono }}">1</span>
+      <h3>Passo 1 &mdash; Dê um dono a {{ n_sem_dono }} contato{{ 's' if n_sem_dono != 1 }}</h3>
+    </div>
+    {% if orfaos %}
     <div class="dd-nota">
-      <b>Sem dono</b> é gente que está na base mas sem consultor responsável. <b>Fora da base</b> é gente que veio
-      na planilha e o JOB não conhece. Nenhum dos dois recebe nada até você resolver isso — logo abaixo.
+      Estes não recebem nada até alguém ficar responsável por eles. Marque, escolha por quem eles falam,
+      e voltam pra campanha sozinhos. Quem não está no CRM vira contato novo lá.
+      {% if n_sem_dono > orfaos|length %}<br><b>Mostrando os {{ orfaos|length }} primeiros</b> dos {{ n_sem_dono }}.
+      Resolva estes e os próximos aparecem.{% endif %}
     </div>
-  </div>
-
-  <div class="card" style="margin-bottom:18px;padding:0;">
-    <div class="card-header"><h3>Por consultor</h3></div>
-    <div class="cons-tabela">
-    <div class="cons-linha cons-head">
-      <div>Consultor</div><div>Modelos</div><div>A sair</div><div>Enviados</div><div>Responderam</div><div></div>
-    </div>
-    {% for p in porcons %}
-    <div class="cons-linha">
-      <div>
-        <span class="pill" style="background:{{ 'var(--teal)' if p.apto else 'var(--cinza-2,#6b7280)' }};"></span>{{ p.nome }}
-        {% if not p.apto %}<div class="cons-modelos">WhatsApp fechado — os contatos esperam</div>{% endif %}
-      </div>
-      <div class="cons-modelos {{ 'falta' if not p.modelos else '' }}">
-        {{ p.modelos|length ~ ' escolhido(s)' if p.modelos else 'nenhum — não sai nada' }}
-      </div>
-      <div>{{ p.pendente or 0 }}{% if p.enfileirado %} <span style="color:var(--cinza);font-size:11px;">(+{{ p.enfileirado }} na fila)</span>{% endif %}</div>
-      <div>{{ p.enviado or 0 }}</div>
-      <div style="color:var(--teal);">{{ p.respondeu or 0 }}</div>
-      <div><button class="btn-outline btn-sm" onclick="abrirModelos({{ p.consultor_id }}, '{{ p.nome|e }}')">Escolher modelos</button></div>
-    </div>
-    {% else %}
-    <div style="padding:18px;color:var(--cinza);min-width:0;">Ninguém ainda: ou a lista está vazia, ou nenhum contato tem dono.</div>
-    {% endfor %}
-    </div>
-    <div class="dd-nota" style="padding:14px 18px;">
-      Cada consultor manda um texto <b>próprio</b>. Sete pessoas mandando a mesma frase no mesmo dia é assinatura de
-      robô e é o que derruba número. Consultor sem modelo escolhido não dispara nada — de propósito: o sistema
-      não escreve em nome de ninguém.
-    </div>
-  </div>
-
-  <div class="card" style="margin-bottom:18px;padding:0;">
-    <div class="card-header"><h3>Ritmo</h3></div>
-    <div class="dd-nota" style="padding:14px 18px 0;">
-      Vale a partir do próximo lote — o que já saiu não muda.
-      {% set a_sair = (resumo.get('pendente', 0) + resumo.get('enfileirado', 0)) %}
-      {% if porcons and a_sair %}
-        Faltam {{ a_sair }} contatos. No ritmo de agora ({{ camp.teto_dia }} por dia, {{ porcons|length }}
-        consultor{{ 'es' if porcons|length > 1 else '' }}), isso leva cerca de
-        {{ ((a_sair / (camp.teto_dia * porcons|length)) | round(0, 'ceil')) | int }} dia(s) de disparo.
-      {% endif %}
-    </div>
-    <div class="ritmo-linha">
-      <div>
-        <label for="r-teto">Por consultor, por dia<button type="button" class="job-i" aria-label="Por que existe um teto"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">Falar com muita gente nova em sequência é o que faz o WhatsApp bloquear um número. O teto espalha a campanha por vários dias. Comece baixo e suba conforme for medindo.</span></button></label>
-        <input class="campo" id="r-teto" type="number" min="1" max="500" value="{{ camp.teto_dia }}" style="width:110px;">
-      </div>
-      <div><label for="r-ini">Das</label><input class="campo" id="r-ini" type="time" value="{{ camp.hora_inicio }}" style="width:120px;"></div>
-      <div><label for="r-fim">Até</label><input class="campo" id="r-fim" type="time" value="{{ camp.hora_fim }}" style="width:120px;"></div>
-      <div class="dc-dias">
-        {% for dnum, drot in [(1,'Seg'),(2,'Ter'),(3,'Qua'),(4,'Qui'),(5,'Sex'),(6,'Sáb'),(7,'Dom')] %}
-        <label class="dc-dia"><input type="checkbox" class="r-dia" value="{{ dnum }}"
-          {% if dnum|string in camp.dias_semana.split(',') %}checked{% endif %}>{{ drot }}</label>
-        {% endfor %}
-      </div>
-      <div class="ritmo-chaves">
-      <label class="dd-chave"><input type="checkbox" id="r-arquivar" {% if camp.arquivar is none or camp.arquivar %}checked{% endif %}>
-        Arquivar a conversa depois de enviar<button type="button" class="job-i" aria-label="O que isso faz"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">A conversa sai da caixa de entrada do consultor no dia do disparo e volta sozinha quando o cliente responde. Sem isso, quem dispara 100 contatos abre o WhatsApp com 100 conversas mudas na frente.</span></button></label>
-      <label class="dd-chave"><input type="checkbox" id="r-avisar" {% if camp.avisar_fora_horario %}checked{% endif %}>
-        Avisar o consultor mesmo de madrugada<button type="button" class="job-i" aria-label="O que isso faz"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">Desligado, a resposta que chega fora do horário comercial só vira aviso às 8h. A resposta é registrada na hora certa de qualquer jeito — o que espera é só o toque no sino.</span></button></label>
-      </div>
-      <button class="btn btn-sm" onclick="salvarRitmo(this)">Salvar ritmo</button>
-      <span id="r-retorno" class="dd-retorno" style="margin:0;"></span>
-    </div>
-  </div>
-
-  {% if orfaos %}
-  <div class="card" style="margin-bottom:18px;padding:0;">
-    <div class="card-header"><h3>Precisam de dono ({{ orfaos|length }})</h3></div>
-    <div class="dd-nota" style="padding:14px 18px 0;">
-      Estes não recebem nada enquanto não tiverem consultor. Marque, escolha por quem eles falam, e eles entram
-      na campanha sozinhos. Quem está como "fora da base" vira lead novo no CRM ao ser atribuído.
-    </div>
-    <div class="orf-lista">
+    <div class="dd-pessoas">
       {% for o in orfaos %}
-      <label class="orf-linha">
-        <input type="checkbox" class="orf-chk" value="{{ o.id }}" style="width:15px;height:15px;">
+      <label class="dd-pessoa">
+        <input type="checkbox" class="orf-chk" value="{{ o.id }}">
         <span>{{ o.nome or 'Sem nome' }}</span>
         <span class="tel">{{ o.telefone }}</span>
-        <span class="tag">{{ 'fora da base' if o.status == 'sem_lead' else 'sem consultor' }}</span>
+        <span class="dir">{{ 'não está no CRM' if o.status == 'sem_lead' else 'sem consultor' }}</span>
       </label>
       {% endfor %}
     </div>
-    <div class="orf-acao">
-      <button class="btn-outline btn-sm" type="button" onclick="marcarTodos(true)">Marcar todos</button>
+    <div class="dd-rodape">
+      <button class="btn-outline btn-sm" type="button" onclick="marcarTodos(true)">Marcar os {{ orfaos|length }} desta tela</button>
       <button class="btn-outline btn-sm" type="button" onclick="marcarTodos(false)">Desmarcar</button>
-      <select class="campo" id="orf-consultor">
-        <option value="">Escolha o consultor…</option>
+      <select class="campo" id="orf-consultor" aria-label="Consultor que vai ficar com estes contatos">
+        <option value="">Escolha por quem eles vão falar…</option>
         {% for c in consultores %}<option value="{{ c.id }}">{{ c.nome }}</option>{% endfor %}
       </select>
-      <button class="btn btn-sm" onclick="atribuir(this)">Atribuir e devolver pra campanha</button>
-      <span id="orf-retorno" class="dd-retorno" style="margin:0;"></span>
+      <button class="btn-outline btn-sm" id="btn-atribuir" onclick="atribuir(this)" disabled>Passar para o consultor escolhido</button>
+      <span id="orf-eco" class="dd-eco" role="status" aria-live="polite" style="margin:0;"></span>
     </div>
+    {% else %}
+    <div class="dd-vazio">Todo mundo da lista já tem consultor responsável.</div>
+    {% endif %}
+  </div>
+
+  {# ── 3. O TEXTO DE CADA CONSULTOR ───────────────────────────────────── #}
+  <div class="card dd-bloco" id="textos">
+    <div class="dd-cab">
+      <span class="passo {{ 'fazer' if sem_texto }}">2</span>
+      <h3>Passo 2 &mdash; Escolha o texto de cada consultor</h3>
+      <span class="n">{{ com_texto|length }} de {{ porcons|length }} escolhidos</span>
+    </div>
+    {% if porcons %}
+    <div class="dd-tab">
+      <div class="dd-linha cab">
+        <div>Consultor</div><div>Texto que vai sair</div><div>A enviar</div><div>Enviados</div><div>Responderam</div><div></div>
+      </div>
+      {% for p in porcons %}
+      <div class="dd-linha">
+        <div class="dd-quem">
+          <b>{{ p.nome }}</b>
+          <div class="dd-estado {{ 'on' if p.apto else 'off' }}">
+            {{ 'WhatsApp aberto, pronto pra enviar' if p.apto else 'WhatsApp fechado — os contatos esperam' }}
+          </div>
+        </div>
+        <div>
+          {% if p.modelos %}
+            {% for m in p.modelos %}<div style="font-size:var(--t-apoio);color:var(--cinza);">{{ m.nome }}</div>{% endfor %}
+          {% else %}<span class="dd-texto-off">nenhum — não envia nada</span>{% endif %}
+        </div>
+        <div>{{ p.pendente or 0 }}{% if p.enfileirado %} <span style="color:var(--cinza);font-size:11px;">(+{{ p.enfileirado }} na fila)</span>{% endif %}</div>
+        <div>{{ p.enviado or 0 }}</div>
+        <div style="color:var(--verde);">{{ p.respondeu or 0 }}</div>
+        <div>
+          <button class="{{ 'btn btn-sm' if not p.modelos else 'btn-outline btn-sm' }}"
+                  onclick="abrirTextos({{ p.consultor_id }}, '{{ p.nome|e }}')">
+            {{ 'Escolher o texto' if not p.modelos else 'Trocar' }}
+          </button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="dd-nota">
+      Cada consultor manda um texto próprio. Sete pessoas mandando a mesma frase no mesmo dia é assinatura de
+      robô, e é o que derruba número. Com mais de um texto escolhido, o sistema sorteia a cada envio.
+    </div>
+    {% else %}
+    <div class="dd-vazio">Ninguém ainda: resolva os contatos sem consultor acima e eles aparecem aqui.</div>
+    {% endif %}
+  </div>
+
+  {#  A ATIVAÇÃO MORA AQUI, no fim da preparação. É o único lugar da tela que
+      sabe se está pronto — e é onde o admin chega depois de resolver os dois
+      passos. No topo, ele ficava acima das tarefas que o desbloqueiam.  #}
+  {% if camp.status != 'ativa' %}
+  <div class="dd-falta {{ 'dd-pronta' if not falta }}" id="ativar">
+    {% if falta %}
+      <h4>Antes de ativar, falta</h4>
+      <ol>
+        {% if not resumo %}<li>Esta campanha está sem lista.</li>{% endif %}
+        {% if not porcons %}<li>Ninguém da lista tem consultor. <a href="#dono">Resolver o passo 1</a></li>{% endif %}
+        {% for p in sem_texto %}
+        <li><b>{{ p.nome }}</b> está sem texto — nada sai por {{ p.nome.split(' ')[0] }}.
+            <a href="#textos">Escolher o texto</a></li>
+        {% endfor %}
+      </ol>
+      <div style="margin-top:12px;">
+        <button class="btn" disabled>Ativar campanha</button>
+        <span class="dd-eco" style="margin-left:10px;">Resolva o que está acima pra poder ativar.</span>
+      </div>
+    {% else %}
+      <h4>Pronta pra ativar</h4>
+      <div style="font-size:var(--t-corpo);line-height:1.6;">
+        {{ com_texto|length }} consultor{{ 'es' if com_texto|length > 1 }} com texto escolhido.
+        Ao ativar, começa a enviar das {{ camp.hora_inicio }} às {{ camp.hora_fim }}, no máximo
+        {{ camp.teto_dia }} por pessoa por dia.
+        {% if n_sem_dono %}Os {{ n_sem_dono }} sem consultor continuam de fora até você resolver.{% endif %}
+      </div>
+      <div style="margin-top:12px;">
+        <button class="btn" onclick="mudarEstado('ativa', this)">Ativar — envia das {{ camp.hora_inicio }} às {{ camp.hora_fim }}</button>
+      </div>
+    {% endif %}
   </div>
   {% endif %}
 
-  {% if responderam %}
-  <div class="card" style="margin-bottom:18px;padding:0;">
-    <div class="card-header"><h3>Responderam ({{ responderam|length }})</h3></div>
-    <div class="dd-nota" style="padding:14px 18px 0;">
-      Estes já saíram da campanha e a conversa voltou pra caixa de entrada do consultor. O atendimento é dele
-      daqui — a campanha não manda mais nada pra eles.
+  {# ── 4. RITMO (ajuste, não tarefa: nasce recolhido) ─────────────────── #}
+  <details class="card dd-conf">
+    <summary>
+      <span class="seta">&#9656;</span> Ritmo e horário
+      <span class="resumo">{{ camp.teto_dia }}/dia por consultor · {{ camp.hora_inicio }}–{{ camp.hora_fim }}
+        · {{ 'arquiva a conversa' if (camp.arquivar is none or camp.arquivar) else 'não arquiva' }}</span>
+    </summary>
+    <div class="dd-nota" style="padding-top:0;">
+      Vale a partir do próximo envio — o que já saiu não muda.
+      {% set a_sair = (resumo.get('pendente', 0) + resumo.get('enfileirado', 0)) %}
+      {% if porcons and a_sair %}
+      Faltam {{ a_sair }} contatos: no ritmo de agora, cerca de
+      <b id="r-conta" data-sair="{{ a_sair }}" data-cons="{{ porcons|length }}">{{ ((a_sair / (camp.teto_dia * porcons|length)) | round(0, 'ceil')) | int }}</b>
+      dia(s) de envio.
+      {% endif %}
     </div>
-    {% for r in responderam %}
-    <div class="prob-linha">
-      <span>{{ r.nome or 'Sem nome' }}</span>
-      <span style="color:var(--cinza);font-size:11.5px;">{{ r.telefone }}</span>
-      {% if r.quer_parar %}<span class="dd-parar">parece pedido pra sair da lista</span>{% endif %}
-      <span class="motivo" style="color:var(--cinza);">
-        {{ r.quando }}{% if r.demorou %} · respondeu em {{ r.demorou }}{% endif %}
-      </span>
-      <button class="btn-outline btn-sm" style="margin-left:10px;"
-              onclick="bloquear({{ r.id }}, this)">Não quer receber</button>
+    <div class="dd-campos">
+      <div>
+        <label for="r-teto">Máximo por consultor, por dia<button type="button" class="job-i" aria-label="Por que existe um limite"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">Falar com muita gente nova em sequência é o que faz o WhatsApp bloquear um número. O limite espalha a campanha por vários dias. Comece baixo e suba conforme for medindo.</span></button></label>
+        <input class="campo" id="r-teto" type="number" min="1" max="500" value="{{ camp.teto_dia }}" style="width:110px;">
+      </div>
+      <div><label for="r-ini">Só envia a partir das</label><input class="campo" id="r-ini" type="time" value="{{ camp.hora_inicio }}" style="width:120px;"></div>
+      <div><label for="r-fim">E para às</label><input class="campo" id="r-fim" type="time" value="{{ camp.hora_fim }}" style="width:120px;"></div>
+      <div style="flex-basis:100%;">
+        <label style="margin-bottom:7px;">Dias em que pode enviar</label>
+        <div class="dd-dias">
+          {% for dn, dr in [(1,'Seg'),(2,'Ter'),(3,'Qua'),(4,'Qui'),(5,'Sex'),(6,'Sáb'),(7,'Dom')] %}
+          <label class="dd-dia"><input type="checkbox" class="r-dia" value="{{ dn }}"
+            {% if dn|string in camp.dias_semana.split(',') %}checked{% endif %}>{{ dr }}</label>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="dd-chaves">
+        <label class="dd-chave"><input type="checkbox" id="r-arquivar" {% if camp.arquivar is none or camp.arquivar %}checked{% endif %}>
+          Arquivar a conversa depois de enviar<button type="button" class="job-i" aria-label="O que isso faz"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">A conversa sai da caixa de entrada do consultor no dia do envio e volta sozinha quando o cliente responde. Sem isso, quem envia 100 contatos abre o WhatsApp com 100 conversas mudas na frente.</span></button></label>
+        <label class="dd-chave"><input type="checkbox" id="r-avisar" {% if camp.avisar_fora_horario %}checked{% endif %}>
+          Avisar o consultor mesmo de madrugada<button type="button" class="job-i" aria-label="O que isso faz"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">Desligado, a resposta que chega fora do horário comercial só vira aviso às 8h. A resposta é registrada na hora certa de qualquer jeito — o que espera é só o toque no sino.</span></button></label>
+      </div>
+      <button class="btn-outline btn-sm" onclick="salvarRitmo(this)">Salvar ritmo</button>
+      <span id="r-eco" class="dd-eco" role="status" aria-live="polite" style="margin:0;"></span>
     </div>
-    {% endfor %}
-  </div>
-  {% endif %}
+  </details>
 
-  {% if problemas %}
-  <div class="card" style="margin-bottom:18px;padding:0;">
-    <div class="card-header"><h3>Não vão sair ({{ problemas|length }})</h3></div>
+  <h2 class="dd-secao">Acompanhamento</h2>
+
+  {# ── 5. RESPONDERAM ─────────────────────────────────────────────────── #}
+  <div class="card dd-bloco" id="responderam">
+    <div class="dd-cab"><h3>Responderam</h3><span class="n">{{ resumo.get('respondeu', 0) }}</span></div>
+    {% if responderam %}
+    <div class="dd-nota">
+      Saíram da campanha e a conversa voltou pra caixa de entrada do consultor. O atendimento é dele daqui —
+      a campanha não manda mais nada pra eles.
+    </div>
+    <div class="dd-pessoas">
+      {% for r in responderam %}
+      <div class="dd-pessoa">
+        <span>{{ r.nome or 'Sem nome' }}</span>
+        <span class="tel">{{ r.telefone }}</span>
+        {% if r.quer_parar %}<span class="dd-sinal">parece pedido pra sair da lista</span>{% endif %}
+        <span class="dir">{{ r.quando }}{% if r.demorou %} · respondeu em {{ r.demorou }}{% endif %}</span>
+        <button class="btn-outline btn-sm" style="margin-left:10px;"
+                data-nome="{{ r.nome|e }}" onclick="bloquear({{ r.id }}, this)">Bloquear</button>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="dd-vazio">Ninguém respondeu ainda.</div>
+    {% endif %}
+  </div>
+
+  {# ── 6. NÃO VÃO SAIR ────────────────────────────────────────────────── #}
+  <div class="card dd-bloco" id="fora">
+    <div class="dd-cab"><h3>Não vão sair</h3><span class="n">{{ n_problema }}</span></div>
+    {% if problemas %}
+    <div class="dd-nota">Estes ficaram de fora e a campanha não tenta de novo sozinha.</div>
     {% for p in problemas %}
-    <div class="prob-linha">
+    <div class="dd-pessoa">
       <span>{{ p.nome or 'Sem nome' }}</span>
-      <span style="color:var(--cinza);font-size:11.5px;">{{ p.telefone }}</span>
-      <span class="motivo">
-        {% if p.status == 'sem_variavel' %}{{ p.texto_enviado }}
+      <span class="tel">{{ p.telefone }}</span>
+      <span class="dir" style="color:var(--rosa);">
+        {% if p.status == 'sem_variavel' %}faltou a coluna <b>{{ (p.texto_enviado or '')|replace('faltou na planilha: ','')|replace('_',' ') }}</b> na planilha
         {% elif p.status == 'bloqueado' %}pediu pra não receber
+        {% elif p.status == 'travado' %}não saiu em 3 tentativas
         {% else %}telefone inválido{% endif %}
       </span>
     </div>
     {% endfor %}
+    {% else %}
+    <div class="dd-vazio">Ninguém ficou de fora.</div>
+    {% endif %}
   </div>
-  {% endif %}
-
-  <div id="retorno-lote" class="dd-retorno"></div>
 </div>
 
-<div class="dd-modal" id="modal-modelos">
-  <div class="caixa">
-    <div class="topo">
-      <h3 id="mm-titulo">Modelos</h3>
-      <div style="font-size:12px;color:var(--cinza);line-height:1.5;">
-        Marque os textos que podem sair por esta pessoa nesta campanha. Com mais de um, o sistema sorteia a cada
-        envio — duas mensagens iguais seguidas é o que o WhatsApp lê como robô.
-      </div>
+<div class="modal-overlay" id="modal-textos" data-modal>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mt-titulo">
+    <button class="modal-close" onclick="fecharTextos()" aria-label="Fechar">&times;</button>
+    <h3 id="mt-titulo">Textos</h3>
+    <div style="font-size:var(--t-apoio);color:var(--cinza);line-height:1.55;margin:-8px 0 14px;">
+      Marque os textos que podem sair por esta pessoa nesta campanha. Com mais de um, o sistema sorteia a cada
+      envio — duas mensagens iguais seguidas é o que o WhatsApp lê como robô.
     </div>
-    <div class="lista" id="mm-lista"></div>
-    <div class="rodape">
-      <button class="btn-outline" onclick="document.getElementById('modal-modelos').style.display='none'">Cancelar</button>
-      <button class="btn" id="mm-salvar" onclick="salvarModelos(this)">Salvar modelos</button>
+    <div id="mt-lista"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+      <button class="btn-outline" onclick="fecharTextos()">Cancelar</button>
+      <button class="btn" id="mt-salvar" onclick="salvarTextos(this)">Salvar</button>
     </div>
   </div>
 </div>
@@ -288,60 +432,87 @@ select.campo:focus { outline:none; border-color:var(--teal); }
   var consultorAberto = null;
 
   function post(url, dados) {
-    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    return fetch(url, { method:'POST', headers:{'Content-Type':'application/json'},
                         body: JSON.stringify(dados || {}) }).then(function (r) { return r.json(); });
   }
+  function eco(el, msg, tipo) {
+    el.textContent = msg;   // textContent, nunca innerHTML: nome vem do banco
+    el.className = 'dd-eco' + (tipo ? ' ' + tipo : '');
+  }
+  // A confirmação sobrevive ao reload: sem isto, toda mensagem de sucesso era
+  // escrita e destruída pela própria página um segundo depois.
+  function recarregarCom(msg) { sessionStorage.setItem('dd-msg', msg); location.reload(); }
+  (function () {
+    var m = sessionStorage.getItem('dd-msg');
+    if (m) { sessionStorage.removeItem('dd-msg'); setTimeout(function () { toast(m); }, 80); }
+  })();
 
-  function mudarStatus(novo, btn) {
+  function mudarEstado(novo, btn) {
+    var rot = btn.textContent;
     btn.disabled = true; btn.textContent = novo === 'ativa' ? 'Ativando…' : 'Pausando…';
-    post('/disparos/campanha/' + CID + '/status', { status: novo }).then(function () {
-      location.reload();
-    }).catch(function () { btn.disabled = false; btn.textContent = 'Tentar de novo'; });
+    post('/disparos/campanha/' + CID + '/status', { status: novo }).then(function (r) {
+      if (!r || !r.ok) { btn.disabled = false; btn.textContent = rot; toast('Não consegui mudar. Nada foi alterado.', 'err'); return; }
+      recarregarCom(novo === 'ativa' ? 'Campanha ativada.' : 'Campanha pausada.');
+    }).catch(function () { btn.disabled = false; btn.textContent = rot; toast('Sem conexão com o servidor.', 'err'); });
   }
 
-  function enviarLote(btn) {
-    btn.disabled = true; btn.textContent = 'Colocando na fila…';
-    var alvo = document.getElementById('retorno-lote');
+  function enviarAgora(btn) {
+    var rot = btn.textContent, alvo = document.getElementById('eco');
+    btn.disabled = true; btn.textContent = 'Montando a fila…';
+    eco(alvo, '', '');
     post('/disparos/campanha/' + CID + '/enfileirar').then(function (r) {
-      btn.disabled = false; btn.textContent = 'Enviar o lote de agora';
       var partes = [];
-      if (r.enfileirados) partes.push('<b>' + r.enfileirados + '</b> mensagem(ns) entraram na fila dos consultores.');
+      if (r.enfileirados) partes.push(r.enfileirados + ' mensagem(ns) entraram na fila dos consultores.');
       else partes.push('Nenhuma mensagem entrou na fila.');
       if (r.motivo) partes.push(r.motivo);
       if (r.inaptos && r.inaptos.length) partes.push('Esperando o WhatsApp abrir: ' + r.inaptos.join(', ') + '.');
-      if (r.sem_modelo && r.sem_modelo.length) partes.push('Sem modelo escolhido, não dispararam: ' + r.sem_modelo.join(', ') + '.');
-      if (r.sem_variavel) partes.push(r.sem_variavel + ' contato(s) parados por falta de coluna na planilha.');
-      alvo.innerHTML = partes.join('<br>');
-      if (r.enfileirados) setTimeout(function () { location.reload(); }, 2500);
+      if (r.sem_modelo && r.sem_modelo.length) partes.push('Sem texto escolhido: ' + r.sem_modelo.join(', ') + '.');
+      if (r.sem_variavel) partes.push(r.sem_variavel + ' parados por falta de coluna na planilha.');
+      if (r.enfileirados) { btn.textContent = 'Fila montada'; recarregarCom(partes.join(' ')); return; }
+      btn.disabled = false; btn.textContent = rot;
+      eco(alvo, partes.join(' '), 'err');
     }).catch(function () {
-      btn.disabled = false; btn.textContent = 'Enviar o lote de agora';
-      alvo.textContent = 'Não consegui falar com o servidor. Tente de novo.';
+      btn.disabled = false; btn.textContent = rot;
+      eco(alvo, 'Não consegui falar com o servidor. Nada foi enviado.', 'err');
     });
   }
 
   function marcarTodos(v) {
     document.querySelectorAll('.orf-chk').forEach(function (c) { c.checked = v; });
+    contarMarcados();
   }
+  function contarMarcados() {
+    var n = document.querySelectorAll('.orf-chk:checked').length;
+    var b = document.getElementById('btn-atribuir');
+    if (!b) return;
+    b.disabled = !n;
+    b.textContent = n ? 'Passar ' + n + ' para o consultor escolhido' : 'Passar para o consultor escolhido';
+  }
+  document.querySelectorAll('.orf-chk').forEach(function (c) { c.addEventListener('change', contarMarcados); });
 
   function atribuir(btn) {
     var ids = Array.from(document.querySelectorAll('.orf-chk:checked')).map(function (c) { return parseInt(c.value, 10); });
     var cons = document.getElementById('orf-consultor').value;
-    var ret = document.getElementById('orf-retorno');
-    if (!cons) { ret.textContent = 'Escolha primeiro por qual consultor eles falam.'; return; }
-    if (!ids.length) { ret.textContent = 'Marque pelo menos um contato.'; return; }
-    btn.disabled = true; btn.textContent = 'Atribuindo…';
+    var alvo = document.getElementById('orf-eco'), rot = btn.textContent;
+    if (!cons) { eco(alvo, 'Escolha primeiro por qual consultor eles falam.', 'err'); document.getElementById('orf-consultor').focus(); return; }
+    if (!ids.length) { eco(alvo, 'Marque pelo menos um contato.', 'err'); return; }
+    btn.disabled = true; btn.textContent = 'Passando…';
     post('/disparos/campanha/' + CID + '/atribuir', { consultor_id: parseInt(cons, 10), alvo_ids: ids })
       .then(function (r) {
-        if (!r.ok) { ret.textContent = r.erro || 'Não deu certo.'; btn.disabled = false; btn.textContent = 'Atribuir e devolver pra campanha'; return; }
-        ret.textContent = r.atribuidos + ' voltaram pra campanha' + (r.leads_criados ? ' · ' + r.leads_criados + ' lead(s) criados no CRM' : '') + '.';
-        setTimeout(function () { location.reload(); }, 1200);
+        if (!r || !r.ok) { contarMarcados(); btn.textContent = rot; eco(alvo, (r && r.erro) || 'Não deu certo. Ninguém foi passado.', 'err'); return; }
+        recarregarCom(r.atribuidos + ' contato(s) voltaram pra campanha'
+                      + (r.leads_criados ? ' · ' + r.leads_criados + ' criado(s) no CRM' : '') + '.');
+      })
+      .catch(function () {
+        contarMarcados(); btn.textContent = rot;
+        eco(alvo, 'Não consegui falar com o servidor. Ninguém foi passado — tente de novo.', 'err');
       });
   }
 
   function salvarRitmo(btn) {
     var dias = Array.from(document.querySelectorAll('.r-dia:checked')).map(function (c) { return parseInt(c.value, 10); });
-    var ret = document.getElementById('r-retorno');
-    if (!dias.length) { ret.textContent = 'Escolha pelo menos um dia da semana.'; return; }
+    var alvo = document.getElementById('r-eco'), rot = btn.textContent;
+    if (!dias.length) { eco(alvo, 'Escolha pelo menos um dia da semana.', 'err'); return; }
     btn.disabled = true; btn.textContent = 'Salvando…';
     post('/disparos/campanha/' + CID + '/ritmo', {
       teto_dia: parseInt(document.getElementById('r-teto').value, 10),
@@ -351,61 +522,92 @@ select.campo:focus { outline:none; border-color:var(--teal); }
       arquivar: document.getElementById('r-arquivar').checked,
       avisar_fora_horario: document.getElementById('r-avisar').checked
     }).then(function (r) {
-      btn.disabled = false; btn.textContent = 'Salvar ritmo';
-      if (!r.ok) { ret.textContent = r.erro || 'Não deu certo.'; return; }
-      ret.textContent = 'Salvo. Vale a partir do próximo lote.';
-      setTimeout(function () { location.reload(); }, 900);
+      if (!r || !r.ok) { btn.disabled = false; btn.textContent = rot; eco(alvo, (r && r.erro) || 'Não consegui salvar.', 'err'); return; }
+      recarregarCom('Ritmo salvo. Vale a partir do próximo envio.');
     }).catch(function () {
-      btn.disabled = false; btn.textContent = 'Salvar ritmo';
-      ret.textContent = 'Não consegui falar com o servidor.';
+      btn.disabled = false; btn.textContent = rot;
+      eco(alvo, 'Sem conexão com o servidor. Nada foi salvo.', 'err');
     });
   }
 
+  // A conta de dias reage ao campo que a decide, sem precisar salvar antes.
+  (function () {
+    var teto = document.getElementById('r-teto'), conta = document.getElementById('r-conta');
+    if (!teto || !conta) return;
+    teto.addEventListener('input', function () {
+      var t = Math.max(1, parseInt(this.value, 10) || 1);
+      var cons = Math.max(1, parseInt(conta.dataset.cons, 10) || 1);
+      conta.textContent = Math.ceil(parseInt(conta.dataset.sair, 10) / (t * cons));
+    });
+    document.querySelectorAll('.dd-campos input').forEach(function (i) {
+      i.addEventListener('input', function () {
+        eco(document.getElementById('r-eco'), 'Alterado — clique em Salvar ritmo pra valer.', '');
+      });
+    });
+  })();
+
+  // Bloquear é para sempre e vale em todas as campanhas: pede confirmação no
+  // próprio botão, sem alerta do navegador (o projeto tirou os nativos).
   function bloquear(alvoId, btn) {
-    // Sem confirm() nativo: o projeto tirou os alertas do navegador. O que segura
-    // um clique errado aqui é o botão dizer a consequência e existir a volta na
-    // tela de campanhas.
+    if (btn.dataset.armado !== '1') {
+      btn.dataset.armado = '1';
+      btn.textContent = 'Confirmar: nunca mais receber';
+      setTimeout(function () {
+        if (btn.dataset.armado === '1') { btn.dataset.armado = '0'; btn.textContent = 'Bloquear'; }
+      }, 4000);
+      return;
+    }
     btn.disabled = true; btn.textContent = 'Bloqueando…';
     post('/disparos/campanha/' + CID + '/bloquear', { alvo_id: alvoId }).then(function (r) {
-      if (!r.ok) { btn.disabled = false; btn.textContent = 'Tentar de novo'; return; }
-      btn.textContent = 'Bloqueado';
-      setTimeout(function () { location.reload(); }, 900);
-    }).catch(function () { btn.disabled = false; btn.textContent = 'Tentar de novo'; });
+      if (!r || !r.ok) { btn.disabled = false; btn.dataset.armado = '0'; btn.textContent = 'Bloquear'; toast('Não consegui bloquear.', 'err'); return; }
+      recarregarCom((btn.dataset.nome || 'O contato') + ' não recebe mais campanha de ninguém.');
+    }).catch(function () {
+      btn.disabled = false; btn.dataset.armado = '0'; btn.textContent = 'Bloquear';
+      toast('Sem conexão com o servidor.', 'err');
+    });
   }
 
-  function abrirModelos(consultorId, nome) {
+  function abrirTextos(consultorId, nome) {
     consultorAberto = consultorId;
-    document.getElementById('mm-titulo').textContent = 'Modelos de ' + nome;
+    document.getElementById('mt-titulo').textContent = 'Textos que podem sair por ' + nome;
     var marcados = ESCOLHIDOS[consultorId] || [];
-    // Os DELE primeiro: é o texto com a voz dele que deve estar no topo.
     var lista = MODELOS.slice().sort(function (a, b) {
-      var pa = (a.dono === consultorId) ? 0 : 1, pb = (b.dono === consultorId) ? 0 : 1;
-      return pa - pb;
+      return ((a.dono === consultorId) ? 0 : 1) - ((b.dono === consultorId) ? 0 : 1);
     });
-    document.getElementById('mm-lista').innerHTML = lista.map(function (m) {
+    document.getElementById('mt-lista').innerHTML = lista.map(function (m) {
       var chk = marcados.indexOf(m.id) >= 0 ? ' checked' : '';
       // "compartilhado" só quando é de todo mundo. Texto pessoal de OUTRO
       // consultor sai com o nome de quem escreveu — escolher a voz de outra
-      // pessoa pode até fazer sentido, mas tem que ser uma decisão, não um
-      // engano.
+      // pessoa pode fazer sentido, mas tem que ser decisão, não engano.
       var dono = '';
       if (m.dono !== consultorId) {
         dono = ' <span style="color:var(--cinza);font-size:10.5px;">(' +
                (m.dono ? 'de ' + (m.dono_nome || 'outro consultor') : 'compartilhado') + ')</span>';
       }
-      return '<label class="mod-item"><input type="checkbox" class="mm-chk" value="' + m.id + '"' + chk + '>' +
+      return '<label style="display:flex;gap:9px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--borda);font-size:var(--t-apoio);cursor:pointer;">' +
+             '<input type="checkbox" class="mt-chk" value="' + m.id + '"' + chk + ' style="width:15px;height:15px;margin-top:2px;flex-shrink:0;">' +
              '<span><b>' + m.nome.replace(/</g, '&lt;') + '</b>' + dono +
-             '<span class="corpo">' + (m.corpo || '').slice(0, 160).replace(/</g, '&lt;') + '</span></span></label>';
-    }).join('') || '<div style="padding:14px 0;color:var(--cinza);font-size:12.5px;">Nenhum modelo de WhatsApp cadastrado ainda. Crie em Biblioteca.</div>';
-    document.getElementById('modal-modelos').style.display = 'flex';
+             '<span style="display:block;color:var(--cinza);font-size:var(--t-apoio);line-height:1.45;margin-top:2px;">' +
+             (m.corpo || '').slice(0, 160).replace(/</g, '&lt;') + '</span></span></label>';
+    }).join('') || '<div style="padding:14px 0;color:var(--cinza);font-size:var(--t-apoio);">Nenhum texto de WhatsApp cadastrado ainda. Crie em Biblioteca.</div>';
+    var s = document.getElementById('mt-salvar');
+    s.disabled = false; s.textContent = 'Salvar';
+    document.getElementById('modal-textos').classList.add('open');
   }
+  function fecharTextos() { document.getElementById('modal-textos').classList.remove('open'); }
+  document.getElementById('modal-textos').addEventListener('click', function (e) {
+    if (e.target === this) fecharTextos();
+  });
 
-  function salvarModelos(btn) {
-    var ids = Array.from(document.querySelectorAll('.mm-chk:checked')).map(function (c) { return parseInt(c.value, 10); });
+  function salvarTextos(btn) {
+    var ids = Array.from(document.querySelectorAll('.mt-chk:checked')).map(function (c) { return parseInt(c.value, 10); });
     btn.disabled = true; btn.textContent = 'Salvando…';
     post('/disparos/campanha/' + CID + '/modelos', { consultor_id: consultorAberto, modelo_ids: ids })
-      .then(function () { location.reload(); })
-      .catch(function () { btn.disabled = false; btn.textContent = 'Tentar de novo'; });
+      .then(function (r) {
+        if (!r || !r.ok) { btn.disabled = false; btn.textContent = 'Salvar'; toast('Não consegui salvar.', 'err'); return; }
+        recarregarCom(ids.length ? 'Texto escolhido.' : 'Sem texto escolhido: este consultor não envia nada.');
+      })
+      .catch(function () { btn.disabled = false; btn.textContent = 'Salvar'; toast('Sem conexão com o servidor.', 'err'); });
   }
 </script>
 {% endblock %}

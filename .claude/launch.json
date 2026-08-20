@@ -12,31 +12,13 @@
       "port": 8791
     },
     {
-      "name": "job",
+      "name": "job-local",
       "runtimeExecutable": "/bin/sh",
       "runtimeArgs": [
         "-c",
-        "JOB_DATA_DIR=/private/tmp/claude-501/-Users-guilhermesantos-Desktop-job-serenus/bfb257af-7cee-4413-8919-367a184f7b26/scratchpad/devdata PORT=8799 exec /private/tmp/claude-501/-Users-guilhermesantos-Desktop-job-serenus/bfb257af-7cee-4413-8919-367a184f7b26/scratchpad/venv/bin/python app.py"
+        "JOB_DATA_DIR=/private/tmp/claude-501/-Users-guilhermesantos-Developer-job-serenus-worktrees-stream-deck-ipad-macbook-f07e98/7030ef76-b29e-4422-96ba-d6d89f0868a2/scratchpad/devdata PORT=8805 exec /private/tmp/claude-501/-Users-guilhermesantos-Developer-job-serenus-worktrees-stream-deck-ipad-macbook-f07e98/7030ef76-b29e-4422-96ba-d6d89f0868a2/scratchpad/venv/bin/python app.py"
       ],
-      "port": 8799
-    },
-    {
-      "name": "job-sus",
-      "runtimeExecutable": "/bin/sh",
-      "runtimeArgs": [
-        "-c",
-        "JOB_DATA_DIR=/private/tmp/claude-501/-Users-guilhermesantos-Desktop-job-serenus--claude-worktrees-brasil-api-sus-card-361b29/59582d48-f132-44a0-a765-5491948dbaa9/scratchpad/devdata PORT=8802 exec /private/tmp/claude-501/-Users-guilhermesantos-Desktop-job-serenus/bfb257af-7cee-4413-8919-367a184f7b26/scratchpad/venv/bin/python app.py"
-      ],
-      "port": 8802
-    },
-    {
-      "name": "job-disparo",
-      "runtimeExecutable": "/bin/sh",
-      "runtimeArgs": [
-        "-c",
-        "JOB_DATA_DIR=/private/tmp/claude-501/-Users-guilhermesantos-Developer-job-serenus-worktrees-motor-disparo-campanhas-3690f8/7030ef76-b29e-4422-96ba-d6d89f0868a2/scratchpad/devdata PORT=8804 exec /private/tmp/claude-501/-Users-guilhermesantos-Developer-job-serenus-worktrees-motor-disparo-campanhas-3690f8/7030ef76-b29e-4422-96ba-d6d89f0868a2/scratchpad/venv/bin/python app.py"
-      ],
-      "port": 8804
+      "port": 8805
     }
   ]
 }
