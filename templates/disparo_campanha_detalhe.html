@@ -67,6 +67,21 @@
 .dd-vazio { padding:14px 20px 16px; font-size:var(--t-corpo); color:var(--cinza); }
 /* Corte entre o que exige decisão e o que só se olha. Sem ele, os seis blocos
    pareciam ter todos o mesmo peso — que é o que fazia a tela parecer bagunça. */
+.dd-vars { display:flex; gap:8px; flex-wrap:wrap; padding:0 20px 12px; }
+.dd-var { display:flex; flex-direction:column; align-items:flex-start; gap:2px; text-align:left;
+  border:1px solid var(--borda-2); border-radius:9px; padding:7px 11px; background:var(--panel-2);
+  cursor:pointer; font-family:inherit; color:var(--texto);
+  transition:border-color 140ms var(--ease-saida), transform 140ms var(--ease-saida); }
+.dd-var b { font-family:ui-monospace,Menlo,monospace; font-size:var(--t-apoio); color:var(--info); }
+.dd-var span { font-size:11px; color:var(--cinza); max-width:210px; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+.dd-var:active { transform:scale(.97); }
+@media (hover:hover) and (pointer:fine) { .dd-var:hover { border-color:var(--cinza); } }
+.dd-fixas { padding:0 20px; display:flex; flex-direction:column; gap:8px; }
+.dd-fixa { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.dd-fixa .campo { font-size:var(--t-apoio); }
+.dd-fixa .tira { background:none; border:none; color:var(--cinza); font-size:18px; cursor:pointer;
+  line-height:1; padding:0 4px; }
 .dd-secao { font-family:'Sora',sans-serif; font-size:10px; font-weight:700; color:var(--cinza);
   text-transform:uppercase; letter-spacing:.07em; margin:28px 0 12px; }
 
@@ -186,7 +201,7 @@ label.dd-pessoa { cursor:pointer; transition:background 120ms var(--ease-saida);
     {% if n_sem_dono or n_problema %}
     <div class="dd-atencao">
       {% if n_sem_dono %}<a class="dd-chip alerta" href="#dono"><b>{{ n_sem_dono }}</b> sem consultor</a>{% endif %}
-      {% if resumo.get('sem_variavel') %}<a class="dd-chip alerta" href="#fora"><b>{{ resumo.get('sem_variavel') }}</b> falta coluna na planilha</a>{% endif %}
+      {% if resumo.get('sem_variavel') %}<a class="dd-chip alerta" href="#fora"><b>{{ resumo.get('sem_variavel') }}</b> sem valor de variável</a>{% endif %}
       {% if resumo.get('travado') %}<a class="dd-chip alerta" href="#fora"><b>{{ resumo.get('travado') }}</b> não saíram em 3 tentativas</a>{% endif %}
       {% if resumo.get('invalido') %}<a class="dd-chip alerta" href="#fora"><b>{{ resumo.get('invalido') }}</b> telefone inválido</a>{% endif %}
       {% if resumo.get('bloqueado') %}<span class="dd-chip"><b>{{ resumo.get('bloqueado') }}</b> não querem receber</span>{% endif %}
@@ -280,6 +295,36 @@ label.dd-pessoa { cursor:pointer; transition:background 120ms var(--ease-saida);
     {% else %}
     <div class="dd-vazio">Ninguém ainda: resolva os contatos sem consultor acima e eles aparecem aqui.</div>
     {% endif %}
+  </div>
+
+  {# ── VARIÁVEIS ─────────────────────────────────────────────────────── #}
+  <div class="card dd-bloco" id="variaveis">
+    <div class="dd-cab"><h3>Variáveis do texto</h3>
+      <span class="n">{{ (colunas|length) + (fixas|length) }} disponíve{{ 'is' if ((colunas|length) + (fixas|length)) != 1 else 'l' }}</span></div>
+    <div class="dd-nota">
+      Escreva a variável entre chaves no texto e ela vira o valor de cada pessoa na hora do envio.
+      Clique numa delas pra copiar.
+    </div>
+    {% if colunas %}
+    <div class="dd-vars">
+      {% for c in colunas %}
+      <button type="button" class="dd-var" onclick="copiarVar(this,'{{ c }}')">
+        <b>{{ '{' }}{{ c }}{{ '}' }}</b>
+        <span>{{ exemplos.get(c) or 'da planilha' }}</span>
+      </button>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="dd-nota" style="padding-top:4px;">
+      <b>Variáveis fixas</b> valem igual pra todo mundo desta campanha — servem pro que não muda de pessoa
+      pra pessoa (a operadora, o prazo, o nome do plano). Não precisam virar coluna na planilha.
+    </div>
+    <div id="fixas-lista" class="dd-fixas"></div>
+    <div class="dd-rodape" style="border-top:none;padding-top:4px;">
+      <button class="btn-outline btn-sm" type="button" onclick="novaFixa()">Criar variável</button>
+      <button class="btn-outline btn-sm" onclick="salvarFixas(this)">Salvar variáveis</button>
+      <span id="fx-eco" class="dd-eco" role="status" aria-live="polite" style="margin:0;"></span>
+    </div>
   </div>
 
   {#  A ATIVAÇÃO MORA AQUI, no fim da preparação. É o único lugar da tela que
@@ -396,7 +441,7 @@ label.dd-pessoa { cursor:pointer; transition:background 120ms var(--ease-saida);
       <span>{{ p.nome or 'Sem nome' }}</span>
       <span class="tel">{{ p.telefone }}</span>
       <span class="dir" style="color:var(--rosa);">
-        {% if p.status == 'sem_variavel' %}faltou a coluna <b>{{ (p.texto_enviado or '')|replace('faltou na planilha: ','')|replace('_',' ') }}</b> na planilha
+        {% if p.status == 'sem_variavel' %}sem valor pra <b>{{ (p.texto_enviado or '')|replace('sem valor: ','')|replace('faltou na planilha: ','')|replace('_',' ') }}</b> — <a href="#variaveis" style="color:var(--info);">criar a variável</a>
         {% elif p.status == 'bloqueado' %}pediu pra não receber
         {% elif p.status == 'travado' %}não saiu em 3 tentativas
         {% else %}telefone inválido{% endif %}
@@ -548,6 +593,62 @@ label.dd-pessoa { cursor:pointer; transition:background 120ms var(--ease-saida);
 
   // Bloquear é para sempre e vale em todas as campanhas: pede confirmação no
   // próprio botão, sem alerta do navegador (o projeto tirou os nativos).
+  // ── Variáveis ──────────────────────────────────────────────────────────
+  var FIXAS = {{ fixas|tojson }};
+  // O que esta campanha SABE preencher: colunas da planilha + variáveis fixas +
+  // as duas que o sistema resolve sozinho.
+  var DISPONIVEIS = new Set(
+    {{ colunas|tojson }}.concat(Object.keys(FIXAS || {})).concat(['nome', 'saudacao'])
+  );
+
+  function copiarVar(btn, nome) {
+    var txt = '{' + nome + '}';
+    var antes = btn.querySelector('span').textContent;
+    navigator.clipboard.writeText(txt).then(function () {
+      btn.querySelector('span').textContent = 'copiado';
+      setTimeout(function () { btn.querySelector('span').textContent = antes; }, 1400);
+    }).catch(function () { toast('Não consegui copiar. Escreva ' + txt + ' no texto.', 'err'); });
+  }
+
+  function linhaFixa(nome, valor) {
+    var d = document.createElement('div');
+    d.className = 'dd-fixa';
+    d.innerHTML = '<input class="campo dd-fx-nome" placeholder="nome (ex: operadora)" style="width:190px;">' +
+                  '<span style="color:var(--cinza);font-size:var(--t-apoio);">vale</span>' +
+                  '<input class="campo dd-fx-valor" placeholder="valor (ex: MedSênior)" style="width:250px;">' +
+                  '<button type="button" class="tira" title="Remover">&times;</button>';
+    d.querySelector('.dd-fx-nome').value = nome || '';
+    d.querySelector('.dd-fx-valor').value = valor || '';
+    d.querySelector('.tira').onclick = function () { d.remove(); };
+    return d;
+  }
+  function novaFixa() {
+    var alvo = document.getElementById('fixas-lista');
+    var l = linhaFixa('', ''); alvo.appendChild(l); l.querySelector('.dd-fx-nome').focus();
+  }
+  (function () {
+    var alvo = document.getElementById('fixas-lista');
+    if (!alvo) return;
+    var nomes = Object.keys(FIXAS || {});
+    if (!nomes.length) { alvo.appendChild(linhaFixa('', '')); return; }
+    nomes.forEach(function (n) { alvo.appendChild(linhaFixa(n, FIXAS[n])); });
+  })();
+
+  function salvarFixas(btn) {
+    var vars = Array.from(document.querySelectorAll('.dd-fixa')).map(function (l) {
+      return { nome: l.querySelector('.dd-fx-nome').value, valor: l.querySelector('.dd-fx-valor').value };
+    }).filter(function (v) { return (v.nome || '').trim() || (v.valor || '').trim(); });
+    var alvo = document.getElementById('fx-eco'), rot = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Salvando…';
+    post('/disparos/campanha/' + CID + '/variaveis', { variaveis: vars }).then(function (r) {
+      if (!r || !r.ok) { btn.disabled = false; btn.textContent = rot; eco(alvo, (r && r.erro) || 'Não consegui salvar.', 'err'); return; }
+      recarregarCom(r.variaveis + ' variável(is) salva(s). Quem tinha parado por falta de variável volta pra fila.');
+    }).catch(function () {
+      btn.disabled = false; btn.textContent = rot;
+      eco(alvo, 'Sem conexão com o servidor. Nada foi salvo.', 'err');
+    });
+  }
+
   function bloquear(alvoId, btn) {
     if (btn.dataset.armado !== '1') {
       btn.dataset.armado = '1';
@@ -584,11 +685,21 @@ label.dd-pessoa { cursor:pointer; transition:background 120ms var(--ease-saida);
         dono = ' <span style="color:var(--cinza);font-size:10.5px;">(' +
                (m.dono ? 'de ' + (m.dono_nome || 'outro consultor') : 'compartilhado') + ')</span>';
       }
+      // Avisa ANTES de escolher: texto que usa variável que esta campanha não
+      // tem deixaria todo mundo de fora, e o admim só descobriria depois, no
+      // bloco "não vão sair".
+      var usadas = ((m.corpo || '').match(/\{([a-z0-9_]+)\}/g) || []).map(function (x) { return x.slice(1, -1); });
+      var faltam = usadas.filter(function (v, i, a) { return a.indexOf(v) === i && !DISPONIVEIS.has(v); });
+      var aviso = faltam.length
+        ? '<span style="display:block;color:var(--rosa);font-size:11px;margin-top:3px;font-weight:600;">' +
+          'Esta campanha não tem ' + faltam.map(function (f) { return '{' + f + '}'; }).join(', ') +
+          ' — com este texto, ninguém sai.</span>'
+        : '';
       return '<label style="display:flex;gap:9px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--borda);font-size:var(--t-apoio);cursor:pointer;">' +
              '<input type="checkbox" class="mt-chk" value="' + m.id + '"' + chk + ' style="width:15px;height:15px;margin-top:2px;flex-shrink:0;">' +
              '<span><b>' + m.nome.replace(/</g, '&lt;') + '</b>' + dono +
              '<span style="display:block;color:var(--cinza);font-size:var(--t-apoio);line-height:1.45;margin-top:2px;">' +
-             (m.corpo || '').slice(0, 160).replace(/</g, '&lt;') + '</span></span></label>';
+             (m.corpo || '').slice(0, 160).replace(/</g, '&lt;') + '</span>' + aviso + '</span></label>';
     }).join('') || '<div style="padding:14px 0;color:var(--cinza);font-size:var(--t-apoio);">Nenhum texto de WhatsApp cadastrado ainda. Crie em Biblioteca.</div>';
     var s = document.getElementById('mt-salvar');
     s.disabled = false; s.textContent = 'Salvar';
