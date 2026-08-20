@@ -13,10 +13,23 @@
 .dc-sub b { color:var(--texto); }
 
 /* ── Cartão de campanha ── */
-.dc-card { padding:0; overflow:hidden; margin-bottom:10px; }
+.dc-card { padding:0; overflow:hidden; margin-bottom:10px; display:block; text-decoration:none;
+  color:inherit; transition:border-color 140ms var(--ease-saida), transform 140ms var(--ease-saida); }
+.dc-card:active { transform:scale(.995); }
+@media (hover:hover) and (pointer:fine) {
+  .dc-card:hover { border-color:var(--borda-2); }
+  .dc-card:hover .nome { color:var(--verde); }
+  .dc-card:hover .dc-seta { color:var(--texto); transform:translateX(2px); }
+}
+.dc-card:focus-visible { outline:2px solid var(--info); outline-offset:2px; }
+.dc-seta { color:var(--cinza-2); font-size:20px; line-height:1; flex-shrink:0;
+  transition:color 140ms var(--ease-saida), transform 140ms var(--ease-saida); }
+@media (prefers-reduced-motion: reduce) {
+  .dc-card, .dc-seta { transition:none; } .dc-card:active { transform:none; }
+}
 .dc-linha { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:15px 20px; }
-.dc-linha a.nome { font-size:15px; font-weight:700; color:var(--texto); text-decoration:none; letter-spacing:-.01em; }
-.dc-linha a.nome:hover { color:var(--verde); }
+.dc-linha .nome { font-size:15px; font-weight:700; color:var(--texto); letter-spacing:-.01em;
+  transition:color 140ms var(--ease-saida); }
 .dc-meta { font-size:var(--t-apoio); color:var(--cinza); margin-top:3px; }
 .dc-quando { color:var(--info); font-weight:600; }
 .dc-nums { display:flex; gap:24px; text-align:center; }
@@ -187,10 +200,15 @@ details.dc-guardado[open] > summary .seta { transform:rotate(90deg); }
   </details>
 
   {% for c in campanhas %}
-  <div class="card dc-card">
+  {#  O CARD INTEIRO ABRE. Só o nome era link, e link sem sublinhado no meio de
+      um card não parece clicável: o Guilherme criou a campanha e perguntou como
+      abria. Agora o card é o alvo, com seta à direita dizendo que vai pra algum
+      lugar. O <a> continua sendo o elemento — chega pelo teclado e o navegador
+      mostra o destino na barra de status. #}
+  <a class="card dc-card" href="/disparos/campanha/{{ c.id }}">
     <div class="dc-linha">
       <div>
-        <a class="nome" href="/disparos/campanha/{{ c.id }}">{{ c.nome }}</a>
+        <span class="nome">{{ c.nome }}</span>
         <div class="dc-meta">
           {{ 'Sai por quem fechou a venda' if c.publico == 'vendas' else 'Sai pelo responsável no CRM' }}
           · {{ c.teto_dia }} por consultor/dia · {{ c.hora_inicio }} às {{ c.hora_fim }}
@@ -203,11 +221,12 @@ details.dc-guardado[open] > summary .seta { transform:rotate(90deg); }
         <div class="{{ 'alerta' if c.sem_dono }}"><b>{{ c.sem_dono or 0 }}</b>sem consultor</div>
       </div>
       <span class="dc-selo {{ c.status }}">{{ ROT_ESTADO.get(c.status, c.status) }}</span>
+      <span class="dc-seta" aria-hidden="true">&rsaquo;</span>
     </div>
     {% if c.status == 'rascunho' %}
-    <div class="dc-trava">Ainda não envia nada — falta conferir a lista e ativar.</div>
+    <div class="dc-trava">Ainda não envia nada &mdash; abra pra conferir a lista e ativar.</div>
     {% endif %}
-  </div>
+  </a>
   {% else %}
   <div class="card dc-vazio">Nenhuma campanha ainda. A primeira se cria aqui embaixo.</div>
   {% endfor %}
