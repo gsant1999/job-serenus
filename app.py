@@ -12659,6 +12659,9 @@ def _disparo_texto(conn, alvo, modelo, agora=None, fixas=None, consultor=None, f
     # PRECEDÊNCIA, do mais geral pro mais específico: o que o sistema resolve
     # perde pra fixa da campanha, que perde pra coluna da linha. O valor mais
     # específico sobre aquela pessoa é sempre o que vale.
+    #
+    # A exceção é quem está falando — ver o bloco lá embaixo. Sobre o CLIENTE,
+    # a planilha sabe mais que o sistema; sobre o REMETENTE, nunca.
     juntas = {}
     if consultor:
         primeiro = (consultor or '').strip().split(' ')[0]
@@ -12671,8 +12674,22 @@ def _disparo_texto(conn, alvo, modelo, agora=None, fixas=None, consultor=None, f
             _n = _f[2:] if _f.startswith('55') else _f
             juntas['consultor_whatsapp'] = (f'({_n[:2]}) {_n[2:-4]}-{_n[-4:]}' if len(_n) in (10, 11) else _f)
             juntas['consultor_link'] = 'wa.me/' + _f
+    _remetente = dict(juntas)   # o que o SISTEMA sabe sobre quem manda
     juntas.update(fixas or {})
     juntas.update(variaveis or {})
+    # QUEM ESTÁ FALANDO NÃO É CONFIGURÁVEL. Isto vem depois do update de
+    # propósito: uma fixa (ou uma coluna da planilha) chamada `consultor`
+    # sobrescrevia a identidade de quem manda, e a mensagem saía do WhatsApp
+    # da Juliana dizendo "Meu nome é Guilherme". Aconteceu de verdade, com
+    # cliente do outro lado, na MEDSÊNIOR de 20/08/2026: 9 mensagens.
+    #
+    # Um valor fixo pra "quem sou eu" é sempre errado num motor cujo ponto
+    # inteiro é sair pela pessoa que o cliente conhece. Não tem caso de uso
+    # legítimo, então a tela não precisa avisar — o sistema simplesmente não
+    # deixa. As outras variáveis continuam livres.
+    for _k in ('consultor', 'consultor_completo', 'consultor_whatsapp', 'consultor_link'):
+        if _k in _remetente:
+            juntas[_k] = _remetente[_k]
     for chave, valor in juntas.items():
         txt = txt.replace('{' + chave + '}', str(valor))
     faltando = sorted(set(_re.findall(r'\{([a-z0-9_]+)\}', txt)))
