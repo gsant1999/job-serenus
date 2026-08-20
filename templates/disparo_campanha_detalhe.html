@@ -80,6 +80,19 @@
 .dd-vazio { padding:14px 20px 16px; font-size:var(--t-corpo); color:var(--cinza); }
 /* Corte entre o que exige decisão e o que só se olha. Sem ele, os seis blocos
    pareciam ter todos o mesmo peso — que é o que fazia a tela parecer bagunça. */
+/* A Biblioteca tem dezenas de textos. Sem busca e sem grupo, escolher virava
+   rolar uma lista alfabética até achar — foi o que o Guilherme encontrou. */
+.mt-busca { width:100%; margin-bottom:12px; }
+.mt-grupo { font-family:'Sora',sans-serif; font-size:10px; font-weight:700; color:var(--cinza);
+  text-transform:uppercase; letter-spacing:.06em; margin:14px 0 4px; }
+.mt-grupo:first-child { margin-top:0; }
+.mt-item { display:flex; gap:9px; align-items:flex-start; padding:9px 0;
+  border-bottom:1px solid var(--borda); font-size:var(--t-apoio); cursor:pointer; }
+.mt-item input { width:15px; height:15px; margin-top:2px; flex-shrink:0; }
+.mt-item b { display:block; }
+.mt-corpo { display:block; color:var(--cinza); font-size:11.5px; line-height:1.45; margin-top:2px;
+  overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+.mt-nada { padding:18px 0; color:var(--cinza); font-size:var(--t-apoio); }
 .dd-vars { display:flex; gap:8px; flex-wrap:wrap; padding:0 20px 12px; }
 .dd-var { display:flex; flex-direction:column; align-items:flex-start; gap:2px; text-align:left;
   border:1px solid var(--borda-2); border-radius:9px; padding:7px 11px; background:var(--panel-2);
@@ -499,6 +512,8 @@ label.dd-pessoa { cursor:pointer; transition:background 120ms var(--ease-saida);
       Marque os textos que podem sair por esta pessoa nesta campanha. Com mais de um, o sistema sorteia a cada
       envio — duas mensagens iguais seguidas é o que o WhatsApp lê como robô.
     </div>
+    <input class="campo mt-busca" id="mt-busca" type="search" autocomplete="off"
+           placeholder="Buscar por nome ou pelo que está escrito…" oninput="filtrarTextos()">
     <div id="mt-lista"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
       <button class="btn-outline" onclick="fecharTextos()">Cancelar</button>
@@ -634,8 +649,14 @@ label.dd-pessoa { cursor:pointer; transition:background 120ms var(--ease-saida);
   var FIXAS = {{ fixas|tojson }};
   // O que esta campanha SABE preencher: colunas da planilha + variáveis fixas +
   // as duas que o sistema resolve sozinho.
+  // As de SISTEMA vêm da mesma fonte que a tela desenha as fichas: sem isto,
+  // {consultor} — que o servidor resolve sozinho — aparecia como "esta campanha
+  // não tem", em vermelho, no texto certo. Duas listas do mesmo assunto sempre
+  // divergem; agora é uma só.
   var DISPONIVEIS = new Set(
-    {{ colunas|tojson }}.concat(Object.keys(FIXAS || {})).concat(['nome', 'saudacao'])
+    {{ colunas|tojson }}
+      .concat(Object.keys(FIXAS || {}))
+      .concat(Object.keys({{ vars_sistema|tojson }}))
   );
 
   function copiarVar(btn, nome) {
@@ -708,47 +729,91 @@ label.dd-pessoa { cursor:pointer; transition:background 120ms var(--ease-saida);
   function abrirTextos(consultorId, nome) {
     consultorAberto = consultorId;
     document.getElementById('mt-titulo').textContent = 'Textos que podem sair por ' + nome;
-    var marcados = ESCOLHIDOS[consultorId] || [];
-    var lista = MODELOS.slice().sort(function (a, b) {
-      return ((a.dono === consultorId) ? 0 : 1) - ((b.dono === consultorId) ? 0 : 1);
-    });
-    document.getElementById('mt-lista').innerHTML = lista.map(function (m) {
-      var chk = marcados.indexOf(m.id) >= 0 ? ' checked' : '';
-      // "compartilhado" só quando é de todo mundo. Texto pessoal de OUTRO
-      // consultor sai com o nome de quem escreveu — escolher a voz de outra
-      // pessoa pode fazer sentido, mas tem que ser decisão, não engano.
-      var dono = '';
-      if (m.dono !== consultorId) {
-        dono = ' <span style="color:var(--cinza);font-size:10.5px;">(' +
-               (m.dono ? 'de ' + (m.dono_nome || 'outro consultor') : 'compartilhado') + ')</span>';
-      }
-      // Avisa ANTES de escolher: texto que usa variável que esta campanha não
-      // tem deixaria todo mundo de fora, e o admim só descobriria depois, no
-      // bloco "não vão sair".
-      var usadas = ((m.corpo || '').match(/\{([a-z0-9_]+)\}/g) || []).map(function (x) { return x.slice(1, -1); });
-      var faltam = usadas.filter(function (v, i, a) { return a.indexOf(v) === i && !DISPONIVEIS.has(v); });
-      var aviso = faltam.length
-        ? '<span style="display:block;color:var(--rosa);font-size:11px;margin-top:3px;font-weight:600;">' +
-          'Esta campanha não tem ' + faltam.map(function (f) { return '{' + f + '}'; }).join(', ') +
-          ' — com este texto, ninguém sai.</span>'
-        : '';
-      return '<label style="display:flex;gap:9px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--borda);font-size:var(--t-apoio);cursor:pointer;">' +
-             '<input type="checkbox" class="mt-chk" value="' + m.id + '"' + chk + ' style="width:15px;height:15px;margin-top:2px;flex-shrink:0;">' +
-             '<span><b>' + m.nome.replace(/</g, '&lt;') + '</b>' + dono +
-             '<span style="display:block;color:var(--cinza);font-size:var(--t-apoio);line-height:1.45;margin-top:2px;">' +
-             (m.corpo || '').slice(0, 160).replace(/</g, '&lt;') + '</span>' + aviso + '</span></label>';
-    }).join('') || '<div style="padding:14px 0;color:var(--cinza);font-size:var(--t-apoio);">Nenhum texto de WhatsApp cadastrado ainda. Crie em Biblioteca.</div>';
+    document.getElementById('mt-busca').value = '';
+    montarTextos();
     var s = document.getElementById('mt-salvar');
     s.disabled = false; s.textContent = 'Salvar';
     document.getElementById('modal-textos').classList.add('open');
+    setTimeout(function () { document.getElementById('mt-busca').focus(); }, 60);
   }
-  function fecharTextos() { document.getElementById('modal-textos').classList.remove('open'); }
+
+  // O que já estava marcado precisa sobreviver à busca: quem filtra, marca, e
+  // depois apaga a busca não pode perder a marcação de quem sumiu da tela.
+  var mtMarcados = null;
+  function lembrarMarcados() {
+    if (!mtMarcados) return;
+    document.querySelectorAll('.mt-chk').forEach(function (c) {
+      var id = parseInt(c.value, 10);
+      if (c.checked) mtMarcados.add(id); else mtMarcados.delete(id);
+    });
+  }
+
+  function montarTextos() {
+    if (!mtMarcados) mtMarcados = new Set(ESCOLHIDOS[consultorAberto] || []);
+    var termo = (document.getElementById('mt-busca').value || '').trim().toLowerCase();
+    var casa = function (m) {
+      if (!termo) return true;
+      return (m.nome || '').toLowerCase().indexOf(termo) >= 0 ||
+             (m.corpo || '').toLowerCase().indexOf(termo) >= 0;
+    };
+    var dele = MODELOS.filter(function (m) { return m.dono === consultorAberto && casa(m); });
+    var comuns = MODELOS.filter(function (m) { return !m.dono && casa(m); });
+    var outros = MODELOS.filter(function (m) { return m.dono && m.dono !== consultorAberto && casa(m); });
+
+    var html = '';
+    if (dele.length) html += '<div class="mt-grupo">Textos de ' + esc(nomeCurto()) + ' &middot; ' + dele.length + '</div>' + dele.map(item).join('');
+    if (comuns.length) html += '<div class="mt-grupo">Compartilhados &middot; ' + comuns.length + '</div>' + comuns.map(item).join('');
+    if (outros.length) html += '<div class="mt-grupo">De outros consultores &middot; ' + outros.length + '</div>' + outros.map(item).join('');
+    if (!html) {
+      html = '<div class="mt-nada">' + (termo
+        ? 'Nenhum texto com "' + esc(termo) + '". Tente outra palavra, ou crie o texto na Biblioteca.'
+        : 'Nenhum texto de WhatsApp cadastrado ainda. Crie em Biblioteca.') + '</div>';
+    }
+    document.getElementById('mt-lista').innerHTML = html;
+  }
+
+  function nomeCurto() {
+    var t = document.getElementById('mt-titulo').textContent || '';
+    var n = t.replace('Textos que podem sair por ', '').trim();
+    return n.split(' ')[0] || 'você';
+  }
+  function esc(t) { return String(t).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+  function item(m) {
+    var chk = mtMarcados.has(m.id) ? ' checked' : '';
+    var dono = '';
+    if (m.dono && m.dono !== consultorAberto) {
+      dono = ' <span style="color:var(--cinza);font-size:10.5px;">(de ' + esc(m.dono_nome || 'outro consultor') + ')</span>';
+    }
+    // Avisa ANTES de escolher: texto que usa variável que esta campanha não tem
+    // deixaria todo mundo de fora, e o admin só descobriria depois.
+    var usadas = ((m.corpo || '').match(/\{([a-z0-9_]+)\}/g) || []).map(function (x) { return x.slice(1, -1); });
+    var faltam = usadas.filter(function (v, i, a) { return a.indexOf(v) === i && !DISPONIVEIS.has(v); });
+    var aviso = faltam.length
+      ? '<span style="display:block;color:var(--rosa);font-size:11px;margin-top:3px;font-weight:600;">' +
+        'Esta campanha não tem ' + faltam.map(function (f) { return '{' + esc(f) + '}'; }).join(', ') +
+        ' &mdash; com este texto, ninguém sai.</span>'
+      : '';
+    return '<label class="mt-item"><input type="checkbox" class="mt-chk" value="' + m.id + '"' + chk +
+           ' onchange="lembrarMarcados()">' +
+           '<span><b>' + esc(m.nome) + '</b>' + dono +
+           '<span class="mt-corpo">' + esc((m.corpo || '').slice(0, 180)) + '</span>' + aviso + '</span></label>';
+  }
+
+  function filtrarTextos() { lembrarMarcados(); montarTextos(); }
+
+  function fecharTextos() {
+    document.getElementById('modal-textos').classList.remove('open');
+    mtMarcados = null;   // a próxima abertura relê o que está salvo
+  }
   document.getElementById('modal-textos').addEventListener('click', function (e) {
     if (e.target === this) fecharTextos();
   });
 
   function salvarTextos(btn) {
-    var ids = Array.from(document.querySelectorAll('.mt-chk:checked')).map(function (c) { return parseInt(c.value, 10); });
+    lembrarMarcados();
+    var ids = Array.from(mtMarcados);   // inclui o que foi marcado e depois filtrado da tela
     btn.disabled = true; btn.textContent = 'Salvando…';
     post('/disparos/campanha/' + CID + '/modelos', { consultor_id: consultorAberto, modelo_ids: ids })
       .then(function (r) {
