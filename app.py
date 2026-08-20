@@ -201,11 +201,22 @@ def _handler_erro_global(e):
 # Garante que o banco é inicializado tanto em dev (python app.py) 
 # quanto em produção (gunicorn) na primeira requisição
 _db_initialized = False
+_DB_INIT_LOCK = threading.Lock()
 
 _fluxos_seed_feito = False
 
 @app.before_request
 def _ensure_db_initialized():
+    global _db_initialized, _fluxos_seed_feito
+    # Mesmo motivo da trava do agendador: entre o `if not _db_initialized` e a
+    # atribuição cabe outra thread, e as duas rodam init_db() em cima do mesmo
+    # banco. Com 4 threads quase nunca acontecia; com 24 a janela abre.
+    with _DB_INIT_LOCK:
+        _ensure_db_initialized_travado()
+
+
+def _ensure_db_initialized_travado():
+    """Só entra aqui com _DB_INIT_LOCK na mão."""
     global _db_initialized, _fluxos_seed_feito
     if not _db_initialized:
         try:
@@ -48332,6 +48343,9 @@ _verificar_banco_vazio()
 
 # Agendador de backup
 _SCHEDULER_INICIADO = False
+# O agendador manda mensagem para cliente. Subir dois é mandar tudo em dobro,
+# então a exclusão aqui precisa de trava, não de flag conferida sem proteção.
+_SCHEDULER_LOCK = threading.Lock()
 
 def _importar_leads_automatico():
     """
@@ -51547,6 +51561,7 @@ def _enviar_conversoes_automatico():
 
 _ULTIMA_VARREDURA_FILA = 0.0
 _VARREDURA_FILA_INTERVALO = 300  # 5 min, igual ao agendador
+_VARREDURA_FILA_LOCK = threading.Lock()
 
 
 def _varrer_fila_throttled():
@@ -51565,7 +51580,21 @@ def _varrer_fila_throttled():
     agora = time.time()
     if agora - _ULTIMA_VARREDURA_FILA < _VARREDURA_FILA_INTERVALO:
         return
-    _ULTIMA_VARREDURA_FILA = agora
+    # Conferir o relógio e depois carimbar são dois passos, e entre eles cabe
+    # outra thread inteira. O irmão _auto_pull_leads_throttled já resolve isso
+    # com trava; aqui faltava. Com 4 threads a janela era estreita e o defeito
+    # ficava escondido — ao subir para 24 ela fica seis vezes maior, e duas
+    # varreduras simultâneas abrem pendência repetida no sino do consultor.
+    if not _VARREDURA_FILA_LOCK.acquire(blocking=False):
+        return
+    try:
+        # Confere de NOVO com a trava na mão: quem esperou aqui pode ter
+        # esperado justamente quem acabou de carimbar.
+        if time.time() - _ULTIMA_VARREDURA_FILA < _VARREDURA_FILA_INTERVALO:
+            return
+        _ULTIMA_VARREDURA_FILA = time.time()
+    finally:
+        _VARREDURA_FILA_LOCK.release()
 
     def _run():
         try:
@@ -51657,10 +51686,33 @@ def _auto_pull_leads_throttled():
 
 
 def _iniciar_scheduler_backup():
-    """Liga agendador de backup automático JSON (22:00 SP todo dia)."""
+    """Liga agendador de backup automático JSON (22:00 SP todo dia).
+
+    A TRAVA É UMA TRAVA DE VERDADE, NÃO UMA FLAG. Antes, `_SCHEDULER_INICIADO`
+    só virava True DEPOIS de `sched.start()`: entre o `if` e a atribuição cabia
+    outra thread inteira, e cada uma que passasse subia um agendador completo.
+    Medido em bancada com 16 threads: 480 agendadores onde deviam ser 30. E não
+    é um agendador inofensivo — ele manda WhatsApp, SMS e e-mail para cliente,
+    então cada cópia manda de novo. É o estrago de 18/08/2026 outra vez.
+
+    O defeito ficou escondido enquanto o app rodava com 4 threads. Ele aparece
+    exatamente quando se sobe esse número, que é o motivo desta função ser
+    consertada ANTES do Procfile, e não junto.
+    """
     global _SCHEDULER_INICIADO
     if _SCHEDULER_INICIADO:
         return
+    with _SCHEDULER_LOCK:
+        # Confere de novo já com a trava na mão: quem ficou esperando aqui pode
+        # ter ficado esperando justamente quem estava iniciando.
+        if _SCHEDULER_INICIADO:
+            return
+        _iniciar_scheduler_backup_travado()
+
+
+def _iniciar_scheduler_backup_travado():
+    """Corpo do início do agendador. Só entra aqui com _SCHEDULER_LOCK na mão."""
+    global _SCHEDULER_INICIADO
     if MODO_TESTE:
         # Ver MODO_TESTE no topo do arquivo: teste não pode disputar o banco com
         # job de fundo. Marca como iniciado para não tentar de novo a cada request.
