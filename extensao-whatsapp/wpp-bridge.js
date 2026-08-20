@@ -241,7 +241,8 @@
   //
   // POR QUE MEDIR ASSIM, E NAO POR EVENTO AO VIVO
   //
-  // O `checarInbound` marca "respondeu" so enquanto a aba esta aberta. Quem
+  // A deteccao de resposta da campanha (checarRespostasCampanha) marca
+  // "respondeu" so enquanto a aba esta aberta em algum momento. Quem
   // responde pelo celular, ou fora do horario em que o WhatsApp Web ficou
   // aberto, some da conta. Foi isso que deixou a campanha #4 com taxa de
   // resposta 0% sem ninguem saber se era a copy ou a medicao — e decisao de
@@ -1472,23 +1473,116 @@
     if (_jobInboundLigado || ++_jobInboundTentativas > 100) clearInterval(_jobInboundTimer);
   }, 3000);
 
-  // ── Checa por LEITURA se um chat já teve resposta do contato (fallback do evento
-  //    chat.new_message, que nem sempre dispara). Lê as últimas msgs e vê se a mais
-  //    recente NÃO é nossa (fromMe===false) = o contato respondeu. Mais confiável. ──
-  async function checarInbound(chatId) {
-    if (!window.WPP || !window.WPP.chat) return { inbound: false };
+  // ── RESPOSTA DE CAMPANHA: MARCA D'ÁGUA, LIDA DA MEMÓRIA ──────────────────
+  //
+  // A checagem antiga (checarInbound) errava por dois motivos, e os dois doíam:
+  //
+  // 1. A REGRA ERA FALSA em conversa que já existia. Ela só aceitava "respondeu"
+  //    se a gente tivesse mandado UMA mensagem na vida daquele chat — desenhada
+  //    pro disparo frio, onde o primeiro "bom dia" é a primeira mensagem da
+  //    história. Em cliente de carteira existe conversa de meses, então a conta
+  //    dava 2+ e a resposta NUNCA era reconhecida. Nascia morta.
+  //
+  // 2. CUSTAVA CARO. Chamava getMessages POR CONVERSA, 15 por rodada, de minuto
+  //    em minuto — e getMessages CARREGA histórico do servidor. É o mesmo
+  //    caminho que fez o renderer bater 2,5 GB em 11/08 e derrubar a aba.
+  //
+  // A pergunta certa é outra e cabe numa passada só: para cada número em
+  // campanha, entrou alguma mensagem DO CONTATO depois da hora em que a nossa
+  // saiu? A hora do envio (a marca d'água) vem do servidor. A leitura é no
+  // ChatStore que o WhatsApp já tem em memória — nada de rede, nada de abrir
+  // conversa, nada de hidratar histórico. Uma rodada inteira custa menos que
+  // uma única chamada da versão anterior.
+  //
+  // Casar por TELEFONE e não por chat_id é de propósito: o WhatsApp entrega
+  // conversa como @lid (sem número à mostra) e o servidor só sabe endereçar
+  // '55DDD...@c.us'. Comparar id com id perdia justamente esses chats.
+
+  // DDD + 8 dígitos finais. Colapsa as formas em que o mesmo número aparece
+  // (com/sem 55, com/sem o 9º dígito) sem jogar fora o DDD — comparar só os 8
+  // finais faria (19) 9681-0150 colidir com (11) 9681-0150, que é gente
+  // diferente. Mesma canonização que o servidor faz em _normalizar_telefone.
+  function _chaveTel(bruto) {
+    let d = String((bruto && (bruto._serialized || bruto)) || '').replace(/\D/g, '');
+    if (!d) return '';
+    if (d.length > 11 && d.indexOf('55') === 0) d = d.slice(2);
+    if (d.length < 10) return d;
+    return d.slice(0, 2) + d.slice(-8);
+  }
+
+  // Houve mensagem do CONTATO depois da marca? Devolve o carimbo da PRIMEIRA
+  // (é ela que mede quanto o cliente demorou pra responder), ou 0.
+  function _respostaDepoisDe(chat, desde) {
+    let achou = 0;
+    let models = [];
     try {
-      const msgs = await _mensagensDoChat(chatId, 12);
-      if (!msgs || !msgs.length) return { inbound: false };
-      let nossas = 0;
-      for (const m of msgs) { if (m && m.id && m.id.fromMe) nossas++; }
-      const ult = msgs[msgs.length - 1];
-      const ultimaDoContato = !!(ult && ult.id && ult.id.fromMe === false);
-      // Só conta como "respondeu p/ disparar o funil" se: a última mensagem é do
-      // CONTATO **e** a gente só mandou UMA vez (a saudação). Se houver 2+ nossas,
-      // um humano já respondeu (mesmo pelo celular) — NÃO dispara o funil.
-      return { inbound: !!(ultimaDoContato && nossas <= 1) };
-    } catch (e) { return { inbound: false }; }
+      models = (chat.msgs && (chat.msgs.getModelsArray ? chat.msgs.getModelsArray() : chat.msgs._models)) || [];
+    } catch (e) { models = []; }
+    for (const m of models) {
+      // fromMe === false, e não !fromMe: mensagem de sistema vem sem o campo, e
+      // "sem campo" não é o cliente falando.
+      if (!m || !m.t || !m.id || m.id.fromMe !== false) continue;
+      if (m.t <= desde) continue;
+      if (!achou || m.t < achou) achou = m.t;
+    }
+    if (achou) return achou;
+    // A coleção em memória pode não ter a mensagem (conversa antiga, pouco
+    // rolada). O próprio chat ainda denuncia: não-lida + movimento depois da
+    // marca só acontece com mensagem que ENTROU — a nossa sai lida.
+    const t = Number(chat.t || 0);
+    if (t > desde && Number(chat.unreadCount || 0) > 0) return t;
+    return 0;
+  }
+
+  function checarRespostasCampanha(alvos) {
+    if (!window.WPP || !window.WPP.whatsapp) return { erro: 'wpp_ausente' };
+    const lista = Array.isArray(alvos) ? alvos : [];
+    if (!lista.length) return { respostas: [], vigiados: 0, conferidos: 0, sem_memoria: 0, chats: 0 };
+    let chats = [];
+    try {
+      const CS = window.WPP.whatsapp.ChatStore;
+      if (CS && CS.getModelsArray) chats = CS.getModelsArray() || [];
+    } catch (e) { return { erro: 'sem_chatstore' }; }
+    if (!chats.length) {
+      // Sem ChatStore não se afirma NADA. Dizer "ninguém respondeu" aqui seria
+      // inventar silêncio — e foi exatamente esse tipo de resposta muda que fez
+      // uma campanha inteira parecer fracasso.
+      return { respostas: [], vigiados: lista.length, conferidos: 0, sem_memoria: lista.length, chats: 0 };
+    }
+
+    const porTel = new Map();
+    for (const c of chats) {
+      try {
+        if (!c || !c.id || c.isGroup) continue;
+        const cid = c.id._serialized || '';
+        if (!cid || cid.indexOf('@g.us') > 0 || cid.indexOf('status@') === 0) continue;
+        let tel = '';
+        if (cid.indexOf('@c.us') > 0) tel = cid.split('@')[0];
+        else if (cid.indexOf('@lid') > 0) tel = _telLocalDoLid(c.id);
+        const k = _chaveTel(tel);
+        if (!k) continue;
+        // Mesmo número em dois chats (@lid e @c.us): fica o de movimento mais
+        // recente, que é onde a resposta estaria.
+        const ja = porTel.get(k);
+        if (!ja || Number(c.t || 0) > Number(ja.t || 0)) porTel.set(k, c);
+      } catch (e) { /* um chat problemático não derruba a rodada */ }
+    }
+
+    const respostas = [];
+    let conferidos = 0, semMemoria = 0;
+    for (const alvo of lista) {
+      try {
+        const k = _chaveTel(alvo && alvo.telefone);
+        const desde = Number(alvo && alvo.desde) || 0;
+        if (!k || !desde) continue;   // sem marca d'água não há o que comparar
+        const chat = porTel.get(k);
+        if (!chat) { semMemoria++; continue; }
+        conferidos++;
+        const em = _respostaDepoisDe(chat, desde);
+        if (em) respostas.push({ telefone: alvo.telefone, contato_id: (alvo.contato_id || null), em });
+      } catch (e) { /* idem */ }
+    }
+    return { respostas, vigiados: lista.length, conferidos, sem_memoria: semMemoria, chats: chats.length };
   }
 
   // TIPOS QUE SÓ LEEM. Enquanto um deles roda, _navegarConversa recusa —
@@ -1505,7 +1599,8 @@
     'baixar_audios', 'listar_audios', 'listar_conversas_dia', 'listar_todas_conversas',
     'ler_conversa_de', 'baixar_audios_ids', 'baixar_midia_ids', 'canario',
     'baixar_documentos', 'ler_mensagens', 'ler_conversa_completa',
-    'obter_telefone', 'obter_meu_numero', 'obter_chat_id', 'checar_inbound',
+    'obter_telefone', 'obter_meu_numero', 'obter_chat_id',
+    'checar_respostas_campanha',
     'medir_respostas',
   ]);
 
@@ -1537,7 +1632,7 @@
       else if (d.tipo === 'enviar_midia') resp = await enviarMidia(d.chatId, d.midiaTipo, d.dataUrl, d.legenda, d.nomeArquivo);
       else if (d.tipo === 'salvar_contato') resp = await salvarContato(d.chatId, d.nome, d.sobrenome);
       else if (d.tipo === 'apagar_conversa') resp = await apagarConversa(d.chatId);
-      else if (d.tipo === 'checar_inbound') resp = await checarInbound(d.chatId);
+      else if (d.tipo === 'checar_respostas_campanha') resp = checarRespostasCampanha(d.alvos);
       else return;
     } catch (e) { resp = { erro: 'excecao' }; }
     finally {

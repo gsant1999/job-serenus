@@ -3865,6 +3865,11 @@ def init_db():
         ("usuarios", "modulos", "TEXT"),
         # Disparo em roleta (Fase 2): rastreio de resposta/exclusão por contato.
         ("campanha_contato", "sem_resposta_em", "TIMESTAMP"),
+        # COMO a resposta foi descoberta: 'evento' (a extensão viu chegar ao vivo),
+        # 'ronda' (a conferência de minuto em minuto achou depois) ou 'manual'.
+        # Sem isso não dá pra responder a pergunta que abriu este trabalho: a
+        # campanha teve pouca resposta, ou a gente é que não estava vendo?
+        ("campanha_contato", "detectado_por", "TEXT"),
         ("campanha_contato", "excluido_em", "TIMESTAMP"),
         # Janela (dias) sem resposta até o contato virar 'sem_resposta' (varredura).
         ("campanha", "dias_sem_resposta", "INTEGER DEFAULT 2"),
@@ -12130,14 +12135,39 @@ def api_whatsapp_campanha_resposta():
     if not tel:
         return _wa_cors(jsonify({"ok": False, "erro": "telefone"})), 400
     uid = d.get('usuario_id')
+    # COMO foi descoberto: ao vivo pelo evento, ou pela conferência que roda de
+    # minuto em minuto. Guardar isso é o que permite dizer depois se uma campanha
+    # foi mal ou se a gente é que estava cego.
+    origem_det = str(d.get('detectado_por') or 'evento')[:20]
+    if origem_det not in ('evento', 'ronda', 'manual'):
+        origem_det = 'evento'
+    # HORA DA RESPOSTA: quando a extensão consegue ler o carimbo da mensagem do
+    # cliente, é ELE que vale — a resposta pode ter chegado às 21h e só ser vista
+    # às 9h do dia seguinte, quando o consultor abriu o WhatsApp. Gravar a hora da
+    # descoberta em vez da hora do fato faria todo tempo-até-responder mentir.
+    quando = _agora_sp()
+    try:
+        _ts = int(d.get('respondeu_ts') or 0)
+        if _ts > 0:
+            _dt = datetime.fromtimestamp(_ts, TZ_SP)
+            # Nunca aceita futuro: relógio torto do aparelho não pode virar dado.
+            if _dt <= datetime.now(TZ_SP):
+                quando = _dt.strftime('%Y-%m-%d %H:%M:%S')
+    except (TypeError, ValueError, OSError, OverflowError):
+        pass
     conn = db()
+    # 'sem_resposta' entra na lista: a detecção velha era cega em conversa que já
+    # existia, então há contato marcado como silencioso que na verdade respondeu.
+    # Quando a conferência achar essa resposta antiga, o registro se corrige — e o
+    # funil não sai junto, que é o que a validade de envio (commit anterior) trava.
+    _sts = "('enfileirado','enviado','sem_resposta')"
     if uid:
-        conn.execute("""UPDATE campanha_contato SET status='respondeu', respondeu_em=?
-            WHERE telefone_norm=? AND consultor_id=? AND status IN ('enfileirado','enviado')""",
-            (_agora_sp(), tel, uid))
+        conn.execute(f"""UPDATE campanha_contato SET status='respondeu', respondeu_em=?, detectado_por=?
+            WHERE telefone_norm=? AND consultor_id=? AND status IN {_sts}""",
+            (quando, origem_det, tel, uid))
     else:
-        conn.execute("""UPDATE campanha_contato SET status='respondeu', respondeu_em=?
-            WHERE telefone_norm=? AND status IN ('enfileirado','enviado')""", (_agora_sp(), tel))
+        conn.execute(f"""UPDATE campanha_contato SET status='respondeu', respondeu_em=?, detectado_por=?
+            WHERE telefone_norm=? AND status IN {_sts}""", (quando, origem_det, tel))
     # Auto-dispara o funil da campanha (com delay aleatório) pros que responderam
     # agora e ainda não receberam. NÃO exige campanha 'ativa': o lead pode responder
     # dias depois, com a campanha já concluída — o conteúdo tem que sair mesmo assim.
@@ -12168,17 +12198,22 @@ def api_whatsapp_campanha_aguardando():
     conn = db()
     _campanha_marcar_sem_resposta(conn)  # promove os vencidos antes de listar
     def _linha(r):
+        # `desde` é a marca d'água: a hora em que a NOSSA mensagem saiu. A extensão
+        # só chama de resposta o que entrou depois disso. Sem ela, a checagem tinha
+        # que adivinhar pelo formato da conversa — e adivinhava errado em cliente
+        # de carteira, onde já existe conversa de meses.
         return {"contato_id": r['id'], "telefone": r['telefone_norm'],
                 "nome": (r['lead_nome'] or ''),
+                "desde": _epoch_sp(r['enviado_em']),
                 "chat_id": _wa_chat_id(r['telefone_norm'] or r['telefone'] or '')}
     # Nome do lead por subquery (não multiplica linha se houver lead duplicado)
     # — pra o aviso de limpeza dizer QUEM vai ser apagado, não só "2 conversas".
-    aguard = conn.execute("""SELECT id, telefone, telefone_norm,
+    aguard = conn.execute("""SELECT id, telefone, telefone_norm, enviado_em,
         (SELECT nome FROM crm_leads l WHERE l.telefone_norm = campanha_contato.telefone_norm ORDER BY l.id LIMIT 1) AS lead_nome
         FROM campanha_contato
         WHERE consultor_id=? AND status='enviado' AND respondeu_em IS NULL AND excluido_em IS NULL
           AND telefone_norm IS NOT NULL AND telefone_norm<>''""", (uid,)).fetchall()
-    excluir = conn.execute("""SELECT id, telefone, telefone_norm,
+    excluir = conn.execute("""SELECT id, telefone, telefone_norm, enviado_em,
         (SELECT nome FROM crm_leads l WHERE l.telefone_norm = campanha_contato.telefone_norm ORDER BY l.id LIMIT 1) AS lead_nome
         FROM campanha_contato
         WHERE consultor_id=? AND status='sem_resposta' AND excluido_em IS NULL
@@ -25487,6 +25522,31 @@ def _wa_chat_id(telefone):
     return f"{fone}@c.us" if fone else ''
 
 
+def _epoch_sp(valor):
+    """Timestamp do banco -> segundos desde 1970 (UTC), que é a unidade em que o
+    WhatsApp carimba cada mensagem (`msg.t`). É a marca d'água do disparo: a
+    extensão compara a hora que a NOSSA mensagem saiu com a hora das mensagens
+    que entraram, e é assim que ela sabe se o cliente respondeu.
+
+    O fuso não é detalhe: o JOB grava na hora de São Paulo e o SQLite devolve
+    string sem fuso nenhum. Sem colar o TZ aqui, a conta erraria em 3 horas — e
+    errar pra menos é o pior lado, porque mensagem que chegou ANTES do envio
+    passaria por resposta. None quando não dá pra converter."""
+    dt = _parse_dt_seguro(valor)
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        # localize(), NUNCA replace(tzinfo=). TZ_SP é pytz: com replace ele entrega
+        # o fuso HISTÓRICO de 1914 (LMT, -03:06:28) e a conta sai 6 minutos e meio
+        # adiantada — a marca d'água ficaria no futuro e resposta que chegasse nos
+        # primeiros 6 minutos passaria batida. Foi o teste local que pegou isso.
+        dt = TZ_SP.localize(dt)
+    try:
+        return int(dt.timestamp())
+    except Exception:
+        return None
+
+
 def _wa_segundos_desde(valor):
     """Segundos desde um timestamp do banco (PG datetime ou string SQLite),
     lidando com naive/aware igual _data_expirada. None se valor vazio/inválido."""
@@ -30108,8 +30168,8 @@ def admin_set_trabalhador(sid):
 def api_whatsapp_tempo_resposta():
     """Recebe a medicao de tempo de resposta que a extensao fez do historico.
 
-    POR QUE ISTO EXISTE. O JOB so sabia se um lead respondeu quando o
-    `checarInbound` estava rodando — ou seja, com a aba do WhatsApp aberta.
+    POR QUE ISTO EXISTE. O JOB so sabia se um lead respondeu quando a
+    deteccao de campanha estava rodando — ou seja, com a aba do WhatsApp aberta.
     Consultor que responde pelo celular, ou depois de fechar o navegador,
     simplesmente nao entrava na conta. A campanha #4 marcou 0% de resposta e
     ninguem sabia dizer se a copy era ruim ou se a medicao e que nao via.
