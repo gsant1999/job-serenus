@@ -1322,6 +1322,76 @@ def init_db():
                 respondeu_em TIMESTAMP,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            # ═══ DISPARO PARA CAMPANHAS (base própria) ═══
+            # IRMÃO do disparo MEI (tabela `campanha`), e separado dele de
+            # propósito. Lá a lista é fria e anônima: ninguém tem dono, então a
+            # roleta reparte entre quem estiver apto. Aqui o público é a base da
+            # casa — gente que JÁ tem consultor — e a mensagem tem que sair pelo
+            # WhatsApp de quem já conversa com ela. Roleta aqui seria um estranho
+            # falando em nome de quem o cliente conhece.
+            #
+            # As regras divergem em quase tudo (dono, etiqueta, arquivamento,
+            # o que acontece na resposta), então um `if tipo` dentro do MEI
+            # deixaria os dois intocáveis. Tabelas próprias, motor próprio.
+            """CREATE TABLE IF NOT EXISTS disparo_campanha (
+                id SERIAL PRIMARY KEY,
+                nome TEXT NOT NULL,
+                descricao TEXT,
+                publico TEXT NOT NULL DEFAULT 'leads',
+                fonte TEXT NOT NULL DEFAULT 'planilha',
+                filtro_json TEXT,
+                teto_dia INTEGER NOT NULL DEFAULT 10,
+                hora_inicio TEXT NOT NULL DEFAULT '08:00',
+                hora_fim TEXT NOT NULL DEFAULT '18:00',
+                dias_semana TEXT NOT NULL DEFAULT '1,2,3,4,5',
+                status TEXT NOT NULL DEFAULT 'rascunho',
+                criado_por INTEGER,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            # UNIQUE(campanha_id, telefone_norm): a regra "pode estar em várias
+            # campanhas, nunca duas vezes na mesma" vira trava de banco, não
+            # promessa de código. `variaveis_json` guarda as colunas extras da
+            # planilha (mensalidade, vencimento) que a mensagem usa.
+            """CREATE TABLE IF NOT EXISTS disparo_campanha_alvo (
+                id SERIAL PRIMARY KEY,
+                campanha_id INTEGER NOT NULL,
+                lead_id INTEGER,
+                consultor_id INTEGER,
+                nome TEXT,
+                telefone TEXT,
+                telefone_norm TEXT,
+                variaveis_json TEXT,
+                modelo_id INTEGER,
+                texto_enviado TEXT,
+                status TEXT NOT NULL DEFAULT 'sem_dono',
+                fila_id INTEGER,
+                tentativas INTEGER NOT NULL DEFAULT 0,
+                enviado_em TIMESTAMP,
+                respondeu_em TIMESTAMP,
+                detectado_por TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(campanha_id, telefone_norm)
+            )""",
+            # Modelo POR CONSULTOR. Sete pessoas mandando o mesmo texto no mesmo
+            # dia é assinatura de robô e derruba número — cada um manda o dele.
+            """CREATE TABLE IF NOT EXISTS disparo_campanha_modelo (
+                id SERIAL PRIMARY KEY,
+                campanha_id INTEGER NOT NULL,
+                consultor_id INTEGER NOT NULL,
+                modelo_id INTEGER NOT NULL,
+                UNIQUE(campanha_id, consultor_id, modelo_id)
+            )""",
+            # NUNCA MAIS. Quem pediu pra parar não entra em campanha nenhuma, de
+            # nenhum consultor, nem se o telefone vier na planilha que o admin
+            # subiu. A lista é por telefone porque é o telefone que recebe.
+            """CREATE TABLE IF NOT EXISTS disparo_bloqueio (
+                id SERIAL PRIMARY KEY,
+                telefone_norm TEXT NOT NULL UNIQUE,
+                motivo TEXT,
+                lead_id INTEGER,
+                marcado_por INTEGER,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS consultor_wpp_status (
                 usuario_id INTEGER PRIMARY KEY,
                 versao TEXT,
@@ -2589,6 +2659,67 @@ def init_db():
             fila_id INTEGER,
             enviado_em TIMESTAMP,
             respondeu_em TIMESTAMP,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        # ═══ DISPARO PARA CAMPANHAS (base própria) ═══
+        # IRMÃO do disparo MEI (tabela `campanha`), e separado dele de
+        # propósito. Lá a lista é fria e anônima: ninguém tem dono, então a
+        # roleta reparte entre quem estiver apto. Aqui o público é a base da
+        # casa — gente que JÁ tem consultor — e a mensagem tem que sair pelo
+        # WhatsApp de quem já conversa com ela. Roleta aqui seria um estranho
+        # falando em nome de quem o cliente conhece.
+        #
+        # As regras divergem em quase tudo (dono, etiqueta, arquivamento,
+        # o que acontece na resposta), então um `if tipo` dentro do MEI
+        # deixaria os dois intocáveis. Tabelas próprias, motor próprio.
+        CREATE TABLE IF NOT EXISTS disparo_campanha (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            descricao TEXT,
+            publico TEXT NOT NULL DEFAULT 'leads',
+            fonte TEXT NOT NULL DEFAULT 'planilha',
+            filtro_json TEXT,
+            teto_dia INTEGER NOT NULL DEFAULT 10,
+            hora_inicio TEXT NOT NULL DEFAULT '08:00',
+            hora_fim TEXT NOT NULL DEFAULT '18:00',
+            dias_semana TEXT NOT NULL DEFAULT '1,2,3,4,5',
+            status TEXT NOT NULL DEFAULT 'rascunho',
+            criado_por INTEGER,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS disparo_campanha_alvo (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campanha_id INTEGER NOT NULL,
+            lead_id INTEGER,
+            consultor_id INTEGER,
+            nome TEXT,
+            telefone TEXT,
+            telefone_norm TEXT,
+            variaveis_json TEXT,
+            modelo_id INTEGER,
+            texto_enviado TEXT,
+            status TEXT NOT NULL DEFAULT 'sem_dono',
+            fila_id INTEGER,
+            tentativas INTEGER NOT NULL DEFAULT 0,
+            enviado_em TIMESTAMP,
+            respondeu_em TIMESTAMP,
+            detectado_por TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(campanha_id, telefone_norm)
+        );
+        CREATE TABLE IF NOT EXISTS disparo_campanha_modelo (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campanha_id INTEGER NOT NULL,
+            consultor_id INTEGER NOT NULL,
+            modelo_id INTEGER NOT NULL,
+            UNIQUE(campanha_id, consultor_id, modelo_id)
+        );
+        CREATE TABLE IF NOT EXISTS disparo_bloqueio (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telefone_norm TEXT NOT NULL UNIQUE,
+            motivo TEXT,
+            lead_id INTEGER,
+            marcado_por INTEGER,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS consultor_wpp_status (
