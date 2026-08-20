@@ -299,6 +299,56 @@ def testar_fluxo():
     )
     checa('admin exclui uma cotação', r.status_code == 200, json_ok(r))
 
+    testar_mover_etapa(cliente, consultor_id)
+
+
+def testar_mover_etapa(cliente, consultor_id):
+    """As rotas por trás de crm_etapas_listar e leads_mover_etapa.
+
+    O que importa aqui não é o caminho feliz: é que a rota de salvar responde
+    HTTP 200 com ok:true MESMO recusando a etapa. Se isso mudar sem ninguém
+    perceber, a tool do MCP volta a mentir que moveu.
+    """
+    conn = A.db()
+    conn.execute(
+        "INSERT INTO crm_leads (nome, telefone, telefone_norm, etapa, responsavel_id)"
+        " VALUES (?,?,?,?,?)",
+        ('Lead de etapa', '(19) 99999-0002', '19999990002', 'lead_novo', consultor_id),
+    )
+    conn.commit()
+    lid = conn.execute(
+        "SELECT id FROM crm_leads WHERE telefone_norm='19999990002'").fetchone()['id']
+    A.close_db(conn)
+
+    r = chamada(cliente, 'GET', '/api/whatsapp/lead/ficha',
+                query_string={'lead_id': 99999999})
+    corpo = r.get_json() or {}
+    checa('ficha lista etapas mesmo com lead inexistente',
+          r.status_code == 200 and len(corpo.get('etapas') or []) > 0, json_ok(r))
+    checa('ficha marca existe=false para lead inexistente',
+          corpo.get('existe') is False, json_ok(r))
+
+    r = chamada(cliente, 'POST', '/api/whatsapp/lead/salvar',
+                json={'lead_id': lid, 'etapa': '__nao_existe__'})
+    corpo = r.get_json() or {}
+    checa('etapa inválida NÃO vira erro HTTP (o MCP depende disso)',
+          r.status_code == 200 and corpo.get('ok') is True, json_ok(r))
+    checa('etapa inválida é sinalizada em etapa_ok/etapa_erro',
+          corpo.get('etapa_ok') is False and corpo.get('etapa_erro'), json_ok(r))
+
+    r = chamada(cliente, 'POST', '/api/whatsapp/lead/salvar',
+                json={'lead_id': lid, 'etapa': 'cotacao_enviada', 'usuario_nome': 'Agente MCP'})
+    corpo = r.get_json() or {}
+    checa('etapa válida move o lead',
+          (corpo.get('lead') or {}).get('etapa') == 'cotacao_enviada', json_ok(r))
+    checa('o lead que volta é a única prova do movimento (mudou não cita etapa)',
+          'etapa' not in (corpo.get('mudou') or []), json_ok(r))
+
+    conn = A.db()
+    etapa = conn.execute("SELECT etapa FROM crm_leads WHERE id=?", (lid,)).fetchone()['etapa']
+    A.close_db(conn)
+    checa('banco confirma a etapa nova', etapa == 'cotacao_enviada', etapa)
+
 
 if __name__ == '__main__':
     print('Integração da API do MCP de cotações')

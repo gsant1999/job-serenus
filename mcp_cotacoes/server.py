@@ -21,9 +21,11 @@ from .models import (
     CotacaoSalvarAoVivoInput,
     CotacaoSalvarLocalInput,
     CotacoesListarInput,
+    CrmEtapasListarInput,
     ImagemResposta,
     LeadBuscarInput,
     LeadCriarInput,
+    LeadMoverEtapaInput,
     OperadorasListarInput,
     PedidoFilaInput,
     PlanosListarInput,
@@ -195,6 +197,147 @@ async def leads_buscar(entrada: LeadBuscarInput) -> RespostaMCP:
 async def leads_criar(entrada: LeadCriarInput) -> RespostaMCP:
     """Cria lead com deduplicação por telefone; devolve o existente quando já cadastrado."""
     return resposta_mcp(await job.request("POST", "/api/v1/crm/leads", json_body=_json(entrada)))
+
+
+# lead_id que não existe. A ficha do JOB devolve a configuração do CRM (etapas,
+# campos, quadros) mesmo quando não acha o lead — é o único jeito de listar as
+# etapas com a chave de API, porque /crm/etapas exige sessão de navegador.
+_LEAD_INEXISTENTE = 99_999_999
+
+
+@mcp.tool(annotations=LEITURA)
+async def crm_etapas_listar(entrada: CrmEtapasListarInput) -> RespostaMCP:
+    """Lista as etapas do funil e os campos que travam a saída de cada uma.
+
+    Chame antes de leads_mover_etapa: os slugs são configuráveis pelo administrador
+    e não devem ser adivinhados.
+    """
+    resultado = await job.request(
+        "GET", "/api/whatsapp/lead/ficha",
+        params={"lead_id": entrada.lead_id or _LEAD_INEXISTENTE},
+    )
+    r = resposta_mcp(resultado)
+    if not r.ok:
+        return r
+    dados = resultado.dados if isinstance(resultado.dados, dict) else {}
+    # Projeção obrigatória: a ficha crua tem ~140 KB e 82% disso é a lista dos
+    # 5.571 municípios, que ninguém pediu e o agente pagaria em token.
+    etapas = [
+        {"slug": e.get("slug"), "nome": e.get("nome"), "tipo": e.get("tipo"), "ordem": e.get("ordem")}
+        for e in (dados.get("etapas") or [])
+    ]
+    travas = [
+        {
+            "campo": c.get("chave"),
+            "nome": c.get("nome"),
+            "obriga_sair_de": c.get("obriga_saida_de") or None,
+            "obriga_entrar_em": c.get("obriga_entrada_em") or None,
+            "opcoes": c.get("opcoes") or [],
+        }
+        for c in (dados.get("campos_def") or [])
+        if c.get("obriga_saida_de") or c.get("obriga_entrada_em")
+    ]
+    saida: dict = {"etapas": etapas, "campos_que_travam": travas}
+    avisos = []
+    if entrada.lead_id:
+        saida["motivos_perda"] = dados.get("motivos_perda") or []
+        if not dados.get("existe"):
+            avisos.append(
+                f"O lead {entrada.lead_id} não existe, então a lista de motivos de perda "
+                "veio vazia por causa disso, não porque a corretora não tem motivos."
+            )
+    else:
+        avisos.append("Chame com um lead_id real se precisar também dos motivos de perda.")
+    # O JOB tem um fallback de emergência que inventa 9 etapas quando a tabela
+    # de etapas falha. Agir sobre ele seria mover lead pela configuração errada.
+    if len(etapas) == 9 and not any(e["slug"] == "transferencia" for e in etapas):
+        avisos.insert(0, "Esta lista parece o fallback de emergência do JOB, não a configuração "
+                         "real. Confirme com um administrador antes de mover lead.")
+    return RespostaMCP(
+        ok=True, status_http=resultado.status, dados=saida,
+        proximo_passo=" ".join(avisos) or None,
+    )
+
+
+def _resposta_mover_etapa(resultado, etapa_pedida: str) -> RespostaMCP:
+    """Envelope próprio, porque a rota do JOB mente por omissão.
+
+    /api/whatsapp/lead/salvar responde HTTP 200 com ok:true MESMO QUANDO RECUSA
+    a mudança de etapa — o motivo real fica em etapa_ok/etapa_erro. Passar isso
+    pelo resposta_mcp() cru faria a tool dizer "movido" para um lead que não saiu
+    do lugar, e o agente avisaria o corretor de um avanço que não houve.
+
+    A prova de que andou é uma só: o lead que volta na resposta está na etapa
+    pedida. Não dá para usar `mudou` — ele nunca lista a etapa.
+    """
+    r = resposta_mcp(resultado)
+    if not r.ok:
+        return r
+    dados = resultado.dados if isinstance(resultado.dados, dict) else {}
+    lead = dados.get("lead") or {}
+    atual = str(lead.get("etapa") or "").strip()
+    avisos = [str(a) for a in (dados.get("avisos") or []) if a]
+
+    if dados.get("etapa_ok") is False:
+        erro_etapa = str(dados.get("etapa_erro") or "")
+        # `campos_faltando` vem SEMPRE, referente à etapa ATUAL do lead — inclusive
+        # quando a recusa foi por slug inexistente. Quem decide o conselho é o
+        # motivo, não a presença da lista: senão a tool manda preencher um campo
+        # para consertar um erro de digitação no nome da etapa.
+        por_campo = erro_etapa.startswith("Preencha antes") or erro_etapa.startswith("Antes de mover")
+        faltando = [
+            str(c.get("chave")) for c in (dados.get("campos_faltando") or []) if c.get("chave")
+        ]
+        if por_campo and faltando:
+            proximo = ("Preencha " + ", ".join(faltando) + " no argumento campos e chame de novo. "
+                       "Use crm_etapas_listar para ver os valores aceitos.")
+        else:
+            proximo = ("Confira o slug em crm_etapas_listar. O lead continua em "
+                       f"'{atual or 'etapa desconhecida'}'.")
+        return RespostaMCP(
+            ok=False, status_http=resultado.status, dados=None, codigo="etapa_recusada",
+            erro=str(dados.get("etapa_erro") or "O JOB recusou a mudança de etapa."),
+            proximo_passo=proximo,
+        )
+
+    if atual != etapa_pedida:
+        return RespostaMCP(
+            ok=False, status_http=resultado.status, dados=None, codigo="etapa_nao_mudou",
+            erro=(f"O JOB respondeu sucesso, mas o lead está em '{atual or 'etapa desconhecida'}' "
+                  f"e não em '{etapa_pedida}'."),
+            proximo_passo="Confirme o slug em crm_etapas_listar antes de tentar de novo.",
+        )
+
+    return RespostaMCP(
+        ok=True, status_http=resultado.status,
+        dados={"lead_id": lead.get("id"), "etapa": atual, "avisos": avisos},
+        proximo_passo=("Avisos do JOB: " + "; ".join(avisos)) if avisos else None,
+    )
+
+
+@mcp.tool(annotations=ATUALIZACAO)
+async def leads_mover_etapa(entrada: LeadMoverEtapaInput) -> RespostaMCP:
+    """Move o lead para outra etapa do funil do CRM, com histórico.
+
+    Liste as etapas com crm_etapas_listar antes: o slug não pode ser adivinhado.
+    Algumas etapas de origem exigem um campo preenchido para poder sair; nesse
+    caso a tool devolve ok:false dizendo qual campo mandar em `campos`.
+    """
+    corpo: dict = {
+        "lead_id": entrada.lead_id,
+        "etapa": entrada.etapa,
+        "usuario_nome": entrada.usuario_nome,
+    }
+    if entrada.usuario_id:
+        corpo["usuario_id"] = entrada.usuario_id
+    if entrada.campos:
+        corpo["campos"] = entrada.campos
+    # Nada de 'etiquetas' aqui, nunca: a rota trata esse campo como lista FECHADA
+    # e apagaria toda etiqueta do lead que não viesse junto.
+    return _resposta_mover_etapa(
+        await job.request("POST", "/api/whatsapp/lead/salvar", json_body=corpo),
+        entrada.etapa,
+    )
 
 
 @mcp.tool(annotations=ESCRITA)
