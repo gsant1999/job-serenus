@@ -355,6 +355,9 @@
 // resultado e a API passa a poder entregar a imagem.
 (function(){
   var COTACAO_ID = {{ c.id if c else 'null' }};
+  // O token vai junto porque a página pública não tem sessão: é ele que prova
+  // ao servidor que quem está gravando o PNG abriu a cotação de verdade.
+  var COTACAO_TOKEN = {{ (c.token or '') | tojson if c else '""' }};
   if (!COTACAO_ID) return;
   window.addEventListener('load', function(){
     setTimeout(function(){
@@ -365,7 +368,7 @@
         restaurar();
         fetch('/cotacao/' + COTACAO_ID + '/imagem', {
           method: 'POST', headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ imagem: canvas.toDataURL('image/png') })
+          body: JSON.stringify({ imagem: canvas.toDataURL('image/png'), token: COTACAO_TOKEN })
         }).catch(function(){});
       }).catch(function(){});
       });
