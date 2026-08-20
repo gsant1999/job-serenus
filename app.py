@@ -12377,6 +12377,12 @@ def campanha_editar_conteudo(cid):
 # em {vencimento}") em vez de mala direta.
 
 _DISPARO_ORIGEM = 'disparo_base'          # como o item aparece na fila de envio
+# Nome do estado em português, pra tela e log não falarem em slug de banco.
+_DISPARO_STATUS_TEXTO = {'rascunho': 'em rascunho', 'ativa': 'ativa',
+                         'pausada': 'pausada', 'concluida': 'concluída'}
+# Última explicação do "nada saiu", pra rodada de 5 min só falar quando muda.
+# Some no restart, e tudo bem: no restart o log repete uma vez e para.
+_DISPARO_AUTO_ULTIMO = {'motivo': ''}
 
 # Cabeçalhos que a gente reconhece sozinho. O admin não devia ter que aprender o
 # nome que o sistema quer — ele exporta do lugar de onde exportou e sobe.
@@ -12976,6 +12982,7 @@ def _disparo_enfileirar(conn, campanha_id, agora=None):
     teto = max(1, int(camp['teto_dia'] or 10))
     hoje = agora.strftime('%Y-%m-%d')
     n, sem_modelo, inaptos, sem_variavel = 0, set(), set(), 0
+    criados = []   # ids que este laço criou na fila, pra conferir depois do commit
 
     donos = [r['consultor_id'] for r in conn.execute("""SELECT DISTINCT consultor_id
         FROM disparo_campanha_alvo WHERE campanha_id=? AND status='pendente'
@@ -13059,8 +13066,31 @@ def _disparo_enfileirar(conn, campanha_id, agora=None):
             conn.execute("""UPDATE disparo_campanha_alvo
                 SET status='enfileirado', fila_id=?, modelo_id=?, texto_enviado=? WHERE id=?""",
                 (fila_id, modelo.get('id'), texto[:500], alvo['id']))
+            criados.append(fila_id)
             n += 1
     conn.commit()
+    # CONTAR INTENÇÃO NÃO É CONTAR ENTREGA. `n` soma antes do commit, então o
+    # número que ia pro log era o que a função TENTOU fazer. Em 20/08/2026 ele
+    # disse "27 na fila" e só 10 linhas existiam depois — e não sobrou registro
+    # nenhum pra explicar as outras 17. Aqui a conferência é depois do commit:
+    # se o que persistiu não bate com o que foi tentado, isso vira aviso na hora,
+    # com os ids, em vez de virar arqueologia semanas depois.
+    if criados:
+        try:
+            marc = ','.join(['?'] * len(criados))
+            vivos = conn.execute(
+                f"SELECT COUNT(*) q FROM whatsapp_extensao_fila WHERE id IN ({marc})",
+                tuple(criados)).fetchone()['q']
+            if vivos != len(criados):
+                sumiram = [i for i in criados if i not in {r['id'] for r in conn.execute(
+                    f"SELECT id FROM whatsapp_extensao_fila WHERE id IN ({marc})",
+                    tuple(criados)).fetchall()}]
+                app.logger.warning(
+                    f"[DISPARO_AUTO] campanha {campanha_id}: tentei enfileirar {len(criados)} "
+                    f"e sobraram {vivos} na fila. Sumiram os ids {sumiram}.")
+                n = vivos
+        except Exception as e:
+            app.logger.warning(f"[DISPARO_AUTO] campanha {campanha_id}: não confirmei a fila: {e}")
     nomes = lambda ids: [r['nome'] for r in conn.execute(
         f"SELECT nome FROM usuarios WHERE id IN ({','.join(['?'] * len(ids))})", tuple(ids)).fetchall()] if ids else []
     return {'enfileirados': n, 'motivo': '', 'sem_modelo': nomes(list(sem_modelo)),
@@ -13087,6 +13117,7 @@ def _disparo_enfileirar_automatico(conn=None, agora=None):
     try:
         ativas = [r['id'] for r in conn.execute(
             "SELECT id FROM disparo_campanha WHERE status='ativa' ORDER BY id").fetchall()]
+        motivos = []
         for cid in ativas:
             try:
                 r = _disparo_enfileirar(conn, cid, agora)
@@ -13097,8 +13128,43 @@ def _disparo_enfileirar_automatico(conn=None, agora=None):
             total += n
             if n:
                 tocadas += 1
+            else:
+                # A função já sabe QUEM está faltando; até aqui isso era jogado
+                # fora e o log diria só "zero". Nome de gente é o que transforma
+                # a linha em ação: dá pra ligar pra pessoa.
+                detalhe = r.get('motivo') or ''
+                if not detalhe and r.get('inaptos'):
+                    detalhe = 'esperando o WhatsApp abrir: ' + ', '.join(r['inaptos'])
+                if not detalhe and r.get('sem_modelo'):
+                    detalhe = 'sem modelo atribuído: ' + ', '.join(r['sem_modelo'])
+                if not detalhe and r.get('sem_variavel'):
+                    detalhe = f"{r['sem_variavel']} alvo(s) sem valor de variável"
+                motivos.append(f"campanha {cid}: {detalhe or 'nada elegível agora'}")
+        # CAMPANHA PARADA COM GENTE ESPERANDO É NOTÍCIA, NÃO ROTINA. O SELECT
+        # acima filtra por 'ativa', então campanha pausada não deixa nem rastro:
+        # a rodada roda, não acha nada e o `if total:` abaixo cala. Foi assim que
+        # 33 contatos ficaram parados uma hora sem uma linha de log.
+        try:
+            for r in conn.execute(
+                """SELECT c.id, c.status, COUNT(a.id) AS parados
+                     FROM disparo_campanha c
+                     JOIN disparo_campanha_alvo a
+                       ON a.campanha_id = c.id AND a.status = 'pendente'
+                    WHERE c.status <> 'ativa'
+                    GROUP BY c.id, c.status""").fetchall():
+                motivos.append(f"campanha {r['id']}: {r['parados']} parado(s), campanha "
+                               f"{_DISPARO_STATUS_TEXTO.get(r['status'], r['status'])}")
+        except Exception as e:
+            app.logger.warning(f"[DISPARO_AUTO] não consegui olhar campanhas paradas: {e}")
         if total:
             app.logger.info(f"[DISPARO_AUTO] {total} na fila, {tocadas} campanha(s)")
+        # O motivo já existia e era jogado fora. Só que este laço roda de 5 em 5
+        # minutos: repetir a mesma frase 288 vezes por dia treina todo mundo a
+        # ignorar o log. Fala quando MUDA — que é quando há o que saber.
+        agora_txt = ' | '.join(motivos)
+        if agora_txt and agora_txt != _DISPARO_AUTO_ULTIMO.get('motivo'):
+            app.logger.warning(f"[DISPARO_AUTO] nada enfileirado — {agora_txt}")
+        _DISPARO_AUTO_ULTIMO['motivo'] = agora_txt
     finally:
         if prop:
             close_db(conn)
@@ -13285,10 +13351,27 @@ def disparo_medicao():
     camps = [dict(r) for r in conn.execute(
         "SELECT id, nome FROM disparo_campanha ORDER BY id DESC").fetchall()]
     med = _disparo_medicao(conn, cid)
+    # A CONDIÇÃO QUE GOVERNA A TELA TEM QUE ESTAR ESCRITA NELA. O motor
+    # automático só varre campanha com status='ativa'. Campanha pausada não é
+    # nem olhada — e o placar sozinho ("43 ainda por sair") parece lentidão, não
+    # desligamento. Isso já custou uma hora de alguém olhando o número achando
+    # que a fila andava.
+    paradas = [dict(r) for r in conn.execute(
+        """SELECT c.id, c.nome, c.status, COUNT(a.id) AS parados
+             FROM disparo_campanha c
+             JOIN disparo_campanha_alvo a
+               ON a.campanha_id = c.id AND a.status = 'pendente'
+            WHERE c.status <> 'ativa'
+            GROUP BY c.id, c.nome, c.status
+            ORDER BY c.id DESC""").fetchall()]
     close_db(conn)
+    if cid:
+        paradas = [p for p in paradas if p['id'] == cid]
+    for p in paradas:
+        p['status_texto'] = _DISPARO_STATUS_TEXTO.get(p['status'], p['status'])
     nome = next((c['nome'] for c in camps if c['id'] == cid), '')
     return render_template('disparo_medicao.html', med=med, campanhas=camps,
-                           campanha_id=cid, campanha_nome=nome)
+                           campanha_id=cid, campanha_nome=nome, paradas=paradas)
 
 
 @app.route('/disparos/campanha/modelo-planilha')
