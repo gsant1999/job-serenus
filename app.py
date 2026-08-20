@@ -28080,8 +28080,12 @@ def api_v1_cotacao_imagem(cid):
 
 @app.route('/cotacao/<int:cid>/imagem', methods=['POST'])
 def cotacao_guardar_imagem(cid):
-    """A página do documento manda o PNG que ela mesma renderizou. Sem login de
-    propósito: o link público /c/<token> também renderiza, e não tem sessão."""
+    """A página do documento manda o PNG que ela mesma renderizou. Continua sem
+    login de propósito — o link público /c/<token> também renderiza e não tem
+    sessão —, mas em troca a página pública precisa PROVAR que conhece o token
+    da cotação. Sem essa prova, qualquer um plantava o PNG de qualquer cotação
+    que ainda não tivesse imagem, acertando só o id numérico: e esse é
+    exatamente o arquivo que o corretor manda para o cliente."""
     d = request.get_json(silent=True) or {}
     b64 = (d.get('imagem') or '').strip()
     if b64.startswith('data:'):
@@ -28089,9 +28093,17 @@ def cotacao_guardar_imagem(cid):
     if not b64 or len(b64) > 12_000_000:
         return jsonify({'ok': False, 'erro': 'imagem_invalida'}), 400
     conn = db()
-    c = conn.execute("SELECT id, imagem_arquivo FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
+    c = conn.execute("SELECT id, imagem_arquivo, token FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
     if not c:
         close_db(conn); return jsonify({'ok': False, 'erro': 'nao_encontrada'}), 404
+    # A checagem vem ANTES do "já existia" de propósito: senão a rota vira
+    # oráculo de quais cotações ainda estão sem imagem.
+    if not session.get('user_id'):
+        enviado = (d.get('token') or '').strip()
+        if not enviado or not hmac.compare_digest(enviado, c['token'] or ''):
+            close_db(conn)
+            app.logger.warning(f"[COTACAO_IMG] {cid}: gravação recusada — sem sessão e sem token válido")
+            return jsonify({'ok': False, 'erro': 'nao_autorizado'}), 403
     if c['imagem_arquivo']:
         close_db(conn); return jsonify({'ok': True, 'ja_existia': True})
     try:
