@@ -10995,6 +10995,9 @@
   }
 
   function telaUltimaAnaliseSalvaRica(ua, totalMsgs, telefone) {
+    // Mesma razao do guard de renderResultado: aqui `ua` e lido antes de
+    // chegar la, entao a checagem de la nao alcanca este ponto.
+    if (!ua || typeof ua !== 'object') return renderResultado(null, '', telefone, totalMsgs);
     if (!ua.extracao && !ua.ia && !(ua.sugestoes || []).length) return telaUltimaAnaliseSalva(ua, totalMsgs);
     return '<div class="job-ultima-analise-tag">Última análise salva</div>' +
       _faixaComparacao(_antParaTela, ua, totalMsgs, ua.criado_em) +
@@ -13155,6 +13158,21 @@
   }
 
   function renderResultado(r, nome, telefone, totalMsgs) {
+    // ANALISE VAZIA NAO PODE DERRUBAR A SECAO INTEIRA.
+    //
+    // "Uncaught TypeError: Cannot read properties of null (reading 'lead')",
+    // content.js, em web.whatsapp.com — apareceu no botao Erros do Chrome do
+    // Guilherme em 20/08/2026. Os dois caminhos que chamam esta funcao podem
+    // trazer nulo: a analise em memoria com status 'ok' e `resultado` perdido
+    // (service worker reciclado no meio), e a analise salva vinda do servidor.
+    //
+    // Antes, isso estourava no meio da montagem do HTML e a secao Analise
+    // ficava em branco, sem uma palavra. Erro que some com a tela e pior que
+    // erro escrito: ninguem sabe se e a extensao, a internet ou o JOB.
+    if (!r || typeof r !== 'object') {
+      return '<div class="job-lead-nao">Esta analise nao pode ser exibida — o resultado se perdeu.' +
+        '<br><span>Clique em "Analisar de novo" para refazer. Nada foi cobrado nem gravado errado.</span></div>';
+    }
     const fx = classeFaixa(r.faixa);
     const ex = r.extracao || {};
     const sugs = (r.sugestoes || []).map((s) => {
