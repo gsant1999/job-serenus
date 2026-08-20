@@ -48631,12 +48631,38 @@ def crm_modelos_exportar_backup():
     return resposta
 
 
+# As duas rotas públicas de mídia (/crm/modelos/imagem e /crm/modelos/midia)
+# entregam arquivo pelo NOME, e _localizar_anexo acha qualquer nome no volume
+# local OU varrendo o bucket R2 inteiro por sufixo. Sem trava, elas servem
+# QUALQUER anexo do sistema a quem souber o nome — inclusive o PNG da cotação
+# (COTACAO_<id>_<hex>.png, que imprime o nome do cliente) e documento de
+# proposta. A rota irmã /anexos/<nome> usa a MESMA função e é @login_required.
+# Exigir login aqui não dá: cliente de e-mail e painel dentro do WhatsApp Web
+# não mandam sessão. Então a trava é pela FORMA DO NOME — só passa o que estas
+# rotas de fato criam.
+_PUB_IMAGEM_RE = re.compile(r'^modelo_[a-z0-9]{1,20}_\d{6,}\.(?:png|jpg|jpeg|webp|gif)$', re.IGNORECASE)
+_PUB_MIDIA_RE = re.compile(r'^(?:MODELO_WPP_|WA_ANALISE_)[A-Za-z0-9._\-]{1,180}$')
+
+
+def _publico_nome_permitido(nome, padrao, rota):
+    """Deixa passar só o nome que a própria rota gera. Recusa vira log: arquivo
+    legítimo barrado aqui sem aviso viraria mistério silencioso, que é como
+    este projeto já perdeu uma semana antes."""
+    if padrao.match(nome or ''):
+        return True
+    app.logger.warning(f"[PUBLICO] {rota}: nome recusado {nome!r}")
+    return False
+
+
 @app.route('/crm/modelos/imagem/<path:nome>')
 def crm_modelo_imagem(nome):
     """Serve as imagens dos modelos SEM login — o cliente de e-mail do lead
-    precisa carregar a imagem sem sessão nenhuma (mesmo motivo do /avatar/<uid>)."""
+    precisa carregar a imagem sem sessão nenhuma (mesmo motivo do /avatar/<uid>).
+    Só entrega nome no formato que _salvar_imagem_modelo cria."""
     from urllib.parse import unquote
     nome = os.path.basename(unquote(nome))
+    if not _publico_nome_permitido(nome, _PUB_IMAGEM_RE, 'modelos/imagem'):
+        abort(404)
     conteudo, ctype = _localizar_anexo(nome)
     if conteudo is None:
         abort(404)
@@ -49032,9 +49058,12 @@ def crm_modelo_midia(nome):
     """Serve a mídia (áudio/imagem) de um modelo de WhatsApp SEM login — mesmo
     motivo de /crm/modelos/imagem/<nome>: a tag <img>/<audio> injetada no
     painel da extensão (dentro do WhatsApp Web) não manda cookie de sessão
-    nem a chave da extensão."""
+    nem a chave da extensão. Só entrega os dois nomes que o sistema cria aqui:
+    MODELO_WPP_* (mídia de modelo) e WA_ANALISE_* (mídia de conversa)."""
     from urllib.parse import unquote
     nome = os.path.basename(unquote(nome))
+    if not _publico_nome_permitido(nome, _PUB_MIDIA_RE, 'modelos/midia'):
+        abort(404)
     conteudo, ctype = _localizar_anexo(nome)
     if conteudo is None:
         abort(404)
