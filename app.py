@@ -11441,6 +11441,19 @@ def _campanha_marcar_sem_resposta(conn):
 _CAMP_FUNIL_ESPERA_MIN = int(os.environ.get('CAMP_FUNIL_ESPERA_MIN', '45'))   # espera antes de responder
 _CAMP_FUNIL_ESPERA_MAX = int(os.environ.get('CAMP_FUNIL_ESPERA_MAX', '180'))  # (segundos, aleatório)
 
+# VALIDADE DA RESPOSTA PRO FUNIL AUTOMÁTICO. O funil é reação a uma conversa
+# VIVA: se a nossa mensagem saiu há semanas, quem responde hoje está falando com
+# uma pessoa, não com uma sequência programada. Disparar mesmo assim é o erro que
+# já custou 43 mensagens velhas na cara de cliente quando uma rotina parada voltou
+# a rodar. Passou da validade, a resposta continua valendo (o dado é verdadeiro e
+# é marcado) — o que não sai é o funil. Quem assume dali pra frente é o consultor.
+#
+# Isto passa a importar de verdade agora: com a detecção de resposta consertada, o
+# sistema vai enxergar respostas ANTIGAS que nunca foram vistas, todas de uma vez,
+# na primeira vez que cada consultor abrir o WhatsApp. Sem esta trava, esse
+# acerto de contas viraria uma enxurrada de funil em cliente de julho.
+_CAMP_FUNIL_VALIDADE_H = int(os.environ.get('CAMP_FUNIL_VALIDADE_H', '72'))
+
 
 def _campanha_disparar_funil(conn, contato):
     """Auto-dispara o funil da campanha pro contato que respondeu — enfileira cada
@@ -11454,6 +11467,16 @@ def _campanha_disparar_funil(conn, contato):
         return 0
     if ('funil_em' in contato.keys() and contato['funil_em']):
         return 0  # já disparado pra esse contato
+    # Envio velho não gera funil (ver _CAMP_FUNIL_VALIDADE_H). Silêncio aqui seria
+    # falha silenciosa: quem olhar o log tem que saber que houve resposta e que a
+    # decisão de não disparar foi deliberada.
+    _env = contato['enviado_em'] if 'enviado_em' in contato.keys() else None
+    _seg = _wa_segundos_desde(_env) if _env else None
+    if _seg is not None and _seg > _CAMP_FUNIL_VALIDADE_H * 3600:
+        print(f"[CAMPANHA] funil NÃO disparado: contato={contato['id']} respondeu, "
+              f"mas o envio foi há {int(_seg // 3600)}h (validade {_CAMP_FUNIL_VALIDADE_H}h). "
+              f"A resposta foi marcada; o atendimento é do consultor.")
+        return 0
     camp = conn.execute("SELECT funil_id FROM campanha WHERE id=?", (contato['campanha_id'],)).fetchone()
     if not camp or not camp['funil_id']:
         return 0
