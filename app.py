@@ -4001,6 +4001,22 @@ def init_db():
         # Sem isso não dá pra responder a pergunta que abriu este trabalho: a
         # campanha teve pouca resposta, ou a gente é que não estava vendo?
         ("campanha_contato", "detectado_por", "TEXT"),
+        # O QUE FAZER DEPOIS QUE A MENSAGEM SAIU. Hoje só 'arquivar'. Vai na fila
+        # e não na campanha porque quem executa é a extensão, com a conversa na
+        # mão — ela precisa saber disso no mesmo item que mandou.
+        ("whatsapp_extensao_fila", "pos_acao", "TEXT"),
+        # Etiquetas da campanha: a de participação (fica pra sempre, é o registro
+        # de quem recebeu o quê) e a de resposta.
+        ("disparo_campanha", "etiqueta_id", "INTEGER"),
+        ("disparo_campanha", "etiqueta_resp_id", "INTEGER"),
+        ("disparo_campanha", "arquivar", "INTEGER DEFAULT 1"),
+        ("disparo_campanha", "avisar_fora_horario", "INTEGER DEFAULT 0"),
+        ("disparo_campanha_alvo", "arquivado_em", "TIMESTAMP"),
+        ("disparo_campanha_alvo", "notificado_em", "TIMESTAMP"),
+        # O cliente pediu pra parar? Marcado, não executado: bloquear na
+        # detecção erraria em "vou parar de pagar o plano" e apagaria um cliente
+        # da base por engano. Quem bloqueia é uma pessoa, num clique.
+        ("disparo_campanha_alvo", "quer_parar", "INTEGER DEFAULT 0"),
         ("campanha_contato", "excluido_em", "TIMESTAMP"),
         # Janela (dias) sem resposta até o contato virar 'sem_resposta' (varredura).
         # SAÚDE DA CONFERÊNCIA DE RESPOSTAS, por consultor. Sem estes quatro
@@ -12542,6 +12558,79 @@ def _disparo_texto(conn, alvo, modelo, agora=None):
     return txt, faltando
 
 
+def _disparo_etiqueta_id(conn, nome, cor='#3b82f6'):
+    """Acha ou cria a etiqueta do CRM com esse nome. Idempotente — a campanha
+    chama isto toda vez e nunca duplica."""
+    nome = (nome or '').strip()[:60]
+    if not nome:
+        return None
+    r = conn.execute("SELECT id FROM crm_etiquetas WHERE nome=?", (nome,)).fetchone()
+    if r:
+        return r['id']
+    try:
+        conn.execute("INSERT INTO crm_etiquetas (nome, cor, ordem, ativo) VALUES (?,?,?,1)", (nome, cor, 90))
+    except Exception:
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+    r = conn.execute("SELECT id FROM crm_etiquetas WHERE nome=?", (nome,)).fetchone()
+    return r['id'] if r else None
+
+
+def _disparo_etiquetar(conn, lead_id, etiqueta_id):
+    """Cola a etiqueta no lead. A de participação NUNCA é retirada: daqui a três
+    meses ela é a única resposta pra 'quem recebeu a campanha de setembro?'."""
+    if not (lead_id and etiqueta_id):
+        return False
+    try:
+        conn.execute("INSERT INTO crm_lead_etiquetas (lead_id, etiqueta_id, criado_em) VALUES (?,?,?)",
+                     (lead_id, etiqueta_id, _agora_sp()))
+        return True
+    except Exception:
+        # Já tinha a etiqueta (PK composta). Não é erro.
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+        return False
+
+
+def _disparo_nota(conn, lead_id, texto, autor='Campanha'):
+    """Escreve no histórico do lead — o mesmo lugar que a extensão e o site já
+    mostram. Duas notas por alvo: uma quando recebe, outra quando responde. Sem
+    as duas datas não existe 'quanto tempo levou pra responder', que é o número
+    que diz se a campanha funcionou."""
+    if not lead_id:
+        return
+    try:
+        conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+            VALUES (?,?,?,?,?)""", (lead_id, autor, 'whatsapp', (texto or '')[:600], _agora_sp()))
+    except Exception:
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+
+
+def _disparo_decorrido(de, ate=None):
+    """'3 h 12 min' / '25 min'. Texto pra humano, não segundos pra máquina."""
+    ini, fim = _parse_dt_seguro(de), (_parse_dt_seguro(ate) if ate else datetime.now(TZ_SP))
+    if not ini or not fim:
+        return ''
+    if ini.tzinfo is None:
+        ini = TZ_SP.localize(ini)
+    if fim.tzinfo is None:
+        fim = TZ_SP.localize(fim)
+    seg = int((fim - ini).total_seconds())
+    if seg < 60:
+        return 'menos de 1 min'
+    if seg < 3600:
+        return f'{seg // 60} min'
+    if seg < 86400:
+        h, m = seg // 3600, (seg % 3600) // 60
+        return f'{h} h' + (f' {m} min' if m else '')
+    d = seg // 86400
+    return f'{d} dia' + ('s' if d > 1 else '')
+
+
 def _disparo_enfileirar(conn, campanha_id, agora=None):
     """Empurra pra fila da extensão o que pode sair agora, por consultor.
 
@@ -12605,12 +12694,15 @@ def _disparo_enfileirar(conn, campanha_id, agora=None):
                 sem_variavel += 1
                 continue
             tipo = modelo.get('midia_tipo') if modelo.get('midia_tipo') in ('audio', 'imagem', 'video', 'documento') else 'texto'
+            # pos_acao viaja COM o item: quem arquiva é a extensão, com a conversa
+            # na mão, logo depois de confirmar o envio.
+            pos_acao = 'arquivar' if int(camp['arquivar'] if 'arquivar' in camp.keys() and camp['arquivar'] is not None else 1) else None
             conn.execute("""INSERT INTO whatsapp_extensao_fila
                 (lead_id, responsavel_id, telefone, chat_id, tipo, texto, midia_arquivo,
-                 origem, criado_por, criado_em) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                 origem, criado_por, criado_em, pos_acao) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (alvo['lead_id'], cid, alvo['telefone'] or alvo['telefone_norm'], chat_id, tipo, texto,
                  (modelo.get('midia_arquivo') if tipo != 'texto' else None),
-                 _DISPARO_ORIGEM, cid, _agora_sp()))
+                 _DISPARO_ORIGEM, cid, _agora_sp(), pos_acao))
             fila_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
                        else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
             conn.execute("""UPDATE disparo_campanha_alvo
@@ -12633,6 +12725,7 @@ _DISPARO_STATUS_LABEL = {
     'respondeu': 'Responderam', 'sem_dono': 'Sem dono', 'sem_lead': 'Fora da base',
     'sem_modelo': 'Sem modelo', 'sem_variavel': 'Falta coluna na planilha',
     'bloqueado': 'Não querem receber', 'invalido': 'Telefone inválido',
+    'travado': 'Não saiu em 3 tentativas',
 }
 
 
@@ -12657,8 +12750,152 @@ def disparo_campanhas():
         (SELECT COUNT(*) FROM disparo_campanha_alvo a WHERE a.campanha_id=c.id AND a.status='respondeu') respondeu,
         (SELECT COUNT(*) FROM disparo_campanha_alvo a WHERE a.campanha_id=c.id AND a.status IN ('sem_dono','sem_lead')) sem_dono
         FROM disparo_campanha c ORDER BY c.id DESC""").fetchall()
+    try:
+        bloqueios = [dict(r) for r in conn.execute("""SELECT b.telefone_norm, b.motivo, b.criado_em,
+            (SELECT nome FROM crm_leads l WHERE l.telefone_norm=b.telefone_norm ORDER BY l.id LIMIT 1) nome
+            FROM disparo_bloqueio b ORDER BY b.id DESC LIMIT 100""").fetchall()]
+    except Exception:
+        bloqueios = []
     close_db(conn)
-    return render_template('disparo_campanhas.html', campanhas=[dict(r) for r in rows])
+    return render_template('disparo_campanhas.html', campanhas=[dict(r) for r in rows],
+                           bloqueios=bloqueios)
+
+
+def _disparo_percentil(valores, p):
+    """Percentil sem numpy. Lista pequena (uma campanha), interpolação simples."""
+    if not valores:
+        return None
+    v = sorted(valores)
+    if len(v) == 1:
+        return v[0]
+    k = (len(v) - 1) * p
+    baixo, alto = int(k), min(int(k) + 1, len(v) - 1)
+    return v[baixo] + (v[alto] - v[baixo]) * (k - baixo)
+
+
+def _disparo_medicao(conn, campanha_id=None):
+    """As três camadas: o que SAIU, quem REAGIU e o que virou DINHEIRO.
+
+    Mediana e p95, nunca só média: uma resposta que veio três dias depois puxa a
+    média e faz uma campanha ruim parecer boa. O corte por modelo é o que
+    responde "qual texto funciona" — sem ele, a próxima campanha é chute de novo.
+    """
+    onde, args = ("WHERE a.campanha_id=?", [campanha_id]) if campanha_id else ("WHERE 1=1", [])
+    alvos = [dict(r) for r in conn.execute(f"""SELECT a.id, a.lead_id, a.consultor_id, a.status,
+        a.enviado_em, a.respondeu_em, a.modelo_id, a.quer_parar, u.nome consultor,
+        m.nome modelo_nome FROM disparo_campanha_alvo a
+        LEFT JOIN usuarios u ON u.id=a.consultor_id
+        LEFT JOIN modelos_conteudo m ON m.id=a.modelo_id {onde}""", tuple(args)).fetchall()]
+
+    saiu = {'enviados': 0, 'na_fila': 0, 'a_sair': 0, 'travados': 0, 'bloqueados': 0, 'sem_dono': 0}
+    esperas, resp24, resp72, respondeu, quer_parar = [], 0, 0, 0, 0
+    por_consultor, por_modelo = {}, {}
+    leads_atingidos = []
+    for a in alvos:
+        st = a['status']
+        if a['enviado_em']:
+            saiu['enviados'] += 1
+            if a['lead_id']:
+                leads_atingidos.append(a['lead_id'])
+        if st == 'enfileirado': saiu['na_fila'] += 1
+        elif st == 'pendente': saiu['a_sair'] += 1
+        elif st == 'travado': saiu['travados'] += 1
+        elif st == 'bloqueado': saiu['bloqueados'] += 1
+        elif st in ('sem_dono', 'sem_lead'): saiu['sem_dono'] += 1
+        if a['quer_parar']: quer_parar += 1
+
+        chave_c = a['consultor'] or 'Sem consultor'
+        chave_m = a['modelo_nome'] or 'Sem modelo registrado'
+        for mapa, chave in ((por_consultor, chave_c), (por_modelo, chave_m)):
+            d = mapa.setdefault(chave, {'nome': chave, 'enviados': 0, 'respondeu': 0, 'esperas': []})
+            if a['enviado_em']:
+                d['enviados'] += 1
+        if st == 'respondeu' and a['enviado_em'] and a['respondeu_em']:
+            respondeu += 1
+            por_consultor[chave_c]['respondeu'] += 1
+            por_modelo[chave_m]['respondeu'] += 1
+            ini, fim = _epoch_sp(a['enviado_em']), _epoch_sp(a['respondeu_em'])
+            if ini and fim and fim >= ini:
+                seg = fim - ini
+                esperas.append(seg)
+                por_consultor[chave_c]['esperas'].append(seg)
+                por_modelo[chave_m]['esperas'].append(seg)
+                if seg <= 86400: resp24 += 1
+                if seg <= 259200: resp72 += 1
+
+    def _fmt(seg):
+        if seg is None:
+            return '—'
+        seg = int(seg)
+        if seg < 60: return f'{seg}s'
+        if seg < 3600: return f'{seg // 60} min'
+        if seg < 86400: return f'{seg // 3600} h {(seg % 3600) // 60} min'
+        return f'{seg // 86400} dia(s)'
+
+    def _taxa(parte, todo):
+        return round(100.0 * parte / todo, 1) if todo else 0.0
+
+    reagiu = {
+        'respondeu': respondeu, 'taxa': _taxa(respondeu, saiu['enviados']),
+        'em_24h': resp24, 'taxa_24h': _taxa(resp24, saiu['enviados']),
+        'em_72h': resp72, 'taxa_72h': _taxa(resp72, saiu['enviados']),
+        'mediana': _fmt(_disparo_percentil(esperas, 0.5)),
+        'p95': _fmt(_disparo_percentil(esperas, 0.95)),
+        'quer_parar': quer_parar,
+    }
+
+    # DINHEIRO. Só conta o que veio DEPOIS do disparo: proposta que já existia
+    # antes da campanha não foi ela que trouxe, e somar isso seria a campanha se
+    # dando o crédito de venda alheia.
+    dinheiro = {'cotacoes': 0, 'propostas': 0, 'receita': 0.0}
+    if leads_atingidos:
+        ph = ','.join(['?'] * len(leads_atingidos))
+        env = {a['lead_id']: a['enviado_em'] for a in alvos if a['lead_id'] and a['enviado_em']}
+        try:
+            for r in conn.execute(f"SELECT lead_id, criado_em FROM cotacao_salva WHERE lead_id IN ({ph})",
+                                  tuple(leads_atingidos)).fetchall():
+                if _epoch_sp(r['criado_em']) and _epoch_sp(env.get(r['lead_id'])) \
+                        and _epoch_sp(r['criado_em']) >= _epoch_sp(env.get(r['lead_id'])):
+                    dinheiro['cotacoes'] += 1
+        except Exception:
+            pass
+        try:
+            for r in conn.execute(f"SELECT lead_id, valor, criado_em FROM propostas WHERE lead_id IN ({ph})",
+                                  tuple(leads_atingidos)).fetchall():
+                if _epoch_sp(r['criado_em']) and _epoch_sp(env.get(r['lead_id'])) \
+                        and _epoch_sp(r['criado_em']) >= _epoch_sp(env.get(r['lead_id'])):
+                    dinheiro['propostas'] += 1
+                    dinheiro['receita'] += float(r['valor'] or 0)
+        except Exception:
+            pass
+
+    def _acabar(mapa):
+        saida = []
+        for d in mapa.values():
+            d['taxa'] = _taxa(d['respondeu'], d['enviados'])
+            d['mediana'] = _fmt(_disparo_percentil(d['esperas'], 0.5))
+            d.pop('esperas', None)
+            saida.append(d)
+        return sorted(saida, key=lambda x: (-x['enviados'], x['nome']))
+
+    return {'saiu': saiu, 'reagiu': reagiu, 'dinheiro': dinheiro,
+            'por_consultor': _acabar(por_consultor), 'por_modelo': _acabar(por_modelo),
+            'total_alvos': len(alvos)}
+
+
+@app.route('/disparos/medicao')
+@login_required
+@admin_required
+def disparo_medicao():
+    cid = request.args.get('campanha', type=int)
+    conn = db()
+    camps = [dict(r) for r in conn.execute(
+        "SELECT id, nome FROM disparo_campanha ORDER BY id DESC").fetchall()]
+    med = _disparo_medicao(conn, cid)
+    close_db(conn)
+    nome = next((c['nome'] for c in camps if c['id'] == cid), '')
+    return render_template('disparo_medicao.html', med=med, campanhas=camps,
+                           campanha_id=cid, campanha_nome=nome)
 
 
 @app.route('/disparos/campanha/modelo-planilha')
@@ -12736,6 +12973,12 @@ def disparo_campanha_detalhe(cid):
     orfaos = [dict(r) for r in conn.execute("""SELECT id, nome, telefone, telefone_norm, status
         FROM disparo_campanha_alvo WHERE campanha_id=? AND status IN ('sem_dono','sem_lead')
         ORDER BY nome LIMIT 300""", (cid,)).fetchall()]
+    responderam = [dict(r) for r in conn.execute("""SELECT id, nome, telefone, telefone_norm,
+        enviado_em, respondeu_em, quer_parar FROM disparo_campanha_alvo
+        WHERE campanha_id=? AND status='respondeu' ORDER BY respondeu_em DESC LIMIT 200""", (cid,)).fetchall()]
+    for r in responderam:
+        r['demorou'] = _disparo_decorrido(r['enviado_em'], r['respondeu_em'])
+        r['quando'] = _fmt_data_br(r['respondeu_em'])
     problemas = [dict(r) for r in conn.execute("""SELECT id, nome, telefone, status, texto_enviado
         FROM disparo_campanha_alvo WHERE campanha_id=?
           AND status IN ('sem_variavel','invalido','bloqueado') ORDER BY status, nome LIMIT 200""", (cid,)).fetchall()]
@@ -12757,6 +13000,7 @@ def disparo_campanha_detalhe(cid):
     janela_ok, janela_motivo = _disparo_janela_aberta(camp)
     close_db(conn)
     return render_template('disparo_campanha_detalhe.html', camp=dict(camp), resumo=resumo,
+                           responderam=responderam,
                            rotulos=_DISPARO_STATUS_LABEL, porcons=porcons, orfaos=orfaos,
                            problemas=problemas, consultores=consultores, modelos=modelos,
                            escolhidos=escolhidos, janela_ok=janela_ok, janela_motivo=janela_motivo)
@@ -12806,10 +13050,14 @@ def disparo_campanha_ritmo(cid):
     if not (len(ini) == 5 and len(fim) == 5 and ini < fim):
         return jsonify({"ok": False, "erro": "A hora de início precisa ser antes da hora de fim."}), 400
     conn = db()
-    conn.execute("""UPDATE disparo_campanha SET teto_dia=?, hora_inicio=?, hora_fim=?, dias_semana=?
-        WHERE id=?""", (teto, ini, fim, dias, cid))
+    arquivar = 1 if d.get('arquivar', True) else 0
+    avisar_fora = 1 if d.get('avisar_fora_horario') else 0
+    conn.execute("""UPDATE disparo_campanha SET teto_dia=?, hora_inicio=?, hora_fim=?, dias_semana=?,
+        arquivar=?, avisar_fora_horario=? WHERE id=?""",
+        (teto, ini, fim, dias, arquivar, avisar_fora, cid))
     conn.commit(); close_db(conn)
-    return jsonify({"ok": True, "teto_dia": teto, "hora_inicio": ini, "hora_fim": fim, "dias_semana": dias})
+    return jsonify({"ok": True, "teto_dia": teto, "hora_inicio": ini, "hora_fim": fim, "dias_semana": dias,
+                    "arquivar": arquivar, "avisar_fora_horario": avisar_fora})
 
 
 @app.route('/disparos/campanha/<int:cid>/modelos', methods=['POST'])
@@ -12840,6 +13088,58 @@ def disparo_campanha_modelos(cid):
         WHERE campanha_id=? AND consultor_id=? AND status='sem_modelo'""", (cid, consultor_id))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "modelos": len(ids)})
+
+
+@app.route('/disparos/campanha/<int:cid>/bloquear', methods=['POST'])
+@login_required
+@admin_required
+def disparo_campanha_bloquear(cid):
+    """Marca que essa pessoa não quer mais receber campanha — de ninguém, nunca.
+
+    É sempre uma pessoa clicando, nunca a detecção automática: "vou parar de
+    pagar esse plano" tem as mesmas palavras de um pedido de saída, e apagar um
+    cliente da base por causa disso seria caro e invisível.
+    """
+    d = request.json or {}
+    try:
+        alvo_id = int(d.get('alvo_id') or 0)
+    except (TypeError, ValueError):
+        alvo_id = 0
+    conn = db()
+    alvo = conn.execute("""SELECT a.*, c.nome campanha_nome FROM disparo_campanha_alvo a
+        JOIN disparo_campanha c ON c.id=a.campanha_id WHERE a.id=? AND a.campanha_id=?""",
+        (alvo_id, cid)).fetchone()
+    if not alvo:
+        close_db(conn); return jsonify({"ok": False, "erro": "Contato não encontrado."}), 404
+    _disparo_bloquear(conn, alvo['telefone_norm'],
+                      f"Pediu pra não receber (campanha {alvo['campanha_nome']})",
+                      alvo['lead_id'], session.get('user_id'))
+    conn.execute("UPDATE disparo_campanha_alvo SET status='bloqueado', quer_parar=1 WHERE id=?", (alvo['id'],))
+    # Os pendentes do MESMO número em OUTRAS campanhas saem junto: o pedido é
+    # "não me manda mais", não "não me manda mais nesta campanha".
+    conn.execute("""UPDATE disparo_campanha_alvo SET status='bloqueado'
+        WHERE telefone_norm=? AND status IN ('pendente','sem_dono','sem_lead','travado')""",
+        (alvo['telefone_norm'],))
+    _disparo_nota(conn, alvo['lead_id'],
+                  "Pediu pra não receber mais campanha. Está bloqueado para qualquer disparo, "
+                  "de qualquer consultor. Conversa normal com ele segue valendo.")
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/disparos/bloqueio/liberar', methods=['POST'])
+@login_required
+@admin_required
+def disparo_bloqueio_liberar():
+    """Desfaz um bloqueio. Existe porque bloqueio é clique humano, e clique
+    humano erra — sem a volta, o erro seria permanente e silencioso."""
+    tel = _normalizar_telefone(str((request.json or {}).get('telefone') or ''))
+    if not tel:
+        return jsonify({"ok": False, "erro": "telefone"}), 400
+    conn = db()
+    conn.execute("DELETE FROM disparo_bloqueio WHERE telefone_norm=?", (tel,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
 
 
 @app.route('/disparos/campanha/<int:cid>/atribuir', methods=['POST'])
@@ -12951,6 +13251,202 @@ def api_whatsapp_campanha_resposta():
     return _wa_cors(jsonify({"ok": True, "funil_passos": disparados}))
 
 
+# FRASES DE QUEM QUER SAIR. Todas de duas palavras pra cima, de propósito: "pare"
+# sozinho aparece em "não pare de me mandar novidades", e "parar" mora dentro de
+# "vou parar de pagar esse plano" — que é conversa de venda, não pedido de saída.
+# Isto NÃO bloqueia ninguém: levanta a mão pra o consultor decidir.
+_DISPARO_PARAR_PADROES = (
+    'nao quero receber', 'não quero receber', 'nao quero mais receber', 'não quero mais receber',
+    'para de mandar', 'pare de mandar', 'parar de mandar', 'pare de me mandar',
+    'nao me manda mais', 'não me manda mais', 'nao me mande mais', 'não me mande mais',
+    'me tira dessa lista', 'me tire dessa lista', 'me tira da lista', 'me tire da lista',
+    'sair da lista', 'descadastr', 'nao perturbe', 'não perturbe', 'me remova', 'remova meu',
+    'nao envie mais', 'não envie mais', 'cancelar recebimento', 'nao tenho interesse em receber',
+)
+
+
+def _disparo_quer_parar(texto):
+    """A resposta parece um pedido pra não receber mais? Sem acento e em caixa
+    baixa dos dois lados, senão 'não' e 'nao' seriam palavras diferentes."""
+    import unicodedata as _u
+    t = _u.normalize('NFKD', str(texto or '')).encode('ascii', 'ignore').decode('ascii').lower()
+    if not t.strip():
+        return False
+    for p in _DISPARO_PARAR_PADROES:
+        alvo = _u.normalize('NFKD', p).encode('ascii', 'ignore').decode('ascii').lower()
+        if alvo in t:
+            return True
+    return False
+
+
+def _disparo_bloquear(conn, telefone_norm, motivo, lead_id=None, marcado_por=None):
+    """Nunca mais em campanha nenhuma. Idempotente."""
+    if not telefone_norm:
+        return False
+    try:
+        conn.execute("""INSERT INTO disparo_bloqueio (telefone_norm, motivo, lead_id, marcado_por, criado_em)
+            VALUES (?,?,?,?,?)""", (telefone_norm, (motivo or '')[:200], lead_id, marcado_por, _agora_sp()))
+        return True
+    except Exception:
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+        return False   # já estava bloqueado
+
+
+def _disparo_aviso_texto(alvo):
+    """O aviso que o dono do lead recebe. Diz QUEM respondeu, QUANTO tempo depois
+    e o que já aconteceu — sem isso o consultor abre o WhatsApp sem saber se
+    precisa correr ou se já foi tratado."""
+    quem = (alvo['nome'] or alvo['telefone_norm'] or 'Um contato').strip()
+    dec = _disparo_decorrido(alvo['enviado_em'], alvo['respondeu_em'])
+    frase = f'{quem} respondeu'
+    if dec:
+        frase += f' {dec} depois do envio'
+    return frase + '. A conversa voltou pra sua caixa de entrada — o atendimento é seu daqui.'
+
+
+def _disparo_pode_avisar(camp, agora=None):
+    """Fora do horário comercial, avisar ou segurar até de manhã é escolha da
+    campanha (`avisar_fora_horario`). Padrão: segura — acordar sete pessoas às
+    3h por uma resposta que só será atendida às 8h é ruído, não urgência."""
+    try:
+        livre = int(camp['avisar_fora_horario'] if 'avisar_fora_horario' in camp.keys()
+                    and camp['avisar_fora_horario'] is not None else 0)
+    except (TypeError, ValueError):
+        livre = 0
+    return bool(livre) or _horario_comercial(agora)
+
+
+def _disparo_avisos_pendentes():
+    """Solta os avisos que ficaram segurados fora do horário. Roda de 5 em 5 min
+    junto da varredura da fila. Sem isto, o aviso segurado nunca chegaria — que
+    é falha silenciosa com outro nome."""
+    try:
+        conn = db()
+    except Exception:
+        return
+    try:
+        pend = conn.execute("""SELECT a.*, c.nome campanha_nome, c.avisar_fora_horario
+            FROM disparo_campanha_alvo a JOIN disparo_campanha c ON c.id=a.campanha_id
+            WHERE a.respondeu_em IS NOT NULL AND a.notificado_em IS NULL
+              AND a.consultor_id IS NOT NULL LIMIT 200""").fetchall()
+        avisar = []
+        for r in [dict(x) for x in pend]:
+            if not _disparo_pode_avisar(r):
+                continue
+            conn.execute("UPDATE disparo_campanha_alvo SET notificado_em=? WHERE id=?",
+                         (_agora_sp(), r['id']))
+            avisar.append(r)
+        if avisar:
+            conn.commit()
+    except Exception as e:
+        app.logger.warning(f"[DISPARO_AVISO] {e}")
+        try: conn.rollback()
+        except Exception: pass
+        avisar = []
+    finally:
+        try: close_db(conn)
+        except Exception: pass
+    for r in avisar:
+        try:
+            _notificar(r['consultor_id'], 'disparo_resposta',
+                       f"Respondeu a campanha {r['campanha_nome']}",
+                       _disparo_aviso_texto(r), '/crm')
+        except Exception:
+            pass
+
+
+@app.route('/api/whatsapp/disparo/resposta', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
+def api_whatsapp_disparo_resposta():
+    """O cliente respondeu a uma campanha da base. Cinco coisas acontecem aqui,
+    e a sexta NÃO acontece de propósito.
+
+    1. o alvo sai da campanha (não recebe mais nada dela, nunca);
+    2. ganha a etiqueta "Respondeu <campanha>" — a de participação FICA, porque
+       ela é o registro de quem recebeu o quê;
+    3. a segunda nota entra no histórico, com o tempo que o cliente levou;
+    4. o dono é avisado (ou o aviso fica pra manhã, se a campanha pedir isso);
+    5. a extensão recebe a ordem de DESARQUIVAR a conversa.
+
+    O que NÃO acontece: funil automático. Isto é cliente de carteira, e ele
+    acabou de falar com uma pessoa — responder com sequência programada queima
+    relacionamento que custou caro pra construir. O corretor assume daqui.
+    """
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    d = request.json or {}
+    uid = d.get('usuario_id')
+    origem_det = str(d.get('detectado_por') or 'evento')[:20]
+    if origem_det not in ('evento', 'ronda', 'manual'):
+        origem_det = 'evento'
+    quando = _agora_sp()
+    try:
+        _ts = int(d.get('respondeu_ts') or 0)
+        if _ts > 0:
+            _dt = datetime.fromtimestamp(_ts, TZ_SP)
+            if _dt <= datetime.now(TZ_SP):
+                quando = _dt.strftime('%Y-%m-%d %H:%M:%S')
+    except (TypeError, ValueError, OSError, OverflowError):
+        pass
+    conn = db()
+    try:
+        alvo_id = int(d.get('alvo_id') or 0)
+    except (TypeError, ValueError):
+        alvo_id = 0
+    if alvo_id:
+        alvo = conn.execute("""SELECT a.*, c.nome campanha_nome, c.etiqueta_resp_id, c.avisar_fora_horario
+            FROM disparo_campanha_alvo a JOIN disparo_campanha c ON c.id=a.campanha_id
+            WHERE a.id=? AND a.status='enviado'""", (alvo_id,)).fetchone()
+    else:
+        tel = _normalizar_telefone(str(d.get('telefone') or ''))
+        if not tel:
+            close_db(conn); return _wa_cors(jsonify({"ok": False, "erro": "telefone"})), 400
+        alvo = conn.execute("""SELECT a.*, c.nome campanha_nome, c.etiqueta_resp_id, c.avisar_fora_horario
+            FROM disparo_campanha_alvo a JOIN disparo_campanha c ON c.id=a.campanha_id
+            WHERE a.telefone_norm=? AND a.status='enviado'
+              AND (? IS NULL OR a.consultor_id=?) ORDER BY a.id DESC LIMIT 1""", (tel, uid, uid)).fetchone()
+    if not alvo:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": True, "nada": True}))   # já tratado, ou não é da base
+    a = dict(alvo)
+    conn.execute("""UPDATE disparo_campanha_alvo SET status='respondeu', respondeu_em=?, detectado_por=?
+        WHERE id=?""", (quando, origem_det, a['id']))
+    a['respondeu_em'] = quando
+    etq_resp = a['etiqueta_resp_id'] or _disparo_etiqueta_id(
+        conn, f"Respondeu {a['campanha_nome']}"[:60], '#1fd8a4')
+    if etq_resp and not a['etiqueta_resp_id']:
+        conn.execute("UPDATE disparo_campanha SET etiqueta_resp_id=? WHERE id=?", (etq_resp, a['campanha_id']))
+    _disparo_etiquetar(conn, a['lead_id'], etq_resp)
+    quer_parar = _disparo_quer_parar(d.get('texto'))
+    if quer_parar:
+        conn.execute("UPDATE disparo_campanha_alvo SET quer_parar=1 WHERE id=?", (a['id'],))
+    dec = _disparo_decorrido(a['enviado_em'], quando)
+    _disparo_nota(conn, a['lead_id'],
+                  f"Respondeu a campanha \"{a['campanha_nome']}\"" + (f" — {dec} depois do envio." if dec else '.') +
+                  " O atendimento é do consultor a partir daqui (a campanha não manda mais nada)." +
+                  (" A resposta parece um pedido pra não receber mais campanha — confira e, "
+                   "se for isso, marque na tela da campanha." if quer_parar else ''))
+    pode = _disparo_pode_avisar(a)
+    if pode:
+        conn.execute("UPDATE disparo_campanha_alvo SET notificado_em=? WHERE id=?", (_agora_sp(), a['id']))
+    conn.commit(); close_db(conn)
+    if pode and a['consultor_id']:
+        try:
+            _notificar(a['consultor_id'], 'disparo_resposta',
+                       ('Pediu pra não receber mais — ' if quer_parar else 'Respondeu a campanha ')
+                       + a['campanha_nome'],
+                       _disparo_aviso_texto(a) +
+                       (' A mensagem dele parece um pedido pra sair da lista.' if quer_parar else ''),
+                       '/crm')
+        except Exception:
+            pass
+    return _wa_cors(jsonify({"ok": True, "desarquivar": True, "quer_parar": bool(quer_parar),
+                             "chat_id": _wa_chat_id(a['telefone_norm'] or a['telefone'] or ''),
+                             "avisado": bool(pode)}))
+
+
 @app.route('/api/whatsapp/campanha/aguardando', methods=['GET', 'OPTIONS'])
 @requer('whatsapp:ler')
 def api_whatsapp_campanha_aguardando():
@@ -12985,7 +13481,7 @@ def api_whatsapp_campanha_aguardando():
         FROM campanha_contato
         WHERE consultor_id=? AND status='sem_resposta' AND excluido_em IS NULL
           AND telefone_norm IS NOT NULL AND telefone_norm<>''""", (uid,)).fetchall()
-    close_db(conn)
+    conn2 = conn   # a consulta da campanha na base usa a mesma conexão, abaixo
     # DEDUP por telefone: o mesmo número pode estar em MAIS de uma campanha
     # (várias linhas em campanha_contato) — o aviso mostrava "Gábriel" duas
     # vezes e o apagar tentaria excluir o mesmo chat duas vezes. Uma conversa
@@ -13001,9 +13497,26 @@ def api_whatsapp_campanha_aguardando():
             if ja is None or (not ja['nome'] and li['nome']):
                 por_chat[li['chat_id']] = li
         return list(por_chat.values())
+    # CAMPANHA NA BASE, na mesma resposta de propósito: a extensão faz UMA
+    # rodada de leitura por minuto e confere os dois motores nela. Dois
+    # endpoints seriam duas chamadas e duas passadas pela memória do WhatsApp.
+    # Chave separada porque as tabelas e as regras são separadas.
+    base = []
+    try:
+        for r in conn2.execute("""SELECT a.id, a.nome, a.telefone, a.telefone_norm, a.enviado_em
+            FROM disparo_campanha_alvo a
+            WHERE a.consultor_id=? AND a.status='enviado' AND a.respondeu_em IS NULL
+              AND a.enviado_em IS NOT NULL AND COALESCE(a.telefone_norm,'')<>''""", (uid,)).fetchall():
+            base.append({"alvo_id": r['id'], "telefone": r['telefone_norm'], "nome": r['nome'] or '',
+                         "desde": _epoch_sp(r['enviado_em']),
+                         "chat_id": _wa_chat_id(r['telefone_norm'] or r['telefone'] or '')})
+    except Exception:
+        base = []   # banco sem as tabelas novas não derruba a vigília do MEI
+    close_db(conn2)
     return _wa_cors(jsonify({"ok": True,
         "aguardando": _dedup(aguard),
-        "excluir": _dedup(excluir)}))
+        "excluir": _dedup(excluir),
+        "base": base}))
 
 
 @app.route('/api/whatsapp/campanha/excluir-conversa', methods=['POST', 'OPTIONS'])
@@ -26286,6 +26799,11 @@ _WA_FILA_VALIDADE_MIN_POR_ORIGEM = {
     # de proposito: passado isso o cliente recebe uma rajada de passos soltos de
     # uma conversa que morreu, que e pior do que nao receber.
     'funil_manual': 5,
+    # Campanha na base: 2 horas. Não tem a pressa de um lead pago, mas mensagem
+    # de campanha que ficou o dia inteiro na fila chega descolada do dia dela.
+    # E aqui vencer NÃO é perder: o alvo volta pra fila da campanha e sai no
+    # próximo lote. É a única origem em que o vencimento se cura sozinho.
+    'disparo_base': 120,
 }
 
 
@@ -26449,6 +26967,23 @@ def _wa_fila_vencer_atrasados(conn, usuario_id=None, agora=None):
              'chega descolada da conversa, então o JOB prefere não mandar. '
              'Se ainda faz sentido, mande na mão.', v['id']))
         n_venc += 1
+        # CAMPANHA NA BASE: o alvo volta pra fila da campanha em vez de morrer.
+        # A mensagem que venceu não foi perdida — ela nem chegou a existir pro
+        # cliente. No próximo lote sai de novo, com o texto do dia. Depois de 3
+        # voltas o alvo trava e aparece na tela: se não sai há três lotes, tem
+        # algo errado com aquele consultor e insistir calado não resolve.
+        if str(v.get('origem') or '') == _DISPARO_ORIGEM:
+            try:
+                alvo = conn.execute("SELECT id, tentativas FROM disparo_campanha_alvo WHERE fila_id=?",
+                                    (v['id'],)).fetchone()
+                if alvo:
+                    tent = int(alvo['tentativas'] or 0) + 1
+                    conn.execute("""UPDATE disparo_campanha_alvo
+                        SET status=?, fila_id=NULL, tentativas=? WHERE id=?""",
+                        ('travado' if tent >= 3 else 'pendente', tent, alvo['id']))
+            except Exception as e:
+                app.logger.warning(f"[DISPARO] devolver alvo do item {v['id']}: {e}")
+            continue   # sem pendência no sino: nada se perdeu, ele volta no próximo lote
         try:
             tel = str(v.get('telefone') or '').strip()
             eh_abertura = str(v.get('origem') or '') == 'lead_pago'
@@ -26585,6 +27120,8 @@ def api_whatsapp_fila_proximo():
     return _wa_cors(jsonify({"ok": True, "item": {
         "id": it['id'], "chat_id": it['chat_id'], "tipo": it['tipo'], "texto": it['texto'],
         "midia_url": midia_url, "origem": it.get('origem') or '',
+        # O que fazer DEPOIS de mandar. Hoje só 'arquivar' (campanha na base).
+        "pos_acao": it.get('pos_acao') or '',
     }}))
 
 
@@ -26616,7 +27153,36 @@ def api_whatsapp_fila_confirmar(fid):
         if it.get('origem') == 'campanha':
             conn.execute("UPDATE campanha_contato SET status='enviado', enviado_em=? WHERE fila_id=?",
                          (_agora_sp(), fid))
-        if it['lead_id']:
+        elif it.get('origem') == _DISPARO_ORIGEM:
+            # Campanha na base: marca o alvo, cola a etiqueta e escreve a nota. A
+            # etiqueta é o que responde "quem recebeu a campanha de setembro?"
+            # daqui a três meses; a nota é o que dá a hora exata pra medir a
+            # resposta depois.
+            alvo = conn.execute("""SELECT a.*, c.nome campanha_nome, c.etiqueta_id
+                FROM disparo_campanha_alvo a JOIN disparo_campanha c ON c.id=a.campanha_id
+                WHERE a.fila_id=?""", (fid,)).fetchone()
+            if alvo:
+                conn.execute("UPDATE disparo_campanha_alvo SET status='enviado', enviado_em=? WHERE id=?",
+                             (_agora_sp(), alvo['id']))
+                etq = alvo['etiqueta_id'] or _disparo_etiqueta_id(conn, alvo['campanha_nome'])
+                if etq and not alvo['etiqueta_id']:
+                    conn.execute("UPDATE disparo_campanha SET etiqueta_id=? WHERE id=?", (etq, alvo['campanha_id']))
+                _disparo_etiquetar(conn, alvo['lead_id'], etq)
+                _disparo_nota(conn, alvo['lead_id'],
+                              f"Recebeu a campanha \"{alvo['campanha_nome']}\": {(it['texto'] or '')[:250]}")
+                # ARQUIVOU DE VERDADE? A extensão diz. Assumir que sim e a wa-js
+                # não ter suporte deixaria a promessa "arquiva depois do disparo"
+                # valendo só no papel — e ninguém saberia.
+                if d.get('arquivou'):
+                    conn.execute("UPDATE disparo_campanha_alvo SET arquivado_em=? WHERE id=?",
+                                 (_agora_sp(), alvo['id']))
+                elif d.get('arquivo_erro'):
+                    app.logger.warning(f"[DISPARO] conversa NÃO arquivada (alvo {alvo['id']}): "
+                                       f"{str(d.get('arquivo_erro'))[:120]}")
+        # A campanha na base já escreveu a nota dela logo acima, com o nome da
+        # campanha. Escrever a genérica também deixaria o histórico do lead com
+        # duas linhas pro mesmo envio.
+        if it['lead_id'] and it.get('origem') != _DISPARO_ORIGEM:
             conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
                             VALUES (?,?,?,?,?)""",
                          (it['lead_id'], 'Extensão WhatsApp', 'whatsapp',
@@ -50262,6 +50828,12 @@ def _iniciar_scheduler_backup():
         # Vencimento da fila de envio: de 5 em 5 min, INDEPENDENTE de extensao.
         # Ficava dentro de /fila/proximo, entao consultor com extensao parada
         # nunca vencia nada — as mensagens dele apodreciam em silencio.
+        # Avisos de resposta de campanha que ficaram segurados fora do horário.
+        # Mesmo intervalo da varredura da fila: os dois existem pelo mesmo motivo
+        # — não depender de nenhuma extensão estar viva pra o sistema cumprir o
+        # que prometeu.
+        sched.add_job(_disparo_avisos_pendentes, 'interval', minutes=5, max_instances=1,
+                      id='disparo_avisos', replace_existing=True)
         sched.add_job(_varrer_fila_vencida, 'interval', minutes=5, max_instances=1,
                       id='varrer_fila_vencida', replace_existing=True)
         # Envio das conversões: de hora em hora. O par (scheduler + gatilho por

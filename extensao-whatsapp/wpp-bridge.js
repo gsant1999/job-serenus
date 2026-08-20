@@ -1513,7 +1513,7 @@
   // Houve mensagem do CONTATO depois da marca? Devolve o carimbo da PRIMEIRA
   // (é ela que mede quanto o cliente demorou pra responder), ou 0.
   function _respostaDepoisDe(chat, desde) {
-    let achou = 0;
+    let achou = 0, texto = '';
     let models = [];
     try {
       models = (chat.msgs && (chat.msgs.getModelsArray ? chat.msgs.getModelsArray() : chat.msgs._models)) || [];
@@ -1523,15 +1523,56 @@
       // "sem campo" não é o cliente falando.
       if (!m || !m.t || !m.id || m.id.fromMe !== false) continue;
       if (m.t <= desde) continue;
-      if (!achou || m.t < achou) achou = m.t;
+      if (!achou || m.t < achou) {
+        achou = m.t;
+        // O TEXTO da resposta vai junto, cortado. Serve pra uma coisa só: o JOB
+        // reconhecer quem está pedindo pra parar de receber campanha. Nada é
+        // guardado além disso — a conversa continua sendo do consultor.
+        texto = (typeof m.body === 'string' ? m.body : '').slice(0, 200);
+      }
     }
-    if (achou) return achou;
+    if (achou) return { t: achou, texto: texto };
     // A coleção em memória pode não ter a mensagem (conversa antiga, pouco
     // rolada). O próprio chat ainda denuncia: não-lida + movimento depois da
     // marca só acontece com mensagem que ENTROU — a nossa sai lida.
     const t = Number(chat.t || 0);
-    if (t > desde && Number(chat.unreadCount || 0) > 0) return t;
-    return 0;
+    if (t > desde && Number(chat.unreadCount || 0) > 0) return { t: t, texto: '' };
+    return null;
+  }
+
+  // ── ARQUIVAR / DESARQUIVAR A CONVERSA ────────────────────────────────────
+  //
+  // A campanha na base arquiva a conversa logo depois de mandar, e desarquiva
+  // sozinha quando o cliente responde. Serve pra caixa de entrada do consultor
+  // não virar uma parede de 200 conversas mudas no dia do disparo.
+  //
+  // DETECÇÃO EM TEMPO DE EXECUÇÃO, não nome cravado: a wa-js aqui é minificada e
+  // já quebrou envio duas vezes quando o WhatsApp mudou por baixo. Se nenhuma
+  // das formas existir, isto devolve 'sem_suporte' — e o servidor registra que a
+  // conversa NÃO foi arquivada. Prometer arquivamento e não arquivar em silêncio
+  // seria pior do que não ter o recurso.
+  async function arquivarConversa(chatId, arquivar) {
+    const W = window.WPP && window.WPP.chat;
+    if (!W || !chatId) return { erro: 'wpp_ausente' };
+    const querArquivar = arquivar !== false;
+    try {
+      if (querArquivar && typeof W.archive === 'function') {
+        await W.archive(chatId); return { ok: true, via: 'archive' };
+      }
+      if (!querArquivar && typeof W.unarchive === 'function') {
+        await W.unarchive(chatId); return { ok: true, via: 'unarchive' };
+      }
+      // Algumas versões expõem uma função só, com o estado por parâmetro.
+      if (typeof W.setArchive === 'function') {
+        await W.setArchive(chatId, querArquivar); return { ok: true, via: 'setArchive' };
+      }
+      if (typeof W.archive === 'function') {
+        await W.archive(chatId, querArquivar); return { ok: true, via: 'archive2' };
+      }
+      return { erro: 'sem_suporte' };
+    } catch (e) {
+      return { erro: String((e && e.message) || e).slice(0, 120) };
+    }
   }
 
   function checarRespostasCampanha(alvos) {
@@ -1578,8 +1619,11 @@
         const chat = porTel.get(k);
         if (!chat) { semMemoria++; continue; }
         conferidos++;
-        const em = _respostaDepoisDe(chat, desde);
-        if (em) respostas.push({ telefone: alvo.telefone, contato_id: (alvo.contato_id || null), em });
+        const achado = _respostaDepoisDe(chat, desde);
+        if (achado) {
+          respostas.push({ telefone: alvo.telefone, contato_id: (alvo.contato_id || null),
+                           em: achado.t, texto: achado.texto || '' });
+        }
       } catch (e) { /* idem */ }
     }
     return { respostas, vigiados: lista.length, conferidos, sem_memoria: semMemoria, chats: chats.length };
@@ -1601,6 +1645,7 @@
     'baixar_documentos', 'ler_mensagens', 'ler_conversa_completa',
     'obter_telefone', 'obter_meu_numero', 'obter_chat_id',
     'checar_respostas_campanha',
+    // arquivar NÃO entra: é ação pedida, e mexe no estado da conversa.
     'medir_respostas',
   ]);
 
@@ -1633,6 +1678,7 @@
       else if (d.tipo === 'salvar_contato') resp = await salvarContato(d.chatId, d.nome, d.sobrenome);
       else if (d.tipo === 'apagar_conversa') resp = await apagarConversa(d.chatId);
       else if (d.tipo === 'checar_respostas_campanha') resp = checarRespostasCampanha(d.alvos);
+      else if (d.tipo === 'arquivar_conversa') resp = await arquivarConversa(d.chatId, d.arquivar);
       else return;
     } catch (e) { resp = { erro: 'excecao' }; }
     finally {

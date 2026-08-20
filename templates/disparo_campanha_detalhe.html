@@ -45,6 +45,9 @@ select.campo:focus { outline:none; border-color:var(--teal); }
 .prob-linha { display:flex; gap:10px; padding:9px 18px; border-bottom:1px solid var(--borda); font-size:12.5px; align-items:baseline; }
 .prob-linha:last-child { border-bottom:none; }
 .prob-linha .motivo { margin-left:auto; color:var(--rosa); font-size:11.5px; text-align:right; }
+.prob-linha { align-items:center; }
+.dd-parar { font-size:10.5px; color:#f59e0b; border:1px solid rgba(245,158,11,.4);
+  border-radius:20px; padding:2px 9px; white-space:nowrap; }
 .dd-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:80; align-items:center; justify-content:center; padding:20px; }
 .dd-modal .caixa { background:var(--panel); border:1px solid var(--borda); border-radius:14px; width:520px; max-width:100%; max-height:82vh; display:flex; flex-direction:column; }
 .dd-modal .topo { padding:16px 18px 10px; } .dd-modal .topo h3 { font-size:15px; margin:0 0 3px; }
@@ -57,6 +60,10 @@ select.campo:focus { outline:none; border-color:var(--teal); }
 .dd-retorno { font-size:12.5px; color:var(--cinza); line-height:1.6; margin-top:10px; }
 .ritmo-linha { display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; padding:14px 18px; }
 .ritmo-linha label { display:block; font-size:12px; color:var(--cinza); margin-bottom:5px; }
+.ritmo-chaves { flex-basis:100%; display:flex; gap:22px; flex-wrap:wrap; margin-top:2px; }
+.dd-chave { display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--texto);
+  margin-bottom:0; }
+.dd-chave input { width:15px; height:15px; }
 .dc-dias { display:flex; gap:6px; flex-wrap:wrap; }
 .dc-dia { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--borda); border-radius:8px;
   padding:7px 10px; font-size:12.5px; cursor:pointer; user-select:none;
@@ -174,6 +181,12 @@ select.campo:focus { outline:none; border-color:var(--teal); }
           {% if dnum|string in camp.dias_semana.split(',') %}checked{% endif %}>{{ drot }}</label>
         {% endfor %}
       </div>
+      <div class="ritmo-chaves">
+      <label class="dd-chave"><input type="checkbox" id="r-arquivar" {% if camp.arquivar is none or camp.arquivar %}checked{% endif %}>
+        Arquivar a conversa depois de enviar<button type="button" class="job-i" aria-label="O que isso faz"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">A conversa sai da caixa de entrada do consultor no dia do disparo e volta sozinha quando o cliente responde. Sem isso, quem dispara 100 contatos abre o WhatsApp com 100 conversas mudas na frente.</span></button></label>
+      <label class="dd-chave"><input type="checkbox" id="r-avisar" {% if camp.avisar_fora_horario %}checked{% endif %}>
+        Avisar o consultor mesmo de madrugada<button type="button" class="job-i" aria-label="O que isso faz"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">Desligado, a resposta que chega fora do horário comercial só vira aviso às 8h. A resposta é registrada na hora certa de qualquer jeito — o que espera é só o toque no sino.</span></button></label>
+      </div>
       <button class="btn btn-sm" onclick="salvarRitmo(this)">Salvar ritmo</button>
       <span id="r-retorno" class="dd-retorno" style="margin:0;"></span>
     </div>
@@ -206,6 +219,28 @@ select.campo:focus { outline:none; border-color:var(--teal); }
       <button class="btn btn-sm" onclick="atribuir(this)">Atribuir e devolver pra campanha</button>
       <span id="orf-retorno" class="dd-retorno" style="margin:0;"></span>
     </div>
+  </div>
+  {% endif %}
+
+  {% if responderam %}
+  <div class="card" style="margin-bottom:18px;padding:0;">
+    <div class="card-header"><h3>Responderam ({{ responderam|length }})</h3></div>
+    <div class="dd-nota" style="padding:14px 18px 0;">
+      Estes já saíram da campanha e a conversa voltou pra caixa de entrada do consultor. O atendimento é dele
+      daqui — a campanha não manda mais nada pra eles.
+    </div>
+    {% for r in responderam %}
+    <div class="prob-linha">
+      <span>{{ r.nome or 'Sem nome' }}</span>
+      <span style="color:var(--cinza);font-size:11.5px;">{{ r.telefone }}</span>
+      {% if r.quer_parar %}<span class="dd-parar">parece pedido pra sair da lista</span>{% endif %}
+      <span class="motivo" style="color:var(--cinza);">
+        {{ r.quando }}{% if r.demorou %} · respondeu em {{ r.demorou }}{% endif %}
+      </span>
+      <button class="btn-outline btn-sm" style="margin-left:10px;"
+              onclick="bloquear({{ r.id }}, this)">Não quer receber</button>
+    </div>
+    {% endfor %}
   </div>
   {% endif %}
 
@@ -312,7 +347,9 @@ select.campo:focus { outline:none; border-color:var(--teal); }
       teto_dia: parseInt(document.getElementById('r-teto').value, 10),
       hora_inicio: document.getElementById('r-ini').value,
       hora_fim: document.getElementById('r-fim').value,
-      dias_semana: dias
+      dias_semana: dias,
+      arquivar: document.getElementById('r-arquivar').checked,
+      avisar_fora_horario: document.getElementById('r-avisar').checked
     }).then(function (r) {
       btn.disabled = false; btn.textContent = 'Salvar ritmo';
       if (!r.ok) { ret.textContent = r.erro || 'Não deu certo.'; return; }
@@ -322,6 +359,18 @@ select.campo:focus { outline:none; border-color:var(--teal); }
       btn.disabled = false; btn.textContent = 'Salvar ritmo';
       ret.textContent = 'Não consegui falar com o servidor.';
     });
+  }
+
+  function bloquear(alvoId, btn) {
+    // Sem confirm() nativo: o projeto tirou os alertas do navegador. O que segura
+    // um clique errado aqui é o botão dizer a consequência e existir a volta na
+    // tela de campanhas.
+    btn.disabled = true; btn.textContent = 'Bloqueando…';
+    post('/disparos/campanha/' + CID + '/bloquear', { alvo_id: alvoId }).then(function (r) {
+      if (!r.ok) { btn.disabled = false; btn.textContent = 'Tentar de novo'; return; }
+      btn.textContent = 'Bloqueado';
+      setTimeout(function () { location.reload(); }, 900);
+    }).catch(function () { btn.disabled = false; btn.textContent = 'Tentar de novo'; });
   }
 
   function abrirModelos(consultorId, nome) {

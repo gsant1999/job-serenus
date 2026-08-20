@@ -1321,7 +1321,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg && msg.type === 'fila_confirmar') {
     chamarJob('/api/whatsapp/fila/' + encodeURIComponent(msg.fila_id) + '/confirmar', 'POST',
-      { ok: msg.ok, erro: msg.erro, wpp_msg_id: msg.wpp_msg_id }, 15000).then(sendResponse);
+      { ok: msg.ok, erro: msg.erro, wpp_msg_id: msg.wpp_msg_id,
+        // Arquivou de verdade? Vai junto pra o servidor não assumir que sim.
+        arquivou: msg.arquivou, arquivo_erro: msg.arquivo_erro }, 15000).then(sendResponse);
+    return true;
+  }
+  // Resposta a uma campanha da BASE (motor separado do MEI): marca, etiqueta,
+  // escreve a nota, avisa o dono e devolve a ordem de desarquivar a conversa.
+  if (msg && msg.type === 'disparo_resposta') {
+    chamarJob('/api/whatsapp/disparo/resposta', 'POST',
+      { alvo_id: msg.alvo_id, telefone: msg.telefone, usuario_id: msg.usuario_id,
+        detectado_por: msg.detectado_por || 'evento', respondeu_ts: msg.respondeu_ts || 0,
+        texto: msg.texto || '' },
+      15000).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'fila_enviar_agora') {

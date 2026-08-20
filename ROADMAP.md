@@ -33,6 +33,9 @@ Legenda: [ ] pendente · [~] em andamento · [x] feito · (?) aguardando decisã
     sim com número que vale.
   - **ATUALIZAÇÃO 18/08/2026 — a hipótese (B) ganhou um suspeito concreto.** A auditoria achou que `checarCampanhaAguardando()` (a rotina que reporta resposta de lead ao JOB) estava **desligada** para quem entrou pelo login de e-mail/senha: ela exigia a chave antiga `extKey`, que o login novo nunca grava. Mesma trava matava o batimento de presença, então o consultor ainda contava como offline na roleta. Corrigido na extensão **4.98.0** — mas **o número só volta a ser confiável depois que todos atualizarem**. Não tomar decisão de copy com dado anterior a isso. Ver a seção de 18/08 no fim deste arquivo.
 
+- [ ] **Etiqueta da campanha VISÍVEL dentro da extensão (fase 3 do disparo na base).** Hoje a etiqueta existe no CRM e aparece no site e na ficha do lead da extensão, mas o Guilherme pediu "algo que funcione como etiqueta na extensão, algo legal" — um chip na linha da conversa, na lista lateral do WhatsApp. **Não foi feito de propósito:** a lista lateral é virtualizada (as linhas se reciclam ao rolar), então pintar ali exige observer, e observer no WhatsApp já matou a aba antes. Precisa de prova de conceito medindo custo ANTES de escrever a versão final. Plano B, se pesar: chip só no topo da conversa aberta e no painel do JOB, que não custa nada.
+- [ ] **Medir o resultado da varredura retroativa da campanha #4** (depende de todos atualizarem a extensão). É ela que responde se a taxa de 0% era a copy ou a detecção. Ver o item da taxa de resposta acima.
+
 ## CRM (feedback Danilo — checklist atualizado 03/07/2026)
 
 - [x] ESC fecha modais (global, todas as páginas)

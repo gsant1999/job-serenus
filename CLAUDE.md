@@ -24,6 +24,7 @@ ERP em **Flask + PostgreSQL (Railway)** da Serenus Corretora de Saúde. Um arqui
 | Financeiro propostas | `/parcela/<id>/* /proposta/<id>/{antecipacao,boleto-adesao,estornar}` | detalhe |
 | Fluxo de caixa/config | `/fluxo-caixa /financeiro /repasses /producao /niveis /comissoes /regimes /operadoras /produtos /campos` | fluxo_caixa, financeiro, ... |
 | CRM | `/crm /crm/lead/<id>/* /crm/etapas /crm/painel /crm/importar[-agora]` | crm, crm_painel |
+| Disparo p/ campanhas (base) | `/disparos/campanhas` `/disparos/campanha/<id>[/criar /status /enfileirar /ritmo /modelos /atribuir /bloquear]` `/disparos/medicao` `/disparos/bloqueio/liberar` + API `/api/whatsapp/disparo/resposta` | disparo_campanhas, disparo_campanha_detalhe, disparo_medicao |
 | Ingestão de leads | `/webhook/sheets` (push Apps Script) + `_importar_leads_automatico` (pull 15min + throttle por request 10min + botão) | — |
 | Cotação | `/cotacao /cotacao/tabelas/* /cotacao/salvar /cotacao/documento/<id> /c/<token> /cotacao/<id>/{reabrir,ajustar,enviar-email} /cotacao/legendas` | cotacao*, 9 arquivos |
 | Material de apoio | `/material-apoio[/novo]` (navegador de pastas operadora→tipo) | material_apoio |
@@ -78,6 +79,8 @@ de todos e **trava**. Se precisar mover o repo, baixe tudo antes, numa janela de
 - **Anexos:** local `/data/anexos` (achatado) + R2 (`propostas/{id}/{tipo}/arq`). Servir: local → varredura do bucket por sufixo. Uploads pré-27/06/2026 podem não existir mais (logos: já tem fallback p/ embutido).
 - **Cotação:** token público `/c/<token>` é IMUTÁVEL; "Nova versão" cria registro novo (nunca UPDATE). Agravo (`/ajustar`) só mexe no `planos_json` da cotação, nunca na tabela base.
 - **Leads (planilhas):** nome de aba na URL precisa de `urllib.parse.quote` (espaço/acento). Colunas variam por planilha → `_col()` faz mapeamento flexível. Dedup por `telefone_norm`. Job automático tem teto de 50/rodada e ignora leads datados >30 dias (histórico completo só via `/crm/importar`).
+- **Dois motores de disparo, separados de propósito:** `campanha`/`campanha_contato` é a LISTA FRIA (roleta, `/campanhas`); `disparo_campanha*` é a BASE PRÓPRIA (sai pelo dono do lead, `/disparos/campanhas`). Não unificar: as regras divergem em dono, etiqueta, arquivamento e no que acontece na resposta.
+- **`var(--fundo-2)` não existe** em `base.html` — usar `--input-bg` (campo) ou `--panel-2` (superfície). O fallback `#12121a` deixava a tela preta no tema claro. Mesmo caso de `.btn-primary`, que não existe: a classe é `.btn`.
 - **Scheduler:** APScheduler no processo web morre em restart — por isso existe também o auto-pull por request (throttle 10 min). Não remover nenhum dos dois.
 - **R2:** usar `R2_ACCOUNT_ID/ACCESS_KEY/SECRET_KEY` (S3). `R2_API_TOKEN` existe no env mas NÃO funciona com boto3.
 

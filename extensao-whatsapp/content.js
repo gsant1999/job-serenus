@@ -14380,10 +14380,20 @@
         } else {
           envio = await pedirEnviarTexto(item.chat_id, item.texto);
         }
+        // ARQUIVA DEPOIS DE CONFIRMAR, e só se o envio deu certo. Arquivar antes
+        // deixaria a conversa escondida com a mensagem presa na fila. O
+        // resultado vai junto do confirmar: se a wa-js não souber arquivar, o
+        // servidor registra que NÃO arquivou em vez de assumir que sim.
+        let arq = null;
+        if (envio && envio.ok && item.pos_acao === 'arquivar') {
+          try { arq = await pedirArquivar(item.chat_id, true); } catch (e) { arq = null; }
+        }
         await chrome.runtime.sendMessage({
           type: 'fila_confirmar', fila_id: item.id,
           ok: !!(envio && envio.ok), erro: (envio && envio.erro) || null,
           wpp_msg_id: (envio && envio.wpp_msg_id) || null,
+          arquivou: !!(arq && arq.ok),
+          arquivo_erro: (arq && arq.erro) || null,
         });
         _metrica('envio_' + (item.tipo || 'texto'), Date.now() - _t0, !!(envio && envio.ok));
         // Mandou uma: tenta a proxima ja. O servidor decide se pode — aqui so
@@ -14412,6 +14422,7 @@
   // isto, "nenhuma resposta" e "não consegui olhar" chegam iguais no servidor —
   // e foi assim que uma campanha inteira passou por fracasso de copy.
   let _campRonda = null;         // { vigiados, conferidos, sem_memoria, chats, em }
+  let _baseWatch = [];           // alvos da campanha na base aguardando resposta
 
   function pedirApagarConversa(chatId) {
     return new Promise((resolve) => {
@@ -14604,6 +14615,24 @@
     });
   }
 
+  // Arquiva (ou desarquiva) a conversa. Usado pela campanha na base: arquiva
+  // logo depois de mandar e desarquiva sozinho quando o cliente responde.
+  function pedirArquivar(chatId, arquivar) {
+    return new Promise((resolve) => {
+      const reqId = 'ar' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      let pronto = false;
+      function onMsg(ev) {
+        if (ev.source !== window) return;
+        const d = ev.data;
+        if (!d || d.source !== 'JOB_EXT_RESP' || d.reqId !== reqId) return;
+        pronto = true; window.removeEventListener('message', onMsg); resolve(d);
+      }
+      window.addEventListener('message', onMsg);
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'arquivar_conversa', reqId, chatId, arquivar }, '*');
+      setTimeout(() => { if (!pronto) { window.removeEventListener('message', onMsg); resolve(null); } }, 8000);
+    });
+  }
+
   // Avisa o JOB que este número respondeu. `em` é o carimbo da mensagem DO
   // CLIENTE (não a hora em que a gente descobriu) e `origem` diz se veio do
   // evento ao vivo ou da conferência — os dois viram medida lá.
@@ -14630,6 +14659,10 @@
       if (a.chat_id) _campWatch.set(a.chat_id, { telefone: a.telefone, contato_id: a.contato_id, desde: a.desde });
     });
     _campExcluir = (resp.excluir || []).filter((e) => e.chat_id);
+    // Campanha na base: mesma rodada de leitura, motor separado. Chave própria
+    // porque o que acontece na resposta é diferente (desarquiva, etiqueta, nota
+    // e aviso ao dono — e nenhum funil automático).
+    _baseWatch = (resp.base || []).filter((b) => b.desde);
     // CONFERÊNCIA DE RESPOSTAS. É o que sustenta o número: o evento ao vivo só
     // existe com a aba aberta na hora exata, e ninguém fica com o WhatsApp Web
     // aberto 24h. Aqui a pergunta vai pra todos os números de uma vez e a ponte
@@ -14646,11 +14679,33 @@
     for (const e of _campExcluir) {
       if (e.desde) alvos.push({ telefone: e.telefone, contato_id: e.contato_id, desde: e.desde });
     }
+    const porTelBase = new Map();
+    for (const b of _baseWatch) {
+      porTelBase.set(String(b.telefone), b);
+      alvos.push({ telefone: b.telefone, desde: b.desde });
+    }
     let r = null;
     try { r = await pedirChecarRespostas(alvos); } catch (e) { r = null; }
     const _responderam = new Set();
     if (r && r.respostas) {
       for (const item of r.respostas) {
+        const daBase = porTelBase.get(String(item.telefone));
+        if (daBase) {
+          // Campanha na base: reporta no motor dela e DESARQUIVA a conversa —
+          // ela foi escondida no disparo e o cliente acabou de falar.
+          try {
+            const rb = await chrome.runtime.sendMessage({ type: 'disparo_resposta',
+              alvo_id: daBase.alvo_id, telefone: item.telefone, usuario_id: usuarioId,
+              detectado_por: 'ronda', respondeu_ts: item.em,
+              // Só pra o JOB reconhecer quem pediu pra parar de receber campanha.
+              texto: item.texto || '' });
+            if (rb && rb.ok && rb.desarquivar) {
+              await pedirArquivar(rb.chat_id || daBase.chat_id, false);
+            }
+            _baseWatch = _baseWatch.filter((b) => String(b.telefone) !== String(item.telefone));
+          } catch (e) { /* próxima rodada reconcilia */ }
+          continue;
+        }
         if (await reportarRespostaCampanha(item.telefone, item.em, 'ronda', usuarioId)) {
           _responderam.add(String(item.telefone));
         }
