@@ -57,6 +57,10 @@ select.campo:focus { outline:none; border-color:var(--teal); }
 .dd-retorno { font-size:12.5px; color:var(--cinza); line-height:1.6; margin-top:10px; }
 .ritmo-linha { display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; padding:14px 18px; }
 .ritmo-linha label { display:block; font-size:12px; color:var(--cinza); margin-bottom:5px; }
+.ritmo-chaves { flex-basis:100%; display:flex; gap:22px; flex-wrap:wrap; margin-top:2px; }
+.dd-chave { display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--texto);
+  margin-bottom:0; }
+.dd-chave input { width:15px; height:15px; }
 .dc-dias { display:flex; gap:6px; flex-wrap:wrap; }
 .dc-dia { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--borda); border-radius:8px;
   padding:7px 10px; font-size:12.5px; cursor:pointer; user-select:none;
@@ -173,6 +177,12 @@ select.campo:focus { outline:none; border-color:var(--teal); }
         <label class="dc-dia"><input type="checkbox" class="r-dia" value="{{ dnum }}"
           {% if dnum|string in camp.dias_semana.split(',') %}checked{% endif %}>{{ drot }}</label>
         {% endfor %}
+      </div>
+      <div class="ritmo-chaves">
+      <label class="dd-chave"><input type="checkbox" id="r-arquivar" {% if camp.arquivar is none or camp.arquivar %}checked{% endif %}>
+        Arquivar a conversa depois de enviar<button type="button" class="job-i" aria-label="O que isso faz"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">A conversa sai da caixa de entrada do consultor no dia do disparo e volta sozinha quando o cliente responde. Sem isso, quem dispara 100 contatos abre o WhatsApp com 100 conversas mudas na frente.</span></button></label>
+      <label class="dd-chave"><input type="checkbox" id="r-avisar" {% if camp.avisar_fora_horario %}checked{% endif %}>
+        Avisar o consultor mesmo de madrugada<button type="button" class="job-i" aria-label="O que isso faz"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">Desligado, a resposta que chega fora do horário comercial só vira aviso às 8h. A resposta é registrada na hora certa de qualquer jeito — o que espera é só o toque no sino.</span></button></label>
       </div>
       <button class="btn btn-sm" onclick="salvarRitmo(this)">Salvar ritmo</button>
       <span id="r-retorno" class="dd-retorno" style="margin:0;"></span>
@@ -312,7 +322,9 @@ select.campo:focus { outline:none; border-color:var(--teal); }
       teto_dia: parseInt(document.getElementById('r-teto').value, 10),
       hora_inicio: document.getElementById('r-ini').value,
       hora_fim: document.getElementById('r-fim').value,
-      dias_semana: dias
+      dias_semana: dias,
+      arquivar: document.getElementById('r-arquivar').checked,
+      avisar_fora_horario: document.getElementById('r-avisar').checked
     }).then(function (r) {
       btn.disabled = false; btn.textContent = 'Salvar ritmo';
       if (!r.ok) { ret.textContent = r.erro || 'Não deu certo.'; return; }

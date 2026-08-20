@@ -1534,6 +1534,41 @@
     return 0;
   }
 
+  // ── ARQUIVAR / DESARQUIVAR A CONVERSA ────────────────────────────────────
+  //
+  // A campanha na base arquiva a conversa logo depois de mandar, e desarquiva
+  // sozinha quando o cliente responde. Serve pra caixa de entrada do consultor
+  // não virar uma parede de 200 conversas mudas no dia do disparo.
+  //
+  // DETECÇÃO EM TEMPO DE EXECUÇÃO, não nome cravado: a wa-js aqui é minificada e
+  // já quebrou envio duas vezes quando o WhatsApp mudou por baixo. Se nenhuma
+  // das formas existir, isto devolve 'sem_suporte' — e o servidor registra que a
+  // conversa NÃO foi arquivada. Prometer arquivamento e não arquivar em silêncio
+  // seria pior do que não ter o recurso.
+  async function arquivarConversa(chatId, arquivar) {
+    const W = window.WPP && window.WPP.chat;
+    if (!W || !chatId) return { erro: 'wpp_ausente' };
+    const querArquivar = arquivar !== false;
+    try {
+      if (querArquivar && typeof W.archive === 'function') {
+        await W.archive(chatId); return { ok: true, via: 'archive' };
+      }
+      if (!querArquivar && typeof W.unarchive === 'function') {
+        await W.unarchive(chatId); return { ok: true, via: 'unarchive' };
+      }
+      // Algumas versões expõem uma função só, com o estado por parâmetro.
+      if (typeof W.setArchive === 'function') {
+        await W.setArchive(chatId, querArquivar); return { ok: true, via: 'setArchive' };
+      }
+      if (typeof W.archive === 'function') {
+        await W.archive(chatId, querArquivar); return { ok: true, via: 'archive2' };
+      }
+      return { erro: 'sem_suporte' };
+    } catch (e) {
+      return { erro: String((e && e.message) || e).slice(0, 120) };
+    }
+  }
+
   function checarRespostasCampanha(alvos) {
     if (!window.WPP || !window.WPP.whatsapp) return { erro: 'wpp_ausente' };
     const lista = Array.isArray(alvos) ? alvos : [];
@@ -1601,6 +1636,7 @@
     'baixar_documentos', 'ler_mensagens', 'ler_conversa_completa',
     'obter_telefone', 'obter_meu_numero', 'obter_chat_id',
     'checar_respostas_campanha',
+    // arquivar NÃO entra: é ação pedida, e mexe no estado da conversa.
     'medir_respostas',
   ]);
 
@@ -1633,6 +1669,7 @@
       else if (d.tipo === 'salvar_contato') resp = await salvarContato(d.chatId, d.nome, d.sobrenome);
       else if (d.tipo === 'apagar_conversa') resp = await apagarConversa(d.chatId);
       else if (d.tipo === 'checar_respostas_campanha') resp = checarRespostasCampanha(d.alvos);
+      else if (d.tipo === 'arquivar_conversa') resp = await arquivarConversa(d.chatId, d.arquivar);
       else return;
     } catch (e) { resp = { erro: 'excecao' }; }
     finally {
