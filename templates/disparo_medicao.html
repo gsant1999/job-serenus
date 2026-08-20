@@ -1,28 +1,28 @@
 {% extends 'base.html' %}
-{% block title %}Medição das campanhas{% endblock %}
+{% block title %}Resultado das campanhas{% endblock %}
 
 {% block head %}
 <style>
 .dm-wrap { max-width:1040px; }
 .dm-hero { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; flex-wrap:wrap; }
-.dm-hero h1 { font-size:24px; }
-.dm-sub { color:var(--cinza); font-size:13px; margin:4px 0 20px; line-height:1.55; max-width:660px; }
+.dm-hero h1 { font-size:22px; letter-spacing:-.02em; }
+.dm-sub { color:var(--cinza); font-size:12px; margin:4px 0 20px; line-height:1.55; max-width:660px; }
 select.campo { background:var(--input-bg); border:1px solid var(--borda); border-radius:9px;
   color:var(--texto); padding:9px 11px; font-size:13px; font-family:inherit; }
-select.campo:focus { outline:none; border-color:var(--teal); }
+select.campo:focus { outline:none; border-color:var(--verde); }
 .dm-camada { margin-bottom:18px; padding:0; }
-.dm-nums { display:grid; grid-template-columns:repeat(auto-fill,minmax(155px,1fr)); gap:10px; padding:16px 18px; }
+.dm-nums { display:grid; grid-template-columns:repeat(auto-fill,minmax(155px,1fr)); gap:10px; padding:16px 20px; }
 .dm-num { border:1px solid var(--borda); border-radius:10px; padding:11px 13px; }
-.dm-num b { font-family:'Sora',sans-serif; font-size:21px; display:block; line-height:1.1; }
-.dm-num span { font-size:11px; color:var(--cinza); }
-.dm-num.bom b { color:var(--teal); } .dm-num.alerta b { color:var(--rosa); }
-.dm-nota { padding:0 18px 16px; font-size:12px; color:var(--cinza); line-height:1.55; }
+.dm-num b { font-family:'Sora',sans-serif; font-size:22px; display:block; line-height:1.1; }
+.dm-num span { font-size:12px; color:var(--cinza); }
+.dm-num.bom b { color:var(--verde); } .dm-num.alerta b { color:var(--rosa); }
+.dm-nota { padding:0 20px 16px; font-size:12px; color:var(--cinza); line-height:1.55; }
 .dm-tab { overflow-x:auto; }
 .dm-linha { display:grid; grid-template-columns:1.6fr .7fr .7fr .7fr .9fr; gap:10px; align-items:center;
-  padding:11px 18px; border-bottom:1px solid var(--borda); font-size:13px; min-width:560px; }
+  padding:11px 20px; border-bottom:1px solid var(--borda); font-size:13px; min-width:560px; }
 .dm-linha:last-child { border-bottom:none; }
 .dm-head { font-size:10.5px; color:var(--cinza-2); font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
-.dm-vazio { padding:26px 18px; color:var(--cinza); font-size:13px; }
+.dm-vazio { padding:26px 20px; color:var(--cinza); font-size:13px; }
 </style>
 {% endblock %}
 
@@ -30,23 +30,24 @@ select.campo:focus { outline:none; border-color:var(--teal); }
 <div class="page dm-wrap">
   <div class="dm-hero">
     <div>
-      <h1>Medição das campanhas</h1>
+      <h1>Resultado das campanhas</h1>
       <div class="dm-sub">
-        Três camadas, nesta ordem: o que <b>saiu</b>, quem <b>reagiu</b> e o que virou <b>dinheiro</b>.
+        Na ordem: o que <b>saiu</b>, quem <b>respondeu</b> e quanto disso <b>virou venda</b>.
         {% if campanha_nome %}Vendo <b>{{ campanha_nome }}</b>.{% else %}Somando todas as campanhas da base.{% endif %}
       </div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-      <select class="campo" onchange="location.href = this.value ? '/disparos/medicao?campanha=' + this.value : '/disparos/medicao'">
+      <span style="font-size:12px;color:var(--cinza);">Vendo</span>
+      <select class="campo" aria-label="Campanha" onchange="location.href = this.value ? '/disparos/medicao?campanha=' + this.value : '/disparos/medicao'">
         <option value="">Todas as campanhas</option>
         {% for c in campanhas %}<option value="{{ c.id }}" {% if c.id == campanha_id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
       </select>
-      <a href="/disparos/campanhas" class="btn-outline" style="text-decoration:none;white-space:nowrap;">Campanhas</a>
+      <a href="/disparos/campanhas" class="btn-outline" style="text-decoration:none;white-space:nowrap;">Voltar</a>
     </div>
   </div>
 
   <div class="card dm-camada">
-    <div class="card-header"><h3>Saiu</h3></div>
+    <div class="card-header"><h3>O que saiu</h3></div>
     <div class="dm-nums">
       <div class="dm-num"><b>{{ med.saiu.enviados }}</b><span>Mensagens enviadas</span></div>
       <div class="dm-num"><b>{{ med.saiu.na_fila }}</b><span>Na fila agora</span></div>
@@ -60,9 +61,9 @@ select.campo:focus { outline:none; border-color:var(--teal); }
   </div>
 
   <div class="card dm-camada">
-    <div class="card-header"><h3>Reagiu</h3></div>
+    <div class="card-header"><h3>Quem respondeu</h3></div>
     <div class="dm-nums">
-      <div class="dm-num bom"><b>{{ med.reagiu.taxa }}%</b><span>Taxa de resposta</span></div>
+      <div class="dm-num {{ 'bom' if med.reagiu.taxa else '' }}"><b>{{ med.reagiu.taxa }}%</b><span>Taxa de resposta</span></div>
       <div class="dm-num"><b>{{ med.reagiu.respondeu }}</b><span>Responderam</span></div>
       <div class="dm-num"><b>{{ med.reagiu.taxa_24h }}%</b><span>Responderam em 24h</span></div>
       <div class="dm-num"><b>{{ med.reagiu.taxa_72h }}%</b><span>Responderam em 72h</span></div>
@@ -73,24 +74,24 @@ select.campo:focus { outline:none; border-color:var(--teal); }
   </div>
 
   <div class="card dm-camada">
-    <div class="card-header"><h3>Virou dinheiro</h3></div>
+    <div class="card-header"><h3>O que virou venda</h3></div>
     <div class="dm-nums">
       <div class="dm-num"><b>{{ med.dinheiro.cotacoes }}</b><span>Cotações depois do disparo</span></div>
-      <div class="dm-num bom"><b>{{ med.dinheiro.propostas }}</b><span>Propostas fechadas</span></div>
-      <div class="dm-num bom"><b>R$ {{ '%.2f'|format(med.dinheiro.receita) }}</b><span>Mensalidade captada</span></div>
+      <div class="dm-num {{ 'bom' if med.dinheiro.propostas else '' }}"><b>{{ med.dinheiro.propostas }}</b><span>Propostas fechadas</span></div>
+      <div class="dm-num {{ 'bom' if med.dinheiro.receita else '' }}"><b>{{ med.dinheiro.receita|moeda }}</b><span>Mensalidade somada das propostas</span></div>
     </div>
     <div class="dm-nota">Só conta o que veio <b>depois</b> do disparo. Proposta que já existia antes da campanha não
       foi ela que trouxe, e somar isso seria a campanha se dar o crédito de venda alheia.</div>
   </div>
 
   <div class="card dm-camada">
-    <div class="card-header"><h3>Por texto</h3></div>
+    <div class="card-header"><h3>Qual texto funciona</h3></div>
     <div class="dm-tab">
-      <div class="dm-linha dm-head"><div>Modelo</div><div>Enviados</div><div>Responderam</div><div>Taxa</div><div>Metade responde até</div></div>
+      <div class="dm-linha dm-head"><div>Texto</div><div>Enviados</div><div>Responderam</div><div>Taxa</div><div>Metade responde até</div></div>
       {% for m in med.por_modelo %}
       <div class="dm-linha">
         <div>{{ m.nome }}</div><div>{{ m.enviados }}</div><div>{{ m.respondeu }}</div>
-        <div style="color:{{ 'var(--teal)' if m.taxa else 'var(--cinza)' }};font-weight:600;">{{ m.taxa }}%</div>
+        <div style="color:{{ 'var(--verde)' if m.taxa else 'var(--cinza)' }};font-weight:600;">{{ m.taxa }}%</div>
         <div style="color:var(--cinza);">{{ m.mediana }}</div>
       </div>
       {% else %}<div class="dm-vazio">Nada enviado ainda.</div>{% endfor %}
@@ -106,7 +107,7 @@ select.campo:focus { outline:none; border-color:var(--teal); }
       {% for c in med.por_consultor %}
       <div class="dm-linha">
         <div>{{ c.nome }}</div><div>{{ c.enviados }}</div><div>{{ c.respondeu }}</div>
-        <div style="color:{{ 'var(--teal)' if c.taxa else 'var(--cinza)' }};font-weight:600;">{{ c.taxa }}%</div>
+        <div style="color:{{ 'var(--verde)' if c.taxa else 'var(--cinza)' }};font-weight:600;">{{ c.taxa }}%</div>
         <div style="color:var(--cinza);">{{ c.mediana }}</div>
       </div>
       {% else %}<div class="dm-vazio">Nada enviado ainda.</div>{% endfor %}

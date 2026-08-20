@@ -1,200 +1,396 @@
 {% extends 'base.html' %}
-{% block title %}Campanhas na base{% endblock %}
+{% block title %}Campanhas na carteira{% endblock %}
+
+{% set ROT_ESTADO = {'rascunho':'Rascunho', 'ativa':'Ativa', 'pausada':'Pausada', 'concluida':'Encerrada'} %}
 
 {% block head %}
 <style>
-.dc-wrap { max-width:1040px; }
-.dc-hero { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
-.dc-hero h1 { font-size:26px; }
-.dc-sub { color:var(--cinza); font-size:13.5px; margin:4px 0 22px; line-height:1.55; max-width:640px; }
-.dc-card { padding:0; overflow:hidden; margin-bottom:12px; }
-.dc-top { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:15px 20px; }
-.dc-top a.nome { font-size:16px; font-weight:700; color:var(--texto); text-decoration:none; }
-.dc-top a.nome:hover { color:var(--teal); }
-.dc-meta { font-size:11.5px; color:var(--cinza); margin-top:2px; }
-.dc-nums { display:flex; gap:22px; font-size:12px; color:var(--cinza); text-align:center; }
-.dc-nums b { font-family:'Sora',sans-serif; font-size:17px; display:block; color:var(--texto); }
+.dc { --t-h1:22px; --t-h2:15px; --t-corpo:13px; --t-apoio:12px; --t-selo:10.5px; max-width:1000px; }
+
+.dc-topo { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; flex-wrap:wrap; }
+.dc-topo h1 { font-size:var(--t-h1); letter-spacing:-.02em; margin:0; }
+.dc-sub { color:var(--cinza); font-size:var(--t-apoio); margin:6px 0 22px; line-height:1.6; max-width:620px; }
+.dc-sub b { color:var(--texto); }
+
+/* ── Cartão de campanha ── */
+.dc-card { padding:0; overflow:hidden; margin-bottom:10px; }
+.dc-linha { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:15px 20px; }
+.dc-linha a.nome { font-size:15px; font-weight:700; color:var(--texto); text-decoration:none; letter-spacing:-.01em; }
+.dc-linha a.nome:hover { color:var(--verde); }
+.dc-meta { font-size:var(--t-apoio); color:var(--cinza); margin-top:3px; }
+.dc-quando { color:var(--info); font-weight:600; }
+.dc-nums { display:flex; gap:24px; text-align:center; }
+.dc-nums div { font-size:var(--t-apoio); color:var(--cinza); white-space:nowrap; }
+.dc-nums b { font-family:'Sora',sans-serif; font-size:17px; display:block; color:var(--texto); line-height:1.2; }
 .dc-nums .alerta b { color:var(--rosa); }
-.dc-badge { font-size:10.5px; padding:3px 10px; border-radius:20px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; white-space:nowrap; }
-.dc-badge.ativa { background:rgba(31,216,164,.12); color:var(--teal); }
-.dc-badge.pausada { background:rgba(245,158,11,.14); color:#f59e0b; }
-.dc-badge.rascunho { background:rgba(148,163,184,.15); color:var(--cinza); }
-.dc-badge.concluida { background:rgba(148,163,184,.15); color:var(--cinza); }
-.dc-form { padding:22px; }
-.dc-form h3 { font-size:15px; margin:0 0 4px; }
-.dc-passo { margin-bottom:20px; }
-.dc-passo > label, .dc-rot { display:block; font-size:12.5px; font-weight:600; margin-bottom:6px; }
-.dc-hint { font-size:12px; color:var(--cinza); line-height:1.55; margin:0 0 10px; }
-input.campo, select.campo { background:var(--input-bg); border:1px solid var(--borda); border-radius:9px;
-  color:var(--texto); padding:10px 12px; font-size:13px; font-family:inherit; }
-input.campo:focus, select.campo:focus { outline:none; border-color:var(--teal); }
-.dc-linha { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; }
+.dc-selo { font-size:var(--t-selo); padding:3px 10px; border-radius:20px; font-weight:700;
+  text-transform:uppercase; letter-spacing:.4px; white-space:nowrap; }
+.dc-selo.ativa { background:var(--verde-soft); color:var(--verde); }
+.dc-selo.pausada { background:rgba(194,65,12,.14); color:var(--amarelo); }
+.dc-selo.rascunho { background:rgba(59,130,246,.12); color:var(--info); }
+.dc-selo.concluida { background:rgba(148,163,184,.15); color:var(--cinza); }
+.dc-trava { padding:0 20px 13px; font-size:var(--t-apoio); color:var(--rosa); }
+
+/* ── Passos da criação ── */
+.dc-form { padding:0; }
+.dc-passos { display:flex; align-items:center; padding:18px 20px 0; }
+.dc-bolha { display:flex; flex-direction:column; align-items:center; gap:6px; flex-shrink:0; }
+.dc-bolha i { width:26px; height:26px; border-radius:50%; background:var(--panel-3); color:var(--cinza);
+  font-size:var(--t-apoio); font-weight:700; font-style:normal; font-family:'Sora',sans-serif;
+  display:inline-flex; align-items:center; justify-content:center;
+  transition:background 180ms var(--ease-saida), color 180ms var(--ease-saida); }
+.dc-bolha.on i { background:var(--grad-frio); color:#fff; }
+.dc-bolha.feito i { background:var(--verde-soft); color:var(--verde); }
+.dc-bolha span { font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2); font-weight:600; }
+.dc-bolha.on span { color:var(--texto); }
+.dc-trilho { flex:1; height:1px; background:var(--borda-2); margin:0 8px 18px; }
+
+.dc-etapa { padding:22px 20px 0; }
+/* [hidden] é estilo do navegador (display:none) e QUALQUER classe com display
+   o vence — .btn tem display:inline-flex, então o botão "Criar" aparecia junto
+   com o "Continuar" no passo 1. Aqui o atributo volta a mandar. */
+.dc [hidden] { display:none !important; }
+.dc-etapa h4 { font-size:var(--t-h2); margin:0 0 4px; }
+.dc-hint { font-size:var(--t-apoio); color:var(--cinza); line-height:1.6; margin:0 0 14px; max-width:640px; }
+.dc-hint b { color:var(--texto); }
+.dc-hint code { background:var(--panel-3); padding:1px 5px; border-radius:4px; font-size:11px; }
+.campo { background:var(--input-bg); border:1px solid var(--borda); border-radius:9px; color:var(--texto);
+  padding:10px 12px; font-size:var(--t-corpo); font-family:inherit; }
+.campo:focus { outline:none; border-color:var(--verde); }
+.dc-linha-campos { display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; }
+.dc-linha-campos label { display:block; font-size:var(--t-apoio); color:var(--cinza); margin-bottom:5px; }
+
+.dc-opcoes { display:flex; gap:10px; flex-wrap:wrap; }
+.dc-op { flex:1; min-width:230px; border:1px solid var(--borda); border-radius:10px; padding:13px 15px; cursor:pointer;
+  transition:border-color 140ms var(--ease-saida), transform 140ms var(--ease-saida); }
+.dc-op b { display:block; font-size:var(--t-corpo); margin-bottom:3px; }
+.dc-op span { font-size:var(--t-apoio); color:var(--cinza); line-height:1.5; }
+.dc-op:has(input:checked) { border-color:var(--verde); }
+.dc-op:active { transform:scale(.99); }
+.dc-op input { position:absolute; opacity:0; pointer-events:none; }
+@media (hover:hover) and (pointer:fine) { .dc-op:hover { border-color:var(--borda-2); } }
+
+.dc-solta { display:block; border:1.5px dashed var(--borda-2); border-radius:11px; padding:26px 20px;
+  text-align:center; cursor:pointer; background:var(--panel-2); max-width:640px;
+  transition:border-color 140ms var(--ease-saida); }
+.dc-solta b { display:block; font-size:var(--t-corpo); margin-bottom:4px; }
+.dc-solta span { font-size:var(--t-apoio); color:var(--cinza); }
+.dc-solta.tem { border-style:solid; border-color:var(--verde); }
+@media (hover:hover) and (pointer:fine) { .dc-solta:hover { border-color:var(--cinza); } }
+.dc-arq { font-size:var(--t-corpo); color:var(--verde); font-weight:600; margin-top:10px; }
+.dc-arq.err { color:var(--rosa); }
+
 .dc-dias { display:flex; gap:6px; flex-wrap:wrap; }
 .dc-dia { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--borda); border-radius:8px;
-  padding:7px 10px; font-size:12.5px; cursor:pointer; user-select:none;
-  transition:border-color 140ms var(--ease-saida,ease), color 140ms var(--ease-saida,ease); }
-.dc-dia:has(input:checked) { border-color:var(--teal); color:var(--teal); }
+  padding:7px 10px; font-size:var(--t-apoio); cursor:pointer; user-select:none;
+  transition:border-color 140ms var(--ease-saida), color 140ms var(--ease-saida), transform 140ms var(--ease-saida); }
+.dc-dia:has(input:checked) { border-color:var(--verde); color:var(--verde); }
+.dc-dia:active { transform:scale(.97); }
 .dc-dia input { width:14px; height:14px; }
-.dc-escolha { display:flex; gap:10px; flex-wrap:wrap; }
-.dc-op { flex:1; min-width:210px; border:1px solid var(--borda); border-radius:10px; padding:12px 14px; cursor:pointer;
-  transition:border-color 140ms var(--ease-saida,ease); }
-.dc-op:has(input:checked) { border-color:var(--teal); }
-.dc-op b { display:block; font-size:13px; margin-bottom:2px; }
-.dc-op span { font-size:11.5px; color:var(--cinza); line-height:1.45; }
-.dc-arquivo { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
-.dc-arquivo .nome-arq { font-size:12.5px; color:var(--teal); }
-.dc-vazio { padding:30px; text-align:center; color:var(--cinza); }
-.dc-bloq { display:flex; align-items:center; gap:12px; padding:10px 18px; border-bottom:1px solid var(--borda); font-size:12.5px; }
-.dc-bloq:last-child { border-bottom:none; }
-.dc-bloq .motivo { margin-left:auto; color:var(--cinza); font-size:11.5px; text-align:right; }
-/* Botão não ganha estilo próprio aqui: .btn e .btn-outline moram em base.html e
-   já trazem o hover, o :active e o reduced-motion. Reescrever aqui faria estas
-   duas telas se comportarem diferente do resto do JOB — que é exatamente o
-   defeito que deixou a interface remendada antes. */
+
+.dc-revisao { font-size:var(--t-corpo); line-height:2; }
+.dc-revisao b { color:var(--texto); }
+.dc-revisao .rot { color:var(--cinza); display:inline-block; min-width:150px; }
+.dc-rodape { display:flex; gap:10px; align-items:center; padding:20px; margin-top:6px; border-top:1px solid var(--borda); }
+.dc-rodape .dir { margin-left:auto; display:flex; gap:10px; }
+.dc-erro { font-size:var(--t-apoio); color:var(--rosa); font-weight:600; }
+
+.dc-bloq { display:flex; align-items:center; gap:12px; padding:10px 20px; border-top:1px solid var(--borda); font-size:var(--t-corpo); }
+.dc-bloq .dir { margin-left:auto; color:var(--cinza); font-size:var(--t-apoio); text-align:right; }
+details.dc-guardado > summary { list-style:none; cursor:pointer; padding:15px 20px; display:flex; align-items:center;
+  gap:10px; font-size:var(--t-h2); font-weight:700; font-family:'Sora',sans-serif; }
+details.dc-guardado > summary::-webkit-details-marker { display:none; }
+details.dc-guardado > summary .seta { color:var(--cinza); font-size:11px; transition:transform 160ms var(--ease-saida); }
+details.dc-guardado[open] > summary .seta { transform:rotate(90deg); }
+.dc-vazio { padding:26px 20px; text-align:center; color:var(--cinza); font-size:var(--t-corpo); }
+
+@media (prefers-reduced-motion: reduce) {
+  .dc-op, .dc-dia, .dc-solta, .dc-bolha i, details.dc-guardado > summary .seta { transition:none; }
+  .dc-op:active, .dc-dia:active { transform:none; }
+}
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="page dc-wrap">
-  <div class="dc-hero">
+<div class="page dc">
+  <div class="dc-topo">
     <div>
-      <h1>Campanhas na base</h1>
+      <h1>Campanhas na carteira</h1>
+      <div class="dc-sub">
+        Use esta tela quando a lista é de <b>gente que a Serenus já conhece</b> — a mensagem sai pelo WhatsApp do
+        consultor que já fala com cada uma. Para lista comprada ou de gente que nunca ouviu falar da gente,
+        o disparo é o outro.
+      </div>
     </div>
-    <a href="/disparos/medicao" class="btn-outline" style="text-decoration:none;white-space:nowrap;">Medição</a>
-    <a href="/campanhas" class="btn-outline" style="text-decoration:none;white-space:nowrap;">Lista fria (MEI)</a>
-  </div>
-  <div class="dc-sub">
-    Aqui a mensagem sai pelo WhatsApp do <b>consultor dono do lead</b> — não em rodízio. Você sobe uma planilha
-    com quem quer atingir, o sistema casa cada telefone com a base e descobre por quem falar.
-    Nada é enviado até você ativar a campanha.
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <a href="/disparos/medicao" class="btn-outline" style="text-decoration:none;white-space:nowrap;">Resultado</a>
+      <a href="/campanhas" class="btn-outline" style="text-decoration:none;white-space:nowrap;">Ir para lista fria</a>
+    </div>
   </div>
 
   {% for c in campanhas %}
   <div class="card dc-card">
-    <div class="dc-top">
+    <div class="dc-linha">
       <div>
         <a class="nome" href="/disparos/campanha/{{ c.id }}">{{ c.nome }}</a>
         <div class="dc-meta">
-          {{ 'Clientes com venda' if c.publico == 'vendas' else 'Leads' }}
-          · até {{ c.teto_dia }} por consultor/dia
-          · {{ c.hora_inicio }} às {{ c.hora_fim }}
+          {{ 'Sai por quem fechou a venda' if c.publico == 'vendas' else 'Sai pelo responsável no CRM' }}
+          · {{ c.teto_dia }} por consultor/dia · {{ c.hora_inicio }} às {{ c.hora_fim }}
         </div>
       </div>
       <div class="dc-nums">
         <div><b>{{ c.total or 0 }}</b>na lista</div>
-        <div><b>{{ c.enviados or 0 }}</b>enviados</div>
+        <div><b>{{ c.enviados or 0 }}</b>receberam</div>
         <div><b>{{ c.respondeu or 0 }}</b>responderam</div>
-        <div class="{{ 'alerta' if c.sem_dono else '' }}"><b>{{ c.sem_dono or 0 }}</b>sem dono</div>
+        <div class="{{ 'alerta' if c.sem_dono }}"><b>{{ c.sem_dono or 0 }}</b>sem consultor</div>
       </div>
-      <span class="dc-badge {{ c.status }}">{{ c.status }}</span>
+      <span class="dc-selo {{ c.status }}">{{ ROT_ESTADO.get(c.status, c.status) }}</span>
     </div>
+    {% if c.status == 'rascunho' %}
+    <div class="dc-trava">Ainda não envia nada — falta conferir a lista e ativar.</div>
+    {% endif %}
   </div>
   {% else %}
-  <div class="card dc-vazio">Nenhuma campanha na base ainda. A primeira se cria aqui embaixo.</div>
+  <div class="card dc-vazio">Nenhuma campanha na carteira ainda. A primeira se cria aqui embaixo.</div>
   {% endfor %}
 
+  {# ── CRIAÇÃO EM PASSOS. A tela irmã do MEI já fazia assim, e por um motivo:
+       catorze campos de uma vez viram uma parede, e o admin não sabe quais são
+       obrigatórios. Um assunto por vez, com revisão no fim. ── #}
+  <div class="card dc-form" id="nova" style="margin-top:22px;">
+    <div class="dc-passos">
+      {% for n, rot in [(1,'A lista'), (2,'Quem envia'), (3,'Ritmo'), (4,'Conferir')] %}
+      <div class="dc-bolha {{ 'on' if n == 1 }}" data-bolha="{{ n }}"><i>{{ n }}</i><span>{{ rot }}</span></div>
+      {% if not loop.last %}<div class="dc-trilho"></div>{% endif %}
+      {% endfor %}
+    </div>
+
+    <form method="POST" action="/disparos/campanha/criar" enctype="multipart/form-data" id="form-nova">
+
+      <div class="dc-etapa" data-etapa="1">
+        <h4>A sua lista</h4>
+        <p class="dc-hint">
+          Planilha com uma pessoa por linha e <b>a primeira linha com os títulos das colunas</b>. Precisa ter uma
+          coluna de telefone. As outras viram variáveis da mensagem: uma coluna "Valor da Mensalidade" deixa você
+          escrever <code>{valor_da_mensalidade}</code> no texto. Aceita .xlsx e .csv.
+          <br><b>A lista entra só agora</b> — depois de criada, a campanha não aceita outra planilha.
+        </p>
+        <label class="dc-solta" id="dc-solta" for="dc-planilha">
+          <b>Escolher a planilha</b>
+          <span>.xlsx ou .csv &mdash; ou arraste o arquivo aqui</span>
+        </label>
+        <input type="file" id="dc-planilha" name="planilha" accept=".xlsx,.xlsm,.csv" style="display:none;">
+        <div class="dc-arq" id="dc-arq"></div>
+        <p class="dc-hint" style="margin-top:12px;">
+          <a href="/disparos/campanha/modelo-planilha" style="color:var(--cinza);">Baixar uma planilha de exemplo</a>
+        </p>
+      </div>
+
+      <div class="dc-etapa" data-etapa="2" hidden>
+        <h4>Por quem a mensagem sai</h4>
+        <p class="dc-hint">
+          Isto não filtra a sua planilha — ela sai inteira. O que muda é <b>de quem é o WhatsApp</b> que envia.
+        </p>
+        <div class="dc-opcoes">
+          <label class="dc-op"><input type="radio" name="publico" value="leads" checked>
+            <b>Pelo consultor do CRM</b><span>Para lista de leads: sai por quem está como responsável.</span></label>
+          <label class="dc-op"><input type="radio" name="publico" value="vendas">
+            <b>Por quem fechou a venda</b><span>Para lista de clientes: sai por quem vendeu a proposta.</span></label>
+        </div>
+        <div style="margin-top:18px;">
+          <label for="dc-nome" style="display:block;font-size:var(--t-apoio);color:var(--cinza);margin-bottom:5px;">Nome da campanha</label>
+          <p class="dc-hint" style="margin-bottom:8px;">Aparece na etiqueta do cliente e no histórico dele. Use algo que você reconheça daqui a três meses.</p>
+          <input class="campo" id="dc-nome" name="nome" required style="width:400px;max-width:100%;"
+                 placeholder="Ex: MedSênior — reajuste de setembro">
+        </div>
+      </div>
+
+      <div class="dc-etapa" data-etapa="3" hidden>
+        <h4>Ritmo</h4>
+        <p class="dc-hint">Tudo isto continua editável depois de criada.</p>
+        <div class="dc-linha-campos">
+          <div>
+            <label for="dc-teto">Máximo por consultor, por dia<button type="button" class="job-i" aria-label="Por que existe um limite"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">Falar com muita gente nova em sequência é o que faz o WhatsApp bloquear um número. O limite espalha a campanha por vários dias. Comece baixo e suba conforme for medindo.</span></button></label>
+            <input class="campo" id="dc-teto" name="teto_dia" type="number" min="1" max="200" value="10" style="width:120px;">
+          </div>
+          <div><label for="dc-ini">Só envia a partir das</label><input class="campo" id="dc-ini" name="hora_inicio" type="time" value="08:00" style="width:130px;"></div>
+          <div><label for="dc-fim">E para às</label><input class="campo" id="dc-fim" name="hora_fim" type="time" value="18:00" style="width:130px;"></div>
+        </div>
+        <div style="margin-top:16px;">
+          <label style="display:block;font-size:var(--t-apoio);color:var(--cinza);margin-bottom:7px;">Dias em que pode enviar</label>
+          <div class="dc-dias">
+            {% for d, rot in [(1,'Seg'),(2,'Ter'),(3,'Qua'),(4,'Qui'),(5,'Sex'),(6,'Sáb'),(7,'Dom')] %}
+            <label class="dc-dia"><input type="checkbox" name="dias_semana" value="{{ d }}" {% if d < 6 %}checked{% endif %}>{{ rot }}</label>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <div class="dc-etapa" data-etapa="4" hidden>
+        <h4>Confira antes de criar</h4>
+        <p class="dc-hint">A campanha nasce como rascunho: <b>nada é enviado agora</b>.</p>
+        <div class="dc-revisao" id="dc-revisao"></div>
+        <p class="dc-hint" style="margin-top:16px;">
+          <b>Depois de criar, ainda falta:</b> dar um consultor a quem ficou sem dono, escolher o texto que sai por
+          cada consultor, e clicar em ativar. A tela seguinte te guia nisso.
+        </p>
+      </div>
+
+      <div class="dc-rodape">
+        <button class="btn-outline" type="button" id="dc-voltar" onclick="passo(-1)" style="visibility:hidden;">Voltar</button>
+        <span class="dc-erro" id="dc-erro" role="status" aria-live="polite"></span>
+        <div class="dir">
+          <button class="btn" type="button" id="dc-avancar" onclick="passo(1)">Continuar</button>
+          <button class="btn" type="submit" id="dc-criar" hidden>Criar campanha e conferir a lista</button>
+        </div>
+      </div>
+    </form>
+  </div>
+
   {% if bloqueios %}
-  <div class="card" style="margin-top:24px;padding:0;">
-    <div class="card-header"><h3>Não querem receber ({{ bloqueios|length }})</h3></div>
-    <div class="dc-hint" style="padding:14px 18px 0;margin:0;">
-      Estes números não entram em campanha nenhuma, de nenhum consultor — nem se vierem na planilha que você
-      subir. Conversa normal com eles continua valendo; o que para é o disparo.
+  <details class="card dc-guardado" style="margin-top:16px;padding:0;">
+    <summary><span class="seta">&#9656;</span> Não querem receber
+      <span style="font-weight:400;font-family:'Inter',sans-serif;font-size:var(--t-apoio);color:var(--cinza);">{{ bloqueios|length }} número(s)</span></summary>
+    <div class="dc-hint" style="padding:0 20px 6px;">
+      Não entram em campanha nenhuma, de nenhum consultor — nem se vierem na planilha que você subir.
+      Conversa normal com eles continua valendo; o que para é o disparo.
     </div>
     {% for b in bloqueios %}
     <div class="dc-bloq">
       <span>{{ b.nome or 'Sem nome no CRM' }}</span>
-      <span style="color:var(--cinza);font-size:11.5px;">{{ b.telefone_norm }}</span>
-      <span class="motivo">{{ b.motivo }}</span>
-      <button class="btn-outline btn-sm" onclick="liberar('{{ b.telefone_norm }}', this)">Liberar</button>
+      <span style="color:var(--cinza);font-size:var(--t-apoio);">{{ b.telefone_norm }}</span>
+      <span class="dir">{{ b.motivo }}</span>
+      <button class="btn-outline btn-sm" onclick="liberar('{{ b.telefone_norm }}', this)">Voltar a receber</button>
     </div>
     {% endfor %}
-  </div>
+  </details>
   {% endif %}
-
-  <div class="card dc-form" style="margin-top:24px;">
-    <h3>Nova campanha</h3>
-    <p class="dc-hint">A campanha nasce como rascunho: você confere a lista antes de qualquer mensagem sair.</p>
-
-    <form method="POST" action="/disparos/campanha/criar" enctype="multipart/form-data" id="form-nova">
-      <div class="dc-passo">
-        <label for="dc-nome">Nome da campanha</label>
-        <p class="dc-hint">É como ela aparece na etiqueta do lead e no histórico. Use algo que você reconheça daqui a três meses.</p>
-        <input class="campo" id="dc-nome" name="nome" required style="width:380px;max-width:100%;"
-               placeholder="Ex: MedSênior — reajuste de setembro">
-      </div>
-
-      <div class="dc-passo">
-        <span class="dc-rot">Quem vai receber<button type="button" class="job-i" aria-label="Qual a diferença"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">Muda quem o sistema considera dono. Em Leads, o dono é o consultor responsável no CRM. Em clientes com venda, é quem fechou a proposta — é com essa pessoa que o cliente falou por último.</span></button></span>
-        <div class="dc-escolha">
-          <label class="dc-op"><input type="radio" name="publico" value="leads" checked>
-            <b>Leads</b><span>Sai pelo consultor responsável no CRM.</span></label>
-          <label class="dc-op"><input type="radio" name="publico" value="vendas">
-            <b>Clientes com venda</b><span>Sai por quem fechou a proposta.</span></label>
-        </div>
-      </div>
-
-      <div class="dc-passo">
-        <span class="dc-rot">A lista</span>
-        <p class="dc-hint">
-          Planilha com uma pessoa por linha e <b>a primeira linha com os títulos das colunas</b>. Precisa ter uma coluna de telefone.
-          As outras colunas viram variáveis da mensagem: uma coluna "Valor da Mensalidade" permite escrever
-          <code>{valor_da_mensalidade}</code> no texto. Aceita .xlsx e .csv.
-        </p>
-        <div class="dc-arquivo">
-          <button type="button" class="btn-outline btn-sm" onclick="document.getElementById('dc-planilha').click()">Escolher planilha</button>
-          <input type="file" id="dc-planilha" name="planilha" accept=".xlsx,.xlsm,.csv" style="display:none;">
-          <span class="nome-arq" id="dc-arq-nome"></span>
-          <a href="/disparos/campanha/modelo-planilha" style="font-size:12px;color:var(--cinza);">Baixar planilha de exemplo</a>
-        </div>
-      </div>
-
-      <div class="dc-passo">
-        <span class="dc-rot">Ritmo</span>
-        <p class="dc-hint">Tudo isto continua editável depois.</p>
-        <div class="dc-linha">
-          <div>
-            <label for="dc-teto" style="font-weight:400;font-size:12px;color:var(--cinza);">Por consultor, por dia<button type="button" class="job-i" aria-label="Por que existe um teto"><span aria-hidden="true">i</span><span class="job-i-txt" role="tooltip">Falar com muita gente nova em sequência é o que faz o WhatsApp bloquear um número. O teto espalha a campanha por vários dias em vez de concentrar tudo num. Comece baixo e suba conforme for medindo.</span></button></label>
-            <input class="campo" id="dc-teto" name="teto_dia" type="number" min="1" max="200" value="10" style="width:110px;display:block;">
-          </div>
-          <div>
-            <label for="dc-ini" style="font-weight:400;font-size:12px;color:var(--cinza);">Das</label>
-            <input class="campo" id="dc-ini" name="hora_inicio" type="time" value="08:00" style="width:120px;display:block;">
-          </div>
-          <div>
-            <label for="dc-fim" style="font-weight:400;font-size:12px;color:var(--cinza);">Até</label>
-            <input class="campo" id="dc-fim" name="hora_fim" type="time" value="18:00" style="width:120px;display:block;">
-          </div>
-        </div>
-        <div class="dc-dias" style="margin-top:12px;">
-          {% for d, rot in [(1,'Seg'),(2,'Ter'),(3,'Qua'),(4,'Qui'),(5,'Sex'),(6,'Sáb'),(7,'Dom')] %}
-          <label class="dc-dia"><input type="checkbox" name="dias_semana" value="{{ d }}" {% if d < 6 %}checked{% endif %}>{{ rot }}</label>
-          {% endfor %}
-        </div>
-      </div>
-
-      <button class="btn" type="submit" id="dc-enviar">Criar campanha e conferir a lista</button>
-    </form>
-  </div>
 </div>
 
 <script>
-  function liberar(telefone, btn) {
-    btn.disabled = true; btn.textContent = 'Liberando…';
-    fetch('/disparos/bloqueio/liberar', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ telefone: telefone }) })
-      .then(function (r) { return r.json(); })
-      .then(function () { location.reload(); })
-      .catch(function () { btn.disabled = false; btn.textContent = 'Tentar de novo'; });
+  var etapa = 1, TOTAL = 4;
+
+  function mostrar() {
+    document.querySelectorAll('.dc-etapa').forEach(function (e) {
+      e.hidden = parseInt(e.dataset.etapa, 10) !== etapa;
+    });
+    document.querySelectorAll('.dc-bolha').forEach(function (b) {
+      var n = parseInt(b.dataset.bolha, 10);
+      b.className = 'dc-bolha' + (n === etapa ? ' on' : (n < etapa ? ' feito' : ''));
+    });
+    document.getElementById('dc-voltar').style.visibility = etapa > 1 ? 'visible' : 'hidden';
+    document.getElementById('dc-avancar').hidden = etapa === TOTAL;
+    document.getElementById('dc-criar').hidden = etapa !== TOTAL;
+    document.getElementById('dc-erro').textContent = '';
+    if (etapa === TOTAL) revisar();
   }
 
+  function erro(msg, foco) {
+    document.getElementById('dc-erro').textContent = msg;
+    if (foco) foco.focus();
+  }
+
+  // A validação mora na passagem de etapa, não no envio: descobrir na última
+  // tela que faltava a planilha da primeira é o tipo de volta que faz o admin
+  // desistir no meio.
+  function podeAvancar() {
+    if (etapa === 1 && !document.getElementById('dc-planilha').files.length) {
+      erro('Escolha a planilha antes de continuar — ela não pode ser subida depois.');
+      return false;
+    }
+    if (etapa === 2 && !document.getElementById('dc-nome').value.trim()) {
+      erro('Dê um nome à campanha.', document.getElementById('dc-nome'));
+      return false;
+    }
+    if (etapa === 3 && !document.querySelectorAll('input[name=dias_semana]:checked').length) {
+      erro('Escolha pelo menos um dia da semana.');
+      return false;
+    }
+    return true;
+  }
+
+  function passo(d) {
+    if (d > 0 && !podeAvancar()) return;
+    etapa = Math.min(TOTAL, Math.max(1, etapa + d));
+    mostrar();
+    document.getElementById('nova').scrollIntoView({ block: 'nearest' });
+  }
+
+  function revisar() {
+    var arq = document.getElementById('dc-planilha').files[0];
+    var dias = Array.from(document.querySelectorAll('input[name=dias_semana]:checked'))
+      .map(function (c) { return c.parentElement.textContent.trim(); }).join(', ');
+    var pub = document.querySelector('input[name=publico]:checked').value === 'vendas'
+      ? 'Por quem fechou a venda' : 'Pelo consultor responsável no CRM';
+    function li(rot, val) {
+      var d = document.createElement('div');
+      var r = document.createElement('span'); r.className = 'rot'; r.textContent = rot;
+      var b = document.createElement('b'); b.textContent = val;   // nome de arquivo é do usuário
+      d.appendChild(r); d.appendChild(b); return d;
+    }
+    var alvo = document.getElementById('dc-revisao');
+    alvo.innerHTML = '';
+    alvo.appendChild(li('Nome', document.getElementById('dc-nome').value.trim()));
+    alvo.appendChild(li('Lista', arq ? arq.name : '(nenhuma)'));
+    alvo.appendChild(li('Sai por', pub));
+    alvo.appendChild(li('Ritmo', document.getElementById('dc-teto').value + ' por consultor, por dia'));
+    alvo.appendChild(li('Horário', document.getElementById('dc-ini').value + ' às ' + document.getElementById('dc-fim').value));
+    alvo.appendChild(li('Dias', dias));
+  }
+
+  var solta = document.getElementById('dc-solta');
   document.getElementById('dc-planilha').addEventListener('change', function () {
-    document.getElementById('dc-arq-nome').textContent = this.files.length ? this.files[0].name : '';
+    var a = document.getElementById('dc-arq');
+    if (this.files.length) {
+      a.textContent = this.files[0].name; a.className = 'dc-arq';
+      solta.classList.add('tem');
+      document.getElementById('dc-erro').textContent = '';
+    } else { a.textContent = ''; solta.classList.remove('tem'); }
   });
-  // Planilha grande demora a subir. Sem travar, o admin clica de novo e cria
-  // duas campanhas iguais — foi assim que nasceu proposta duplicada no JOB.
-  document.getElementById('form-nova').addEventListener('submit', function () {
-    var b = document.getElementById('dc-enviar');
+  ['dragover', 'dragenter'].forEach(function (ev) {
+    solta.addEventListener(ev, function (e) { e.preventDefault(); solta.classList.add('tem'); });
+  });
+  solta.addEventListener('dragleave', function () {
+    if (!document.getElementById('dc-planilha').files.length) solta.classList.remove('tem');
+  });
+  solta.addEventListener('drop', function (e) {
+    e.preventDefault();
+    if (e.dataTransfer.files.length) {
+      document.getElementById('dc-planilha').files = e.dataTransfer.files;
+      document.getElementById('dc-planilha').dispatchEvent(new Event('change'));
+    }
+  });
+
+  document.getElementById('form-nova').addEventListener('submit', function (e) {
+    if (!document.getElementById('dc-planilha').files.length) {
+      e.preventDefault(); etapa = 1; mostrar();
+      erro('Escolha a planilha antes de criar — ela não pode ser subida depois.');
+      return;
+    }
+    var b = document.getElementById('dc-criar');
     b.disabled = true; b.textContent = 'Lendo a planilha e procurando os donos…';
   });
+  // Voltar do navegador devolvia o botão travado em "Lendo a planilha…" pra
+  // sempre, e a tela ficava morta sem dizer por quê.
+  window.addEventListener('pageshow', function (e) {
+    if (!e.persisted) return;
+    var b = document.getElementById('dc-criar');
+    b.disabled = false; b.textContent = 'Criar campanha e conferir a lista';
+  });
+
+  function liberar(telefone, btn) {
+    var rot = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Reativando…';
+    fetch('/disparos/bloqueio/liberar', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ telefone: telefone }) })
+      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        if (!r || !r.ok) { btn.disabled = false; btn.textContent = rot; toast('Não consegui liberar.', 'err'); return; }
+        location.reload();
+      })
+      .catch(function () { btn.disabled = false; btn.textContent = rot; toast('Sem conexão com o servidor.', 'err'); });
+  }
+
+  mostrar();
 </script>
 {% endblock %}

@@ -12824,13 +12824,17 @@ def _disparo_medicao(conn, campanha_id=None):
                 if seg <= 259200: resp72 += 1
 
     def _fmt(seg):
+        # "3 h 0 min" ninguém escreve. Minuto zero não aparece.
         if seg is None:
             return '—'
         seg = int(seg)
         if seg < 60: return f'{seg}s'
         if seg < 3600: return f'{seg // 60} min'
-        if seg < 86400: return f'{seg // 3600} h {(seg % 3600) // 60} min'
-        return f'{seg // 86400} dia(s)'
+        if seg < 86400:
+            h, m = seg // 3600, (seg % 3600) // 60
+            return f'{h} h' + (f' {m} min' if m else '')
+        d = seg // 86400
+        return f'{d} dia' + ('s' if d > 1 else '')
 
     def _taxa(parte, todo):
         return round(100.0 * parte / todo, 1) if todo else 0.0
