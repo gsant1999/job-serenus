@@ -27765,6 +27765,52 @@ def api_v1_cotacao_planos():
                                 'faixas': precos.get(t['id'], {})} for t in linhas]})
 
 
+def _proximo_passo_calculo(planos, avisos, pedidos):
+    """Frase acionável para quando o cálculo "deu certo" mas não entrega o que
+    foi pedido.
+
+    Existe porque a recusa por faixa de vidas faz o plano SUMIR de `resultados`
+    em vez de voltar com elegivel=False (o motor dá `continue`). Quem lê só
+    `ok`, `total_geral` e `resultados` não tem como perceber. E o caso perigoso
+    não é o total zerado — esse é anômalo o bastante pra levantar suspeita. É o
+    PARCIAL: volta um total plausível com um plano a menos e nenhum zero pra
+    denunciar. 663 das 669 tabelas ativas têm faixa de vidas, então cair nisso é
+    o caminho comum, não a exceção.
+
+    Sai como chave NOVA e opcional: trocar ok:true por ok:false quebraria a tela
+    (que aborta o cálculo inteiro e perde junto os planos que TÊM preço) e a
+    extensão (que perde o motivo específico e passa a culpar o banco). E o nome
+    não pode ser 'erro' nem 'mensagem': o cliente do MCP lê essas duas chaves
+    como falha mesmo quando ok=True."""
+    if not avisos:
+        return None
+    # dict.fromkeys em vez de set: tira o repetido (o mesmo motivo volta uma vez
+    # por plano) sem embaralhar a ordem em que os avisos saíram.
+    vistos = dict.fromkeys((a.get('mensagem') or a.get('codigo') or '')
+                           for a in avisos if isinstance(a, dict))
+    motivos = '; '.join(m for m in vistos if m)
+    codigos = {a.get('codigo') for a in avisos if isinstance(a, dict)}
+    # A orientação segue o motivo real: mandar "ajuste as vidas" quando o plano
+    # nem existe faz o agente girar em falso na correção errada.
+    if 'fora_da_faixa_de_vidas' in codigos:
+        acao = ('Escolha planos que aceitem esta quantidade de vidas (cada plano traz '
+                'vidas_min e vidas_max) e calcule de novo.')
+    else:
+        acao = 'Confira os planos enviados em cotacoes_planos_listar e calcule de novo.'
+    if not planos:
+        return ('Nenhum plano pôde ser calculado para este grupo — total zero não é preço. '
+                f'Motivo: {motivos}. {acao} Não apresente este resultado ao cliente.')
+    faltando = max(0, pedidos - len(planos))
+    if faltando:
+        ficou = 'ficou' if faltando == 1 else 'ficaram'
+        sobrou = (f'o {len(planos)} que sobrou' if len(planos) == 1
+                  else f'os {len(planos)} que sobraram')
+        return (f'{faltando} de {pedidos} planos pedidos {ficou} FORA de "resultados": '
+                f'o total_geral cobre só {sobrou}. Motivo: {motivos}. '
+                'Confira antes de comparar preços com o cliente.')
+    return f'Cálculo saiu com ressalva: {motivos}.'
+
+
 @app.route('/api/v1/cotacao/calcular', methods=['POST', 'OPTIONS'])
 # Mesma porta da rota de cima: chave de API pública OU sessão/extensão.
 # Calcular não cria nada — é leitura com conta.
@@ -27801,8 +27847,12 @@ def api_v1_cotacao_calcular():
     conn = db()
     planos, total, dist, avisos = calcular_cotacao(conn, idades, ids, recs)
     close_db(conn)
-    return jsonify({'ok': True, 'vidas': len(idades), 'distribuicao': dist,
-                    'resultados': planos, 'total_geral': total, 'avisos': avisos})
+    resp = {'ok': True, 'vidas': len(idades), 'distribuicao': dist,
+            'resultados': planos, 'total_geral': total, 'avisos': avisos}
+    prox = _proximo_passo_calculo(planos, avisos, len(ids))
+    if prox:
+        resp['proximo_passo'] = prox
+    return jsonify(resp)
 
 
 def _cotacao_completa(conn, c):
