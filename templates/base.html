@@ -833,10 +833,19 @@
       Funis WhatsApp
     </a>
     {% endif %}
+    {#  DOIS MOTORES, DOIS ITENS DE MENU. Eram um só, e a regra de "aceso"
+        (`'/campanha' in request.path`) casava com /disparos/campanha também:
+        do lado de fora da tela, os dois viravam a mesma coisa. São coisas
+        diferentes — lista fria comprada versus a carteira da casa — e o menu
+        precisa dizer isso antes do primeiro clique.  #}
     {% if session.perfil == 'admin' %}
-    <a href="/campanhas" class="nav-link {% if '/campanha' in request.path %}active{% endif %}" onclick="closeSidebar()">
+    <a href="/campanhas" class="nav-link {% if request.path.startswith('/campanha') %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l19-9-9 19-2-8-8-2z"/></svg>
-      Disparos
+      Disparo lista fria
+    </a>
+    <a href="/disparos/campanhas" class="nav-link {% if request.path.startswith('/disparos') %}active{% endif %}" onclick="closeSidebar()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      Campanha na carteira
     </a>
     {% endif %}
     {% if pode_modulo('crm_modelos') %}
