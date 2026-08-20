@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Campanhas na carteira{% endblock %}
+{% block title %}Disparo pela carteira{% endblock %}
 
 {% set ROT_ESTADO = {'rascunho':'Rascunho', 'ativa':'Ativa', 'pausada':'Pausada', 'concluida':'Encerrada'} %}
 
@@ -115,7 +115,7 @@ details.dc-guardado[open] > summary .seta { transform:rotate(90deg); }
 <div class="page dc">
   <div class="dc-topo">
     <div>
-      <h1>Campanhas na carteira</h1>
+      <h1>Disparo pela carteira</h1>
       <div class="dc-sub">
         Use esta tela quando a lista é de <b>gente que a Serenus já conhece</b> — a mensagem sai pelo WhatsApp do
         consultor que já fala com cada uma. Para lista comprada ou de gente que nunca ouviu falar da gente,
@@ -150,7 +150,7 @@ details.dc-guardado[open] > summary .seta { transform:rotate(90deg); }
     {% endif %}
   </div>
   {% else %}
-  <div class="card dc-vazio">Nenhuma campanha na carteira ainda. A primeira se cria aqui embaixo.</div>
+  <div class="card dc-vazio">Nenhuma campanha ainda. A primeira se cria aqui embaixo.</div>
   {% endfor %}
 
   {# ── CRIAÇÃO EM PASSOS. A tela irmã do MEI já fazia assim, e por um motivo:
