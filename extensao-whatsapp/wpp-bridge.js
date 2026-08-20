@@ -1513,7 +1513,7 @@
   // Houve mensagem do CONTATO depois da marca? Devolve o carimbo da PRIMEIRA
   // (é ela que mede quanto o cliente demorou pra responder), ou 0.
   function _respostaDepoisDe(chat, desde) {
-    let achou = 0;
+    let achou = 0, texto = '';
     let models = [];
     try {
       models = (chat.msgs && (chat.msgs.getModelsArray ? chat.msgs.getModelsArray() : chat.msgs._models)) || [];
@@ -1523,15 +1523,21 @@
       // "sem campo" não é o cliente falando.
       if (!m || !m.t || !m.id || m.id.fromMe !== false) continue;
       if (m.t <= desde) continue;
-      if (!achou || m.t < achou) achou = m.t;
+      if (!achou || m.t < achou) {
+        achou = m.t;
+        // O TEXTO da resposta vai junto, cortado. Serve pra uma coisa só: o JOB
+        // reconhecer quem está pedindo pra parar de receber campanha. Nada é
+        // guardado além disso — a conversa continua sendo do consultor.
+        texto = (typeof m.body === 'string' ? m.body : '').slice(0, 200);
+      }
     }
-    if (achou) return achou;
+    if (achou) return { t: achou, texto: texto };
     // A coleção em memória pode não ter a mensagem (conversa antiga, pouco
     // rolada). O próprio chat ainda denuncia: não-lida + movimento depois da
     // marca só acontece com mensagem que ENTROU — a nossa sai lida.
     const t = Number(chat.t || 0);
-    if (t > desde && Number(chat.unreadCount || 0) > 0) return t;
-    return 0;
+    if (t > desde && Number(chat.unreadCount || 0) > 0) return { t: t, texto: '' };
+    return null;
   }
 
   // ── ARQUIVAR / DESARQUIVAR A CONVERSA ────────────────────────────────────
@@ -1613,8 +1619,11 @@
         const chat = porTel.get(k);
         if (!chat) { semMemoria++; continue; }
         conferidos++;
-        const em = _respostaDepoisDe(chat, desde);
-        if (em) respostas.push({ telefone: alvo.telefone, contato_id: (alvo.contato_id || null), em });
+        const achado = _respostaDepoisDe(chat, desde);
+        if (achado) {
+          respostas.push({ telefone: alvo.telefone, contato_id: (alvo.contato_id || null),
+                           em: achado.t, texto: achado.texto || '' });
+        }
       } catch (e) { /* idem */ }
     }
     return { respostas, vigiados: lista.length, conferidos, sem_memoria: semMemoria, chats: chats.length };

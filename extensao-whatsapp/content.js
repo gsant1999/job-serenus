@@ -14696,7 +14696,9 @@
           try {
             const rb = await chrome.runtime.sendMessage({ type: 'disparo_resposta',
               alvo_id: daBase.alvo_id, telefone: item.telefone, usuario_id: usuarioId,
-              detectado_por: 'ronda', respondeu_ts: item.em });
+              detectado_por: 'ronda', respondeu_ts: item.em,
+              // Só pra o JOB reconhecer quem pediu pra parar de receber campanha.
+              texto: item.texto || '' });
             if (rb && rb.ok && rb.desarquivar) {
               await pedirArquivar(rb.chat_id || daBase.chat_id, false);
             }

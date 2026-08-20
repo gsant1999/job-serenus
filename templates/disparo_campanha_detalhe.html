@@ -45,6 +45,9 @@ select.campo:focus { outline:none; border-color:var(--teal); }
 .prob-linha { display:flex; gap:10px; padding:9px 18px; border-bottom:1px solid var(--borda); font-size:12.5px; align-items:baseline; }
 .prob-linha:last-child { border-bottom:none; }
 .prob-linha .motivo { margin-left:auto; color:var(--rosa); font-size:11.5px; text-align:right; }
+.prob-linha { align-items:center; }
+.dd-parar { font-size:10.5px; color:#f59e0b; border:1px solid rgba(245,158,11,.4);
+  border-radius:20px; padding:2px 9px; white-space:nowrap; }
 .dd-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:80; align-items:center; justify-content:center; padding:20px; }
 .dd-modal .caixa { background:var(--panel); border:1px solid var(--borda); border-radius:14px; width:520px; max-width:100%; max-height:82vh; display:flex; flex-direction:column; }
 .dd-modal .topo { padding:16px 18px 10px; } .dd-modal .topo h3 { font-size:15px; margin:0 0 3px; }
@@ -219,6 +222,28 @@ select.campo:focus { outline:none; border-color:var(--teal); }
   </div>
   {% endif %}
 
+  {% if responderam %}
+  <div class="card" style="margin-bottom:18px;padding:0;">
+    <div class="card-header"><h3>Responderam ({{ responderam|length }})</h3></div>
+    <div class="dd-nota" style="padding:14px 18px 0;">
+      Estes já saíram da campanha e a conversa voltou pra caixa de entrada do consultor. O atendimento é dele
+      daqui — a campanha não manda mais nada pra eles.
+    </div>
+    {% for r in responderam %}
+    <div class="prob-linha">
+      <span>{{ r.nome or 'Sem nome' }}</span>
+      <span style="color:var(--cinza);font-size:11.5px;">{{ r.telefone }}</span>
+      {% if r.quer_parar %}<span class="dd-parar">parece pedido pra sair da lista</span>{% endif %}
+      <span class="motivo" style="color:var(--cinza);">
+        {{ r.quando }}{% if r.demorou %} · respondeu em {{ r.demorou }}{% endif %}
+      </span>
+      <button class="btn-outline btn-sm" style="margin-left:10px;"
+              onclick="bloquear({{ r.id }}, this)">Não quer receber</button>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   {% if problemas %}
   <div class="card" style="margin-bottom:18px;padding:0;">
     <div class="card-header"><h3>Não vão sair ({{ problemas|length }})</h3></div>
@@ -334,6 +359,18 @@ select.campo:focus { outline:none; border-color:var(--teal); }
       btn.disabled = false; btn.textContent = 'Salvar ritmo';
       ret.textContent = 'Não consegui falar com o servidor.';
     });
+  }
+
+  function bloquear(alvoId, btn) {
+    // Sem confirm() nativo: o projeto tirou os alertas do navegador. O que segura
+    // um clique errado aqui é o botão dizer a consequência e existir a volta na
+    // tela de campanhas.
+    btn.disabled = true; btn.textContent = 'Bloqueando…';
+    post('/disparos/campanha/' + CID + '/bloquear', { alvo_id: alvoId }).then(function (r) {
+      if (!r.ok) { btn.disabled = false; btn.textContent = 'Tentar de novo'; return; }
+      btn.textContent = 'Bloqueado';
+      setTimeout(function () { location.reload(); }, 900);
+    }).catch(function () { btn.disabled = false; btn.textContent = 'Tentar de novo'; });
   }
 
   function abrirModelos(consultorId, nome) {

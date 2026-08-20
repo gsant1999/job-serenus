@@ -44,6 +44,9 @@ input.campo:focus, select.campo:focus { outline:none; border-color:var(--teal); 
 .dc-arquivo { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
 .dc-arquivo .nome-arq { font-size:12.5px; color:var(--teal); }
 .dc-vazio { padding:30px; text-align:center; color:var(--cinza); }
+.dc-bloq { display:flex; align-items:center; gap:12px; padding:10px 18px; border-bottom:1px solid var(--borda); font-size:12.5px; }
+.dc-bloq:last-child { border-bottom:none; }
+.dc-bloq .motivo { margin-left:auto; color:var(--cinza); font-size:11.5px; text-align:right; }
 /* Botão não ganha estilo próprio aqui: .btn e .btn-outline moram em base.html e
    já trazem o hover, o :active e o reduced-motion. Reescrever aqui faria estas
    duas telas se comportarem diferente do resto do JOB — que é exatamente o
@@ -57,6 +60,7 @@ input.campo:focus, select.campo:focus { outline:none; border-color:var(--teal); 
     <div>
       <h1>Campanhas na base</h1>
     </div>
+    <a href="/disparos/medicao" class="btn-outline" style="text-decoration:none;white-space:nowrap;">Medição</a>
     <a href="/campanhas" class="btn-outline" style="text-decoration:none;white-space:nowrap;">Lista fria (MEI)</a>
   </div>
   <div class="dc-sub">
@@ -88,6 +92,24 @@ input.campo:focus, select.campo:focus { outline:none; border-color:var(--teal); 
   {% else %}
   <div class="card dc-vazio">Nenhuma campanha na base ainda. A primeira se cria aqui embaixo.</div>
   {% endfor %}
+
+  {% if bloqueios %}
+  <div class="card" style="margin-top:24px;padding:0;">
+    <div class="card-header"><h3>Não querem receber ({{ bloqueios|length }})</h3></div>
+    <div class="dc-hint" style="padding:14px 18px 0;margin:0;">
+      Estes números não entram em campanha nenhuma, de nenhum consultor — nem se vierem na planilha que você
+      subir. Conversa normal com eles continua valendo; o que para é o disparo.
+    </div>
+    {% for b in bloqueios %}
+    <div class="dc-bloq">
+      <span>{{ b.nome or 'Sem nome no CRM' }}</span>
+      <span style="color:var(--cinza);font-size:11.5px;">{{ b.telefone_norm }}</span>
+      <span class="motivo">{{ b.motivo }}</span>
+      <button class="btn-outline btn-sm" onclick="liberar('{{ b.telefone_norm }}', this)">Liberar</button>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
 
   <div class="card dc-form" style="margin-top:24px;">
     <h3>Nova campanha</h3>
@@ -156,6 +178,15 @@ input.campo:focus, select.campo:focus { outline:none; border-color:var(--teal); 
 </div>
 
 <script>
+  function liberar(telefone, btn) {
+    btn.disabled = true; btn.textContent = 'Liberando…';
+    fetch('/disparos/bloqueio/liberar', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ telefone: telefone }) })
+      .then(function (r) { return r.json(); })
+      .then(function () { location.reload(); })
+      .catch(function () { btn.disabled = false; btn.textContent = 'Tentar de novo'; });
+  }
+
   document.getElementById('dc-planilha').addEventListener('change', function () {
     document.getElementById('dc-arq-nome').textContent = this.files.length ? this.files[0].name : '';
   });

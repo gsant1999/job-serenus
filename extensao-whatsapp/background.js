@@ -1331,7 +1331,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'disparo_resposta') {
     chamarJob('/api/whatsapp/disparo/resposta', 'POST',
       { alvo_id: msg.alvo_id, telefone: msg.telefone, usuario_id: msg.usuario_id,
-        detectado_por: msg.detectado_por || 'evento', respondeu_ts: msg.respondeu_ts || 0 },
+        detectado_por: msg.detectado_por || 'evento', respondeu_ts: msg.respondeu_ts || 0,
+        texto: msg.texto || '' },
       15000).then(sendResponse);
     return true;
   }
