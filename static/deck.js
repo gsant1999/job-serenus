@@ -378,7 +378,10 @@ function confirmarFunil(f, card) {
 
 function abrirEscolhaDeConversa() {
   abrirFolha({ titulo: 'Para quem vai',
-               texto: naNuvem() ? 'Seus leads do CRM com telefone, os mais recentes primeiro.' : '',
+               texto: naNuvem()
+                 ? 'As suas conversas do WhatsApp, guardadas da última vez que o '
+                   + 'computador esteve ligado. Depois delas, os leads do CRM.'
+                 : '',
                confirmar: null });
   const corpo = document.createElement('div');
   corpo.id = 'zap-contatos';
@@ -406,7 +409,8 @@ function abrirEscolhaDeConversa() {
       const p = document.createElement('p');
       p.className = 'zap-vazio';
       p.textContent = q ? 'Nenhum nome assim na lista.'
-        : (naNuvem() ? 'Nenhum lead seu com telefone no CRM.'
+        : (naNuvem() ? 'Nada guardado ainda. Abra o WhatsApp Web no computador uma '
+                     + 'vez para o JOB aprender a sua lista de conversas.'
                      : 'A lista aparece quando a extensão terminar de ler as conversas.');
       lista.appendChild(p);
       return;
@@ -426,8 +430,14 @@ function linhaConversa(c, ehAberta) {
   b.type = 'button';
   const escolhida = zapAlvo ? zapAlvo.chatId === c.chatId : ehAberta;
   b.setAttribute('aria-pressed', String(escolhida));
+  // De onde veio o nome importa: uma conversa do WhatsApp é gente que já falou
+  // com você; um lead do CRM pode nunca ter recebido nada. Quem escolhe precisa
+  // saber qual dos dois está tocando.
+  const etiqueta = ehAberta ? 'aberta agora'
+    : (c.de === 'conversa' ? 'conversa do WhatsApp'
+    : (c.de === 'lead' ? 'lead do CRM' : ''));
   b.innerHTML = '<span class="nome">' + escapar(c.nome || 'Sem nome salvo') + '</span>'
-    + (ehAberta ? '<span class="etiqueta">aberta agora</span>' : '');
+    + (etiqueta ? '<span class="etiqueta">' + etiqueta + '</span>' : '');
   b.addEventListener('click', () => {
     // Escolher a conversa que já está aberta é o mesmo que não escolher nada:
     // assim o deck não fica prometendo abrir o que já está na frente.
