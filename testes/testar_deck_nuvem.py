@@ -55,5 +55,22 @@ c.commit(); A.close_db(c)
 r3 = cli.post('/api/deck/comando', json={'tipo': 'modelo', 'id': 9, 'chatId': 'lead:56'})
 checar(r3.status_code == 404, 'lead de outro consultor é recusado')
 
+# ── O DESFECHO VOLTA PARA A TELA ──────────────────────────────────────────────
+# É o que dispensa abrir o WhatsApp só para conferir se chegou.
+r4 = cli.post('/api/deck/comando', json={'tipo': 'modelo', 'id': 9, 'chatId': 'lead:55'}).get_json()
+fila_id = (r4.get('comando') or {}).get('fila_id')
+checar(bool(fila_id), 'o envio devolve o numero da mensagem na fila')
+
+est = cli.get('/api/deck/whatsapp').get_json()
+linha = next((f for f in est.get('fila', []) if f['id'] == fila_id), None)
+checar(linha is not None and linha['status'] == 'pendente', 'a tela ve a mensagem esperando')
+
+c = A.db()
+c.execute("UPDATE whatsapp_extensao_fila SET status='enviado' WHERE id=?", (fila_id,))
+c.commit(); A.close_db(c)
+est2 = cli.get('/api/deck/whatsapp').get_json()
+linha2 = next((f for f in est2.get('fila', []) if f['id'] == fila_id), None)
+checar(linha2 is not None and linha2['status'] == 'enviado', 'a tela ve que chegou')
+
 print('\n' + ('TUDO CERTO' if not falhas else 'FALHOU: ' + '; '.join(falhas)))
 sys.exit(1 if falhas else 0)

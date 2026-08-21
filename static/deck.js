@@ -29,6 +29,8 @@ let zapBusca = '';
 // e ilegível em condição de filtro é bug esperando acontecer.
 let zapPasta = null;
 let semJob = false;        // o JOB parou de responder a este iPad
+// O que foi para a fila da nuvem e ainda não teve desfecho.
+let naNuvemEsperando = [];
 let zapEsperando = null;   // { id, chave } do comando que este iPad disparou
 let confirmando = null;
 
@@ -287,7 +289,7 @@ function cartaoModelo(m) {
     + icone(tipo, 38)
     + '<span class="rotulo">' + escapar(m.titulo || 'Sem título') + '</span>'
     + '<span class="zap-andamento"></span>';
-  b.addEventListener('click', () => confirmarModelo(m, b));
+  b.addEventListener('click', () => { marcarCard(b.dataset.chave, ''); confirmarModelo(m, b); });
   return b;
 }
 
@@ -305,7 +307,7 @@ function cartaoFunil(f) {
     + icone('funil', 38)
     + '<span class="rotulo">' + escapar(f.nome || 'Funil sem nome') + '</span>'
     + '<span class="zap-andamento"></span>';
-  b.addEventListener('click', () => confirmarFunil(f, b));
+  b.addEventListener('click', () => { marcarCard(b.dataset.chave, ''); confirmarFunil(f, b); });
   return b;
 }
 
@@ -513,7 +515,7 @@ function linhaConversa(c, ehAberta) {
 
 async function disparar(pedido) {
   const card = tela.lista.querySelector('[data-chave="' + pedido.chave + '"]');
-  if (card) { card.dataset.estado = 'indo'; card.disabled = true; }
+  marcarCard(pedido.chave, 'indo');
   try {
     const alvo = alvoAtual();
     const r = await chamar('/api/deck/comando', {
@@ -521,12 +523,17 @@ async function disparar(pedido) {
       body: JSON.stringify({ tipo: pedido.tipo, id: pedido.id,
                              chatId: (alvo && alvo.escolhido) ? alvo.chatId : '' }),
     });
-    if (r.erro) { recado(r.erro, 'erro'); soltarCard(pedido.chave); return; }
+    if (r.erro) { recado(r.erro, 'erro'); marcarCard(pedido.chave, 'falhou'); return; }
     // Pela nuvem não há o que esperar na tela: o envio é do servidor e leva
     // minutos. Fingir "entregue" agora seria a mentira mais fácil de contar.
     if (r.comando.estado === 'na_fila_nuvem') {
       recado(r.comando.mensagem, 'ok');
-      soltarCard(pedido.chave);
+      marcarCard(pedido.chave, 'atencao');       // saiu daqui, mas ainda não chegou lá
+      // Fica de olho até o servidor entregar. Sem isto o consultor teria que
+      // abrir o WhatsApp só para saber se chegou — a troca de tela que este
+      // deck existe para acabar.
+      naNuvemEsperando.push({ filaId: r.comando.fila_id, chave: pedido.chave,
+                              para: r.para, em: Date.now() });
       return;
     }
     zapEsperando = { id: r.comando.id, chave: pedido.chave, em: Date.now() };
@@ -535,13 +542,42 @@ async function disparar(pedido) {
   } catch (e) {
     if (String(e.message) === 'sessao') return;
     recado('O JOB não respondeu. Confira a conexão e tente de novo.', 'erro');
-    soltarCard(pedido.chave);
+    marcarCard(pedido.chave, 'falhou');
   }
 }
 
-function soltarCard(chave) {
+const SELO = { indo: 'Indo', foi: 'Enviado', falhou: 'Não foi',
+               atencao: 'Na fila', espera: 'Aguarde' };
+
+/* Verde e vermelho sozinhos não contam a história: quem não distingue as duas
+   cores fica sem saber, e no sol da rua qualquer tinta fraca some. Por isso o
+   canto da tecla passa a dizer a palavra — a cor é o reforço, não a informação. */
+function marcarCard(chave, estado, segundos) {
   const card = tela.lista.querySelector('[data-chave="' + chave + '"]');
-  if (card) { delete card.dataset.estado; card.disabled = false; }
+  if (!card) return;
+  card.disabled = (estado === 'indo');
+  if (!estado) { delete card.dataset.estado; pintarSelo(card, ''); return; }
+  card.dataset.estado = estado;
+  pintarSelo(card, SELO[estado] || '');
+  clearTimeout(card._voltar);
+  // O que deu certo volta ao normal sozinho; o que deu errado FICA. Erro que
+  // some antes de ser lido é erro que ninguém corrige.
+  if (segundos) card._voltar = setTimeout(() => marcarCard(chave, ''), segundos * 1000);
+}
+
+function pintarSelo(card, texto) {
+  let selo = card.querySelector('.selo');
+  if (!texto) { if (selo) selo.remove(); return; }
+  if (!selo) {
+    selo = document.createElement('span');
+    selo.className = 'selo';
+    card.appendChild(selo);
+  }
+  selo.textContent = texto;
+}
+
+function soltarCard(chave) {
+  marcarCard(chave, '');
 }
 
 /* O recado do último envio. Some sozinho quando deu certo; fica quando não deu,
@@ -562,6 +598,38 @@ function recado(texto, tom) {
   requestAnimationFrame(() => caixa.classList.add('aberto'));
   clearTimeout(sumicoDoRecado);
   if (tom === 'ok') sumicoDoRecado = setTimeout(() => caixa.classList.remove('aberto'), 4200);
+}
+
+// O DESFECHO CHEGA AQUI, NÃO NO WHATSAPP.
+//
+// "Na fila" não é resposta: o consultor quer saber se entrou na conversa. A
+// tecla acompanha até o fim — âmbar enquanto espera, verde quando o servidor
+// entregou, vermelho quando não deu.
+function conferirFila(fila) {
+  if (!naNuvemEsperando.length) return;
+  naNuvemEsperando = naNuvemEsperando.filter((p) => {
+    const item = fila.find((f) => f.id === p.filaId);
+    if (!item) {
+      // Uma hora é o alcance do que o servidor conta. Passou disso sem desfecho,
+      // é melhor dizer que perdi o rastro do que deixar a tecla âmbar para sempre.
+      if (Date.now() - p.em < 3600000) return true;
+      marcarCard(p.chave, 'falhou');
+      recado('Perdi o rastro desta mensagem. Confira a conversa no WhatsApp.', 'erro');
+      return false;
+    }
+    if (item.status === 'pendente' || item.status === 'enviando') {
+      marcarCard(p.chave, item.status === 'enviando' ? 'indo' : 'atencao');
+      return true;
+    }
+    if (item.status === 'enviado') {
+      marcarCard(p.chave, 'foi', 8);
+      recado('Chegou no WhatsApp de ' + p.para + '.', 'ok');
+    } else {
+      marcarCard(p.chave, 'falhou');
+      recado('Não saiu para ' + p.para + '. ' + (item.erro || 'Tente de novo.'), 'erro');
+    }
+    return false;
+  });
 }
 
 /* -------------------------------------------------------------- relógio */
@@ -591,6 +659,7 @@ async function bater(deVolta) {
       zapAlvo = null;   // saiu da lista: volta para a conversa aberta em vez de mentir
     }
     conferirComando();
+    conferirFila(r.fila || []);
     // Só repinta quando algo mudou: repintar a cada 2,5s mataria o toque em
     // curso e piscaria a tela na cara de quem está usando.
     if (JSON.stringify([zap.consultado, zap.modo, zap.ligada, zap.chat, zap.rascunho,
@@ -621,15 +690,19 @@ function conferirComando() {
   if (!cmd) {
     if (Date.now() - zapEsperando.em < 120000) return;
     recado('Perdi o rastro deste envio. Confira a conversa antes de mandar de novo.', 'erro');
-    soltarCard(zapEsperando.chave);
+    marcarCard(zapEsperando.chave, 'falhou');
     zapEsperando = null;
     return;
   }
   if (cmd.estado === 'na_fila' || cmd.estado === 'entregue') return;
-  const tom = (cmd.estado === 'falhou' || cmd.estado === 'expirado') ? 'erro'
-            : (cmd.estado === 'esperando' ? 'espera' : 'ok');
+  const ruim = (cmd.estado === 'falhou' || cmd.estado === 'expirado');
+  const tom = ruim ? 'erro' : (cmd.estado === 'esperando' ? 'espera' : 'ok');
   recado(cmd.mensagem, tom);
-  soltarCard(zapEsperando.chave);
+  // Verde some em 6 segundos porque a tecla vai ser usada de novo; vermelho e
+  // âmbar ficam até alguém tocar nela outra vez.
+  marcarCard(zapEsperando.chave,
+             ruim ? 'falhou' : (cmd.estado === 'esperando' ? 'espera' : 'foi'),
+             ruim || cmd.estado === 'esperando' ? 0 : 6);
   zapEsperando = null;
 }
 

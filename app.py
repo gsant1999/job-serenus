@@ -33348,8 +33348,36 @@ def api_deck_whatsapp():
             "comandos": [_deck_publico(c) for c in
                          sorted(_DECK_COMANDOS.get(int(uid), []),
                                 key=lambda c: c['id'], reverse=True)[:12]],
+            "fila": _deck_fila_recente(uid),
         }
     return jsonify(dados)
+
+
+def _deck_fila_recente(uid):
+    """O desfecho do que o deck mandou pela nuvem na última hora.
+
+    A confirmação tem que chegar NA TELA DO DECK. Se o consultor precisa abrir o
+    WhatsApp para saber se a mensagem entrou, o deck não tirou a troca de tela —
+    só mudou o lugar dela.
+    """
+    corte = (datetime.now(TZ_SP) - timedelta(hours=1)).strftime('%Y-%m-%d %H:%M:%S')
+    out = []
+    conn = None
+    try:
+        conn = db()
+        for r in conn.execute("""SELECT id, status, erro FROM whatsapp_extensao_fila
+                WHERE responsavel_id=? AND origem='deck_nuvem'
+                  AND CAST(criado_em AS TEXT) >= ?
+             ORDER BY id DESC LIMIT 20""", (uid, corte)).fetchall():
+            d_ = dict(r)
+            out.append({"id": d_['id'], "status": d_.get('status') or '',
+                        "erro": (d_.get('erro') or '')[:160]})
+    except Exception as e:
+        app.logger.warning(f"[DECK] desfecho da fila: {e}")
+    finally:
+        if conn is not None:
+            close_db(conn)
+    return out
 
 
 def _deck_comando_pela_nuvem(uid, alvo, tipo, d):
@@ -33419,17 +33447,18 @@ def _deck_comando_pela_nuvem(uid, alvo, tipo, d):
         # carimbo do futuro, e o dreno (que compara com a hora de SP) nunca vê a
         # mensagem chegar a vez dela: fica pendente para sempre, sem erro nenhum
         # no log. Foi exatamente o que segurou a mensagem de prova de 20/08.
-        conn.execute("""INSERT INTO whatsapp_extensao_fila
+        cur = conn.execute("""INSERT INTO whatsapp_extensao_fila
             (lead_id, responsavel_id, telefone, chat_id, tipo, texto, midia_arquivo,
              origem, status, criado_por, criado_em)
             VALUES (?,?,?,?,?,?,?,?,'pendente',?,?)""",
             (ld.get('id'), uid, fone, _wa_chat_id(fone), (midia_tipo or 'texto'),
              texto, midia, 'deck_nuvem', uid, _agora_sp()))
+        fila_id = _last_insert_id(cur)
         conn.commit()
     finally:
         close_db(conn)
 
-    return jsonify({"comando": {"id": 0, "tipo": tipo, "rotulo": rotulo,
+    return jsonify({"comando": {"id": 0, "fila_id": fila_id, "tipo": tipo, "rotulo": rotulo,
                                 "estado": "na_fila_nuvem",
                                 "mensagem": "Na fila do servidor. Sai em até alguns "
                                             "minutos, mesmo com o computador desligado."},

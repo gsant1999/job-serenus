@@ -559,7 +559,10 @@ a.secundario {
   overflow: hidden;
   text-align: center;
   transition: transform 130ms var(--ease-saida), opacity 130ms var(--ease-saida),
-              box-shadow 130ms var(--ease-saida);
+              box-shadow 130ms var(--ease-saida),
+              /* tinta e borda são pintura, não layout: mudam junto sem custo de
+                 quadro, e é nelas que mora o aviso */
+              background-color 200ms var(--ease-saida), border-color 200ms var(--ease-saida);
 }
 
 /* O brilho de cima é o que faz a tecla parecer teclada e não desenhada. Ele
@@ -623,9 +626,56 @@ a.secundario {
 .zap-tecla[data-tipo="video"] .icone { color: #7aa8ff; }
 .zap-tecla[data-tipo="funil"] .icone { color: var(--acento); }
 
-.zap-tecla[data-estado="indo"] { border-color: var(--acento); }
-.zap-tecla[data-estado="indo"] .icone,
-.zap-tecla[data-estado="indo"] .marca { color: var(--acento); }
+/* ── A TECLA CONTA O QUE ACONTECEU ──────────────────────────────────────────
+   Em repouso ela é neutra: numa mesa de 300, se todas tiverem cor, nenhuma tem.
+   Depois do toque ela se tinge — e o tom é fraco de propósito, um cinza PUXANDO
+   para a cor, não a cor cheia: quem manda na tela continua sendo o destino lá em
+   cima, não a tecla que acabou de ser usada.
+
+   A cor nunca conta sozinha: o canto diz a palavra. Verde e vermelho são
+   justamente o par que mais gente confunde, e no sol da rua tinta fraca some. */
+.zap-tecla[data-estado] {
+  border-color: color-mix(in srgb, var(--tom) 55%, var(--borda));
+  background: color-mix(in srgb, var(--tom) 10%, var(--tijolo));
+}
+.zap-tecla[data-estado] .icone { color: var(--tom); }
+.zap-tecla[data-estado="indo"]    { --tom: var(--acento); }
+.zap-tecla[data-estado="foi"]     { --tom: var(--ok); }
+.zap-tecla[data-estado="falhou"]  { --tom: var(--erro); }
+.zap-tecla[data-estado="atencao"] { --tom: var(--cuidado); }
+.zap-tecla[data-estado="espera"]  { --tom: var(--cuidado); }
+
+/* O selo ocupa o lugar da marca de mídia: enquanto há resultado para contar, é
+   ele o que importa saber daquela tecla. */
+.zap-tecla[data-estado] .marca { opacity: 0; }
+.zap-tecla .selo {
+  position: absolute;
+  top: 10px; right: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--tom);
+}
+
+/* Chegou: um assentar de 240ms, uma vez. É o instante em que a mensagem entrou
+   na conversa de um cliente — merece um sinal, e merece parar depois dele. */
+.zap-tecla[data-estado="foi"] { animation: tecla-assenta 240ms var(--ease-saida) 1; }
+@keyframes tecla-assenta {
+  0%   { transform: scale(.97); }
+  55%  { transform: scale(1.025); }
+  100% { transform: scale(1); }
+}
+
+/* Não foi: dois passos curtos, sem elástico. Balançar é o gesto universal de
+   "isto não aconteceu" — e para de vez, porque erro que pisca sem parar vira
+   paisagem e ninguém corrige. */
+.zap-tecla[data-estado="falhou"] { animation: tecla-nega 220ms var(--ease-mov) 1; }
+@keyframes tecla-nega {
+  0%, 100% { transform: translateX(0); }
+  30%      { transform: translateX(-4px); }
+  70%      { transform: translateX(4px); }
+}
 
 /* A barra de andamento na base da tecla, como a luz do aparelho. */
 .zap-andamento {
@@ -654,6 +704,9 @@ a.secundario {
 @media (prefers-reduced-motion: reduce) {
   .zap-tecla:active { transform: none; }
   .zap-tecla[data-estado="indo"] .zap-andamento { animation: none; transform: scaleX(1); }
+  /* Sem movimento a informação não pode sumir: cor e selo continuam contando a
+     mesma coisa, só sem o gesto. */
+  .zap-tecla[data-estado="foi"], .zap-tecla[data-estado="falhou"] { animation: none; }
 }
 
 .zap-vazio {
@@ -689,9 +742,13 @@ a.secundario {
 
 /* Aviso do último envio: entra por baixo e sai pelo mesmo caminho. */
 .zap-recado {
+  /* Centrado e com largura de cartão. De borda a borda ele virava uma barra de
+     site atravessada no pé da tela — e, no iPad deitado, uma faixa de 1180px
+     para dizer uma frase. */
   position: fixed;
-  left: max(16px, env(safe-area-inset-left));
-  right: max(16px, env(safe-area-inset-right));
+  left: 50%;
+  transform: translate(-50%, 140%);
+  width: min(560px, calc(100% - 32px));
   bottom: calc(16px + env(safe-area-inset-bottom));
   z-index: 8;
   display: flex;
@@ -705,17 +762,16 @@ a.secundario {
   border-radius: 14px;
   font-size: 14px;
   line-height: 1.4;
-  transform: translateY(140%);
   opacity: 0;
   transition: transform 280ms var(--ease-folha), opacity 200ms var(--ease-saida);
 }
-.zap-recado.aberto { transform: translateY(0); opacity: 1; }
+.zap-recado.aberto { transform: translate(-50%, 0); opacity: 1; }
 .zap-recado[data-tom="erro"] { border-color: var(--erro); color: var(--erro); }
 .zap-recado[data-tom="ok"] { border-color: var(--ok); }
 .zap-recado[data-tom="espera"] { border-color: var(--acento); }
 
 @media (prefers-reduced-motion: reduce) {
-  .zap-recado { transform: none; transition: opacity 200ms var(--ease-saida); }
+  .zap-recado { transform: translate(-50%, 0); transition: opacity 200ms var(--ease-saida); }
 }
 
 
