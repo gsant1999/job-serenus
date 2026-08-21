@@ -33116,29 +33116,186 @@ def deck():
     return render_template('deck.html', v=_deck_versao_estatica())
 
 
+_DECK_NUVEM_CACHE = {}      # uid -> (visto_em, pronta)
+_DECK_NUVEM_CACHE_S = 60
+
+
+def _deck_nuvem_pronta(uid):
+    """O WhatsApp deste consultor está de pé no servidor?
+
+    O iPad bate de 2,5 em 2,5 segundos. Perguntar isso ao Evolution a cada
+    batida seria uma chamada HTTP por segundo e meio por consultor — por isso a
+    resposta vale um minuto.
+    """
+    if not _evolution_ligada():
+        return False
+    agora = time.time()
+    visto = _DECK_NUVEM_CACHE.get(int(uid))
+    if visto and agora - visto[0] < _DECK_NUVEM_CACHE_S:
+        return visto[1]
+    pronta = False
+    try:
+        ok_e, est = _evolution_chamar(
+            'GET', f"/instance/connectionState/{_evolution_instancia(uid)}", tempo=6)
+        pronta = bool(ok_e and ((est or {}).get('instance') or {}).get('state') == 'open')
+    except Exception as e:
+        app.logger.warning(f"[DECK] estado da nuvem: {e}")
+    _DECK_NUVEM_CACHE[int(uid)] = (agora, pronta)
+    return pronta
+
+
+def _deck_biblioteca_nuvem(conn, uid):
+    """A biblioteca lida do banco, não da extensão.
+
+    No modo com extensão, quem manda a biblioteca para o deck é a própria
+    extensão. Com o computador desligado ela não manda nada — e um deck sem
+    biblioteca não serve para nada. Aqui é a mesma consulta da extensão, no
+    formato que o cartão do iPad espera.
+    """
+    rows = conn.execute("""SELECT m.id, m.nome, m.corpo_texto, m.midia_arquivo, m.midia_tipo,
+            m.categoria, m.favorito, m.pasta_id
+            FROM modelos_conteudo m
+           WHERE m.tipo='whatsapp' AND m.ativo=1
+             AND (m.dono_consultor_id = ? OR m.dono_consultor_id IS NULL)
+        ORDER BY m.favorito DESC, (m.categoria IS NULL), m.categoria, m.nome""", (uid,)).fetchall()
+    mapa = _bib_mapa_pastas(conn)
+    out = []
+    for r in rows:
+        md = dict(r)
+        caminho = _bib_caminho(mapa, md.get('pasta_id'))[1:] if md.get('pasta_id') else []
+        out.append({
+            "id": md['id'], "titulo": md.get('nome') or '', "texto": md.get('corpo_texto') or '',
+            "midia_tipo": md.get('midia_tipo') or None,
+            "midia_url": (f"/crm/modelos/midia/{md['midia_arquivo']}"
+                          if md.get('midia_arquivo') else None),
+            "favorito": bool(md.get('favorito')), "categoria": md.get('categoria') or '',
+            "pasta": ' / '.join(caminho),
+        })
+    return out
+
+
 @app.route('/api/deck/whatsapp')
 @login_required
 def api_deck_whatsapp():
     """O que o iPad desenha: a conversa aberta, a biblioteca e os últimos envios."""
     uid = session['user_id']
+    # Fora da trava de propósito: perguntar ao Evolution pode levar segundos, e a
+    # trava do deck é de todo mundo. Aqui só se lê o estado — o dicionário de
+    # presença é do próprio consultor.
+    nuvem_pronta = (not _deck_ligada(_deck_presenca(uid))) and _deck_nuvem_pronta(uid)
     with _deck_trava:
         pres = _deck_presenca(uid)
         pres['ipad_em'] = time.time()   # é isto que acelera a batida da extensão
         _deck_vencer(uid)
+        # MODO NUVEM: o deck deixa de depender da extensao.
+        #
+        # Com a extensao parada (consultor na rua, computador desligado), o deck
+        # nao fica inutil: ele passa a listar os LEADS do CRM em vez das conversas
+        # abertas, e o envio vai para a fila, que escolhe o transporte. E a mesma
+        # tela — o que muda e de onde vem o contato e por onde sai a mensagem.
+        nuvem_pronta = nuvem_pronta and not _deck_ligada(pres)
+
+        leads_nuvem, biblioteca_nuvem = [], []
+        if nuvem_pronta:
+            try:
+                conn_l = db()
+                biblioteca_nuvem = _deck_biblioteca_nuvem(conn_l, uid)
+                for r in conn_l.execute("""SELECT id, nome, telefone
+                        FROM crm_leads
+                       WHERE responsavel_id=?
+                         AND telefone IS NOT NULL AND telefone <> ''
+                    ORDER BY COALESCE(atualizado_em, criado_em) DESC LIMIT 40""",
+                        (uid,)).fetchall():
+                    d_ = dict(r)
+                    leads_nuvem.append({"chatId": f"lead:{d_['id']}",
+                                        "nome": d_.get('nome') or 'Sem nome',
+                                        "telefone": d_.get('telefone') or '', "em": 0})
+                close_db(conn_l)
+            except Exception as e:
+                app.logger.warning(f"[DECK] leads para o modo nuvem: {e}")
+
         dados = {
+            "modo": "nuvem" if nuvem_pronta else "extensao",
             "extensao": {
                 "ligada": _deck_ligada(pres),
                 "chat": pres['chat'],
                 "rascunho": pres['rascunho'],
-                "conversas": pres['conversas'],
-                "modelos": pres['modelos'],
-                "funis": pres['funis'],
+                "conversas": leads_nuvem if nuvem_pronta else pres['conversas'],
+                # Funil pela nuvem ainda não existe: mandar a lista faria o deck
+                # oferecer um botão que não cumpre.
+                "modelos": biblioteca_nuvem if nuvem_pronta else pres['modelos'],
+                "funis": [] if nuvem_pronta else pres['funis'],
             },
             "comandos": [_deck_publico(c) for c in
                          sorted(_DECK_COMANDOS.get(int(uid), []),
                                 key=lambda c: c['id'], reverse=True)[:12]],
         }
     return jsonify(dados)
+
+
+def _deck_comando_pela_nuvem(uid, alvo, tipo, d):
+    """O deck manda pela fila quando o consultor está longe do computador.
+
+    Diferente do caminho da extensão, aqui não há confirmação instantânea: a
+    mensagem entra na fila e sai em até alguns minutos, pelo servidor. A tela
+    precisa dizer isso — prometer "enviado" seria mentira.
+    """
+    try:
+        lead_id = int(alvo.split(':', 1)[1])
+    except (ValueError, IndexError):
+        return jsonify({"erro": "Lead inválido."}), 400
+
+    conn = db()
+    try:
+        lead = conn.execute("SELECT id, nome, telefone FROM crm_leads WHERE id=? AND responsavel_id=?",
+                            (lead_id, uid)).fetchone()
+        if not lead:
+            return jsonify({"erro": "Esse lead não é seu ou não existe mais."}), 404
+        ld = dict(lead)
+        fone = _waspeed_normaliza_fone(ld.get('telefone') or '')
+        if not fone:
+            return jsonify({"erro": "Esse lead não tem telefone utilizável."}), 400
+
+        texto, midia, midia_tipo, rotulo = '', None, '', ''
+        if tipo == 'texto':
+            texto = str(d.get('texto') or '').strip()
+            if not texto:
+                return jsonify({"erro": "A mensagem está vazia."}), 400
+            rotulo = texto[:60]
+        elif tipo == 'modelo':
+            m = conn.execute("""SELECT id, nome, corpo_texto, midia_arquivo, midia_tipo
+                FROM modelos_conteudo WHERE id=? AND tipo='whatsapp' AND ativo=1""",
+                (str(d.get('id') or ''),)).fetchone()
+            if not m:
+                return jsonify({"erro": "Esse modelo não está mais na biblioteca."}), 404
+            md = dict(m)
+            texto = md.get('corpo_texto') or ''
+            midia_tipo = md.get('midia_tipo') if md.get('midia_tipo') in ('audio','imagem','video','documento') else ''
+            midia = md.get('midia_arquivo') if midia_tipo else None
+            rotulo = md.get('nome') or 'modelo'
+            if not texto and not midia:
+                return jsonify({"erro": "Esse modelo está vazio."}), 400
+        else:
+            # Funil pela nuvem ainda não: uma sequência com intervalo precisa de
+            # agendamento próprio, e prometer isso hoje seria mentir.
+            return jsonify({"erro": "Funil pela nuvem ainda não. Com o computador "
+                                    "ligado ele funciona normalmente."}), 400
+
+        conn.execute("""INSERT INTO whatsapp_extensao_fila
+            (lead_id, responsavel_id, telefone, chat_id, tipo, texto, midia_arquivo,
+             origem, status, criado_por)
+            VALUES (?,?,?,?,?,?,?,?,'pendente',?)""",
+            (ld['id'], uid, fone, _wa_chat_id(fone), (midia_tipo or 'texto'),
+             texto, midia, 'deck_nuvem', uid))
+        conn.commit()
+    finally:
+        close_db(conn)
+
+    return jsonify({"comando": {"id": 0, "tipo": tipo, "rotulo": rotulo,
+                                "estado": "na_fila_nuvem",
+                                "mensagem": "Na fila do servidor. Sai em até alguns "
+                                            "minutos, mesmo com o computador desligado."},
+                    "para": ld.get('nome') or 'o lead'})
 
 
 @app.route('/api/deck/comando', methods=['POST'])
@@ -33151,6 +33308,17 @@ def api_deck_comando():
     tipo = str(d.get('tipo') or '')
     if tipo not in ('modelo', 'funil', 'texto'):
         return jsonify({"erro": "tipo de envio desconhecido"}), 400
+
+    # ENVIO PELO MODO NUVEM.
+    #
+    # Alvo comecando com 'lead:' quer dizer que o deck esta no modo nuvem: o
+    # consultor escolheu um lead do CRM, nao uma conversa aberta. Aqui a mensagem
+    # NAO vira comando para a extensao — ela entra na fila do JOB, que escolhe o
+    # transporte e aplica as travas. E o mesmo caminho de todo o resto: uma porta
+    # so.
+    alvo_bruto = str(d.get('chatId') or '').strip()
+    if alvo_bruto.startswith('lead:'):
+        return _deck_comando_pela_nuvem(uid, alvo_bruto, tipo, d)
 
     with _deck_trava:
         pres = _deck_presenca(uid)
