@@ -14,6 +14,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="{{ url_for('static', filename='carreira.css') }}">
+<style>:root{--s-serenus:url("{{ url_for('static', filename='brand/serenus-s.png') }}")}</style>
 </head>
 <body>
 
@@ -56,12 +57,7 @@
         <path d="M148 26 A 182 182 0 0 0 148 374" fill="none" stroke="url(#arcoEsq)" stroke-width="15" stroke-linecap="round"/>
         <path d="M252 374 A 182 182 0 0 0 252 26" fill="none" stroke="url(#arcoDir)" stroke-width="15" stroke-linecap="round"/>
       </svg>
-      <div class="dentro">
-        <div class="rot">Todo dia</div>
-        <div class="n arco-txt">4 a 6</div>
-        <div class="l">clientes novos caem na sua mão</div>
-        {% if leads_30d %}<div class="p">{{ '{:,}'.format(leads_30d).replace(',', '.') }} entraram nos últimos 30 dias</div>{% endif %}
-      </div>
+      <div class="simbolo" role="img" aria-label="Símbolo da Serenus"></div>
     </div>
   </div>
 

@@ -117,19 +117,11 @@ h1 .l2{display:block}
 /* o arco da marca deixa de ser enfeite: ele guarda o numero do dia */
 .medalhao{position:relative;width:380px;max-width:100%;aspect-ratio:1;justify-self:end}
 .medalhao svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-.medalhao .dentro{
-  position:absolute;inset:16%;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;text-align:center;gap:6px;
-}
-.medalhao .rot{color:var(--ink-faint)}
-.medalhao .n{
-  font-family:Archivo,"Helvetica Neue",Arial,sans-serif;font-stretch:118%;font-weight:700;
-  font-size:clamp(52px,7.4vw,76px);letter-spacing:-.045em;line-height:.95;
-}
-.medalhao .l{font-size:16px;line-height:1.35;color:var(--ink-soft);max-width:19ch}
-.medalhao .p{
-  font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:11.5px;
-  letter-spacing:.06em;color:var(--ink-faint);margin-top:8px;max-width:22ch;line-height:1.45;
+.medalhao .simbolo{
+  position:absolute;inset:22%;
+  background:var(--ink);
+  -webkit-mask:var(--s-serenus) center/contain no-repeat;
+          mask:var(--s-serenus) center/contain no-repeat;
 }
 @media (max-width:980px){
   .hero-grade{grid-template-columns:1fr;gap:36px}
