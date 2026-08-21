@@ -27496,6 +27496,153 @@ _WA_FILA_GATE_MESMO_MAX = int(os.environ.get('WA_FILA_GATE_MESMO_MAX', '8'))
 # 'cancelado_atraso' em silencio — o consultor nunca sabia que o cliente dele
 # nao recebeu nada. Falha silenciosa e o inimigo; o teto sozinho era mais uma.
 _WA_FILA_VALIDADE_HORAS = 1                       # padrao, e o que a tela mostra
+# ═══════════════ O segundo transporte: enviar pela nuvem ═══════════════
+#
+# A fila é uma porta só, e agora ela tem duas saídas.
+#
+#   consultor com a extensão viva  -> sai pela extensão, na máquina dele
+#   extensão parada ou PC desligado -> sai pelo servidor
+#
+# NUNCA pelas duas. É essa escolha que impede o cliente de receber a mesma
+# mensagem duas vezes, e ela mora aqui porque aqui é o lugar que enxerga o
+# estado real: o batimento de presença da extensão daquele consultor.
+#
+# Este dreno é de propósito CONSERVADOR: ele só pega item que a extensão
+# claramente não vai pegar. Item recém-criado fica alguns minutos esperando a
+# extensão, porque quem está com o consultor na frente tem prioridade — ele
+# está olhando a conversa e sabe o contexto.
+
+_NUVEM_EXTENSAO_VIVA_MIN = 6      # sem batimento nesse tempo, a extensão está fora
+_NUVEM_CARENCIA_MIN = 4           # tempo que o item espera a extensão antes de a nuvem pegar
+_NUVEM_POR_RODADA = 8             # teto por rodada: dreno lento é dreno seguro
+
+
+def _nuvem_extensao_viva(usuario, agora):
+    """A extensão desse consultor deu sinal de vida há pouco?"""
+    visto = (dict(usuario or {}).get('varr_visto_em') or '').strip()
+    if not visto:
+        return False
+    try:
+        quando = _parse_dt_seguro(visto)
+        if not quando:
+            return False
+        # O batimento vem do banco SEM fuso; `agora` vem com fuso. Subtrair um do
+        # outro levanta TypeError, que a captura abaixo engolia — e o resultado
+        # era TODA extensão parecer morta. Consequência real: a nuvem assumiria
+        # os envios de quem está trabalhando com a extensão de pé, e o cliente
+        # receberia a mesma mensagem duas vezes. Foi o teste que pegou.
+        base = agora.replace(tzinfo=None) if quando.tzinfo is None else agora
+        return (base - quando).total_seconds() < _NUVEM_EXTENSAO_VIVA_MIN * 60
+    except Exception:
+        return False
+
+
+def _nuvem_enviar_item(usuario_id, item):
+    """Manda um item da fila pelo servidor. Devolve (ok, id_da_mensagem_ou_erro)."""
+    inst = _evolution_instancia(usuario_id)
+    fone = _waspeed_normaliza_fone(item.get('telefone') or '')
+    if not fone:
+        return False, 'sem telefone utilizável'
+    tipo = (item.get('tipo') or 'texto').strip()
+    if tipo != 'texto' and item.get('midia_arquivo'):
+        ok, d = _evolution_chamar('POST', f"/message/sendMedia/{inst}", {
+            "number": fone,
+            "mediatype": {'imagem': 'image', 'audio': 'audio',
+                          'documento': 'document', 'video': 'video'}.get(tipo, 'document'),
+            "media": f"{_SITE_BASE_URL}/crm/modelos/midia/{item['midia_arquivo']}",
+            "caption": item.get('texto') or '',
+            "fileName": item['midia_arquivo'],
+        }, tempo=60)
+    else:
+        ok, d = _evolution_chamar('POST', f"/message/sendText/{inst}", {
+            "number": fone, "text": item.get('texto') or '',
+        }, tempo=40)
+    if not ok:
+        return False, str(d)[:200]
+    msg_id = ((d or {}).get('key') or {}).get('id') or ''
+    if not msg_id:
+        return False, 'o servidor não confirmou o envio'
+    return True, msg_id
+
+
+def _wa_drenar_pela_nuvem():
+    """De 5 em 5 min: o que a extensão não vai mandar, o servidor manda.
+
+    Existe pelo mesmo motivo da varredura de vencimento ao lado: o sistema
+    cumprir o que prometeu sem depender de ninguém estar com o computador
+    aberto. A diferença é que aqui ele não só avisa — ele entrega.
+    """
+    if MODO_TESTE or not _evolution_ligada():
+        return
+    agora = datetime.now(TZ_SP)
+    corte = (agora - timedelta(minutes=_NUVEM_CARENCIA_MIN)).strftime('%Y-%m-%d %H:%M:%S')
+    conn = db()
+    enviados = 0
+    try:
+        pendentes = conn.execute("""
+            SELECT q.id, q.responsavel_id, q.telefone, q.chat_id, q.tipo, q.texto,
+                   q.midia_arquivo, q.origem,
+                   u.varr_visto_em
+              FROM whatsapp_extensao_fila q
+              JOIN usuarios u ON u.id = q.responsavel_id
+             WHERE q.status='pendente'
+               AND (q.liberar_em IS NULL OR CAST(q.liberar_em AS TEXT) <= ?)
+               AND CAST(q.criado_em AS TEXT) <= ?
+             ORDER BY q.criado_em ASC LIMIT 60
+        """, (agora.strftime('%Y-%m-%d %H:%M:%S'), corte)).fetchall()
+
+        for linha in pendentes:
+            if enviados >= _NUVEM_POR_RODADA:
+                break
+            it = dict(linha)
+            uid = it['responsavel_id']
+            if _nuvem_extensao_viva(it, agora):
+                continue        # o dono está com a extensão de pé: é dele
+
+            # As MESMAS travas do outro caminho. Estar na nuvem não dá licença
+            # para mandar de madrugada nem para estourar o teto do dia.
+            pode, motivo = _trava_verificar(conn, uid, it, agora)
+            if not pode:
+                app.logger.info(f"[NUVEM] item {it['id']} segurado: {motivo}")
+                continue
+
+            estado = _evolution_chamar('GET', f"/instance/connectionState/{_evolution_instancia(uid)}")
+            if not (estado[0] and ((estado[1] or {}).get('instance') or {}).get('state') == 'open'):
+                continue        # esse consultor não conectou o WhatsApp ao servidor
+
+            # Marca como 'enviando' ANTES de mandar. Se a extensão acordar no
+            # meio, ela não pega o mesmo item — é o que impede o envio dobrado.
+            claim = conn.execute("""UPDATE whatsapp_extensao_fila
+                SET status='enviando', claim_em=? WHERE id=? AND status='pendente'""",
+                (agora.strftime('%Y-%m-%d %H:%M:%S'), it['id']))
+            if getattr(claim, 'rowcount', 1) == 0:
+                continue
+            conn.commit()
+
+            ok, resultado = _nuvem_enviar_item(uid, it)
+            if ok:
+                conn.execute("""UPDATE whatsapp_extensao_fila
+                    SET status='enviado', enviado_em=?, wpp_msg_id=?, erro=NULL
+                    WHERE id=?""", (agora.strftime('%Y-%m-%d %H:%M:%S'), resultado, it['id']))
+                enviados += 1
+            else:
+                # Volta para pendente: pode ser coisa passageira, e o item ainda
+                # tem o vencimento dele para morrer com aviso se for o caso.
+                conn.execute("""UPDATE whatsapp_extensao_fila
+                    SET status='pendente', claim_em=NULL, tentativas=tentativas+1, erro=?
+                    WHERE id=?""", (str(resultado)[:300], it['id']))
+                app.logger.warning(f"[NUVEM] item {it['id']} falhou: {resultado}")
+            conn.commit()
+    except Exception as e:
+        app.logger.warning(f"[NUVEM] dreno: {e}")
+        try: conn.rollback()
+        except Exception: pass
+    finally:
+        close_db(conn)
+    if enviados:
+        app.logger.info(f"[NUVEM] {enviados} mensagem(ns) enviada(s) pelo servidor")
+
+
 # ═══════════════════════ Travas de envio ═══════════════════════
 #
 # O QUE ESTAS TRAVAS PROTEGEM: o número de WhatsApp de uma pessoa de verdade.
@@ -51889,6 +52036,13 @@ def _varrer_fila_throttled():
             _varrer_fila_vencida()
         except Exception as e:
             app.logger.warning(f"[FILA_VARRE] thread: {e}")
+        # Pega carona na mesma rede de seguranca: o agendador morre em restart,
+        # e sem isto o envio pela nuvem morreria junto — calado, que e o pior
+        # jeito. Mesma trava, mesmo intervalo, mesma thread.
+        try:
+            _wa_drenar_pela_nuvem()
+        except Exception as e:
+            app.logger.warning(f"[NUVEM] thread: {e}")
     try:
         threading.Thread(target=_run, daemon=True).start()
     except Exception as e:
@@ -52077,6 +52231,11 @@ def _iniciar_scheduler_backup_travado():
         # sistema cumpre o que prometeu sem depender de ninguém estar olhando.
         sched.add_job(_disparo_enfileirar_automatico, 'interval', minutes=5, max_instances=1,
                       id='disparo_enfileirar', replace_existing=True)
+        # O segundo transporte. Mesmo intervalo dos irmãos acima, mesmo motivo:
+        # o sistema entrega o que prometeu sem depender de o computador de
+        # alguém estar aberto.
+        sched.add_job(_wa_drenar_pela_nuvem, 'interval', minutes=5, max_instances=1,
+                      id='nuvem_drenar', replace_existing=True)
         sched.add_job(_disparo_avisos_pendentes, 'interval', minutes=5, max_instances=1,
                       id='disparo_avisos', replace_existing=True)
         # SMS e e-mail da costura de canais. No servidor de propósito: é o que
