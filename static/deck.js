@@ -64,6 +64,10 @@ function pintar() {
   pintarLista();
 }
 
+// Na mão a barra é estreita: o rótulo do modo precisa caber inteiro em vez de
+// terminar em reticências. Encurta a frase, não o sentido.
+const estreito = () => window.matchMedia('(max-width: 699px)').matches;
+
 // PARA QUEM VAI — a barra fixa do topo.
 //
 // Altura travada, conteúdo trocado por dentro. Antes o cartão era reescrito
@@ -86,11 +90,13 @@ function pintarDestino() {
     nome = naNuvem() ? 'Escolha o cliente' : 'Nenhuma conversa';
     nota = parado;
   } else if (naNuvem()) {
-    rot = 'Pelo servidor — o computador pode estar desligado';
+    rot = estreito() ? 'Pelo servidor' : 'Pelo servidor — o computador pode estar desligado';
     nome = alvo.nome || 'Sem nome salvo';
     nota = 'Entra na fila e sai em alguns minutos. A conversa não aparece aqui.';
   } else {
-    rot = alvo.escolhido ? 'Vai abrir esta conversa no computador' : 'Conversa aberta no computador';
+    rot = alvo.escolhido
+      ? (estreito() ? 'Vai abrir esta conversa' : 'Vai abrir esta conversa no computador')
+      : (estreito() ? 'Conversa aberta no PC' : 'Conversa aberta no computador');
     nome = alvo.nome || 'Conversa sem nome salvo';
     nota = ultimaFala() || 'Toque no nome para ver a conversa.';
   }
@@ -642,7 +648,10 @@ function aplicarTema(id) {
   else delete document.documentElement.dataset.tema;
   const b = el('zap-tema');
   const atual = TEMAS.find((x) => x.id === id) || TEMAS[0];
-  b.textContent = atual.rotulo;
+  // No telefone o botão fica ao lado das seções e não cabe a frase inteira; a
+  // palavra sozinha continua dizendo qual dos três está valendo.
+  b.textContent = estreito() ? atual.rotulo.replace('Tema: ', '') : atual.rotulo;
+  b.setAttribute('aria-label', atual.rotulo + '. Toque para trocar.');
   b.dataset.tema = id;
   // A barra do Safari e os controles do sistema (player de áudio, rolagem)
   // seguem junto; sem isto o player nasce branco no meio de uma folha escura.

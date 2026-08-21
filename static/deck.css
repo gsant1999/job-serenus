@@ -295,7 +295,7 @@ a.secundario {
   align-items: center;
   gap: 14px;
   height: var(--alt-destino);
-  padding: 0 14px 0 18px;
+  padding: 0 16px 0 20px;
   background: var(--tijolo);
   border: 1px solid var(--borda);
   border-radius: var(--raio-mesa);
@@ -332,7 +332,7 @@ a.secundario {
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-  padding: 8px 0;
+  padding: 0;
   background: none;
   border: 0;
   text-align: left;
@@ -367,11 +367,13 @@ a.secundario {
 
 .zap-trocar {
   flex: none;
+  align-self: center;    /* nunca encostar na curva do canto */
   min-height: var(--alt-controle);
+  max-height: var(--alt-controle);
   padding: 0 18px;
   background: transparent;
   border: 1px solid var(--borda-forte);
-  border-radius: 12px;
+  border-radius: 14px;
   font-size: 15px;
   font-weight: 600;
   transition: transform 140ms var(--ease-saida), background-color 140ms var(--ease-saida);
@@ -493,11 +495,50 @@ a.secundario {
    em paisagem, mais espaço virava tecla MENOR (10 colunas de 104px). */
 .zap-lista {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: var(--gap-tecla);
 }
+@media (min-width: 430px)  { .zap-lista { grid-template-columns: repeat(3, 1fr); } }
 @media (min-width: 700px)  { .zap-lista { grid-template-columns: repeat(4, 1fr); } }
 @media (min-width: 1024px) { .zap-lista { grid-template-columns: repeat(6, 1fr); --gap-tecla: 16px; } }
+
+@media (max-width: 699px) {
+  :root {
+    --gap-tecla: 10px;
+    --alt-destino: 88px;
+    --alt-controle: 46px;
+  }
+  body {
+    padding:
+      max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
+      max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  }
+  .zap { gap: 8px; }
+
+  /* A régua vira duas linhas: seções e tema em cima, busca inteira embaixo.
+     Numa linha só, aos 375px, a busca era espremida até sumir e o botão do tema
+     ficava metade fora da tela. */
+  .zap-regua { flex-wrap: wrap; }
+  .zap-secoes { flex: 1; }
+  .zap-secao { flex: 1; padding: 0 10px; }
+  .zap-busca { flex: 1 0 100%; order: 3; }
+
+  .zap-topo { padding: 0 12px 0 16px; gap: 10px; }
+  .zap-nome { line-height: 1.1; }
+  .zap-nome { font-size: 23px; }
+  .zap-rot { font-size: 12px; }
+  .zap-nota { font-size: 14px; }
+  .zap-trocar { padding: 0 14px; }
+
+  .zap-tecla { gap: 10px; padding: 10px 8px; border-radius: 15px; }
+  .zap-tecla .rotulo { font-size: 14px; }
+  .zap-tecla .marca { top: 7px; right: 9px; font-size: 10px; }
+  .zap-mesa { padding: 8px; border-radius: 22px; }
+
+  /* Na mão, a folha ocupa a largura toda: é o aparelho inteiro, não uma janela
+     dentro dele. */
+  .folha { width: 100%; border-radius: 22px 22px 0 0; }
+}
 
 /* A TECLA.
    Isto é uma mesa, não uma lista: toda tecla tem o mesmo tamanho, o mesmo peso
@@ -781,7 +822,6 @@ a.secundario {
 /* Estar na rua e ter que voltar ao computador só para clicar num contato é o
    contrário do que este deck existe para fazer. */
 
-.zap-trocar { flex-shrink: 0; align-self: flex-start; }
 
 .zap-contatos { display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px; }
 .zap-contatos .zap-busca { margin-bottom: 0; }
