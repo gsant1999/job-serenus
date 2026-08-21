@@ -13423,6 +13423,100 @@ def _disparo_medicao(conn, campanha_id=None):
             'total_alvos': len(alvos)}
 
 
+def _saude_dos_numeros(conn, dias=14):
+    """A SAÚDE DO NÚMERO DE CADA CONSULTOR.
+
+    Nasceu de um número recém-comprado que caiu ao ser conectado, em 21/08/2026.
+    Não dá para medir a regra do WhatsApp — ninguém fora de lá a conhece. Dá para
+    medir o NOSSO comportamento e cruzar com o que acontece, que é a única forma
+    honesta de aprender isso.
+
+    O número que mais importa não é quanto se manda: é **quanto se manda para
+    quem nunca falou com a gente, e quantos desses não responderam**. Número que
+    fala sozinho com desconhecido é número sendo denunciado — e a denúncia
+    aparece no silêncio dias antes de aparecer no bloqueio.
+
+    Também mede o que passa POR FORA das travas: elas só freiam envio automático,
+    e o envio manual pela extensão é hoje o maior volume do time.
+    """
+    corte = (datetime.now(TZ_SP) - timedelta(days=dias)).strftime('%Y-%m-%d %H:%M:%S')
+    linhas = [dict(r) for r in conn.execute("""
+        SELECT q.responsavel_id, q.chat_id, q.origem, q.status, q.erro,
+               q.enviado_em, q.criado_em, e.ultima_msg_em
+          FROM whatsapp_extensao_fila q
+     LEFT JOIN wa_conversa_estado e ON e.chat_id = q.chat_id
+         WHERE CAST(q.criado_em AS TEXT) >= ?
+    """, (corte,)).fetchall()]
+    nomes = {int(dict(r)['id']): dict(r)['nome']
+             for r in conn.execute("SELECT id, nome FROM usuarios").fetchall()}
+
+    # Quem já tinha conversa ANTES da janela: é o que separa abordar um
+    # desconhecido de continuar um assunto.
+    conhecidos = set()
+    try:
+        for r in conn.execute("SELECT chat_id FROM wa_conversa_estado").fetchall():
+            conhecidos.add(dict(r)['chat_id'])
+    except Exception:
+        pass
+
+    por_uid = {}
+    for l in linhas:
+        uid = l['responsavel_id']
+        d = por_uid.setdefault(uid, {
+            "usuario_id": uid, "nome": nomes.get(int(uid or 0), f"usuário {uid}"),
+            "enviados": 0, "frios": 0, "frios_sem_retorno": 0, "falhas": 0,
+            "manuais": 0, "automaticos": 0, "motivos": {},
+        })
+        if l['status'] == 'enviado':
+            d['enviados'] += 1
+            if _trava_e_automatica(l.get('origem')):
+                d['automaticos'] += 1
+            else:
+                d['manuais'] += 1
+            if l['chat_id'] not in conhecidos:
+                d['frios'] += 1
+                # Sem sinal de vida na conversa depois do envio: o silêncio é o
+                # aviso que vem antes do bloqueio.
+                if not l.get('ultima_msg_em'):
+                    d['frios_sem_retorno'] += 1
+        elif l['status'] in ('falhou', 'expirado', 'cancelado_atraso'):
+            d['falhas'] += 1
+            m = (l.get('erro') or l['status'])[:70]
+            d['motivos'][m] = d['motivos'].get(m, 0) + 1
+
+    saida = []
+    for d in por_uid.values():
+        d['motivos'] = sorted(d['motivos'].items(), key=lambda x: -x[1])[:3]
+        d['silencio_pct'] = (round(100.0 * d['frios_sem_retorno'] / d['frios'])
+                             if d['frios'] else 0)
+        d['por_dia'] = round(d['enviados'] / float(dias), 1)
+        d['frios_por_dia'] = round(d['frios'] / float(dias), 1)
+        # A régua é a mesma das travas, para o número ser comparável ao freio que
+        # já existe — e para ficar visível quando o manual passa por fora dele.
+        d['perto_do_teto'] = d['por_dia'] >= _TRAVA_TETO_DIARIO * 0.6
+        d['frio_demais'] = d['frios_por_dia'] >= _TRAVA_TETO_FRIO * 0.6
+        d['risco'] = ('alto' if (d['silencio_pct'] >= 80 and d['frios'] >= 20) or d['frio_demais']
+                      else 'medio' if d['silencio_pct'] >= 60 and d['frios'] >= 10
+                      else 'baixo')
+        saida.append(d)
+    saida.sort(key=lambda x: (-x['frios'], -x['enviados']))
+    return {"dias": dias, "consultores": saida,
+            "teto_dia": _TRAVA_TETO_DIARIO, "teto_frio": _TRAVA_TETO_FRIO}
+
+
+@app.route('/api/whatsapp/saude')
+@login_required
+@admin_required
+def api_whatsapp_saude():
+    """Os números crus, para leitura de fora da tela."""
+    dias = max(1, min(90, request.args.get('dias', 14, type=int)))
+    conn = db()
+    try:
+        return jsonify(_saude_dos_numeros(conn, dias))
+    finally:
+        close_db(conn)
+
+
 @app.route('/disparos/medicao')
 @login_required
 @admin_required
@@ -13451,7 +13545,8 @@ def disparo_medicao():
     for p in paradas:
         p['status_texto'] = _DISPARO_STATUS_TEXTO.get(p['status'], p['status'])
     nome = next((c['nome'] for c in camps if c['id'] == cid), '')
-    return render_template('disparo_medicao.html', med=med, campanhas=camps,
+    saude = _saude_dos_numeros(conn, 14)
+    return render_template('disparo_medicao.html', med=med, campanhas=camps, saude=saude,
                            campanha_id=cid, campanha_nome=nome, paradas=paradas)
 
 
