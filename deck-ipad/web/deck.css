@@ -495,3 +495,15 @@ input[type="range"]::-webkit-slider-thumb {
   .tijolo:active, .principal:active, .secundario:active, .aba:active { transform: none; }
   .tijolo[data-estado="rodando"] .andamento { animation: none; transform: scaleX(1); }
 }
+
+/* A foto da câmera dentro da folha. Largura inteira e altura pelo conteúdo: é
+   para reconhecer a sala num relance, não para inspecionar detalhe. */
+.folha-foto {
+  display: block;
+  width: 100%;
+  max-height: 46vh;
+  object-fit: contain;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  background: #000;
+}

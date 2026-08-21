@@ -33,6 +33,7 @@ WEB = RAIZ / "web"
 ARQ_CONFIG = RAIZ / "botoes.json"
 ARQ_TOKEN = RAIZ / ".token"
 ARQ_REGISTRO = RAIZ / "registro.log"
+ARQ_FOTO = RAIZ / ".foto.jpg"        # ultima foto da camera; o git ignora
 
 PORTA = int(os.environ.get("DECK_PORTA", "8765"))
 LIMITE_SAIDA = 20_000        # caracteres guardados por execucao
@@ -99,6 +100,9 @@ def ambiente_do_login() -> dict:
 
 
 AMBIENTE = ambiente_do_login()
+# Onde o deck mora, para os comandos poderem escrever ali sem caminho cravado —
+# a pasta do repositório muda de máquina para máquina.
+AMBIENTE["DECK_RAIZ"] = str(RAIZ)
 
 
 def texto_applescript(valor: str) -> str:
@@ -694,6 +698,20 @@ class Deck(BaseHTTPRequestHandler):
             return
         if caminho == "/api/estado":
             self.json_ok(self.estado_geral())
+            return
+        if caminho == "/api/foto":
+            # A ÚLTIMA FOTO DA CÂMERA, PARA O IPAD VER.
+            #
+            # Fica fora da pasta web de propósito: o que a câmera do escritório
+            # capturou não é arquivo de aplicação, e ninguém sem token deve
+            # conseguir pedir. Esta rota já passou pela checagem de pareamento
+            # acima, e a de rede local antes dela.
+            try:
+                dados = ARQ_FOTO.read_bytes()
+            except OSError:
+                self.json_ok({"erro": "Nenhuma foto ainda. Toque em Ver a sala agora."}, 404)
+                return
+            self.responder(200, dados, "image/jpeg")
             return
         self.json_ok({"erro": "rota que nao existe"}, 404)
 
