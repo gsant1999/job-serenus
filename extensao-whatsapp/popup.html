@@ -79,7 +79,22 @@
     .nota { font-size: 11px; color: #5b6486; line-height: 1.5; margin-top: 12px; }
     #status { font-size: 11.5px; margin-top: 10px; min-height: 14px; color: #8b93ad; }
     .ok { color: #21c58f !important; } .err { color: #f2547a !important; }
-  </style>
+  
+    .nuvem{border:1px solid #2a2e37;border-radius:12px;padding:12px;margin:12px 0;
+           display:flex;flex-direction:column;gap:10px}
+    .nuvem-topo{display:flex;align-items:flex-start;gap:9px}
+    .nuvem-luz{width:9px;height:9px;border-radius:50%;background:#6b7280;
+               flex-shrink:0;margin-top:5px}
+    .nuvem-luz[data-e="conectado"]{background:#35c07f}
+    .nuvem-luz[data-e="conectando"]{background:#5b93ff}
+    .nuvem-luz[data-e="caiu"]{background:#ff6f6f}
+    .nuvem-t{font-size:13px;font-weight:600;letter-spacing:-.01em}
+    .nuvem-s{font-size:11.5px;line-height:1.4;color:#99a1ad;margin-top:2px}
+    .nuvem-qr{background:#fff;border-radius:10px;padding:10px;text-align:center}
+    .nuvem-qr img{width:100%;max-width:220px;display:block;margin:0 auto;
+                  image-rendering:pixelated}
+    .nuvem-dica{font-size:10.5px;line-height:1.4;color:#3d444b;margin:8px 0 0}
+</style>
 </head>
 <body>
 
@@ -112,6 +127,29 @@
   </label>
   <p class="nota">Desligando, o painel some do WhatsApp Web neste computador.
     Recarregue a aba depois de mudar.</p>
+
+  <!-- WHATSAPP NA NUVEM.
+       Com isto ligado, mensagem e funil saem mesmo com o computador desligado.
+       O QR e pedido SOB DEMANDA, no clique: o codigo vale ~40s e o servidor tem
+       teto de codigos por conexao. Renovar em laco queima o teto e passa a
+       mostrar um codigo morto sem avisar — foi o que aconteceu em 20/08/2026. -->
+  <div class="nuvem" id="nuvem" hidden>
+    <div class="nuvem-topo">
+      <span class="nuvem-luz" id="nuvemLuz"></span>
+      <div style="flex:1 1 auto; min-width:0;">
+        <div class="nuvem-t">WhatsApp na nuvem</div>
+        <div class="nuvem-s" id="nuvemRecado">verificando…</div>
+      </div>
+    </div>
+    <div class="nuvem-qr" id="nuvemQr" hidden>
+      <img id="nuvemQrImg" alt="Codigo para conectar">
+      <p class="nuvem-dica">No celular: WhatsApp &rsaquo; Aparelhos conectados &rsaquo;
+        Conectar aparelho. O codigo vale cerca de 40 segundos.</p>
+    </div>
+    <button id="nuvemConectar" class="bt-azul">Conectar meu WhatsApp</button>
+    <button id="nuvemOutro" class="bt-fraco" hidden>Gerar outro codigo</button>
+    <button id="nuvemSair" class="bt-fraco" hidden>Desconectar do servidor</button>
+  </div>
 
   <div id="status"></div>
 
