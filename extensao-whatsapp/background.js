@@ -850,7 +850,12 @@ async function _deckBatida() {
   const info = await _deckPerguntarAba(tabId,
     { type: 'deck_info', comCatalogo: _deckPrecisaCatalogo() }, 9000) || {};
   const r = await deckPonte('/api/whatsapp/extensao/deck/sincronizar',
-    { chat: info.chat || null, catalogo: info.catalogo || null });
+    { chat: info.chat || null, catalogo: info.catalogo || null,
+      // A lista era montada aqui e ficava pelo caminho: sem ela no corpo, o JOB
+      // nunca teve o que guardar, e a escolha de cliente pelo deck só oferecia
+      // lead do CRM. O deck existe para o consultor reconhecer quem ele estava
+      // atendendo — isso é o nome da conversa, não o nome do cadastro.
+      conversas: info.conversas || null });
   if (!r.ok) {
     _deckFalhas++;
     return _deckFalhas >= DECK_FALHAS_ATE_DORMIR ? 0 : DECK_BEAT_OCIOSO;
@@ -890,9 +895,38 @@ async function _deckLaco() {
 
 // A busca de um minuto em um minuto: uma chamada curta, sem envolver a aba. É o
 // único trabalho de fundo que sobra quando ninguém está com o deck aberto.
+//
+// DE CARONA, A LISTA DE CONVERSAS — e é aqui que ela tem que ir.
+//
+// Antes a lista só era mandada enquanto o deck estava aberto na frente do
+// consultor. Só que o deck com o computador desligado é justamente o caso em que
+// a extensão não está rodando: a lista nunca chegava a existir para quando ela
+// era necessária. Um nó que se mordia. Agora o JOB aprende a lista enquanto ele
+// trabalha normalmente no computador, e ela está pronta quando ele sai.
+//
+// A cada 10 minutos, não a cada minuto: ler as conversas trava a navegação da
+// aba, e essa é a razão de ela nunca ter vindo por aqui.
+let _deckListaEm = 0;
+const DECK_LISTA_CADA_MS = 10 * 60 * 1000;
+
 async function _deckProcurar() {
   if (_deckLacoVivo) return;
-  const r = await deckPonte('/api/whatsapp/extensao/deck/sincronizar', { chat: null, catalogo: null });
+  let conversas = null;
+  if (Date.now() - _deckListaEm > DECK_LISTA_CADA_MS) {
+    _deckListaEm = Date.now();
+    try {
+      const aba = await _deckAba();
+      if (aba) {
+        const info = await _deckPerguntarAba(aba, { type: 'deck_info', comCatalogo: false }, 9000);
+        if (info && Array.isArray(info.conversas) && info.conversas.length) {
+          conversas = info.conversas;
+        }
+      }
+    } catch (e) { /* sem WhatsApp aberto não há lista, e isso é normal */ }
+  }
+  const corpo = { chat: null, catalogo: null };
+  if (conversas) corpo.conversas = conversas;
+  const r = await deckPonte('/api/whatsapp/extensao/deck/sincronizar', corpo);
   if (r.ok) _deckLaco();
 }
 
