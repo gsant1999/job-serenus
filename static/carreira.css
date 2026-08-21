@@ -93,21 +93,63 @@ h1 .l2{display:block}
 .hero-acoes{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
 .hero-nota{font-size:14px;color:var(--ink-faint)}
 
-/* ── faixa de números ── */
-.faixa{
-  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
-  background:var(--line);border:1px solid var(--line);border-radius:20px;overflow:hidden;margin-top:8px;
-}
-.faixa .cel{background:var(--bg);padding:26px 22px;display:flex;flex-direction:column;gap:6px}
-.faixa .num{font-family:Archivo,"Helvetica Neue",Arial,sans-serif;font-stretch:118%;font-weight:700;letter-spacing:-.04em;font-size:clamp(28px,3.6vw,42px);line-height:1;white-space:nowrap}
-.faixa .leg{font-size:14px;color:var(--ink-soft);line-height:1.4}
-.n-magenta{color:var(--magenta)} .n-laranja{color:var(--laranja)}
-.n-ambar{color:var(--ambar)}     .n-azul{color:var(--azul)}
-.n-ciano{color:var(--ciano)}     .n-indigo{color:var(--indigo)}
-.n-coral{color:var(--coral)}
-@media (max-width:860px){ .faixa{grid-template-columns:repeat(2,1fr)} }
-@media (max-width:460px){ .faixa{grid-template-columns:1fr} }
+/* cores do arco, para pintar numero solto */
+.n-magenta{color:var(--magenta)} .n-coral{color:var(--coral)}
+.n-laranja{color:var(--laranja)} .n-ambar{color:var(--ambar)}
+.n-ciano{color:var(--ciano)}     .n-azul{color:var(--azul)}
+.n-indigo{color:var(--indigo)}
 
+/* ── o que se ganha: fica logo abaixo do titulo, e a pergunta que todo
+      candidato faz primeiro. Comissao e premio sao lados diferentes da conta,
+      entao moram em blocos diferentes, com o premio marcado como coisa que
+      vem da operadora e nao da corretora. ── */
+.ganhos{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:16px;margin-top:10px}
+@media (max-width:900px){ .ganhos{grid-template-columns:1fr} }
+
+.ganho-fixo,.ganho-venda{
+  border:1px solid var(--line);border-radius:20px;padding:26px 28px;
+  display:flex;flex-direction:column;gap:10px;background:var(--surface);
+}
+@media (max-width:600px){ .ganho-fixo,.ganho-venda{padding:22px 20px} }
+
+.gf-num{
+  font-family:Archivo,"Helvetica Neue",Arial,sans-serif;font-stretch:118%;font-weight:700;
+  font-size:clamp(38px,5.4vw,54px);letter-spacing:-.045em;line-height:1;
+}
+.gf-leg{font-size:15.5px;line-height:1.5;color:var(--ink-soft)}
+.gf-zero{
+  margin-top:6px;padding-top:16px;border-top:1px solid var(--line);
+  display:flex;flex-direction:column;gap:5px;
+}
+.gf-zero .zn{font-size:17px;font-weight:600;letter-spacing:-.015em}
+.gf-zero .zl{font-size:14.5px;line-height:1.5;color:var(--ink-soft)}
+
+/* o bloco da venda e o unico com a borda do arco: e onde o dinheiro cresce */
+.ganho-venda{position:relative;border-color:transparent;background:var(--surface)}
+.ganho-venda::before{
+  content:"";position:absolute;inset:0;border-radius:20px;padding:1.5px;
+  background:var(--arco);
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+          mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;
+}
+.gv-linha{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.gv-parte{display:flex;flex-direction:column;gap:6px;min-width:150px}
+.gv-num{
+  font-family:Archivo,"Helvetica Neue",Arial,sans-serif;font-stretch:118%;font-weight:700;
+  font-size:clamp(38px,5.4vw,54px);letter-spacing:-.045em;line-height:1;
+}
+.gv-leg{font-size:14.5px;line-height:1.45;color:var(--ink-soft)}
+.gv-leg b{color:var(--ink);font-weight:600}
+.gv-mais{
+  font-family:Archivo,sans-serif;font-stretch:118%;font-weight:700;
+  font-size:34px;color:var(--ink-faint);line-height:1;
+}
+.gv-nota{
+  margin-top:4px;padding-top:16px;border-top:1px solid var(--line);
+  font-size:14.5px;line-height:1.55;color:var(--ink-soft);
+}
+.gv-nota b{color:var(--ink)}
 
 /* ── arco da marca no fundo do topo ── */
 .hero{position:relative}
@@ -180,6 +222,7 @@ h1 .l2{display:block}
 .exemplo .total{padding:24px 28px;display:flex;flex-wrap:wrap;gap:8px 20px;align-items:baseline;justify-content:space-between;background:var(--surface-2)}
 .exemplo .total .oq{font-size:17px;font-weight:600}
 .exemplo .total .vl{font-family:Archivo,sans-serif;font-stretch:118%;font-weight:700;font-size:clamp(34px,5vw,48px);letter-spacing:-.04em;white-space:nowrap}
+
 
 /* ── seções ── */
 section{padding:72px 0 0;display:flex;flex-direction:column;gap:26px}
