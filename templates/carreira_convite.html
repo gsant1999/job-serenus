@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Convite para entrar no time | Serenus</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="{{ url_for('static', filename='favicon.png') }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="{{ url_for('static', filename='carreira.css') }}">
+</head>
+<body>
+
+<div class="topo">
+  <div class="topo-in">
+    <span aria-label="Serenus Corretora de Saúde">
+      <img class="marca marca-light" src="{{ url_for('static', filename='brand/serenus-logo-black.png') }}" alt="Serenus Corretora de Saúde">
+      <img class="marca marca-dark" src="{{ url_for('static', filename='brand/serenus-logo-light.png') }}" alt="Serenus Corretora de Saúde">
+    </span>
+    <a class="btn btn-sm btn-arco" href="{{ link_aceite }}" target="_blank" rel="noopener">Aceitar e confirmar</a>
+  </div>
+</div>
+
+<div class="wrap" style="max-width:840px">
+
+<header class="convite-topo">
+  <div class="fio" style="width:120px"></div>
+  <div class="rot">Convite &nbsp;/&nbsp; Corretor de planos de saúde &nbsp;/&nbsp; Serenus</div>
+  <h1>A vaga é sua,<span class="l2 arco-txt">{{ nome }}.</span></h1>
+  <p class="lede">Conversamos, você entendeu a operação e a gente gostou do que ouviu. Esta carta existe para que nada do que foi combinado dependa de memória.</p>
+</header>
+
+<section id="conversa">
+  <div class="sec-topo">
+    <div class="rot">Por que você</div>
+    <h2>Não é convite de lista.</h2>
+  </div>
+  <div class="texto">
+    <p>Falamos com várias pessoas para esta vaga e escolhemos você. O que pesou foi o jeito de conduzir a conversa: quem sabe ouvir o cliente antes de empurrar plano é quem vende plano de saúde de verdade.</p>
+    <p>O que a Serenus coloca na mesa está logo abaixo. É o mesmo que estava na página da vaga, agora com a sua data e sem margem para mal-entendido.</p>
+  </div>
+</section>
+
+<section id="combinado">
+  <div class="sec-topo">
+    <div class="rot">O que foi combinado</div>
+    <h2>Preto no branco.</h2>
+  </div>
+  <div class="combinado">
+    <div class="item"><div class="k">Início</div><div class="v n-magenta">{{ inicio }}</div><div class="d">Apresente-se às 9h no escritório.</div></div>
+    <div class="item"><div class="k">Regime</div><div class="v n-indigo">PJ</div><div class="d">Prestação de serviço pelo seu CNPJ, sem vínculo celetista.</div></div>
+    <div class="item"><div class="k">Fixo mensal</div><div class="v n-ciano">R$ 1.000</div><div class="d">Todo mês, desde o primeiro, independente da produção.</div></div>
+    <div class="item"><div class="k">Ajuda de custo</div><div class="v n-laranja">R$ 500</div><div class="d">Nos 3 primeiros meses, somada ao fixo.</div></div>
+    <div class="item"><div class="k">Comissão, meses 1 a 3</div><div class="v n-ambar">50%</div><div class="d">Da primeira mensalidade de cada cliente que você fechar. Sem teto.</div></div>
+    <div class="item"><div class="k">A partir do 4º mês</div><div class="v n-azul">Regime por produção</div><div class="d">Comissionamento estratégico, apresentado e combinado antes de valer.</div></div>
+    <div class="item"><div class="k">Janela de trabalho</div><div class="v n-coral">9h às 17h</div><div class="d">Disponibilidade combinada. Fora dela, o horário é seu.</div></div>
+    <div class="item"><div class="k">Presencial</div><div class="v n-magenta">3 meses</div><div class="d">Segunda a sexta. Depois, home office possível.</div></div>
+  </div>
+  <div class="aviso">
+    <div class="t">Os prêmios de operadora continuam por fora</div>
+    <div class="c">MedSênior R$ 300 por vida, Porto Saúde R$ 200 por vida, Amil com 50% de bônus na 4ª parcela e Vera Cruz Adesão com 50% sobre a primeira mensalidade. Quem define esses valores é a operadora, então eles <b>podem mudar a qualquer momento</b>, sem aviso à corretora. O fixo, a ajuda de custo e a comissão da corretora não mudam.</div>
+  </div>
+</section>
+
+<section id="primeiro-dia">
+  <div class="sec-topo">
+    <div class="rot">Primeiro dia</div>
+    <h2>O que trazer em {{ inicio }}.</h2>
+  </div>
+  <ul class="checklist">
+    <li><span class="cx"></span><span><b>Documento com foto</b> e CPF.</span></li>
+    <li><span class="cx"></span><span><b>Cartão CNPJ</b> da sua empresa. Se ainda estiver abrindo, avise antes que a gente ajusta o prazo.</span></li>
+    <li><span class="cx"></span><span><b>Chave PIX</b> da pessoa jurídica, é por onde o fixo e a comissão são pagos.</span></li>
+    <li><span class="cx"></span><span><b>Seu celular</b> com WhatsApp funcionando. É a ferramenta principal do dia.</span></li>
+    <li><span class="cx"></span><span><b>Notebook</b>, se tiver. Se não tiver, a gente resolve, mas precisa saber antes.</span></li>
+  </ul>
+  <div class="texto">
+    <p>Endereço: <strong>Rua Joaquim Guilherme da Costa, 370, Hortolândia</strong>. Se der qualquer imprevisto no caminho, avise pelo WhatsApp e a gente segura.</p>
+  </div>
+  <div class="hero-acoes">
+    <a class="btn btn-linha" href="{{ link_maps }}" target="_blank" rel="noopener">Traçar rota até o escritório</a>
+  </div>
+</section>
+
+<section id="semana">
+  <div class="sec-topo">
+    <div class="rot">Primeira semana</div>
+    <h2>Como vai ser.</h2>
+  </div>
+  <div class="trilha">
+    <div class="passo"><div class="mes n-magenta">D1</div><div class="oq">Conhecer o time e o sistema</div><div class="det">Acesso ao JOB, ao WhatsApp de trabalho e à sua fila de leads. Você senta com quem já vende.</div></div>
+    <div class="passo"><div class="mes n-laranja">D2</div><div class="oq">Produto e operadora</div><div class="det">Portfólio, carência, rede e as regras que mais derrubam venda.</div></div>
+    <div class="passo"><div class="mes n-ambar">D3</div><div class="oq">Cotação na prática</div><div class="det">Montar comparativo e mandar para o cliente sem travar.</div></div>
+    <div class="passo"><div class="mes n-azul">D4 e D5</div><div class="oq">Atender de verdade</div><div class="det">Seus primeiros leads, com alguém do lado na hora da objeção.</div></div>
+  </div>
+</section>
+
+<div class="fecho">
+  <div class="fio" style="width:96px"></div>
+  <h2>Falta você dizer sim.</h2>
+  <div class="texto">
+    <p>Confirme pelo WhatsApp que aceita e que começa em {{ inicio }}. Qualquer ponto desta carta que você quiser rever, é só falar antes de confirmar: o combinado precisa estar bom para os dois lados desde o primeiro dia.</p>
+  </div>
+  <div class="acoes">
+    <a class="btn btn-arco" href="{{ link_aceite }}" target="_blank" rel="noopener">Aceitar e confirmar início</a>
+    <a class="btn btn-linha" href="{{ link_duvida }}" target="_blank" rel="noopener">Tenho uma dúvida antes</a>
+  </div>
+  <div class="assinatura">
+    <b>Serenus Corretora de Saúde</b>
+    <span>Rua Joaquim Guilherme da Costa, 370, Hortolândia, SP</span>
+  </div>
+</div>
+
+<div class="rodape">
+  Carta de convite emitida para {{ nome }}. Condições comerciais vigentes na data de emissão;
+  prêmios de operadora podem ser alterados pelas operadoras a qualquer momento.
+</div>
+
+</div>
+</body>
+</html>

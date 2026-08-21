@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Montar carta convite{% endblock %}
+{% block content %}
+<div style="max-width:720px;margin:0 auto;padding:24px 0">
+  <h1 style="margin:0 0 6px">Montar carta convite</h1>
+  <p style="color:var(--cinza);margin:0 0 22px">
+    Gera o link da carta que você manda ao candidato depois da entrevista. A carta repete o que
+    foi combinado (fixo, ajuda de custo, comissão, presencial) com o nome e a data de início dele.
+  </p>
+
+  <div style="display:flex;flex-direction:column;gap:16px;border:1px solid var(--borda);border-radius:12px;padding:22px">
+    <label style="display:flex;flex-direction:column;gap:6px">
+      <span style="font-weight:600">Nome do candidato</span>
+      <input id="cNome" type="text" placeholder="Aline" style="padding:11px 13px;border-radius:9px;border:1px solid var(--borda);background:var(--input-bg);color:var(--texto)">
+      <span style="font-size:13px;color:var(--cinza)">Só o primeiro nome funciona melhor: a carta trata a pessoa por ele.</span>
+    </label>
+
+    <label style="display:flex;flex-direction:column;gap:6px">
+      <span style="font-weight:600">Data de início</span>
+      <input id="cInicio" type="date" style="padding:11px 13px;border-radius:9px;border:1px solid var(--borda);background:var(--input-bg);color:var(--texto)">
+    </label>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <button id="btnGerar" class="btn">Gerar link da carta</button>
+      <a id="verCarta" class="btn" style="display:none" target="_blank" rel="noopener">Abrir a carta</a>
+    </div>
+
+    <div id="saida" style="display:none;flex-direction:column;gap:8px">
+      <span style="font-weight:600">Link para mandar no WhatsApp</span>
+      <input id="linkSaida" readonly style="padding:11px 13px;border-radius:9px;border:1px solid var(--borda);background:var(--input-bg);color:var(--texto);font-family:ui-monospace,monospace;font-size:13px">
+      <button id="btnCopiar" class="btn" style="align-self:flex-start">Copiar link</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const base = location.origin + '/carreira/convite';
+  const nome = document.getElementById('cNome');
+  const inicio = document.getElementById('cInicio');
+  const saida = document.getElementById('saida');
+  const link = document.getElementById('linkSaida');
+  const ver = document.getElementById('verCarta');
+
+  document.getElementById('btnGerar').addEventListener('click', () => {
+    const n = nome.value.trim();
+    if (!n) { nome.focus(); return; }
+    const p = new URLSearchParams({ nome: n });
+    if (inicio.value) {
+      const [a, m, d] = inicio.value.split('-');
+      p.set('inicio', `${d}/${m}/${a}`);
+    }
+    const url = base + '?' + p.toString();
+    link.value = url;
+    ver.href = url;
+    saida.style.display = 'flex';
+    ver.style.display = 'inline-flex';
+  });
+
+  document.getElementById('btnCopiar').addEventListener('click', async (ev) => {
+    try { await navigator.clipboard.writeText(link.value); }
+    catch (e) { link.select(); document.execCommand('copy'); }
+    ev.target.textContent = 'Link copiado';
+    setTimeout(() => ev.target.textContent = 'Copiar link', 1800);
+  });
+})();
+</script>
+{% endblock %}

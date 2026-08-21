@@ -13,290 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<style>
-/* ══ IDENTIDADE SERENUS ══
-   Wordmark preto + arco em espectro. As cores abaixo foram tiradas do
-   próprio arco do logo: magenta, coral, laranja, âmbar, ciano, azul, índigo. */
-:root{
-  --magenta:#FF459D; --coral:#FF6760; --laranja:#FF8636; --ambar:#FFB11A;
-  --ciano:#10A8DD;   --azul:#0996F5;  --indigo:#747DFA;
-  --arco:linear-gradient(96deg,var(--magenta) 0%,var(--coral) 22%,var(--laranja) 38%,var(--ambar) 52%,var(--ciano) 74%,var(--azul) 88%,var(--indigo) 100%);
-
-  --bg:#FFFFFF; --bg-2:#F5F5F7; --surface:#FFFFFF; --surface-2:#F2F2F5;
-  --ink:#0B0B0F; --ink-soft:#55555F; --ink-faint:#8C8C97;
-  --line:#E4E4E9; --line-forte:#CFCFD8;
-  --pill-ink:#FFFFFF;
-
-  --mapa-r1:#A3A3B0; --mapa-r2:#B9B9C6; --mapa-r3:#CDCDD8; --mapa-r4:#DCDCE4;
-  --mapa-verde:#E6EFE7; --mapa-agua:#D7E6EC;
-
-  --ease-saida:cubic-bezier(.23,1,.32,1);
-  color-scheme:light;
-}
-@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
-  --bg:#0B0B0F; --bg-2:#121218; --surface:#141419; --surface-2:#1B1B22;
-  --ink:#F4F4F7; --ink-soft:#A6A6B2; --ink-faint:#75757F;
-  --line:#232329; --line-forte:#33333C;
-  --pill-ink:#0B0B0F;
-  --mapa-r1:#4E4E5C; --mapa-r2:#3D3D4A; --mapa-r3:#33333E; --mapa-r4:#2A2A33;
-  --mapa-verde:#1B2620; --mapa-agua:#182831;
-  color-scheme:dark;
-} }
-:root[data-theme="dark"]{
-  --bg:#0B0B0F; --bg-2:#121218; --surface:#141419; --surface-2:#1B1B22;
-  --ink:#F4F4F7; --ink-soft:#A6A6B2; --ink-faint:#75757F;
-  --line:#232329; --line-forte:#33333C;
-  --pill-ink:#0B0B0F;
-  --mapa-r1:#4E4E5C; --mapa-r2:#3D3D4A; --mapa-r3:#33333E; --mapa-r4:#2A2A33;
-  --mapa-verde:#1B2620; --mapa-agua:#182831;
-  color-scheme:dark;
-}
-
-*{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
-@media (prefers-reduced-motion:reduce){ html{scroll-behavior:auto} }
-body{
-  margin:0;background:var(--bg);color:var(--ink);
-  font-family:Archivo,"Helvetica Neue",Helvetica,Arial,sans-serif;
-  font-size:17px;line-height:1.6;-webkit-font-smoothing:antialiased;
-  overflow-x:clip;
-}
-p{margin:0}
-strong{font-weight:600;color:var(--ink)}
-a{color:inherit}
-:focus-visible{outline:2px solid var(--azul);outline-offset:3px;border-radius:6px}
-.wrap{max-width:1080px;margin:0 auto;padding:0 28px}
-h1,h2,h3{margin:0;font-weight:700;letter-spacing:-.03em;line-height:1.02;text-wrap:balance}
-.rot{
-  font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;
-  font-size:11.5px;letter-spacing:.18em;text-transform:uppercase;font-weight:500;color:var(--ink-faint);
-}
-.arco-txt{background:var(--arco);-webkit-background-clip:text;background-clip:text;color:transparent}
-.fio{height:4px;border-radius:99px;background:var(--arco)}
-
-/* ── topo ── */
-.topo{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--bg) 86%,transparent);backdrop-filter:saturate(180%) blur(16px);border-bottom:1px solid var(--line)}
-.topo-in{max-width:1080px;margin:0 auto;padding:14px 28px;display:flex;align-items:center;justify-content:space-between;gap:20px}
-.marca{height:34px;width:auto;display:block}
-.marca-dark{display:none}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .marca-light{display:none}:root:not([data-theme="light"]) .marca-dark{display:block}}
-:root[data-theme="dark"] .marca-light{display:none}
-:root[data-theme="dark"] .marca-dark{display:block}
-
-.btn{
-  display:inline-flex;align-items:center;justify-content:center;
-  padding:13px 24px;border-radius:999px;border:1px solid transparent;
-  background:var(--ink);color:var(--pill-ink);
-  font:600 15px/1 Archivo,sans-serif;text-decoration:none;cursor:pointer;white-space:nowrap;
-  transition:transform 140ms var(--ease-saida), opacity 140ms var(--ease-saida);
-}
-.btn:active{transform:scale(.97)}
-@media (hover:hover) and (pointer:fine){ .btn:hover{opacity:.88} }
-.btn-arco{background:var(--arco);color:#fff;position:relative}
-.btn-linha{background:transparent;color:var(--ink);border-color:var(--line-forte)}
-@media (hover:hover) and (pointer:fine){ .btn-linha:hover{background:var(--surface-2);opacity:1} }
-.btn-sm{padding:10px 18px;font-size:14px}
-
-/* ── hero ── */
-.hero{padding:84px 0 64px;display:flex;flex-direction:column;gap:30px}
-.hero .fio{width:120px}
-h1{font-size:clamp(42px,8.2vw,92px)}
-h1 .l2{display:block}
-.lede{font-size:clamp(18px,2.2vw,22px);line-height:1.5;color:var(--ink-soft);max-width:46ch;font-weight:400}
-.hero-acoes{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
-.hero-nota{font-size:14px;color:var(--ink-faint)}
-
-/* ── faixa de números ── */
-.faixa{
-  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
-  background:var(--line);border:1px solid var(--line);border-radius:20px;overflow:hidden;margin-top:8px;
-}
-.faixa .cel{background:var(--bg);padding:26px 22px;display:flex;flex-direction:column;gap:6px}
-.faixa .num{font-family:Archivo,"Helvetica Neue",Arial,sans-serif;font-stretch:118%;font-weight:700;letter-spacing:-.04em;font-size:clamp(28px,3.6vw,42px);line-height:1;white-space:nowrap}
-.faixa .leg{font-size:14px;color:var(--ink-soft);line-height:1.4}
-.n-magenta{color:var(--magenta)} .n-laranja{color:var(--laranja)}
-.n-ambar{color:var(--ambar)}     .n-azul{color:var(--azul)}
-.n-ciano{color:var(--ciano)}     .n-indigo{color:var(--indigo)}
-.n-coral{color:var(--coral)}
-@media (max-width:860px){ .faixa{grid-template-columns:repeat(2,1fr)} }
-@media (max-width:460px){ .faixa{grid-template-columns:1fr} }
-
-
-/* ── arco da marca no fundo do topo ── */
-.hero{position:relative}
-.hero-grade{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:48px;align-items:center}
-.hero-col{display:flex;flex-direction:column;gap:30px;min-width:0}
-
-/* o arco da marca deixa de ser enfeite: ele guarda o numero do dia */
-.medalhao{position:relative;width:380px;max-width:100%;aspect-ratio:1;justify-self:end}
-.medalhao svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-.medalhao .dentro{
-  position:absolute;inset:16%;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;text-align:center;gap:6px;
-}
-.medalhao .rot{color:var(--ink-faint)}
-.medalhao .n{
-  font-family:Archivo,"Helvetica Neue",Arial,sans-serif;font-stretch:118%;font-weight:700;
-  font-size:clamp(52px,7.4vw,76px);letter-spacing:-.045em;line-height:.95;
-}
-.medalhao .l{font-size:16px;line-height:1.35;color:var(--ink-soft);max-width:19ch}
-.medalhao .p{
-  font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:11.5px;
-  letter-spacing:.06em;color:var(--ink-faint);margin-top:8px;max-width:22ch;line-height:1.45;
-}
-@media (max-width:980px){
-  .hero-grade{grid-template-columns:1fr;gap:36px}
-  .medalhao{justify-self:center;width:330px}
-}
-
-/* ── prova (leads entregues) ── */
-.prova{
-  border:1px solid var(--line);border-radius:24px;overflow:hidden;
-  display:grid;grid-template-columns:1.15fr 1fr;gap:1px;background:var(--line);
-}
-.prova > div{background:var(--bg);padding:34px}
-.prova .grande{
-  font-family:Archivo,"Helvetica Neue",Arial,sans-serif;font-stretch:118%;
-  font-weight:700;letter-spacing:-.045em;line-height:.92;
-  font-size:clamp(56px,9vw,116px);
-}
-.prova .sub{font-size:17px;color:var(--ink-soft);margin-top:10px;max-width:34ch;line-height:1.45}
-.prova .lado{display:flex;flex-direction:column;justify-content:center;gap:20px}
-.prova .mini{display:flex;flex-direction:column;gap:4px}
-.prova .mini .n{font-family:Archivo,sans-serif;font-stretch:118%;font-weight:700;font-size:38px;letter-spacing:-.04em;line-height:1}
-.prova .mini .l{font-size:14.5px;color:var(--ink-soft);line-height:1.4}
-@media (max-width:820px){ .prova{grid-template-columns:1fr} .prova > div{padding:26px} }
-
-/* ── parede de operadoras ── */
-.operadoras{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px}
-.op-chip{
-  background:#FFFFFF;border:1px solid var(--line);border-radius:16px;
-  height:78px;display:flex;align-items:center;justify-content:center;padding:14px 18px;
-}
-.op-chip img{max-height:100%;max-width:100%;width:auto;height:auto;object-fit:contain}
-.op-mais{
-  border:1px dashed var(--line-forte);border-radius:16px;height:78px;
-  display:flex;align-items:center;justify-content:center;text-align:center;
-  font-size:13.5px;color:var(--ink-faint);line-height:1.3;padding:12px;background:transparent;
-}
-
-/* ── logo dentro do cartao de premio ── */
-.premio .selo{
-  background:#FFFFFF;border:1px solid var(--line);border-radius:12px;
-  height:52px;width:100px;display:flex;align-items:center;justify-content:center;
-  padding:8px 10px;margin-bottom:4px;
-}
-.premio .selo img{max-height:100%;max-width:100%;object-fit:contain}
-
-/* ── exemplo de uma venda ── */
-.exemplo{border:1px solid var(--line);border-radius:24px;overflow:hidden;background:var(--surface)}
-.exemplo .cab{padding:22px 28px;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:10px 18px;align-items:baseline;justify-content:space-between}
-.exemplo .cab .tit{font-size:19px;font-weight:600;letter-spacing:-.015em}
-.exemplo .cab .marca-ex{font-size:14px;color:var(--ink-faint)}
-.exemplo .linhas{display:flex;flex-direction:column}
-.exemplo .ln{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:baseline;justify-content:space-between;padding:16px 28px;border-bottom:1px solid var(--line)}
-.exemplo .ln .oq{font-size:16px;color:var(--ink-soft)}
-.exemplo .ln .oq b{color:var(--ink);font-weight:600}
-.exemplo .ln .vl{font-family:Archivo,sans-serif;font-stretch:118%;font-weight:700;font-size:26px;letter-spacing:-.03em;white-space:nowrap}
-.exemplo .total{padding:24px 28px;display:flex;flex-wrap:wrap;gap:8px 20px;align-items:baseline;justify-content:space-between;background:var(--surface-2)}
-.exemplo .total .oq{font-size:17px;font-weight:600}
-.exemplo .total .vl{font-family:Archivo,sans-serif;font-stretch:118%;font-weight:700;font-size:clamp(34px,5vw,48px);letter-spacing:-.04em;white-space:nowrap}
-
-/* ── seções ── */
-section{padding:72px 0 0;display:flex;flex-direction:column;gap:26px}
-.sec-topo{display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--line);padding-top:26px}
-h2{font-size:clamp(30px,4.4vw,46px)}
-.texto{display:flex;flex-direction:column;gap:16px;max-width:62ch;color:var(--ink-soft);font-size:17.5px}
-
-/* ── blocos de número grande ── */
-.blocos{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
-.bloco{
-  background:var(--surface);border:1px solid var(--line);border-radius:20px;
-  padding:28px;display:flex;flex-direction:column;gap:10px;position:relative;overflow:hidden;
-}
-.bloco::before{content:"";position:absolute;inset:0 0 auto 0;height:4px;background:var(--arco)}
-.bloco .rot{margin-top:2px}
-.bloco .num{font-family:Archivo,"Helvetica Neue",Arial,sans-serif;font-stretch:118%;font-weight:700;letter-spacing:-.04em;font-size:clamp(38px,5vw,54px);line-height:1}
-.bloco .num small{font-size:.44em;font-weight:600;letter-spacing:-.01em;color:var(--ink-soft);display:block;margin-top:6px}
-.bloco .d{font-size:15px;color:var(--ink-soft);line-height:1.5}
-.bloco.destaque{background:var(--ink);border-color:var(--ink)}
-.bloco.destaque .d, .bloco.destaque .rot{color:color-mix(in srgb,var(--pill-ink) 66%,transparent)}
-.bloco.destaque .num{color:var(--pill-ink)}
-
-/* ── conta grande ── */
-.conta{
-  border:1px solid var(--line);border-radius:20px;background:var(--surface-2);
-  padding:30px;display:flex;flex-wrap:wrap;align-items:center;gap:14px 20px;
-}
-.conta .p{display:flex;flex-direction:column;gap:4px}
-.conta .pv{font-family:Archivo,"Helvetica Neue",Arial,sans-serif;font-stretch:118%;font-size:clamp(26px,3.6vw,38px);font-weight:700;letter-spacing:-.035em;line-height:1}
-.conta .pl{font-size:13px;color:var(--ink-faint);line-height:1.3}
-.conta .op{font-family:Archivo,"Helvetica Neue",Arial,sans-serif;font-stretch:118%;font-size:clamp(22px,3vw,30px);font-weight:600;color:var(--ink-faint);line-height:1}
-
-/* ── mapa ── */
-.mapa-bloco{position:relative;border-radius:22px;overflow:hidden;border:1px solid var(--line);background:var(--bg-2)}
-.mapa-svg{display:block;width:100%;height:auto}
-.mapa-svg polyline,.mapa-svg polygon{fill:none;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
-.m-green{fill:var(--mapa-verde);stroke:none}
-.m-water{stroke:var(--mapa-agua);stroke-width:3}
-.m-r4{stroke:var(--mapa-r4);stroke-width:1.2}
-.m-r3{stroke:var(--mapa-r3);stroke-width:2.2}
-.m-r2{stroke:var(--mapa-r2);stroke-width:4}
-.m-r1{stroke:var(--mapa-r1);stroke-width:7}
-.m-alvo{stroke:url(#gradArco);stroke-width:6}
-.m-dot{fill:var(--magenta);stroke:var(--bg);stroke-width:4}
-.m-halo{fill:var(--magenta);opacity:.10}
-.m-halo2{fill:var(--magenta);opacity:.18}
-.mapa-cartao{
-  position:absolute;left:24px;bottom:24px;right:24px;max-width:360px;
-  background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:22px 24px;
-  display:flex;flex-direction:column;gap:8px;
-  box-shadow:0 1px 2px rgba(0,0,0,.06),0 20px 40px -20px rgba(0,0,0,.45);
-}
-.mapa-cartao .cid{font-family:Archivo,"Helvetica Neue",Arial,sans-serif;font-stretch:118%;font-size:22px;font-weight:700;letter-spacing:-.03em}
-.mapa-cartao .end{font-size:15.5px;color:var(--ink-soft);line-height:1.45}
-.mapa-cartao .cep{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--ink-faint);letter-spacing:.05em}
-.mapa-cartao .btn{margin-top:12px;align-self:flex-start}
-.mapa-nota{font-size:14px;color:var(--ink-faint);line-height:1.5}
-@media (max-width:680px){
-  .mapa-cartao{position:static;max-width:none;border:0;border-top:1px solid var(--line);border-radius:0;box-shadow:none}
-  .mapa-bloco{border-radius:16px}
-}
-
-/* ── trilha ── */
-.trilha{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
-.passo{background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:26px;display:flex;flex-direction:column;gap:10px}
-.passo .mes{font-family:Archivo,"Helvetica Neue",Arial,sans-serif;font-stretch:118%;font-size:40px;font-weight:700;letter-spacing:-.04em;line-height:1}
-.passo .oq{font-size:18px;font-weight:600;letter-spacing:-.01em;line-height:1.25}
-.passo .det{font-size:15px;color:var(--ink-soft);line-height:1.5}
-
-/* ── prêmios ── */
-.premios{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
-.premio{border:1px solid var(--line);border-radius:20px;padding:26px;display:flex;flex-direction:column;gap:8px;background:var(--surface)}
-.premio .op{font-size:17px;font-weight:600;letter-spacing:-.01em}
-.premio .op small{display:block;font-weight:400;font-size:13.5px;color:var(--ink-faint);margin-top:3px}
-.premio .val{font-family:Archivo,"Helvetica Neue",Arial,sans-serif;font-stretch:118%;font-size:clamp(34px,4.6vw,44px);font-weight:700;letter-spacing:-.04em;line-height:1;margin-top:6px}
-.premio .val small{display:block;font-size:.36em;font-weight:600;letter-spacing:0;color:var(--ink-soft);margin-top:8px;line-height:1.35}
-
-/* ── avisos e listas ── */
-.aviso{border:1px solid var(--line-forte);border-radius:20px;padding:24px 26px;display:flex;flex-direction:column;gap:8px;background:var(--surface-2)}
-.aviso .t{font-weight:600;font-size:17px;letter-spacing:-.01em}
-.aviso .c{font-size:15.5px;color:var(--ink-soft);line-height:1.55;max-width:64ch}
-.cartaz{background:var(--ink);color:var(--pill-ink);border-radius:24px;padding:44px;display:flex;flex-direction:column;gap:16px}
-.cartaz h3{font-size:clamp(28px,4.2vw,42px);color:var(--pill-ink)}
-.cartaz p{font-size:18px;line-height:1.55;max-width:56ch;color:color-mix(in srgb,var(--pill-ink) 72%,transparent)}
-@media (max-width:600px){ .cartaz{padding:30px 24px} }
-.lista{display:grid;gap:14px;margin:0;padding:0;list-style:none;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
-.lista li{padding-left:20px;position:relative;font-size:16.5px;color:var(--ink-soft);line-height:1.5}
-.lista li::before{content:"";position:absolute;left:0;top:11px;width:8px;height:8px;border-radius:50%;background:var(--arco)}
-
-/* ── fecho ── */
-.fecho{margin-top:80px;border-radius:24px;border:1px solid var(--line);padding:48px;display:flex;flex-direction:column;gap:22px;background:var(--surface-2)}
-.fecho h2{max-width:20ch}
-.fecho .acoes{display:flex;flex-wrap:wrap;gap:12px}
-@media (max-width:600px){ .fecho{padding:32px 24px} }
-.rodape{padding:44px 0 80px;font-size:13.5px;color:var(--ink-faint);line-height:1.65}
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='carreira.css') }}">
 </head>
 <body>
 
@@ -306,7 +23,7 @@ h2{font-size:clamp(30px,4.4vw,46px)}
       <img class="marca marca-light" src="{{ url_for('static', filename='brand/serenus-logo-black.png') }}" alt="Serenus Corretora de Saúde">
       <img class="marca marca-dark" src="{{ url_for('static', filename='brand/serenus-logo-light.png') }}" alt="Serenus Corretora de Saúde">
     </a>
-    <a class="btn btn-sm btn-arco" href="{{ link_zap }}" target="_blank" rel="noopener">Quero me candidatar</a>
+    <a class="btn btn-sm btn-arco" href="/carreira/candidatura">Quero me candidatar</a>
   </div>
 </div>
 
@@ -320,7 +37,7 @@ h2{font-size:clamp(30px,4.4vw,46px)}
       <h1>Você vende.<span class="l2 arco-txt">O lead é por nossa conta.</span></h1>
       <p class="lede">Aqui ninguém começa o dia procurando com quem falar. A Serenus paga o anúncio, o contato cai no seu sistema e você faz o que sabe: vender plano de saúde.</p>
       <div class="hero-acoes">
-        <a class="btn btn-arco" href="{{ link_zap }}" target="_blank" rel="noopener">Quero me candidatar</a>
+        <a class="btn btn-arco" href="/carreira/candidatura">Quero me candidatar</a>
         <a class="btn btn-linha" href="#dinheiro">Ver quanto se ganha</a>
       </div>
       <p class="hero-nota">Trabalho presencial em Hortolândia nos 3 primeiros meses.</p>
@@ -646,8 +363,8 @@ h2{font-size:clamp(30px,4.4vw,46px)}
     <p>A gente apresenta a operação, você conhece o escritório e o time, e tira qualquer dúvida sobre remuneração e rotina antes de decidir qualquer coisa.</p>
   </div>
   <div class="acoes">
-    <a class="btn btn-arco" href="{{ link_zap }}" target="_blank" rel="noopener">Quero me candidatar</a>
-    <a class="btn btn-linha" href="{{ link_maps }}" target="_blank" rel="noopener">Ver o escritório no mapa</a>
+    <a class="btn btn-arco" href="/carreira/candidatura">Quero me candidatar</a>
+    <a class="btn btn-linha" href="{{ link_zap }}" target="_blank" rel="noopener">Prefiro falar no WhatsApp</a>
   </div>
 </div>
 

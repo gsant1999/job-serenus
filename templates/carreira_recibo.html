@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Candidatura enviada | Serenus</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="{{ url_for('static', filename='favicon.png') }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="{{ url_for('static', filename='carreira.css') }}">
+</head>
+<body>
+
+<div class="topo">
+  <div class="topo-in">
+    <a href="/carreira" aria-label="Serenus Corretora de Saúde">
+      <img class="marca marca-light" src="{{ url_for('static', filename='brand/serenus-logo-black.png') }}" alt="Serenus Corretora de Saúde">
+      <img class="marca marca-dark" src="{{ url_for('static', filename='brand/serenus-logo-light.png') }}" alt="Serenus Corretora de Saúde">
+    </a>
+  </div>
+</div>
+
+<div class="wrap" style="max-width:760px">
+  <div class="hero" style="padding:96px 0 0">
+    <div class="form-cartao">
+      <div class="recibo">
+        <div class="fio" style="width:96px"></div>
+        <h2>Recebemos, {{ primeiro_nome }}.</h2>
+        <p>Sua candidatura entrou na nossa lista agora. A gente lê uma por uma, não é robô que responde.</p>
+        <p><b>O que acontece agora:</b> se o seu perfil encaixar, alguém do time chama no WhatsApp <b>{{ whatsapp_mascarado }}</b> em até 3 dias úteis para marcar uma conversa. Se não encaixar desta vez, guardamos seu contato para a próxima abertura.</p>
+        <p style="font-size:15px;color:var(--ink-faint)">Enquanto isso, se quiser reler o que foi combinado sobre remuneração e rotina, a página da vaga continua no ar.</p>
+        <div class="hero-acoes">
+          <a class="btn btn-linha" href="/carreira">Reler a vaga</a>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="rodape">
+    Serenus Corretora de Saúde &nbsp;/&nbsp; Rua Joaquim Guilherme da Costa, 370, Hortolândia, SP
+  </div>
+</div>
+</body>
+</html>

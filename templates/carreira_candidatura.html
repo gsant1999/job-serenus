@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Candidatura | Corretor na Serenus</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="{{ url_for('static', filename='favicon.png') }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="{{ url_for('static', filename='carreira.css') }}">
+</head>
+<body>
+
+<div class="topo">
+  <div class="topo-in">
+    <a href="/carreira" aria-label="Serenus Corretora de Saúde">
+      <img class="marca marca-light" src="{{ url_for('static', filename='brand/serenus-logo-black.png') }}" alt="Serenus Corretora de Saúde">
+      <img class="marca marca-dark" src="{{ url_for('static', filename='brand/serenus-logo-light.png') }}" alt="Serenus Corretora de Saúde">
+    </a>
+    <a class="btn btn-sm btn-linha" href="/carreira">Voltar para a vaga</a>
+  </div>
+</div>
+
+<div class="wrap" style="max-width:820px">
+
+<header class="hero" style="padding:64px 0 30px;gap:20px">
+  <div class="fio"></div>
+  <div class="rot">Candidatura &nbsp;/&nbsp; Corretor de planos de saúde &nbsp;/&nbsp; Hortolândia, SP</div>
+  <h1 style="font-size:clamp(34px,5.6vw,54px)">Leva 3 minutos.</h1>
+  <p class="lede">São 8 perguntas. Responda com sinceridade, inclusive nas que podem te desclassificar: é melhor descobrir agora do que na segunda semana.</p>
+</header>
+
+<div class="passos">
+  <div class="passo-bola feito" data-bola="1"><i></i></div>
+  <div class="passo-bola" data-bola="2"><i></i></div>
+  <div class="passo-bola" data-bola="3"><i></i></div>
+  <div class="passo-conta"><span id="passoAtual">1</span> de 3</div>
+</div>
+
+<form class="form-cartao" id="formCand" method="post" action="/carreira/candidatura" novalidate>
+
+  <!-- ETAPA 1 ─────────────────────────────────────────────── -->
+  <section class="etapa" data-etapa="1">
+    <div class="etapa-tit">
+      <h2>Quem é você</h2>
+      <p>O retorno vem pelo WhatsApp, então confira o número antes de seguir.</p>
+    </div>
+
+    <div class="campo" data-obrig>
+      <label for="nome">Nome completo</label>
+      <input type="text" id="nome" name="nome" autocomplete="name" maxlength="120">
+      <div class="msg-erro">Escreva seu nome completo.</div>
+    </div>
+
+    <div class="campo" data-obrig>
+      <label for="whatsapp">WhatsApp com DDD</label>
+      <input type="tel" id="whatsapp" name="whatsapp" inputmode="tel" autocomplete="tel" placeholder="(19) 90000-0000" maxlength="20">
+      <div class="msg-erro">Precisa ter DDD e pelo menos 10 dígitos.</div>
+    </div>
+
+    <div class="campo">
+      <label for="email">E-mail <span style="font-weight:400;color:var(--ink-faint)">(opcional)</span></label>
+      <input type="email" id="email" name="email" autocomplete="email" maxlength="120">
+    </div>
+
+    <div class="campo" data-obrig>
+      <label for="cidade">Em que cidade você mora hoje</label>
+      <input type="text" id="cidade" name="cidade" autocomplete="address-level2" placeholder="Hortolândia, Sumaré, Campinas..." maxlength="80">
+      <div class="msg-erro">Diga a cidade onde você mora.</div>
+    </div>
+
+    <div class="form-acoes">
+      <span class="nota-form">Seus dados ficam com a Serenus e servem só para esta vaga.</span>
+      <button type="button" class="btn btn-arco" data-ir="2">Continuar</button>
+    </div>
+  </section>
+
+  <!-- ETAPA 2 ─────────────────────────────────────────────── -->
+  <section class="etapa" data-etapa="2" hidden>
+    <div class="etapa-tit">
+      <h2>O que a vaga exige</h2>
+      <p>Estas três respostas decidem se faz sentido continuar. Não existe resposta bonita aqui, só a verdadeira.</p>
+    </div>
+
+    <div class="campo" data-obrig>
+      <label>Você consegue trabalhar presencial em Hortolândia, de segunda a sexta, nos 3 primeiros meses?</label>
+      <div class="dica">Rua Joaquim Guilherme da Costa, 370. Depois desse período abre a possibilidade de home office.</div>
+      <div class="opcoes" data-nome="presencial">
+        <label class="opcao"><input type="radio" name="presencial" value="sim"><span class="marca-op"></span><span class="txt"><b>Consigo, sem problema</b></span></label>
+        <label class="opcao"><input type="radio" name="presencial" value="ajustar"><span class="marca-op"></span><span class="txt"><b>Consigo, mas preciso ajustar alguma coisa</b><span>Transporte, horário de escola, outro compromisso</span></span></label>
+        <label class="opcao"><input type="radio" name="presencial" value="nao"><span class="marca-op"></span><span class="txt"><b>Não consigo ir presencial</b><span>Só home office</span></span></label>
+      </div>
+      <div class="alerta" data-alerta="presencial-nao" hidden><b>Sendo direto:</b> os 3 meses presenciais não são negociáveis, é onde o treinamento acontece. Você pode enviar mesmo assim, e a gente guarda seu contato para quando abrir vaga remota, mas hoje não temos.</div>
+      <div class="msg-erro">Escolha uma opção.</div>
+    </div>
+
+    <div class="campo" data-obrig>
+      <label>Você tem CNPJ?</label>
+      <div class="dica">A contratação é PJ, com fixo mensal, ajuda de custo e comissão.</div>
+      <div class="opcoes" data-nome="cnpj">
+        <label class="opcao"><input type="radio" name="cnpj" value="tenho"><span class="marca-op"></span><span class="txt"><b>Já tenho CNPJ ativo</b></span></label>
+        <label class="opcao"><input type="radio" name="cnpj" value="abro"><span class="marca-op"></span><span class="txt"><b>Não tenho, mas abro</b><span>A gente explica como fazer</span></span></label>
+        <label class="opcao"><input type="radio" name="cnpj" value="nao"><span class="marca-op"></span><span class="txt"><b>Prefiro não trabalhar como PJ</b></span></label>
+      </div>
+      <div class="alerta" data-alerta="cnpj-nao" hidden><b>Sendo direto:</b> hoje a Serenus só contrata corretor como PJ. Se isso for inegociável para você, provavelmente não é a vaga certa.</div>
+      <div class="msg-erro">Escolha uma opção.</div>
+    </div>
+
+    <div class="campo" data-obrig>
+      <label>Disponibilidade na janela de 9h às 17h</label>
+      <div class="opcoes" data-nome="janela">
+        <label class="opcao"><input type="radio" name="janela" value="total"><span class="marca-op"></span><span class="txt"><b>Tenho a janela toda livre</b></span></label>
+        <label class="opcao"><input type="radio" name="janela" value="parcial"><span class="marca-op"></span><span class="txt"><b>Tenho quase toda</b><span>Faltam algumas horas fixas na semana</span></span></label>
+        <label class="opcao"><input type="radio" name="janela" value="pouca"><span class="marca-op"></span><span class="txt"><b>Só consigo parte do dia</b></span></label>
+      </div>
+      <div class="msg-erro">Escolha uma opção.</div>
+    </div>
+
+    <div class="form-acoes">
+      <div class="esq"><button type="button" class="btn btn-linha" data-ir="1">Voltar</button></div>
+      <button type="button" class="btn btn-arco" data-ir="3">Continuar</button>
+    </div>
+  </section>
+
+  <!-- ETAPA 3 ─────────────────────────────────────────────── -->
+  <section class="etapa" data-etapa="3" hidden>
+    <div class="etapa-tit">
+      <h2>Sua experiência</h2>
+      <p>Ninguém precisa vir pronto. Precisamos saber de onde você está partindo.</p>
+    </div>
+
+    <div class="campo" data-obrig>
+      <label>Já vendeu plano de saúde?</label>
+      <div class="opcoes duas" data-nome="experiencia">
+        <label class="opcao"><input type="radio" name="experiencia" value="nunca"><span class="marca-op"></span><span class="txt"><b>Nunca vendi</b></span></label>
+        <label class="opcao"><input type="radio" name="experiencia" value="ate1"><span class="marca-op"></span><span class="txt"><b>Menos de 1 ano</b></span></label>
+        <label class="opcao"><input type="radio" name="experiencia" value="1a3"><span class="marca-op"></span><span class="txt"><b>De 1 a 3 anos</b></span></label>
+        <label class="opcao"><input type="radio" name="experiencia" value="mais3"><span class="marca-op"></span><span class="txt"><b>Mais de 3 anos</b></span></label>
+      </div>
+      <div class="msg-erro">Escolha uma opção.</div>
+    </div>
+
+    <div class="campo" data-obrig>
+      <label>E venda de qualquer outra coisa?</label>
+      <div class="opcoes duas" data-nome="venda_geral">
+        <label class="opcao"><input type="radio" name="venda_geral" value="nunca"><span class="marca-op"></span><span class="txt"><b>Nunca trabalhei com venda</b></span></label>
+        <label class="opcao"><input type="radio" name="venda_geral" value="loja"><span class="marca-op"></span><span class="txt"><b>Loja, balcão ou atendimento</b></span></label>
+        <label class="opcao"><input type="radio" name="venda_geral" value="telefone"><span class="marca-op"></span><span class="txt"><b>Telefone ou WhatsApp</b></span></label>
+        <label class="opcao"><input type="radio" name="venda_geral" value="externa"><span class="marca-op"></span><span class="txt"><b>Venda externa ou consultiva</b></span></label>
+      </div>
+      <div class="msg-erro">Escolha uma opção.</div>
+    </div>
+
+    <div class="campo" data-obrig>
+      <label for="melhor_venda">Conte a melhor venda que você já fez</label>
+      <div class="dica">Não precisa ser plano de saúde e não precisa ser grande. Queremos ver como você conduz: o que a pessoa queria, o que travou e como você resolveu.</div>
+      <textarea id="melhor_venda" name="melhor_venda" maxlength="1200" placeholder="Escreva do seu jeito, em 3 ou 4 linhas."></textarea>
+      <div class="msg-erro">Escreva pelo menos umas duas linhas. É a parte que mais pesa aqui.</div>
+    </div>
+
+    <div class="campo" data-obrig>
+      <label>Quando você poderia começar?</label>
+      <div class="opcoes duas" data-nome="inicio">
+        <label class="opcao"><input type="radio" name="inicio" value="imediato"><span class="marca-op"></span><span class="txt"><b>Imediatamente</b></span></label>
+        <label class="opcao"><input type="radio" name="inicio" value="15dias"><span class="marca-op"></span><span class="txt"><b>Em até 15 dias</b></span></label>
+        <label class="opcao"><input type="radio" name="inicio" value="30dias"><span class="marca-op"></span><span class="txt"><b>Em até 30 dias</b></span></label>
+        <label class="opcao"><input type="radio" name="inicio" value="depois"><span class="marca-op"></span><span class="txt"><b>Mais para frente</b></span></label>
+      </div>
+      <div class="msg-erro">Escolha uma opção.</div>
+    </div>
+
+    <div class="campo">
+      <label for="observacao">Quer nos contar mais alguma coisa? <span style="font-weight:400;color:var(--ink-faint)">(opcional)</span></label>
+      <textarea id="observacao" name="observacao" maxlength="800" style="min-height:90px"></textarea>
+    </div>
+
+    <input type="text" name="site" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px" aria-hidden="true">
+
+    <div class="form-acoes">
+      <div class="esq"><button type="button" class="btn btn-linha" data-ir="2">Voltar</button></div>
+      <button type="submit" class="btn btn-arco" id="btnEnviar">Enviar candidatura</button>
+    </div>
+    <p class="nota-form">Ao enviar, você autoriza a Serenus a entrar em contato pelo WhatsApp informado sobre esta vaga.</p>
+  </section>
+</form>
+
+<div class="rodape">
+  Serenus Corretora de Saúde &nbsp;/&nbsp; Rua Joaquim Guilherme da Costa, 370, Hortolândia, SP
+</div>
+
+</div>
+
+<script>
+(function(){
+  const form = document.getElementById('formCand');
+  const etapas = [...form.querySelectorAll('.etapa')];
+  const bolas = [...document.querySelectorAll('.passo-bola')];
+  const conta = document.getElementById('passoAtual');
+
+  function mostrar(n){
+    etapas.forEach(e => e.hidden = (e.dataset.etapa !== String(n)));
+    bolas.forEach(b => b.classList.toggle('feito', Number(b.dataset.bola) <= n));
+    conta.textContent = n;
+    window.scrollTo({top:0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'});
+  }
+
+  function validar(etapa){
+    let ok = true;
+    etapa.querySelectorAll('.campo[data-obrig]').forEach(campo => {
+      const input = campo.querySelector('input[type=text],input[type=tel],textarea');
+      const grupo = campo.querySelector('.opcoes');
+      let vale = true;
+      if (grupo) {
+        vale = !!form.querySelector('input[name="'+grupo.dataset.nome+'"]:checked');
+      } else if (input) {
+        const v = input.value.trim();
+        if (input.id === 'whatsapp') vale = v.replace(/\D/g,'').length >= 10;
+        else if (input.id === 'melhor_venda') vale = v.length >= 40;
+        else vale = v.length >= 2;
+      }
+      campo.classList.toggle('erro', !vale);
+      if (!vale && ok) { campo.scrollIntoView({block:'center'}); ok = false; }
+    });
+    return ok;
+  }
+
+  form.addEventListener('click', ev => {
+    const b = ev.target.closest('[data-ir]');
+    if (!b) return;
+    const destino = Number(b.dataset.ir);
+    const atual = Number(b.closest('.etapa').dataset.etapa);
+    if (destino > atual && !validar(b.closest('.etapa'))) return;
+    mostrar(destino);
+  });
+
+  // avisos que aparecem conforme a resposta: o candidato sabe onde está pisando
+  form.addEventListener('change', ev => {
+    const el = ev.target;
+    if (el.name === 'presencial' || el.name === 'cnpj') {
+      const alerta = form.querySelector('[data-alerta="'+el.name+'-nao"]');
+      if (alerta) alerta.hidden = (el.value !== 'nao');
+    }
+    const campo = el.closest('.campo');
+    if (campo) campo.classList.remove('erro');
+  });
+
+  form.querySelectorAll('input,textarea').forEach(i => {
+    i.addEventListener('input', () => i.closest('.campo')?.classList.remove('erro'));
+  });
+
+  // telefone formatado enquanto digita
+  const tel = document.getElementById('whatsapp');
+  tel.addEventListener('input', () => {
+    let d = tel.value.replace(/\D/g,'').slice(0,11);
+    let s = d;
+    if (d.length > 2)  s = '(' + d.slice(0,2) + ') ' + d.slice(2);
+    if (d.length > 6)  s = '(' + d.slice(0,2) + ') ' + d.slice(2, d.length > 10 ? 7 : 6) + '-' + d.slice(d.length > 10 ? 7 : 6);
+    tel.value = s;
+  });
+
+  form.addEventListener('submit', ev => {
+    const ultima = etapas[etapas.length-1];
+    if (!validar(ultima)) { ev.preventDefault(); return; }
+    const btn = document.getElementById('btnEnviar');
+    btn.disabled = true;
+    btn.textContent = 'Enviando...';
+  });
+})();
+</script>
+</body>
+</html>

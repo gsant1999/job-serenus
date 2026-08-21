@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Candidaturas{% endblock %}
+{% block content %}
+<div style="max-width:1100px;margin:0 auto;padding:24px 0">
+  <h1 style="margin:0 0 6px">Candidaturas de corretor</h1>
+  <p style="color:var(--cinza);margin:0 0 22px">
+    {{ candidatos|length }} candidatura(s). Ordenadas pelo encaixe: quanto maior, mais a pessoa
+    bate com o que a vaga exige (presencial em Hortolândia, PJ, janela de 9h às 17h e experiência).
+    Quem respondeu que não pode presencial ou não aceita PJ fica com encaixe zero.
+  </p>
+
+  {% if not candidatos %}
+    <div style="padding:28px;border:1px solid var(--borda);border-radius:12px;color:var(--cinza)">
+      Nenhuma candidatura ainda. O formulário fica em
+      <a href="/carreira/candidatura">/carreira/candidatura</a>.
+    </div>
+  {% else %}
+  <div style="overflow-x:auto;border:1px solid var(--borda);border-radius:12px">
+    <table style="width:100%;border-collapse:collapse;min-width:900px">
+      <thead>
+        <tr style="background:var(--panel-2);text-align:left">
+          <th style="padding:12px 14px">Encaixe</th>
+          <th style="padding:12px 14px">Candidato</th>
+          <th style="padding:12px 14px">Cidade</th>
+          <th style="padding:12px 14px">Perfil</th>
+          <th style="padding:12px 14px">Veredito</th>
+          <th style="padding:12px 14px">Quando</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in candidatos %}
+        <tr style="border-top:1px solid var(--borda)">
+          <td style="padding:12px 14px;font-weight:700;font-size:18px">{{ c.encaixe }}</td>
+          <td style="padding:12px 14px">
+            <div style="font-weight:600">{{ c.nome }}</div>
+            <div style="color:var(--cinza);font-size:13px">
+              <a href="https://wa.me/55{{ c.whatsapp_norm }}" target="_blank" rel="noopener">{{ c.whatsapp }}</a>
+              {% if c.email %} · {{ c.email }}{% endif %}
+            </div>
+          </td>
+          <td style="padding:12px 14px">{{ c.cidade or '-' }}</td>
+          <td style="padding:12px 14px;font-size:13px;color:var(--cinza);line-height:1.5">
+            Presencial: {{ c.presencial }}<br>
+            CNPJ: {{ c.cnpj }} · Janela: {{ c.janela }}<br>
+            Saúde: {{ c.experiencia }} · Venda: {{ c.venda_geral }}<br>
+            Começa: {{ c.inicio }}
+          </td>
+          <td style="padding:12px 14px">{{ c.veredito }}</td>
+          <td style="padding:12px 14px;font-size:13px;color:var(--cinza)">{{ c.criado_em }}</td>
+        </tr>
+        {% if c.melhor_venda %}
+        <tr>
+          <td colspan="6" style="padding:0 14px 14px 14px;color:var(--cinza);font-size:14px;line-height:1.55">
+            <b style="color:var(--texto)">Melhor venda que já fez:</b> {{ c.melhor_venda }}
+            {% if c.observacao %}<br><b style="color:var(--texto)">Observação:</b> {{ c.observacao }}{% endif %}
+          </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
