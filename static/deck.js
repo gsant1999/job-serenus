@@ -5,7 +5,7 @@
 
 const el = (id) => document.getElementById(id);
 const tela = {
-  conexao: el('conexao'), topo: el('zap-topo'), lista: el('zap-lista'),
+  topo: el('zap-topo'), lista: el('zap-lista'),
   busca: el('zap-busca'), secoes: el('zap-secoes'),
   folha: el('folha'), cortina: el('cortina'), folhaTitulo: el('folha-titulo'),
   folhaTexto: el('folha-texto'), folhaAcoes: el('folha-acoes'),
@@ -28,6 +28,9 @@ let zapBusca = '';
 // Antes isto usava um caractere nulo como sentinela: funcionava e era ilegível,
 // e ilegível em condição de filtro é bug esperando acontecer.
 let zapPasta = null;
+let semJob = false;        // o JOB parou de responder a este iPad
+// O que foi para a fila da nuvem e ainda não teve desfecho.
+let naNuvemEsperando = [];
 let zapEsperando = null;   // { id, chave } do comando que este iPad disparou
 let confirmando = null;
 
@@ -54,55 +57,103 @@ function pintar() {
   tela.secoes.querySelectorAll('.zap-secao').forEach((b) => {
     b.setAttribute('aria-selected', String(b.dataset.secao === zapSecao));
   });
-  tela.busca.hidden = (zapSecao === 'funis' ? zap.funis.length : zap.modelos.length) < 8;
+  // Funil pela nuvem não existe: a aba some, em vez de ficar apagada. Aba
+  // apagada é convite a um toque que não cumpre.
+  tela.secoes.querySelector('[data-secao="funis"]').hidden = naNuvem();
+  if (naNuvem() && zapSecao === 'funis') zapSecao = 'mensagens';
 
-  if (!zap.consultado) {
-    tela.topo.dataset.estado = 'pronto';
-    tela.topo.innerHTML = '<span class="zap-pulso"></span><div>'
-      + '<p class="zap-rot">Procurando a extensão</p>'
-      + '<p class="zap-motivo" style="color:var(--texto-fraco)">Perguntando quem está na conversa.</p></div>';
-    pintarLista();
-    return;
-  }
-  const parado = motivoDeNaoEnviar();
-  const alvo = alvoAtual();
-  tela.topo.dataset.estado = parado ? 'parado' : 'pronto';
-  const trocar = zap.conversas.length
-    ? '<button class="secundario zap-trocar" type="button" id="zap-trocar">'
-      + (alvo && alvo.escolhido ? 'Trocar' : 'Escolher outra') + '</button>'
-    : '';
-  tela.topo.innerHTML = parado
-    ? '<span class="zap-pulso"></span><div style="flex:1;min-width:0">'
-      + '<p class="zap-rot">Sem conversa para enviar</p>'
-      + '<p class="zap-motivo">' + escapar(parado) + '</p></div>' + trocar
-    : '<span class="zap-pulso"></span><div style="flex:1;min-width:0">'
-      + '<p class="zap-rot">' + (naNuvem()
-          ? 'Sai pelo servidor, com o computador desligado'
-          : (alvo.escolhido ? 'Vai abrir esta conversa no computador e enviar'
-                            : 'Vai para a conversa aberta no computador')) + '</p>'
-      + '<h2 class="zap-nome">' + escapar(alvo.nome || 'Conversa sem nome salvo') + '</h2>'
-      + (naNuvem()
-          ? '<p class="zap-motivo">Entra na fila e sai em alguns minutos. Aqui não dá '
-            + 'para ver a conversa — confira depois no WhatsApp.</p>'
-          : (alvo.escolhido ? '' : rascunhoHtml())) + '</div>' + trocar;
-  const bt = el('zap-trocar');
-  if (bt) bt.addEventListener('click', abrirEscolhaDeConversa);
+  pintarDestino();
   pintarLista();
 }
 
-// As últimas falas da conversa. Nome no topo não basta: duas Marias existem, a
-// conversa não — e é ela que diz se você está prestes a disparar no lugar certo.
-function rascunhoHtml() {
-  const falas = zap.rascunho || [];
-  if (!falas.length) {
-    return '<div class="zap-conversa"><p class="vazio">Sem mensagens de texto recentes '
-         + 'nesta conversa.</p></div>';
+// Na mão a barra é estreita: o rótulo do modo precisa caber inteiro em vez de
+// terminar em reticências. Encurta a frase, não o sentido.
+const estreito = () => window.matchMedia('(max-width: 699px)').matches;
+
+// PARA QUEM VAI — a barra fixa do topo.
+//
+// Altura travada, conteúdo trocado por dentro. Antes o cartão era reescrito
+// inteiro a cada batida e mudava de 76px para mais de 200 conforme a conversa
+// entrava e saía: a mesa saltava debaixo do dedo entre o olho mirar e a mão
+// encostar. Aqui todo toque errado é uma mensagem no cliente errado.
+function pintarDestino() {
+  const parado = zap.consultado ? motivoDeNaoEnviar() : '';
+  const alvo = alvoAtual();
+  tela.topo.dataset.modo = naNuvem() ? 'nuvem' : 'extensao';
+  tela.topo.dataset.estado = !zap.consultado ? 'procurando' : (parado ? 'parado' : 'pronto');
+
+  let rot, nome, nota;
+  if (!zap.consultado) {
+    rot = 'Procurando o computador';
+    nome = 'Um instante';
+    nota = 'Perguntando quem está na conversa.';
+  } else if (parado) {
+    rot = 'Não dá para enviar agora';
+    nome = naNuvem() ? 'Escolha o cliente' : 'Nenhuma conversa';
+    nota = parado;
+  } else if (naNuvem()) {
+    rot = estreito() ? 'Pelo servidor' : 'Pelo servidor — o computador pode estar desligado';
+    nome = alvo.nome || 'Sem nome salvo';
+    nota = 'Entra na fila e sai em alguns minutos. A conversa não aparece aqui.';
+  } else {
+    rot = alvo.escolhido
+      ? (estreito() ? 'Vai abrir esta conversa' : 'Vai abrir esta conversa no computador')
+      : (estreito() ? 'Conversa aberta no PC' : 'Conversa aberta no computador');
+    nome = alvo.nome || 'Conversa sem nome salvo';
+    nota = ultimaFala() || 'Toque no nome para ver a conversa.';
   }
-  return '<div class="zap-conversa">' + falas.map((f) =>
-    '<div class="zap-fala" data-de="' + (f.de === 'consultor' ? 'consultor' : 'lead') + '">'
-    + escapar(f.texto)
-    + (f.hora ? '<span class="hora">' + escapar(f.hora) + '</span>' : '')
-    + '</div>').join('') + '</div>';
+
+  tela.topo.innerHTML =
+    '<span class="zap-pulso" aria-hidden="true"></span>'
+    + '<button class="zap-quem" type="button" id="zap-ver">'
+    + '<span class="zap-rot">' + escapar(rot) + '</span>'
+    + '<span class="zap-nome">' + escapar(nome) + '</span>'
+    + '<span class="zap-nota">' + escapar(nota) + '</span></button>'
+    + (zap.conversas.length
+        ? '<button class="zap-trocar" type="button" id="zap-trocar">'
+          + (alvo && alvo.escolhido ? 'Trocar' : 'Escolher') + '</button>'
+        : '');
+
+  const bt = el('zap-trocar');
+  if (bt) bt.addEventListener('click', abrirEscolhaDeConversa);
+  const ver = el('zap-ver');
+  if (ver) ver.addEventListener('click', abrirConversa);
+}
+
+// Uma linha só. A conversa inteira mora na folha — é lá que a decisão acontece,
+// e é lá que ela cabe sem empurrar a mesa para fora da tela.
+function ultimaFala() {
+  const falas = zap.rascunho || [];
+  if (!falas.length) return '';
+  const f = falas[falas.length - 1];
+  const quem = f.de === 'consultor' ? 'Você' : 'Ele';
+  return quem + ': "' + String(f.texto || '').slice(0, 70) + '"'
+       + (f.hora ? ' — ' + f.hora : '');
+}
+
+// A conversa, quando pedida. Nome no topo não basta: duas Marias existem, a
+// conversa não — e é ela que diz se você está prestes a disparar no lugar certo.
+function abrirConversa() {
+  const falas = zap.rascunho || [];
+  const alvo = alvoAtual();
+  if (naNuvem()) {
+    abrirFolha({ titulo: (alvo && alvo.nome) || 'Este contato',
+      texto: 'Pelo servidor o JOB não lê a conversa — ele só entrega. Para ver o que '
+           + 'foi dito, abra o WhatsApp no celular ou ligue o computador.',
+      confirmar: null });
+    return;
+  }
+  abrirFolha({ titulo: (alvo && alvo.nome) || 'Conversa aberta', texto: '', confirmar: null });
+  const caixa = document.createElement('div');
+  caixa.className = 'zap-conversa';
+  caixa.innerHTML = falas.length
+    ? falas.map((f) =>
+        '<div class="zap-fala" data-de="' + (f.de === 'consultor' ? 'consultor' : 'lead') + '">'
+        + escapar(f.texto)
+        + (f.hora ? '<span class="hora">' + escapar(f.hora) + '</span>' : '')
+        + '</div>').join('')
+    : '<p class="vazio">Sem mensagens de texto recentes nesta conversa.</p>';
+  tela.folhaTexto.insertAdjacentElement('afterend', caixa);
 }
 
 // PARA QUEM VAI. É a pergunta mais importante da tela inteira.
@@ -118,6 +169,10 @@ function alvoAtual() {
 
 // A condição que governa a tela, dita com todas as letras — e com o que fazer.
 function motivoDeNaoEnviar() {
+  if (semJob) {
+    return 'O iPad perdeu a conexão com o JOB. Confira o wi-fi; ele volta sozinho '
+         + 'quando a rede voltar.';
+  }
   if (!zap.consultado) return 'Ainda perguntando ao computador.';
   if (naNuvem()) {
     if (zapSecao === 'funis') {
@@ -139,7 +194,6 @@ function motivoDeNaoEnviar() {
 }
 
 function pintarLista() {
-  const travado = Boolean(motivoDeNaoEnviar());
   pintarPastas();
   let base = zapSecao === 'funis' ? zap.funis : zap.modelos;
   if (zapSecao !== 'funis' && zapPasta !== null) {
@@ -155,7 +209,7 @@ function pintarLista() {
   }
   tela.lista.innerHTML = '';
   itens.forEach((item) => tela.lista.appendChild(
-    zapSecao === 'funis' ? cartaoFunil(item, travado) : cartaoModelo(item, travado)));
+    zapSecao === 'funis' ? cartaoFunil(item) : cartaoModelo(item)));
 }
 
 // A biblioteca tem centenas de itens; sem pasta, achar um áudio no iPad é
@@ -222,25 +276,24 @@ function icone(nome, px) {
 
 
 
-function cartaoModelo(m, travado) {
+function cartaoModelo(m) {
   const tipo = m.midia_tipo || 'texto';
   const b = document.createElement('button');
   b.className = 'zap-tecla';
   b.type = 'button';
   b.dataset.chave = 'modelo:' + m.id;
   b.dataset.tipo = tipo;
-  b.disabled = travado;
-  // O título inteiro no `title`: na tecla ele corta em três linhas, e quem
-  // precisa do resto não deveria ter que adivinhar.
-  b.title = m.titulo || 'Sem título';
-  b.innerHTML = icone(tipo)
+  // A marca do canto só para mídia. Texto é o caso comum: carimbar "TEXTO" em
+  // oito de dez teclas é ruído que some com o que de fato distingue uma da outra.
+  b.innerHTML = (ROTULO_MIDIA[tipo] ? '<span class="marca">' + ROTULO_MIDIA[tipo] + '</span>' : '')
+    + icone(tipo, 38)
     + '<span class="rotulo">' + escapar(m.titulo || 'Sem título') + '</span>'
     + '<span class="zap-andamento"></span>';
-  b.addEventListener('click', () => confirmarModelo(m, b));
+  b.addEventListener('click', () => { marcarCard(b.dataset.chave, ''); confirmarModelo(m, b); });
   return b;
 }
 
-function cartaoFunil(f, travado) {
+function cartaoFunil(f) {
   const passos = f.passos || [];
   const total = passos.reduce((s, p) => s + (Number(p.delay_segundos) || 0), 0);
   const b = document.createElement('button');
@@ -248,17 +301,13 @@ function cartaoFunil(f, travado) {
   b.type = 'button';
   b.dataset.chave = 'funil:' + f.id;
   b.dataset.tipo = 'funil';
-  b.disabled = travado;
-  b.title = (f.nome || 'Funil sem nome') + ' — ' + passos.length
-    + (passos.length === 1 ? ' mensagem' : ' mensagens')
-    + (total ? ', termina ' + duracao(total) : '');
-  // O número de passos fica no canto, como a marca de um preset: diz o tamanho
-  // do disparo sem gastar linha de rótulo.
-  b.innerHTML = '<span class="marca">' + passos.length + '</span>'
-    + icone('funil')
+  // O canto diz o tamanho do disparo sem gastar linha de rótulo. `title` saiu:
+  // no iPad não existe cursor, então aquele texto nunca aparecia para ninguém.
+  b.innerHTML = '<span class="marca">' + passos.length + ' msg</span>'
+    + icone('funil', 38)
     + '<span class="rotulo">' + escapar(f.nome || 'Funil sem nome') + '</span>'
     + '<span class="zap-andamento"></span>';
-  b.addEventListener('click', () => confirmarFunil(f, b));
+  b.addEventListener('click', () => { marcarCard(b.dataset.chave, ''); confirmarFunil(f, b); });
   return b;
 }
 
@@ -284,6 +333,9 @@ function abrirFolha(o) {
   desenharLista(o.lista);
   tela.folhaAcoes.hidden = !o.confirmar;
   if (o.confirmar) tela.folhaConfirmar.textContent = o.confirmar;
+  // Dois cancelares na mesma folha ("Fechar" e "Não fazer") é uma escolha a mais
+  // para quem já está decidindo. Com ação, fica só o par decidir/não decidir.
+  el('fechar-folha').hidden = Boolean(o.confirmar);
   tela.cortina.hidden = false;
   tela.folha.hidden = false;
   requestAnimationFrame(() => {
@@ -341,7 +393,17 @@ function fecharFolha() {
   setTimeout(() => { tela.folha.hidden = true; tela.cortina.hidden = true; }, 280);
 }
 
+// A guarda que saiu da mesa mora aqui: se não dá para enviar, a folha diz o
+// motivo e o que fazer, e não oferece o botão de confirmar.
+function folhaImpedida() {
+  const parado = motivoDeNaoEnviar();
+  if (!parado) return false;
+  abrirFolha({ titulo: 'Ainda não dá para enviar', texto: parado, confirmar: null });
+  return true;
+}
+
 function confirmarModelo(m, card) {
+  if (folhaImpedida()) return;
   const alvo = alvoAtual();
   const nome = (alvo && alvo.nome) || 'a conversa aberta';
   confirmando = { tipo: 'modelo', id: m.id, chave: card.dataset.chave };
@@ -354,6 +416,7 @@ function confirmarModelo(m, card) {
 }
 
 function confirmarFunil(f, card) {
+  if (folhaImpedida()) return;
   const alvo = alvoAtual();
   const nome = (alvo && alvo.nome) || 'a conversa aberta';
   const passos = f.passos || [];
@@ -452,7 +515,7 @@ function linhaConversa(c, ehAberta) {
 
 async function disparar(pedido) {
   const card = tela.lista.querySelector('[data-chave="' + pedido.chave + '"]');
-  if (card) { card.dataset.estado = 'indo'; card.disabled = true; }
+  marcarCard(pedido.chave, 'indo');
   try {
     const alvo = alvoAtual();
     const r = await chamar('/api/deck/comando', {
@@ -460,12 +523,17 @@ async function disparar(pedido) {
       body: JSON.stringify({ tipo: pedido.tipo, id: pedido.id,
                              chatId: (alvo && alvo.escolhido) ? alvo.chatId : '' }),
     });
-    if (r.erro) { recado(r.erro, 'erro'); soltarCard(pedido.chave); return; }
+    if (r.erro) { recado(r.erro, 'erro'); marcarCard(pedido.chave, 'falhou'); return; }
     // Pela nuvem não há o que esperar na tela: o envio é do servidor e leva
     // minutos. Fingir "entregue" agora seria a mentira mais fácil de contar.
     if (r.comando.estado === 'na_fila_nuvem') {
       recado(r.comando.mensagem, 'ok');
-      soltarCard(pedido.chave);
+      marcarCard(pedido.chave, 'atencao');       // saiu daqui, mas ainda não chegou lá
+      // Fica de olho até o servidor entregar. Sem isto o consultor teria que
+      // abrir o WhatsApp só para saber se chegou — a troca de tela que este
+      // deck existe para acabar.
+      naNuvemEsperando.push({ filaId: r.comando.fila_id, chave: pedido.chave,
+                              para: r.para, em: Date.now() });
       return;
     }
     zapEsperando = { id: r.comando.id, chave: pedido.chave, em: Date.now() };
@@ -474,13 +542,42 @@ async function disparar(pedido) {
   } catch (e) {
     if (String(e.message) === 'sessao') return;
     recado('O JOB não respondeu. Confira a conexão e tente de novo.', 'erro');
-    soltarCard(pedido.chave);
+    marcarCard(pedido.chave, 'falhou');
   }
 }
 
-function soltarCard(chave) {
+const SELO = { indo: 'Indo', foi: 'Enviado', falhou: 'Não foi',
+               atencao: 'Na fila', espera: 'Aguarde' };
+
+/* Verde e vermelho sozinhos não contam a história: quem não distingue as duas
+   cores fica sem saber, e no sol da rua qualquer tinta fraca some. Por isso o
+   canto da tecla passa a dizer a palavra — a cor é o reforço, não a informação. */
+function marcarCard(chave, estado, segundos) {
   const card = tela.lista.querySelector('[data-chave="' + chave + '"]');
-  if (card) { delete card.dataset.estado; card.disabled = Boolean(motivoDeNaoEnviar()); }
+  if (!card) return;
+  card.disabled = (estado === 'indo');
+  if (!estado) { delete card.dataset.estado; pintarSelo(card, ''); return; }
+  card.dataset.estado = estado;
+  pintarSelo(card, SELO[estado] || '');
+  clearTimeout(card._voltar);
+  // O que deu certo volta ao normal sozinho; o que deu errado FICA. Erro que
+  // some antes de ser lido é erro que ninguém corrige.
+  if (segundos) card._voltar = setTimeout(() => marcarCard(chave, ''), segundos * 1000);
+}
+
+function pintarSelo(card, texto) {
+  let selo = card.querySelector('.selo');
+  if (!texto) { if (selo) selo.remove(); return; }
+  if (!selo) {
+    selo = document.createElement('span');
+    selo.className = 'selo';
+    card.appendChild(selo);
+  }
+  selo.textContent = texto;
+}
+
+function soltarCard(chave) {
+  marcarCard(chave, '');
 }
 
 /* O recado do último envio. Some sozinho quando deu certo; fica quando não deu,
@@ -501,6 +598,38 @@ function recado(texto, tom) {
   requestAnimationFrame(() => caixa.classList.add('aberto'));
   clearTimeout(sumicoDoRecado);
   if (tom === 'ok') sumicoDoRecado = setTimeout(() => caixa.classList.remove('aberto'), 4200);
+}
+
+// O DESFECHO CHEGA AQUI, NÃO NO WHATSAPP.
+//
+// "Na fila" não é resposta: o consultor quer saber se entrou na conversa. A
+// tecla acompanha até o fim — âmbar enquanto espera, verde quando o servidor
+// entregou, vermelho quando não deu.
+function conferirFila(fila) {
+  if (!naNuvemEsperando.length) return;
+  naNuvemEsperando = naNuvemEsperando.filter((p) => {
+    const item = fila.find((f) => f.id === p.filaId);
+    if (!item) {
+      // Uma hora é o alcance do que o servidor conta. Passou disso sem desfecho,
+      // é melhor dizer que perdi o rastro do que deixar a tecla âmbar para sempre.
+      if (Date.now() - p.em < 3600000) return true;
+      marcarCard(p.chave, 'falhou');
+      recado('Perdi o rastro desta mensagem. Confira a conversa no WhatsApp.', 'erro');
+      return false;
+    }
+    if (item.status === 'pendente' || item.status === 'enviando') {
+      marcarCard(p.chave, item.status === 'enviando' ? 'indo' : 'atencao');
+      return true;
+    }
+    if (item.status === 'enviado') {
+      marcarCard(p.chave, 'foi', 8);
+      recado('Chegou no WhatsApp de ' + p.para + '.', 'ok');
+    } else {
+      marcarCard(p.chave, 'falhou');
+      recado('Não saiu para ' + p.para + '. ' + (item.erro || 'Tente de novo.'), 'erro');
+    }
+    return false;
+  });
 }
 
 /* -------------------------------------------------------------- relógio */
@@ -530,6 +659,7 @@ async function bater(deVolta) {
       zapAlvo = null;   // saiu da lista: volta para a conversa aberta em vez de mentir
     }
     conferirComando();
+    conferirFila(r.fila || []);
     // Só repinta quando algo mudou: repintar a cada 2,5s mataria o toque em
     // curso e piscaria a tela na cara de quem está usando.
     if (JSON.stringify([zap.consultado, zap.modo, zap.ligada, zap.chat, zap.rascunho,
@@ -542,9 +672,13 @@ async function bater(deVolta) {
   setTimeout(bater, 2500);
 }
 
+// "Ligado ao JOB" era uma linha de 13px cinza no canto, e "a extensão respondeu"
+// era outra frase em outro lugar. Na cabeça de quem usa é a MESMA pergunta:
+// dá para enviar agora? Uma pergunta, um lugar — a barra de destino.
 function conexao(ligado) {
-  tela.conexao.textContent = ligado ? 'Ligado ao JOB' : 'Sem conexão com o JOB.';
-  tela.conexao.classList.toggle('caiu', !ligado);
+  if (semJob === !ligado) return;
+  semJob = !ligado;
+  pintarDestino();
 }
 
 function conferirComando() {
@@ -556,23 +690,65 @@ function conferirComando() {
   if (!cmd) {
     if (Date.now() - zapEsperando.em < 120000) return;
     recado('Perdi o rastro deste envio. Confira a conversa antes de mandar de novo.', 'erro');
-    soltarCard(zapEsperando.chave);
+    marcarCard(zapEsperando.chave, 'falhou');
     zapEsperando = null;
     return;
   }
   if (cmd.estado === 'na_fila' || cmd.estado === 'entregue') return;
-  const tom = (cmd.estado === 'falhou' || cmd.estado === 'expirado') ? 'erro'
-            : (cmd.estado === 'esperando' ? 'espera' : 'ok');
+  const ruim = (cmd.estado === 'falhou' || cmd.estado === 'expirado');
+  const tom = ruim ? 'erro' : (cmd.estado === 'esperando' ? 'espera' : 'ok');
   recado(cmd.mensagem, tom);
-  soltarCard(zapEsperando.chave);
+  // Verde some em 6 segundos porque a tecla vai ser usada de novo; vermelho e
+  // âmbar ficam até alguém tocar nela outra vez.
+  marcarCard(zapEsperando.chave,
+             ruim ? 'falhou' : (cmd.estado === 'esperando' ? 'espera' : 'foi'),
+             ruim || cmd.estado === 'esperando' ? 0 : 6);
   zapEsperando = null;
 }
+
+/* ----------------------------------------------------------------- tema */
+
+// Três estados, não dois: "Automático" é o padrão e devolve o comando ao
+// sistema. Um interruptor de dois estados não tem como voltar para isso.
+const TEMAS = [
+  { id: '',       rotulo: 'Tema: automático' },
+  { id: 'claro',  rotulo: 'Tema: claro' },
+  { id: 'escuro', rotulo: 'Tema: escuro' },
+];
+
+function aplicarTema(id) {
+  if (id) document.documentElement.dataset.tema = id;
+  else delete document.documentElement.dataset.tema;
+  const b = el('zap-tema');
+  const atual = TEMAS.find((x) => x.id === id) || TEMAS[0];
+  // No telefone o botão fica ao lado das seções e não cabe a frase inteira; a
+  // palavra sozinha continua dizendo qual dos três está valendo.
+  b.textContent = estreito() ? atual.rotulo.replace('Tema: ', '') : atual.rotulo;
+  b.setAttribute('aria-label', atual.rotulo + '. Toque para trocar.');
+  b.dataset.tema = id;
+  // A barra do Safari e os controles do sistema (player de áudio, rolagem)
+  // seguem junto; sem isto o player nasce branco no meio de uma folha escura.
+  const escuro = id === 'escuro'
+    || (!id && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', escuro ? '#0e0f12' : '#f1f2f5');
+}
+
+el('zap-tema').addEventListener('click', () => {
+  const i = TEMAS.findIndex((x) => x.id === (localStorage.getItem('deck_tema') || ''));
+  const proximo = TEMAS[(i + 1) % TEMAS.length];
+  localStorage.setItem('deck_tema', proximo.id);
+  aplicarTema(proximo.id);
+});
+aplicarTema(localStorage.getItem('deck_tema') || '');
 
 /* -------------------------------------------------------------- partida */
 
 tela.secoes.querySelectorAll('.zap-secao').forEach((b) => {
   b.addEventListener('click', () => {
     zapSecao = b.dataset.secao;
+    zapBusca = '';
+    tela.busca.value = '';
     localStorage.setItem('deck_zap_secao', zapSecao);
     pintar();
   });

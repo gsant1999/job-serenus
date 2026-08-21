@@ -14,31 +14,29 @@
 
 {# Tela cheia de propósito: no iPad o deck é usado como aplicativo (Compartilhar >
    Adicionar à Tela de Início), e a barra de navegação do JOB só tomaria altura
-   de quem está com o dedo na tela. A volta para o sistema fica no topo. #}
-<header class="topo">
-  <div class="titulo">
-    <h1>Deck</h1>
-    <p id="conexao" class="conexao">Conectando</p>
-  </div>
-  <div class="acoes-topo">
-    <a class="secundario" href="/crm">Ir para o CRM</a>
-  </div>
-</header>
+   de quem está com o dedo na tela.
 
+   Três camadas: para quem vai (fixa), a régua de filtro (cola embaixo dela) e a
+   mesa — a única que rola. O nome de quem vai receber é a informação mais cara
+   da tela: ela é a que não pode sair de vista quando o dedo desce. #}
 <main class="zap">
   <div class="zap-topo" id="zap-topo"></div>
 
-  <div class="zap-secoes" id="zap-secoes" role="tablist">
-    <button class="zap-secao" type="button" role="tab" data-secao="mensagens">Mensagens</button>
-    <button class="zap-secao" type="button" role="tab" data-secao="funis">Funis</button>
+  <div class="zap-regua">
+    <div class="zap-secoes" id="zap-secoes" role="tablist">
+      <button class="zap-secao" type="button" role="tab" data-secao="mensagens">Mensagens</button>
+      <button class="zap-secao" type="button" role="tab" data-secao="funis">Funis</button>
+    </div>
+    <input class="zap-busca" id="zap-busca" type="search" autocomplete="off"
+           placeholder="Buscar" aria-label="Buscar na biblioteca">
+    <button class="zap-tema" id="zap-tema" type="button"></button>
   </div>
 
   <div class="zap-pastas" id="zap-pastas" hidden></div>
 
-  <input class="zap-busca" id="zap-busca" type="search" autocomplete="off"
-         placeholder="Buscar na biblioteca" aria-label="Buscar na biblioteca" hidden>
-
-  <div class="zap-lista" id="zap-lista"></div>
+  <div class="zap-mesa">
+    <div class="zap-lista" id="zap-lista"></div>
+  </div>
 </main>
 
 <div id="cortina" class="cortina" hidden></div>

@@ -20,17 +20,44 @@
   --ok: #35c07f;
   --erro: #ff6f6f;
   --cuidado: #eaa64d;
+  --nuvem: #b48cff;
 
   --raio: 14px;
+  --raio-mesa: 28px;
+  --raio-tecla: 18px;        /* 28 menos os 10 de respiro da mesa */
   --gap: 12px;
+  --gap-tecla: 14px;
+  --alt-controle: 48px;      /* todo controle auxiliar tem a MESMA altura */
+  --alt-destino: 96px;
 
   --ease-saida: cubic-bezier(.23, 1, .32, 1);
   --ease-mov:   cubic-bezier(.77, 0, .175, 1);
   --ease-folha: cubic-bezier(.32, .72, 0, 1);
 }
 
+/* Regra do tema: `data-tema` no <html> ganha do sistema; sem ele, vale o
+   sistema. Os dois blocos abaixo listam os MESMOS tokens de propósito — um
+   deles sozinho deixaria alguma cor definida só dentro de uma condição, que é
+   como uma tela nasce meio clara e meio escura. */
+:root[data-tema="claro"] {
+  color-scheme: light;
+  --fundo: #f1f2f5;
+  --tijolo: #ffffff;
+  --tijolo-toque: #e9ebf0;
+  --borda: #dcdfe6;
+  --borda-forte: #c3c8d2;
+  --texto: #14161a;
+  --texto-fraco: #5d6673;
+  --acento: #1f6feb;
+  --ok: #1d8f5b;
+  --erro: #c53434;
+  --cuidado: #a9640a;
+  --nuvem: #6d3fc4;
+}
+:root[data-tema="escuro"] { color-scheme: dark; }
+
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-tema="escuro"]) {
     --fundo: #f1f2f5;
     --tijolo: #ffffff;
     --tijolo-toque: #e9ebf0;
@@ -42,6 +69,7 @@
     --ok: #1d8f5b;
     --erro: #c53434;
     --cuidado: #a9640a;
+    --nuvem: #6d3fc4;
   }
 }
 
@@ -50,6 +78,7 @@
 html, body {
   margin: 0;
   height: 100%;
+  overflow: hidden;   /* quem rola é a mesa, não a página */
   background: var(--fundo);
   color: var(--texto);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
@@ -65,62 +94,36 @@ body {
 }
 
 button { font: inherit; color: inherit; cursor: pointer; }
+
+/* Um anel de foco só, para tudo que se aperta. O contorno cru do navegador
+   aparecia quadrado por cima de botão redondo, e só em alguns. Fica no
+   :focus-visible: quem toca com o dedo não vê anel nenhum; quem navega por
+   teclado nunca fica perdido. */
+:where(button, a, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+:where(button, a, input):focus:not(:focus-visible) { outline: none; }
 [hidden] { display: none !important; }
 
-/* ---------------------------------------------------------------- topo */
-
-/* O topo é uma camada, não uma faixa opaca: o conteúdo corre por baixo dele.
-   É o que faz a tela parecer profunda em vez de recortada. */
-.topo {
-  position: sticky;
-  top: calc(-1 * max(16px, env(safe-area-inset-top)));
-  z-index: 5;
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--gap);
-  margin: calc(-1 * max(16px, env(safe-area-inset-top))) calc(-1 * max(16px, env(safe-area-inset-right)))
-          18px calc(-1 * max(16px, env(safe-area-inset-left)));
-  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
-           14px max(16px, env(safe-area-inset-left));
-  background: color-mix(in srgb, var(--fundo) 78%, transparent);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  .topo { background: var(--fundo); backdrop-filter: none; -webkit-backdrop-filter: none; }
-}
-
-.titulo h1 {
-  margin: 0;
-  font-size: 26px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-}
-
-.conexao {
-  margin: 4px 0 0;
-  font-size: 13px;
-  line-height: 1.3;
-  color: var(--texto-fraco);
-}
-.conexao.caiu { color: var(--erro); }
-
-.acoes-topo { display: flex; gap: 8px; flex-shrink: 0; }
+/* A faixa "Deck / Ir para o CRM" e a linha "Ligado ao JOB" foram removidas: o
+   pixel mais nobre do iPad não é para o nome do produto, e o estado da conexão
+   virou o pulso da barra de destino — era a mesma pergunta ("dá para enviar
+   agora?") escrita em dois lugares com pesos diferentes. */
 
 .secundario {
   background: transparent;
-  border: 1px solid var(--borda);
-  border-radius: 10px;
-  color: var(--texto-fraco);
-  font-size: 13px;
-  font-weight: 500;
-  padding: 9px 13px;
-  min-height: 40px;
-  transition: transform 140ms var(--ease-saida), opacity 140ms var(--ease-saida);
+  border: 1px solid var(--borda-forte);
+  border-radius: 13px;
+  color: var(--texto);
+  font-size: 15px;
+  font-weight: 600;
+  padding: 0 18px;
+  min-height: 52px;
+  transition: transform 140ms var(--ease-saida), background-color 140ms var(--ease-saida);
 }
+.secundario:active { background: var(--tijolo-toque); }
 .secundario:active { transform: scale(.97); }
 
 /* O botão de voltar ao JOB é um link, mas tem que se parecer com os irmãos:
@@ -135,14 +138,19 @@ a.secundario {
 .principal {
   background: var(--acento);
   border: none;
-  border-radius: 12px;
+  border-radius: 13px;
   color: #fff;
   font-size: 16px;
-  font-weight: 600;
-  padding: 14px 20px;
-  min-height: 50px;
-  transition: transform 140ms var(--ease-saida), opacity 140ms var(--ease-saida);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  padding: 0 22px;
+  min-height: 52px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .18) inset,
+              0 4px 14px color-mix(in srgb, var(--acento) 34%, transparent);
+  transition: transform 140ms var(--ease-saida), opacity 140ms var(--ease-saida),
+              box-shadow 140ms var(--ease-saida);
 }
+.principal:active { box-shadow: 0 1px 4px color-mix(in srgb, var(--acento) 30%, transparent); }
 .principal:active { transform: scale(.97); }
 .principal:disabled { opacity: .5; }
 
@@ -184,19 +192,23 @@ a.secundario {
 
 .folha {
   position: fixed;
-  left: 0; right: 0; bottom: 0;
+  left: 50%;
+  bottom: 0;
+  width: min(620px, 100%);
+  transform: translate(-50%, 100%);
   max-height: 82vh;
   display: flex;
   flex-direction: column;
   padding: 10px 20px calc(20px + env(safe-area-inset-bottom));
   background: var(--tijolo);
-  border-top: 1px solid var(--borda);
-  border-radius: 20px 20px 0 0;
-  transform: translateY(100%);
+  border: 1px solid var(--borda);
+  border-bottom: 0;
+  border-radius: 24px 24px 0 0;
+  box-shadow: 0 -18px 50px rgba(0, 0, 0, .28);
   transition: transform 280ms var(--ease-folha);
   z-index: 11;
 }
-.folha.aberta { transform: translateY(0); }
+.folha.aberta { transform: translate(-50%, 0); }
 
 .puxador {
   width: 40px; height: 4px;
@@ -253,7 +265,7 @@ a.secundario {
 /* ------------------------------------------------- movimento reduzido */
 
 @media (prefers-reduced-motion: reduce) {
-  .folha { transition: opacity 200ms var(--ease-saida); transform: none; opacity: 0; }
+  .folha { transition: opacity 200ms var(--ease-saida); transform: translate(-50%, 0); opacity: 0; }
   .folha.aberta { opacity: 1; }
   .tijolo:active, .principal:active, .secundario:active, .aba:active { transform: none; }
   .tijolo[data-estado="rodando"] .andamento { animation: none; transform: scaleX(1); }
@@ -262,84 +274,176 @@ a.secundario {
 
 /* ═══════════════ Tela do WhatsApp ═══════════════ */
 
-.zap { padding-bottom: 28px; }
-
-/* Cartão de estado: quem vai receber, ou por que ninguém vai. */
-.zap-topo {
+/* A tela é uma coluna de três camadas: destino (fixo), régua (cola embaixo) e
+   mesa (a única que rola). Assim o nome de quem vai receber nunca sai de vista
+   quando o dedo desce atrás de uma tecla lá embaixo. */
+.zap {
   display: flex;
-  /* Com o rascunho da conversa dentro, o cartão ficou alto: centralizar deixava
-     o ponto de estado boiando no meio, longe da frase que ele qualifica. */
-  align-items: flex-start;
-  gap: 12px;
-  padding: 14px 16px;
-  margin-bottom: var(--gap);
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+}
+
+/* PARA QUEM VAI.
+   Altura TRAVADA. Antes este cartão crescia e encolhia sozinho conforme a
+   conversa entrava e saía, e a mesa inteira saltava debaixo do dedo entre o olho
+   mirar e a mão encostar. Aqui todo toque errado é uma mensagem enviada. */
+.zap-topo {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: var(--alt-destino);
+  padding: 0 16px 0 20px;
   background: var(--tijolo);
   border: 1px solid var(--borda);
-  border-radius: var(--raio);
+  border-radius: var(--raio-mesa);
+  position: relative;
+  overflow: hidden;
 }
-.zap-topo[data-estado="parado"] { border-color: var(--cuidado); }
+/* A tarja do modo. A cor não carrega a informação sozinha — o rótulo ao lado diz
+   por extenso, porque cor sozinha é adivinhação. */
+.zap-topo::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 4px;
+  background: var(--ok);
+}
+.zap-topo[data-modo="nuvem"]::before { background: var(--nuvem); }
+.zap-topo[data-estado="parado"]::before { background: var(--cuidado); }
 
 .zap-pulso {
   width: 9px; height: 9px;
   flex-shrink: 0;
-  margin-top: 5px;   /* na linha do rótulo, não no topo absoluto da caixa */
   border-radius: 50%;
   background: var(--ok);
 }
+.zap-topo[data-modo="nuvem"] .zap-pulso { background: var(--nuvem); }
 .zap-topo[data-estado="parado"] .zap-pulso { background: var(--cuidado); }
+.zap-topo[data-estado="procurando"] .zap-pulso { background: var(--texto-fraco); }
+
+/* O bloco do nome é botão: toca e a conversa abre na folha. */
+.zap-quem {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 0;
+  background: none;
+  border: 0;
+  text-align: left;
+  transition: opacity 140ms var(--ease-saida);
+}
+.zap-quem:active { opacity: .7; }
+.zap-quem > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .zap-rot {
-  margin: 0;
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: .05em;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .06em;
   text-transform: uppercase;
-  color: var(--texto-fraco);
+  color: var(--ok);
 }
+.zap-topo[data-modo="nuvem"] .zap-rot { color: var(--nuvem); }
+.zap-topo[data-estado="parado"] .zap-rot { color: var(--cuidado); }
+.zap-topo[data-estado="procurando"] .zap-rot { color: var(--texto-fraco); }
+
 .zap-nome {
-  margin: 2px 0 0;
-  font-size: 19px;
+  font-size: 28px;
   font-weight: 700;
   letter-spacing: -0.02em;
-  line-height: 1.2;
+  line-height: 1.05;
 }
-.zap-motivo {
-  margin: 3px 0 0;
-  font-size: 13.5px;
-  line-height: 1.45;
-  color: var(--cuidado);
+.zap-nota {
+  font-size: 15px;
+  line-height: 1.35;
+  color: var(--texto-fraco);
+}
+.zap-topo[data-estado="parado"] .zap-nota { color: var(--cuidado); }
+
+.zap-trocar {
+  flex: none;
+  align-self: center;    /* nunca encostar na curva do canto */
+  min-height: var(--alt-controle);
+  max-height: var(--alt-controle);
+  padding: 0 18px;
+  background: transparent;
+  border: 1px solid var(--borda-forte);
+  border-radius: 14px;
+  font-size: 15px;
+  font-weight: 600;
+  transition: transform 140ms var(--ease-saida), background-color 140ms var(--ease-saida);
+}
+.zap-trocar:active { transform: scale(.97); background: var(--tijolo-toque); }
+
+/* Coisa igual se parece igual: seção, pasta, busca e "Escolher" têm a MESMA
+   altura. Antes eram 44, 40, 46 e 40 — quatro acabamentos para irmãos. */
+.zap-regua {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--alt-controle);
 }
 
-/* Segmentado: duas seções, uma escolha. */
 .zap-secoes {
   display: flex;
-  max-width: 420px;
-  gap: 4px;
-  padding: 4px;
-  margin-bottom: var(--gap);
+  flex: none;
+  gap: 3px;
+  padding: 3px;
   background: var(--tijolo);
   border: 1px solid var(--borda);
-  border-radius: 12px;
+  border-radius: 13px;
 }
 .zap-secao {
-  flex: 1;
   background: transparent;
   border: none;
-  border-radius: 9px;
+  border-radius: 10px;
   color: var(--texto-fraco);
   font-size: 15px;
   font-weight: 600;
-  padding: 10px;
-  min-height: 44px;
+  padding: 0 18px;
+  min-height: 42px;
   transition: transform 140ms var(--ease-saida);
 }
 .zap-secao:active { transform: scale(.97); }
 .zap-secao[aria-selected="true"] { background: var(--tijolo-toque); color: var(--texto); }
 
+/* O tema é de quem está segurando o aparelho, não do relógio do sistema: o deck
+   é usado em cima de mesa, dentro do carro e na rua com sol batendo na tela. Sem
+   escolha feita, o sistema continua mandando — e o botão diz qual dos três
+   estados está valendo, em vez de pedir para adivinhar pelo ícone. */
+.zap-tema {
+  flex: none;
+  min-height: var(--alt-controle);
+  padding: 0 14px;
+  background: var(--tijolo);
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+  color: var(--texto-fraco);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: transform 140ms var(--ease-saida), color 140ms var(--ease-saida);
+}
+.zap-tema:active { transform: scale(.97); }
+.zap-tema[data-tema="claro"], .zap-tema[data-tema="escuro"] { color: var(--texto); }
+
+/* A busca fica SEMPRE na tela. Antes ela aparecia só com 8+ itens e sumia ao
+   trocar de seção — com filtro escrito, a lista dizia "nada com esse nome" e o
+   campo de apagar já não estava lá. Beco sem saída, além de mais um pulo de
+   layout. */
 .zap-busca {
-  width: 100%;
-  padding: 13px 15px;
-  margin-bottom: var(--gap);
+  flex: 1;
+  min-width: 0;
+  height: var(--alt-controle);
+  padding: 0 15px;
   background: var(--tijolo);
   border: 1px solid var(--borda);
   border-radius: 12px;
@@ -347,22 +451,93 @@ a.secundario {
   font-size: 16px;   /* 16px evita o zoom automático do Safari no foco */
 }
 .zap-busca::placeholder { color: var(--texto-fraco); }
-.zap-busca:focus { outline: 2px solid var(--acento); outline-offset: 1px; }
+.zap-busca::placeholder { color: var(--texto-fraco); }
 
-.zap-lista {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
-  gap: 10px;
-  /* O painel rebaixado é o corpo do aparelho: sem ele as teclas flutuam soltas
-     na página e a mesa vira lista de novo. */
-  padding: 12px;
+/* A mesa é o corpo do aparelho, e é a ÚNICA parte que rola. Sem esse painel
+   rebaixado as teclas flutuam soltas na página e vira lista de novo. */
+.zap-mesa {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 10px;
   background: color-mix(in srgb, #000 22%, var(--fundo));
   border: 1px solid var(--borda);
-  border-radius: 18px;
+  border-radius: var(--raio-mesa);
 }
 
+/* No claro a mesa não pode ser um bloco cinza pesado embaixo de teclas brancas:
+   fica sujo. Ela recua um degrau só, e quem faz a tecla existir é a sombra —
+   luz vindo de cima, como no aparelho de verdade. */
+.zap-mesa[data-claro], :root[data-tema="claro"] .zap-mesa {
+  background: color-mix(in srgb, var(--borda) 28%, var(--fundo));
+}
+:root[data-tema="claro"] .zap-tecla {
+  border-color: color-mix(in srgb, var(--borda) 80%, transparent);
+  box-shadow: 0 1px 2px rgba(20, 24, 32, .07), 0 6px 14px rgba(20, 24, 32, .05);
+}
+:root[data-tema="claro"] .zap-tecla:active { box-shadow: 0 1px 2px rgba(20, 24, 32, .1); }
+
 @media (prefers-color-scheme: light) {
-  .zap-lista { background: color-mix(in srgb, var(--borda) 45%, var(--fundo)); }
+  :root:not([data-tema="escuro"]) .zap-mesa {
+    background: color-mix(in srgb, var(--borda) 28%, var(--fundo));
+  }
+  :root:not([data-tema="escuro"]) .zap-tecla {
+    border-color: color-mix(in srgb, var(--borda) 80%, transparent);
+    box-shadow: 0 1px 2px rgba(20, 24, 32, .07), 0 6px 14px rgba(20, 24, 32, .05);
+  }
+  :root:not([data-tema="escuro"]) .zap-tecla:active { box-shadow: 0 1px 2px rgba(20, 24, 32, .1); }
+}
+
+/* Colunas FIXAS por faixa, não auto-fill: a tecla precisa estar no mesmo lugar
+   toda vez que o deck abre. auto-fill remexe a mesa a cada largura e mata a
+   memória muscular — que é o que faz um deck ser rápido. E antes ele fazia pior:
+   em paisagem, mais espaço virava tecla MENOR (10 colunas de 104px). */
+.zap-lista {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--gap-tecla);
+}
+@media (min-width: 430px)  { .zap-lista { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 700px)  { .zap-lista { grid-template-columns: repeat(4, 1fr); } }
+@media (min-width: 1024px) { .zap-lista { grid-template-columns: repeat(6, 1fr); --gap-tecla: 16px; } }
+
+@media (max-width: 699px) {
+  :root {
+    --gap-tecla: 10px;
+    --alt-destino: 88px;
+    --alt-controle: 46px;
+  }
+  body {
+    padding:
+      max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
+      max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  }
+  .zap { gap: 8px; }
+
+  /* A régua vira duas linhas: seções e tema em cima, busca inteira embaixo.
+     Numa linha só, aos 375px, a busca era espremida até sumir e o botão do tema
+     ficava metade fora da tela. */
+  .zap-regua { flex-wrap: wrap; }
+  .zap-secoes { flex: 1; }
+  .zap-secao { flex: 1; padding: 0 10px; }
+  .zap-busca { flex: 1 0 100%; order: 3; }
+
+  .zap-topo { padding: 0 12px 0 16px; gap: 10px; }
+  .zap-nome { line-height: 1.1; }
+  .zap-nome { font-size: 23px; }
+  .zap-rot { font-size: 12px; }
+  .zap-nota { font-size: 14px; }
+  .zap-trocar { padding: 0 14px; }
+
+  .zap-tecla { gap: 10px; padding: 10px 8px; border-radius: 15px; }
+  .zap-tecla .rotulo { font-size: 14px; }
+  .zap-tecla .marca { top: 7px; right: 9px; font-size: 10px; }
+  .zap-mesa { padding: 8px; border-radius: 22px; }
+
+  /* Na mão, a folha ocupa a largura toda: é o aparelho inteiro, não uma janela
+     dentro dele. */
+  .folha { width: 100%; border-radius: 22px 22px 0 0; }
 }
 
 /* A TECLA.
@@ -376,14 +551,18 @@ a.secundario {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 10px 8px;
+  gap: 14px;
+  padding: 14px 12px;
   background: var(--tijolo);
   border: 1px solid var(--borda);
-  border-radius: 15px;
+  border-radius: var(--raio-tecla);
   overflow: hidden;
   text-align: center;
-  transition: transform 130ms var(--ease-saida), opacity 130ms var(--ease-saida);
+  transition: transform 130ms var(--ease-saida), opacity 130ms var(--ease-saida),
+              box-shadow 130ms var(--ease-saida),
+              /* tinta e borda são pintura, não layout: mudam junto sem custo de
+                 quadro, e é nelas que mora o aviso */
+              background-color 200ms var(--ease-saida), border-color 200ms var(--ease-saida);
 }
 
 /* O brilho de cima é o que faz a tecla parecer teclada e não desenhada. Ele
@@ -413,13 +592,16 @@ a.secundario {
 
 .zap-tecla .icone { color: var(--texto-fraco); flex-shrink: 0; }
 
+/* 17px, duas linhas. Antes era 11,5px em três: o texto que decide o disparo era
+   o penúltimo menor da tela. Com "Áudio apresentação 1" e "Áudio apresentação 2"
+   lado a lado, no sol, em pé, isso é sorteio. */
 .zap-tecla .rotulo {
-  font-size: 11.5px;
+  font-size: 17px;
   font-weight: 600;
-  line-height: 1.22;
+  line-height: 1.25;
   letter-spacing: -0.01em;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   word-break: break-word;
@@ -427,8 +609,9 @@ a.secundario {
 
 .zap-tecla .marca {
   position: absolute;
-  top: 7px; right: 9px;
-  font-size: 9.5px;
+  top: 10px; right: 12px;
+  font-size: 12px;
+  text-transform: uppercase;
   font-weight: 700;
   letter-spacing: .05em;
   color: var(--texto-fraco);
@@ -443,9 +626,56 @@ a.secundario {
 .zap-tecla[data-tipo="video"] .icone { color: #7aa8ff; }
 .zap-tecla[data-tipo="funil"] .icone { color: var(--acento); }
 
-.zap-tecla[data-estado="indo"] { border-color: var(--acento); }
-.zap-tecla[data-estado="indo"] .icone,
-.zap-tecla[data-estado="indo"] .marca { color: var(--acento); }
+/* ── A TECLA CONTA O QUE ACONTECEU ──────────────────────────────────────────
+   Em repouso ela é neutra: numa mesa de 300, se todas tiverem cor, nenhuma tem.
+   Depois do toque ela se tinge — e o tom é fraco de propósito, um cinza PUXANDO
+   para a cor, não a cor cheia: quem manda na tela continua sendo o destino lá em
+   cima, não a tecla que acabou de ser usada.
+
+   A cor nunca conta sozinha: o canto diz a palavra. Verde e vermelho são
+   justamente o par que mais gente confunde, e no sol da rua tinta fraca some. */
+.zap-tecla[data-estado] {
+  border-color: color-mix(in srgb, var(--tom) 55%, var(--borda));
+  background: color-mix(in srgb, var(--tom) 10%, var(--tijolo));
+}
+.zap-tecla[data-estado] .icone { color: var(--tom); }
+.zap-tecla[data-estado="indo"]    { --tom: var(--acento); }
+.zap-tecla[data-estado="foi"]     { --tom: var(--ok); }
+.zap-tecla[data-estado="falhou"]  { --tom: var(--erro); }
+.zap-tecla[data-estado="atencao"] { --tom: var(--cuidado); }
+.zap-tecla[data-estado="espera"]  { --tom: var(--cuidado); }
+
+/* O selo ocupa o lugar da marca de mídia: enquanto há resultado para contar, é
+   ele o que importa saber daquela tecla. */
+.zap-tecla[data-estado] .marca { opacity: 0; }
+.zap-tecla .selo {
+  position: absolute;
+  top: 10px; right: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--tom);
+}
+
+/* Chegou: um assentar de 240ms, uma vez. É o instante em que a mensagem entrou
+   na conversa de um cliente — merece um sinal, e merece parar depois dele. */
+.zap-tecla[data-estado="foi"] { animation: tecla-assenta 240ms var(--ease-saida) 1; }
+@keyframes tecla-assenta {
+  0%   { transform: scale(.97); }
+  55%  { transform: scale(1.025); }
+  100% { transform: scale(1); }
+}
+
+/* Não foi: dois passos curtos, sem elástico. Balançar é o gesto universal de
+   "isto não aconteceu" — e para de vez, porque erro que pisca sem parar vira
+   paisagem e ninguém corrige. */
+.zap-tecla[data-estado="falhou"] { animation: tecla-nega 220ms var(--ease-mov) 1; }
+@keyframes tecla-nega {
+  0%, 100% { transform: translateX(0); }
+  30%      { transform: translateX(-4px); }
+  70%      { transform: translateX(4px); }
+}
 
 /* A barra de andamento na base da tecla, como a luz do aparelho. */
 .zap-andamento {
@@ -457,9 +687,12 @@ a.secundario {
   transform-origin: left;
   opacity: 0;
 }
+/* Seis passadas e para. Laço infinito em elemento que fica na tela é distração
+   permanente e camada de composição queimada à toa — e se o envio travar, a
+   barrinha correndo para sempre vira promessa que ninguém cumpre. */
 .zap-tecla[data-estado="indo"] .zap-andamento {
   opacity: 1;
-  animation: tecla-correndo 1.4s var(--ease-mov) infinite;
+  animation: tecla-correndo 1.4s var(--ease-mov) 6;
 }
 @keyframes tecla-correndo {
   0%   { transform: scaleX(0); transform-origin: left; }
@@ -471,6 +704,9 @@ a.secundario {
 @media (prefers-reduced-motion: reduce) {
   .zap-tecla:active { transform: none; }
   .zap-tecla[data-estado="indo"] .zap-andamento { animation: none; transform: scaleX(1); }
+  /* Sem movimento a informação não pode sumir: cor e selo continuam contando a
+     mesma coisa, só sem o gesto. */
+  .zap-tecla[data-estado="foi"], .zap-tecla[data-estado="falhou"] { animation: none; }
 }
 
 .zap-vazio {
@@ -506,9 +742,13 @@ a.secundario {
 
 /* Aviso do último envio: entra por baixo e sai pelo mesmo caminho. */
 .zap-recado {
+  /* Centrado e com largura de cartão. De borda a borda ele virava uma barra de
+     site atravessada no pé da tela — e, no iPad deitado, uma faixa de 1180px
+     para dizer uma frase. */
   position: fixed;
-  left: max(16px, env(safe-area-inset-left));
-  right: max(16px, env(safe-area-inset-right));
+  left: 50%;
+  transform: translate(-50%, 140%);
+  width: min(560px, calc(100% - 32px));
   bottom: calc(16px + env(safe-area-inset-bottom));
   z-index: 8;
   display: flex;
@@ -522,17 +762,16 @@ a.secundario {
   border-radius: 14px;
   font-size: 14px;
   line-height: 1.4;
-  transform: translateY(140%);
   opacity: 0;
   transition: transform 280ms var(--ease-folha), opacity 200ms var(--ease-saida);
 }
-.zap-recado.aberto { transform: translateY(0); opacity: 1; }
+.zap-recado.aberto { transform: translate(-50%, 0); opacity: 1; }
 .zap-recado[data-tom="erro"] { border-color: var(--erro); color: var(--erro); }
 .zap-recado[data-tom="ok"] { border-color: var(--ok); }
 .zap-recado[data-tom="espera"] { border-color: var(--acento); }
 
 @media (prefers-reduced-motion: reduce) {
-  .zap-recado { transform: none; transition: opacity 200ms var(--ease-saida); }
+  .zap-recado { transform: translate(-50%, 0); transition: opacity 200ms var(--ease-saida); }
 }
 
 
@@ -577,9 +816,9 @@ a.secundario {
 /* ═══════════════ Pastas da biblioteca ═══════════════ */
 
 .zap-pastas {
+  flex: none;
   display: flex;
-  gap: 6px;
-  margin-bottom: var(--gap);
+  gap: 8px;
   overflow-x: auto;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
@@ -592,10 +831,10 @@ a.secundario {
   border: 1px solid var(--borda);
   border-radius: 999px;
   color: var(--texto-fraco);
-  font-size: 13.5px;
-  font-weight: 500;
-  padding: 8px 14px;
-  min-height: 40px;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 0 16px;
+  min-height: var(--alt-controle);
   white-space: nowrap;
   transition: transform 140ms var(--ease-saida);
 }
@@ -639,7 +878,6 @@ a.secundario {
 /* Estar na rua e ter que voltar ao computador só para clicar num contato é o
    contrário do que este deck existe para fazer. */
 
-.zap-trocar { flex-shrink: 0; align-self: flex-start; }
 
 .zap-contatos { display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px; }
 .zap-contatos .zap-busca { margin-bottom: 0; }
@@ -656,16 +894,18 @@ a.secundario {
 .zap-contato {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 12px;
   width: 100%;
-  min-height: 52px;
-  padding: 12px 14px;
-  background: var(--tijolo);
-  border: 1px solid var(--borda);
-  border-radius: 12px;
+  min-height: 60px;
+  padding: 0 16px;
+  background: color-mix(in srgb, var(--texto) 4%, transparent);
+  border: 1px solid transparent;
+  border-radius: 14px;
   text-align: left;
-  transition: transform 130ms var(--ease-saida);
+  transition: transform 130ms var(--ease-saida), background-color 130ms var(--ease-saida);
 }
+.zap-contato:active { background: var(--tijolo-toque); }
 .zap-contato:active { transform: scale(.98); }
 .zap-contato[aria-pressed="true"] { border-color: var(--acento); }
 
