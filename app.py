@@ -1593,7 +1593,16 @@ def init_db():
                 detalhe TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
-                        """CREATE TABLE IF NOT EXISTS wa_conversa_estado (
+                        """CREATE TABLE IF NOT EXISTS deck_conversa (
+                usuario_id INTEGER NOT NULL,
+                chat_id TEXT NOT NULL,
+                nome TEXT,
+                telefone TEXT,
+                ultima_em REAL,
+                visto_em TIMESTAMP,
+                PRIMARY KEY (usuario_id, chat_id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS wa_conversa_estado (
                 chat_id TEXT PRIMARY KEY,
                 telefone_norm TEXT,
                 lead_id INTEGER,
@@ -2870,6 +2879,15 @@ def init_db():
             usuario_id INTEGER,
             detalhe TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS deck_conversa (
+            usuario_id INTEGER NOT NULL,
+            chat_id TEXT NOT NULL,
+            nome TEXT,
+            telefone TEXT,
+            ultima_em REAL,
+            visto_em TEXT,
+            PRIMARY KEY (usuario_id, chat_id)
         );
         CREATE TABLE IF NOT EXISTS wa_conversa_estado (
             chat_id TEXT PRIMARY KEY,
@@ -33011,6 +33029,82 @@ def api_nuvem_desconectar():
     return _wa_cors(jsonify({"ok": True, "recado": "Desconectado do servidor."}))
 
 
+_DECK_CONVERSAS_GUARDADAS = 40
+
+
+def _deck_guardar_conversas(uid, conversas):
+    """Guarda com quem o consultor anda conversando, para o deck servir na rua.
+
+    ATÉ ONDE VAI. Grava NOME, TELEFONE e QUANDO foi a última mensagem — nada do
+    conteúdo. As falas da conversa continuam só em memória, como sempre
+    estiveram: é conversa de cliente de plano de saúde, e o que a tela precisa
+    para você reconhecer o destino é o nome, não o que foi dito.
+
+    Sem isto, o deck com o computador desligado só sabe dos leads do CRM — que
+    não é a mesma coisa que "com quem eu estava falando agora há pouco".
+    """
+    if not conversas:
+        return
+    agora = _agora_sp()
+    conn = None
+    try:
+        conn = db()
+        vivos = []
+        for c in conversas[:_DECK_CONVERSAS_GUARDADAS]:
+            chat_id = (c.get('chatId') or '').strip()
+            if not chat_id or chat_id.endswith('@g.us'):
+                continue        # grupo não é destino de disparo
+            vivos.append(chat_id)
+            r = conn.execute("""UPDATE deck_conversa
+                    SET nome=?, telefone=?, ultima_em=?, visto_em=?
+                  WHERE usuario_id=? AND chat_id=?""",
+                (c.get('nome') or '', c.get('telefone') or '',
+                 float(c.get('em') or 0), agora, uid, chat_id))
+            if getattr(r, 'rowcount', 0) == 0:
+                conn.execute("""INSERT INTO deck_conversa
+                    (usuario_id, chat_id, nome, telefone, ultima_em, visto_em)
+                    VALUES (?,?,?,?,?,?)""",
+                    (uid, chat_id, c.get('nome') or '', c.get('telefone') or '',
+                     float(c.get('em') or 0), agora))
+        # O que saiu da lista do WhatsApp sai daqui também. A lista guardada é um
+        # espelho do que existe hoje, não um arquivo que só cresce.
+        if vivos:
+            marcas = ','.join(['?'] * len(vivos))
+            conn.execute(f"""DELETE FROM deck_conversa
+                 WHERE usuario_id=? AND chat_id NOT IN ({marcas})""", [uid] + vivos)
+        conn.commit()
+    except Exception as e:
+        app.logger.warning(f"[DECK] nao guardei a lista de conversas: {e}")
+        if conn is not None:
+            try: conn.rollback()
+            except Exception: pass
+    finally:
+        if conn is not None:
+            close_db(conn)
+
+
+def _deck_conversas_guardadas(conn, uid):
+    """A última lista de conversas que a extensão leu, para o modo nuvem.
+
+    Só entra quem tem telefone: pelo servidor o envio é por número, e mostrar um
+    nome que não dá para enviar seria oferecer um botão que não cumpre.
+    """
+    out = []
+    try:
+        for r in conn.execute("""SELECT chat_id, nome, telefone, ultima_em
+                FROM deck_conversa
+               WHERE usuario_id=? AND telefone IS NOT NULL AND telefone <> ''
+            ORDER BY ultima_em DESC LIMIT ?""",
+                (uid, _DECK_CONVERSAS_GUARDADAS)).fetchall():
+            d_ = dict(r)
+            out.append({"chatId": d_['chat_id'], "nome": d_.get('nome') or 'Sem nome salvo',
+                        "telefone": d_.get('telefone') or '',
+                        "em": int(d_.get('ultima_em') or 0), "de": "conversa"})
+    except Exception as e:
+        app.logger.warning(f"[DECK] lista guardada: {e}")
+    return out
+
+
 @app.route('/api/whatsapp/extensao/deck/sincronizar', methods=['POST', 'OPTIONS'])
 @requer('whatsapp:enviar')
 def api_deck_sincronizar():
@@ -33040,10 +33134,12 @@ def api_deck_sincronizar():
             pres['conversas'] = [
                 {'chatId': str(c.get('chatId') or '')[:80],
                  'nome': str(c.get('nome') or '')[:80],
+                 'telefone': str(c.get('telefone') or '')[:24],
                  'em': int(c.get('em') or 0)}
                 for c in d['conversas'][:40]
                 if isinstance(c, dict) and c.get('chatId')
             ]
+            _deck_guardar_conversas(uid, pres['conversas'])
         if pres['chat'] is None:
             pres['rascunho'] = []
         elif isinstance(d.get('rascunho'), list):
@@ -33214,6 +33310,12 @@ def api_deck_whatsapp():
             try:
                 conn_l = db()
                 biblioteca_nuvem = _deck_biblioteca_nuvem(conn_l, uid)
+                # PRIMEIRO as conversas de verdade. Com o computador desligado, o
+                # que o consultor procura é o nome de quem ele estava atendendo —
+                # não a lista do CRM. O CRM entra depois, para quem ainda não foi
+                # abordado.
+                leads_nuvem = _deck_conversas_guardadas(conn_l, uid)
+                ja = {_waspeed_normaliza_fone(c['telefone']) for c in leads_nuvem}
                 for r in conn_l.execute("""SELECT id, nome, telefone
                         FROM crm_leads
                        WHERE responsavel_id=?
@@ -33221,9 +33323,12 @@ def api_deck_whatsapp():
                     ORDER BY COALESCE(atualizado_em, criado_em) DESC LIMIT 40""",
                         (uid,)).fetchall():
                     d_ = dict(r)
+                    if _waspeed_normaliza_fone(d_.get('telefone') or '') in ja:
+                        continue        # já está na lista como conversa
                     leads_nuvem.append({"chatId": f"lead:{d_['id']}",
                                         "nome": d_.get('nome') or 'Sem nome',
-                                        "telefone": d_.get('telefone') or '', "em": 0})
+                                        "telefone": d_.get('telefone') or '',
+                                        "em": 0, "de": "lead"})
                 close_db(conn_l)
             except Exception as e:
                 app.logger.warning(f"[DECK] leads para o modo nuvem: {e}")
@@ -33254,21 +33359,35 @@ def _deck_comando_pela_nuvem(uid, alvo, tipo, d):
     mensagem entra na fila e sai em até alguns minutos, pelo servidor. A tela
     precisa dizer isso — prometer "enviado" seria mentira.
     """
-    try:
-        lead_id = int(alvo.split(':', 1)[1])
-    except (ValueError, IndexError):
-        return jsonify({"erro": "Lead inválido."}), 400
-
     conn = db()
     try:
-        lead = conn.execute("SELECT id, nome, telefone FROM crm_leads WHERE id=? AND responsavel_id=?",
-                            (lead_id, uid)).fetchone()
-        if not lead:
-            return jsonify({"erro": "Esse lead não é seu ou não existe mais."}), 404
-        ld = dict(lead)
+        # Dois tipos de alvo chegam aqui: um lead do CRM (lead:123) e uma conversa
+        # de verdade do WhatsApp, guardada da última vez que a extensão leu. A
+        # segunda é a que serve na rua — é o nome que o consultor reconhece.
+        if alvo.startswith('lead:'):
+            try:
+                lead_id = int(alvo.split(':', 1)[1])
+            except (ValueError, IndexError):
+                return jsonify({"erro": "Lead inválido."}), 400
+            lead = conn.execute(
+                "SELECT id, nome, telefone FROM crm_leads WHERE id=? AND responsavel_id=?",
+                (lead_id, uid)).fetchone()
+            if not lead:
+                return jsonify({"erro": "Esse lead não é seu ou não existe mais."}), 404
+            ld = dict(lead)
+        else:
+            conversa = conn.execute(
+                "SELECT nome, telefone FROM deck_conversa WHERE usuario_id=? AND chat_id=?",
+                (uid, alvo)).fetchone()
+            if not conversa:
+                return jsonify({"erro": "Não reconheço essa conversa. Abra o WhatsApp Web "
+                                        "uma vez para o JOB atualizar a sua lista."}), 404
+            cd = dict(conversa)
+            ld = {"id": None, "nome": cd.get('nome') or '', "telefone": cd.get('telefone') or ''}
         fone = _waspeed_normaliza_fone(ld.get('telefone') or '')
         if not fone:
-            return jsonify({"erro": "Esse lead não tem telefone utilizável."}), 400
+            return jsonify({"erro": "Esse contato não tem telefone utilizável pelo servidor. "
+                                    "Dá para enviar com o computador ligado."}), 400
 
         texto, midia, midia_tipo, rotulo = '', None, '', ''
         if tipo == 'texto':
@@ -33304,7 +33423,7 @@ def _deck_comando_pela_nuvem(uid, alvo, tipo, d):
             (lead_id, responsavel_id, telefone, chat_id, tipo, texto, midia_arquivo,
              origem, status, criado_por, criado_em)
             VALUES (?,?,?,?,?,?,?,?,'pendente',?,?)""",
-            (ld['id'], uid, fone, _wa_chat_id(fone), (midia_tipo or 'texto'),
+            (ld.get('id'), uid, fone, _wa_chat_id(fone), (midia_tipo or 'texto'),
              texto, midia, 'deck_nuvem', uid, _agora_sp()))
         conn.commit()
     finally:
@@ -33336,7 +33455,7 @@ def api_deck_comando():
     # transporte e aplica as travas. E o mesmo caminho de todo o resto: uma porta
     # so.
     alvo_bruto = str(d.get('chatId') or '').strip()
-    if alvo_bruto.startswith('lead:'):
+    if alvo_bruto.startswith('lead:') or (alvo_bruto and not _deck_ligada(_deck_presenca(uid))):
         return _deck_comando_pela_nuvem(uid, alvo_bruto, tipo, d)
 
     with _deck_trava:
