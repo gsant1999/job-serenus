@@ -416,50 +416,35 @@ h2{font-size:clamp(30px,4.4vw,46px)}
 .assinatura b{color:var(--ink);font-size:17px}
 
 /* ═══════════ IMPRESSAO / SALVAR EM PDF ═══════════
-   A carta convite e mandada por e-mail, mas tambem e impressa e entregue em
-   maos depois da entrevista. Na folha nao existe tema escuro nem botao. */
+   A pagina imprime do jeito que esta na tela, fundo escuro incluido. O padrao
+   do navegador e jogar fora toda cor de fundo para economizar tinta, e ai a
+   apresentacao chega no candidato descaracterizada: sem o arco, sem o preto,
+   com o degrade do titulo virando texto invisivel. print-color-adjust:exact
+   desliga essa economia. Some so o que nao faz sentido no papel: a barra que
+   acompanha a rolagem e os botoes de clicar. */
 @media print{
-  :root{
-    --bg:#FFFFFF; --bg-2:#FFFFFF; --surface:#FFFFFF; --surface-2:#F6F6F8;
-    --ink:#000000; --ink-soft:#333333; --ink-faint:#666666;
-    --line:#CCCCCC; --line-forte:#999999;
+  :root, :root[data-theme="light"], :root:not([data-theme="light"]){
+    --bg:#0B0B0F; --bg-2:#121218; --surface:#141419; --surface-2:#1B1B22;
+    --ink:#F4F4F7; --ink-soft:#A6A6B2; --ink-faint:#75757F;
+    --line:#232329; --line-forte:#33333C; --pill-ink:#0B0B0F;
+    --mapa-r1:#4E4E5C; --mapa-r2:#3D3D4A; --mapa-r3:#33333E; --mapa-r4:#2A2A33;
+    --mapa-verde:#1B2620; --mapa-agua:#182831;
+    color-scheme:dark;
   }
-  body{background:#FFFFFF;color:#000000;font-size:12pt}
-  .topo,.nao-imprime,.hero-acoes,.fecho .acoes{display:none !important}
-  .wrap{max-width:100% !important;padding:0 !important}
-  a{color:#000000;text-decoration:none}
-  section{padding-top:20pt;break-inside:avoid}
-  .sec-topo{border-top:1pt solid #CCCCCC}
-  h1{font-size:26pt}
-  h2{font-size:17pt}
-  .combinado,.trilha,.blocos,.aviso,.exemplo,.form-cartao{break-inside:avoid}
-  .combinado .item .v{font-size:16pt}
-  .convite-topo{padding-top:0}
-  .fecho{border:1pt solid #CCCCCC;break-inside:avoid}
-  .arco-txt{-webkit-text-fill-color:#000000;color:#000000}
-  .fio{background:#000000;height:2pt}
-  @page{margin:14mm}
+  html,body{background:#0B0B0F !important;color:#F4F4F7}
+  *{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
+
+  .topo,.nao-imprime,.hero-acoes,.fecho .acoes,.form-acoes{display:none !important}
+  .wrap{max-width:100% !important;padding:0 10mm !important}
+  a{color:inherit;text-decoration:none}
+
+  /* nada de bloco partido no meio da folha */
+  section{break-inside:avoid;padding-top:18pt}
+  .ganhos,.ganho-fixo,.ganho-venda,.prova,.operadoras,.mapa-bloco,.blocos,.bloco,
+  .conta,.trilha,.passo,.premios,.premio,.exemplo,.aviso,.cartaz,.lista,.fecho,
+  .combinado,.checklist,.form-cartao{break-inside:avoid}
+  .medalhao{width:300px}
+
+  @page{margin:10mm;size:A4}
 }
 
-/* ── apoio da pergunta aberta ──
-   Folha em branco trava gente que vende muito bem falando. Os chips dao o
-   comeco da frase e o botao de audio abre a saida por voz, sem deixar de ser
-   pergunta obrigatoria. */
-.apoios{display:flex;flex-direction:column;gap:8px;margin:2px 0 4px}
-.apoio-rot{font-size:13.5px;color:var(--ink-faint)}
-.apoio-chips{display:flex;flex-wrap:wrap;gap:8px}
-.chip{
-  border:1px solid var(--line-forte);background:transparent;color:var(--ink-soft);
-  border-radius:999px;padding:7px 14px;font:500 13.5px/1 Archivo,sans-serif;cursor:pointer;
-  transition:transform 140ms var(--ease-saida), border-color 140ms var(--ease-saida), color 140ms var(--ease-saida);
-}
-.chip:active{transform:scale(.97)}
-@media (hover:hover) and (pointer:fine){ .chip:hover{border-color:var(--azul);color:var(--ink)} }
-.ajuda-linha{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between}
-.contador{font-size:13.5px;color:var(--ink-faint)}
-.contador.ok{color:var(--ciano)}
-.link-audio{
-  background:none;border:0;padding:0;cursor:pointer;color:var(--azul);
-  font:600 13.5px/1.4 Archivo,sans-serif;text-decoration:underline;text-underline-offset:3px;
-}
-.link-audio:active{transform:scale(.98)}

@@ -25,7 +25,7 @@
       <img class="marca marca-dark" src="{{ url_for('static', filename='brand/serenus-logo-light.png') }}" alt="Serenus Corretora de Saúde">
     </a>
     <span style="display:flex;gap:8px;align-items:center">
-      <a class="btn btn-sm btn-linha" href="/carreira/apresentacao.pdf" target="_blank" rel="noopener">Baixar em PDF</a>
+      <button type="button" class="btn btn-sm btn-linha nao-imprime" onclick="window.print()">Imprimir esta página</button>
       <a class="btn btn-sm btn-arco" href="/carreira/candidatura">Quero me candidatar</a>
     </span>
   </div>
@@ -392,7 +392,8 @@
   </div>
   <div class="acoes">
     <a class="btn btn-arco" href="/carreira/candidatura">Quero me candidatar</a>
-    <a class="btn btn-linha" href="/carreira/apresentacao.pdf" target="_blank" rel="noopener">Baixar a apresentação em PDF</a>
+    <button type="button" class="btn btn-linha nao-imprime" onclick="window.print()">Imprimir esta página</button>
+    <a class="btn btn-linha" href="/carreira/apresentacao.pdf" target="_blank" rel="noopener">Baixar o resumo em PDF</a>
     <a class="btn btn-linha" href="{{ link_zap }}" target="_blank" rel="noopener">Prefiro falar no WhatsApp</a>
   </div>
 </div>
