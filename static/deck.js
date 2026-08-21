@@ -627,6 +627,39 @@ function conferirComando() {
   zapEsperando = null;
 }
 
+/* ----------------------------------------------------------------- tema */
+
+// Três estados, não dois: "Automático" é o padrão e devolve o comando ao
+// sistema. Um interruptor de dois estados não tem como voltar para isso.
+const TEMAS = [
+  { id: '',       rotulo: 'Tema: automático' },
+  { id: 'claro',  rotulo: 'Tema: claro' },
+  { id: 'escuro', rotulo: 'Tema: escuro' },
+];
+
+function aplicarTema(id) {
+  if (id) document.documentElement.dataset.tema = id;
+  else delete document.documentElement.dataset.tema;
+  const b = el('zap-tema');
+  const atual = TEMAS.find((x) => x.id === id) || TEMAS[0];
+  b.textContent = atual.rotulo;
+  b.dataset.tema = id;
+  // A barra do Safari e os controles do sistema (player de áudio, rolagem)
+  // seguem junto; sem isto o player nasce branco no meio de uma folha escura.
+  const escuro = id === 'escuro'
+    || (!id && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', escuro ? '#0e0f12' : '#f1f2f5');
+}
+
+el('zap-tema').addEventListener('click', () => {
+  const i = TEMAS.findIndex((x) => x.id === (localStorage.getItem('deck_tema') || ''));
+  const proximo = TEMAS[(i + 1) % TEMAS.length];
+  localStorage.setItem('deck_tema', proximo.id);
+  aplicarTema(proximo.id);
+});
+aplicarTema(localStorage.getItem('deck_tema') || '');
+
 /* -------------------------------------------------------------- partida */
 
 tela.secoes.querySelectorAll('.zap-secao').forEach((b) => {

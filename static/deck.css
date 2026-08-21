@@ -35,8 +35,29 @@
   --ease-folha: cubic-bezier(.32, .72, 0, 1);
 }
 
+/* Regra do tema: `data-tema` no <html> ganha do sistema; sem ele, vale o
+   sistema. Os dois blocos abaixo listam os MESMOS tokens de propósito — um
+   deles sozinho deixaria alguma cor definida só dentro de uma condição, que é
+   como uma tela nasce meio clara e meio escura. */
+:root[data-tema="claro"] {
+  color-scheme: light;
+  --fundo: #f1f2f5;
+  --tijolo: #ffffff;
+  --tijolo-toque: #e9ebf0;
+  --borda: #dcdfe6;
+  --borda-forte: #c3c8d2;
+  --texto: #14161a;
+  --texto-fraco: #5d6673;
+  --acento: #1f6feb;
+  --ok: #1d8f5b;
+  --erro: #c53434;
+  --cuidado: #a9640a;
+  --nuvem: #6d3fc4;
+}
+:root[data-tema="escuro"] { color-scheme: dark; }
+
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-tema="escuro"]) {
     --fundo: #f1f2f5;
     --tijolo: #ffffff;
     --tijolo-toque: #e9ebf0;
@@ -73,6 +94,17 @@ body {
 }
 
 button { font: inherit; color: inherit; cursor: pointer; }
+
+/* Um anel de foco só, para tudo que se aperta. O contorno cru do navegador
+   aparecia quadrado por cima de botão redondo, e só em alguns. Fica no
+   :focus-visible: quem toca com o dedo não vê anel nenhum; quem navega por
+   teclado nunca fica perdido. */
+:where(button, a, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+:where(button, a, input):focus:not(:focus-visible) { outline: none; }
 [hidden] { display: none !important; }
 
 /* A faixa "Deck / Ir para o CRM" e a linha "Ligado ao JOB" foram removidas: o
@@ -82,15 +114,16 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .secundario {
   background: transparent;
-  border: 1px solid var(--borda);
-  border-radius: 10px;
-  color: var(--texto-fraco);
-  font-size: 13px;
-  font-weight: 500;
-  padding: 9px 13px;
-  min-height: 40px;
-  transition: transform 140ms var(--ease-saida), opacity 140ms var(--ease-saida);
+  border: 1px solid var(--borda-forte);
+  border-radius: 13px;
+  color: var(--texto);
+  font-size: 15px;
+  font-weight: 600;
+  padding: 0 18px;
+  min-height: 52px;
+  transition: transform 140ms var(--ease-saida), background-color 140ms var(--ease-saida);
 }
+.secundario:active { background: var(--tijolo-toque); }
 .secundario:active { transform: scale(.97); }
 
 /* O botão de voltar ao JOB é um link, mas tem que se parecer com os irmãos:
@@ -105,14 +138,19 @@ a.secundario {
 .principal {
   background: var(--acento);
   border: none;
-  border-radius: 12px;
+  border-radius: 13px;
   color: #fff;
   font-size: 16px;
-  font-weight: 600;
-  padding: 14px 20px;
-  min-height: 50px;
-  transition: transform 140ms var(--ease-saida), opacity 140ms var(--ease-saida);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  padding: 0 22px;
+  min-height: 52px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .18) inset,
+              0 4px 14px color-mix(in srgb, var(--acento) 34%, transparent);
+  transition: transform 140ms var(--ease-saida), opacity 140ms var(--ease-saida),
+              box-shadow 140ms var(--ease-saida);
 }
+.principal:active { box-shadow: 0 1px 4px color-mix(in srgb, var(--acento) 30%, transparent); }
 .principal:active { transform: scale(.97); }
 .principal:disabled { opacity: .5; }
 
@@ -154,19 +192,23 @@ a.secundario {
 
 .folha {
   position: fixed;
-  left: 0; right: 0; bottom: 0;
+  left: 50%;
+  bottom: 0;
+  width: min(620px, 100%);
+  transform: translate(-50%, 100%);
   max-height: 82vh;
   display: flex;
   flex-direction: column;
   padding: 10px 20px calc(20px + env(safe-area-inset-bottom));
   background: var(--tijolo);
-  border-top: 1px solid var(--borda);
-  border-radius: 20px 20px 0 0;
-  transform: translateY(100%);
+  border: 1px solid var(--borda);
+  border-bottom: 0;
+  border-radius: 24px 24px 0 0;
+  box-shadow: 0 -18px 50px rgba(0, 0, 0, .28);
   transition: transform 280ms var(--ease-folha);
   z-index: 11;
 }
-.folha.aberta { transform: translateY(0); }
+.folha.aberta { transform: translate(-50%, 0); }
 
 .puxador {
   width: 40px; height: 4px;
@@ -223,7 +265,7 @@ a.secundario {
 /* ------------------------------------------------- movimento reduzido */
 
 @media (prefers-reduced-motion: reduce) {
-  .folha { transition: opacity 200ms var(--ease-saida); transform: none; opacity: 0; }
+  .folha { transition: opacity 200ms var(--ease-saida); transform: translate(-50%, 0); opacity: 0; }
   .folha.aberta { opacity: 1; }
   .tijolo:active, .principal:active, .secundario:active, .aba:active { transform: none; }
   .tijolo[data-estado="rodando"] .andamento { animation: none; transform: scaleX(1); }
@@ -369,6 +411,28 @@ a.secundario {
 .zap-secao:active { transform: scale(.97); }
 .zap-secao[aria-selected="true"] { background: var(--tijolo-toque); color: var(--texto); }
 
+/* O tema é de quem está segurando o aparelho, não do relógio do sistema: o deck
+   é usado em cima de mesa, dentro do carro e na rua com sol batendo na tela. Sem
+   escolha feita, o sistema continua mandando — e o botão diz qual dos três
+   estados está valendo, em vez de pedir para adivinhar pelo ícone. */
+.zap-tema {
+  flex: none;
+  min-height: var(--alt-controle);
+  padding: 0 14px;
+  background: var(--tijolo);
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+  color: var(--texto-fraco);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: transform 140ms var(--ease-saida), color 140ms var(--ease-saida);
+}
+.zap-tema:active { transform: scale(.97); }
+.zap-tema[data-tema="claro"], .zap-tema[data-tema="escuro"] { color: var(--texto); }
+
 /* A busca fica SEMPRE na tela. Antes ela aparecia só com 8+ itens e sumia ao
    trocar de seção — com filtro escrito, a lista dizia "nada com esse nome" e o
    campo de apagar já não estava lá. Beco sem saída, além de mais um pulo de
@@ -385,7 +449,7 @@ a.secundario {
   font-size: 16px;   /* 16px evita o zoom automático do Safari no foco */
 }
 .zap-busca::placeholder { color: var(--texto-fraco); }
-.zap-busca:focus { outline: 2px solid var(--acento); outline-offset: 1px; }
+.zap-busca::placeholder { color: var(--texto-fraco); }
 
 /* A mesa é o corpo do aparelho, e é a ÚNICA parte que rola. Sem esse painel
    rebaixado as teclas flutuam soltas na página e vira lista de novo. */
@@ -400,8 +464,27 @@ a.secundario {
   border-radius: var(--raio-mesa);
 }
 
+/* No claro a mesa não pode ser um bloco cinza pesado embaixo de teclas brancas:
+   fica sujo. Ela recua um degrau só, e quem faz a tecla existir é a sombra —
+   luz vindo de cima, como no aparelho de verdade. */
+.zap-mesa[data-claro], :root[data-tema="claro"] .zap-mesa {
+  background: color-mix(in srgb, var(--borda) 28%, var(--fundo));
+}
+:root[data-tema="claro"] .zap-tecla {
+  border-color: color-mix(in srgb, var(--borda) 80%, transparent);
+  box-shadow: 0 1px 2px rgba(20, 24, 32, .07), 0 6px 14px rgba(20, 24, 32, .05);
+}
+:root[data-tema="claro"] .zap-tecla:active { box-shadow: 0 1px 2px rgba(20, 24, 32, .1); }
+
 @media (prefers-color-scheme: light) {
-  .zap-mesa { background: color-mix(in srgb, var(--borda) 45%, var(--fundo)); }
+  :root:not([data-tema="escuro"]) .zap-mesa {
+    background: color-mix(in srgb, var(--borda) 28%, var(--fundo));
+  }
+  :root:not([data-tema="escuro"]) .zap-tecla {
+    border-color: color-mix(in srgb, var(--borda) 80%, transparent);
+    box-shadow: 0 1px 2px rgba(20, 24, 32, .07), 0 6px 14px rgba(20, 24, 32, .05);
+  }
+  :root:not([data-tema="escuro"]) .zap-tecla:active { box-shadow: 0 1px 2px rgba(20, 24, 32, .1); }
 }
 
 /* Colunas FIXAS por faixa, não auto-fill: a tecla precisa estar no mesmo lugar
@@ -434,7 +517,8 @@ a.secundario {
   border-radius: var(--raio-tecla);
   overflow: hidden;
   text-align: center;
-  transition: transform 130ms var(--ease-saida), opacity 130ms var(--ease-saida);
+  transition: transform 130ms var(--ease-saida), opacity 130ms var(--ease-saida),
+              box-shadow 130ms var(--ease-saida);
 }
 
 /* O brilho de cima é o que faz a tecla parecer teclada e não desenhada. Ele
@@ -714,16 +798,18 @@ a.secundario {
 .zap-contato {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 12px;
   width: 100%;
-  min-height: 52px;
-  padding: 12px 14px;
-  background: var(--tijolo);
-  border: 1px solid var(--borda);
-  border-radius: 12px;
+  min-height: 60px;
+  padding: 0 16px;
+  background: color-mix(in srgb, var(--texto) 4%, transparent);
+  border: 1px solid transparent;
+  border-radius: 14px;
   text-align: left;
-  transition: transform 130ms var(--ease-saida);
+  transition: transform 130ms var(--ease-saida), background-color 130ms var(--ease-saida);
 }
+.zap-contato:active { background: var(--tijolo-toque); }
 .zap-contato:active { transform: scale(.98); }
 .zap-contato[aria-pressed="true"] { border-color: var(--acento); }
 
