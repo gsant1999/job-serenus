@@ -330,8 +330,8 @@ h2{font-size:clamp(30px,4.4vw,46px)}
       <div class="leg">de prêmio por vida na MedSênior, pago por fora da comissão</div>
     </div>
     <div class="cel">
-      <div class="num n-azul">0</div>
-      <div class="leg">leads que você precisa comprar, caçar ou pedir de favor</div>
+      <div class="num n-azul">4 a 6</div>
+      <div class="leg">clientes novos por dia entregues para você atender</div>
     </div>
   </div>
 </header>
@@ -347,19 +347,19 @@ h2{font-size:clamp(30px,4.4vw,46px)}
     <p>Quem entra aqui entra para vender, não para prospectar do zero.</p>
   </div>
 
-  {% if leads_30d %}
   <div class="prova">
     <div>
-      <div class="rot">Leads que entraram nos últimos 30 dias</div>
-      <div class="grande arco-txt">{{ '{:,}'.format(leads_30d).replace(',', '.') }}</div>
-      <p class="sub">Número puxado agora do nosso próprio sistema, não é estimativa. Ele muda todo dia porque a campanha roda todo dia.</p>
+      <div class="rot">O que cai na sua mão, por dia</div>
+      <div class="grande arco-txt">4 a 6</div>
+      <p class="sub">clientes novos por dia para você atender. Gente que pediu cotação de plano de saúde hoje, não lista fria comprada.</p>
     </div>
     <div class="lado">
-      <div class="mini"><div class="n n-laranja">{{ leads_dia }}</div><div class="l">contatos novos por dia, em média, distribuídos para o time</div></div>
-      <div class="mini"><div class="n n-azul">R$ 0</div><div class="l">é o que o corretor paga por esse lead</div></div>
+      <div class="mini"><div class="n n-azul">R$ 0</div><div class="l">é o que você paga por esses contatos</div></div>
+      {% if leads_30d %}
+      <div class="mini"><div class="n n-laranja">{{ '{:,}'.format(leads_30d).replace(',', '.') }}</div><div class="l">foi o total que entrou na corretora nos últimos 30 dias, lido do sistema agora</div></div>
+      {% endif %}
     </div>
   </div>
-  {% endif %}
 
   <div class="operadoras">
     <div class="op-chip"><img src="{{ url_for('static', filename='operadoras/medsenior.svg') }}" alt="MedSênior" loading="lazy"></div>
@@ -477,6 +477,37 @@ h2{font-size:clamp(30px,4.4vw,46px)}
       <div class="oq">Comissionamento estratégico</div>
       <div class="det">Regime de comissão por produção, home office possível e os prêmios de operadora seguem valendo integralmente.</div>
     </div>
+  </div>
+</section>
+
+<section id="case">
+  <div class="sec-topo">
+    <div class="rot">Como foi com quem já fez esse caminho</div>
+    <h2>A Juliana entrou em junho.</h2>
+  </div>
+  <div class="texto">
+    <p>Ela chegou sem carteira de cliente e começou pelo mesmo lugar que você vai começar: o lead que a corretora entrega. Estes são os números dela no sistema, de 19 de junho a 17 de agosto de 2026.</p>
+  </div>
+  <div class="blocos">
+    <div class="bloco">
+      <div class="rot">Vendas fechadas</div>
+      <div class="num n-magenta">15<small>em pouco menos de 2 meses</small></div>
+      <div class="d">Propostas ativas, já implantadas. Aproximadamente 2 por semana.</div>
+    </div>
+    <div class="bloco">
+      <div class="rot">Vidas</div>
+      <div class="num n-laranja">27<small>pessoas com plano por causa dela</small></div>
+      <div class="d">Cada vida também vale prêmio de operadora, quando a campanha prevê.</div>
+    </div>
+    <div class="bloco destaque">
+      <div class="rot">Comissão no período</div>
+      <div class="num">R$ 7.082<small>além do fixo e da ajuda de custo</small></div>
+      <div class="d">Média perto de R$ 3,5 mil por mês em comissão. O melhor mês dela foi julho: 10 vendas e R$ 3.707.</div>
+    </div>
+  </div>
+  <div class="aviso">
+    <div class="t">Por que estamos mostrando isso</div>
+    <div class="c">Não é o recorde da casa nem o resultado de um vendedor veterano: é o começo de uma consultora que entrou há dois meses, com o mesmo fixo e a mesma entrega de lead que estamos oferecendo aqui. Resultado depende de quem vende, então o seu pode ser maior ou menor. Mostramos o número real justamente para você julgar com o pé no chão.</div>
   </div>
 </section>
 
