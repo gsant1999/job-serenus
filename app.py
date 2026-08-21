@@ -1593,7 +1593,15 @@ def init_db():
                 detalhe TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
-                        """CREATE TABLE IF NOT EXISTS deck_conversa (
+                        """CREATE TABLE IF NOT EXISTS carreira_candidato (
+                id SERIAL PRIMARY KEY,
+                nome TEXT NOT NULL, whatsapp TEXT, whatsapp_norm TEXT, email TEXT, cidade TEXT,
+                presencial TEXT, cnpj TEXT, janela TEXT, experiencia TEXT, venda_geral TEXT,
+                melhor_venda TEXT, inicio TEXT, observacao TEXT,
+                encaixe INTEGER DEFAULT 0, veredito TEXT, status TEXT DEFAULT 'novo',
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS deck_conversa (
                 usuario_id INTEGER NOT NULL,
                 chat_id TEXT NOT NULL,
                 nome TEXT,
@@ -2878,6 +2886,14 @@ def init_db():
             ok INTEGER DEFAULT 1,
             usuario_id INTEGER,
             detalhe TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS carreira_candidato (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL, whatsapp TEXT, whatsapp_norm TEXT, email TEXT, cidade TEXT,
+            presencial TEXT, cnpj TEXT, janela TEXT, experiencia TEXT, venda_geral TEXT,
+            melhor_venda TEXT, inicio TEXT, observacao TEXT,
+            encaixe INTEGER DEFAULT 0, veredito TEXT, status TEXT DEFAULT 'novo',
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS deck_conversa (
@@ -43938,6 +43954,396 @@ def _build_cot(conn, c):
                    + ' - copart. ' + (p.get('coparticipacao') or '') + ' - R$ ' + _moeda_doc(p.get('total')) + '/mês')
     cot['legenda'] = '\n'.join(leg)
     return cot
+
+
+# ═══════════════ PÁGINA PÚBLICA DE CARREIRA (/carreira) ═══════════════
+# Carta de apresentação para captação de corretores. Pública (sem login),
+# para mandar o link direto ao candidato.
+
+ENDERECO_SERENUS = 'Rua Joaquim Guilherme da Costa, 370 - Hortolândia - SP'
+
+
+@app.route('/carreira/convite')
+def carreira_convite():
+    """Carta de convite para mandar ao candidato DEPOIS da entrevista.
+    O nome e a data de inicio vem na propria URL (montada em /carreira/convite/montar),
+    para o link poder ser gerado sem cadastrar ninguem."""
+    import urllib.parse
+    nome = (request.args.get('nome') or '').strip()[:60] or 'você'
+    inicio = (request.args.get('inicio') or '').strip()[:20] or 'a data combinada'
+    numero = os.environ.get('WHATSAPP_CARREIRA') or NUMERO_WHATSAPP_SERENUS
+    aceite = urllib.parse.quote(
+        f'Aqui é {nome}. Recebi a carta da Serenus, aceito a proposta e confirmo o início em {inicio}.')
+    duvida = urllib.parse.quote(
+        f'Aqui é {nome}. Recebi a carta da Serenus e tenho uma dúvida antes de confirmar:')
+    return render_template(
+        'carreira_convite.html',
+        nome=nome, inicio=inicio,
+        link_aceite=f'https://wa.me/{numero}?text={aceite}',
+        link_duvida=f'https://wa.me/{numero}?text={duvida}',
+        link_maps='https://www.google.com/maps/search/?api=1&query='
+                  + urllib.parse.quote(ENDERECO_SERENUS),
+    )
+
+
+@app.route('/carreira/convite/montar')
+@login_required
+def carreira_convite_montar():
+    """Gera o link da carta com o nome e a data do candidato."""
+    if session.get('perfil') != 'admin':
+        abort(404)
+    return render_template('carreira_convite_montar.html')
+
+
+# ── Filtro de candidatos ────────────────────────────────────────────────────
+# O peso de cada resposta esta escrito aqui, num lugar so, para o time poder
+# discordar do criterio sem ter que ler codigo espalhado.
+_CARREIRA_PESOS = {
+    'presencial':  {'sim': 25, 'ajustar': 15, 'nao': 0},
+    'cnpj':        {'tenho': 15, 'abro': 12, 'nao': 0},
+    'janela':      {'total': 20, 'parcial': 12, 'pouca': 4},
+    'experiencia': {'mais3': 20, '1a3': 16, 'ate1': 10, 'nunca': 5},
+    'venda_geral': {'externa': 20, 'telefone': 16, 'loja': 12, 'nunca': 2},
+}
+_CARREIRA_INICIO_BONUS = {'imediato': 0, '15dias': 0, '30dias': -3, 'depois': -8}
+
+
+def _carreira_avaliar(d):
+    """Devolve (encaixe 0-100, veredito curto). Presencial e PJ sao eliminatorios:
+    nao adianta pontuar bem no resto se a pessoa nao pode cumprir o basico."""
+    if d.get('presencial') == 'nao':
+        return 0, 'Fora do perfil: não pode presencial'
+    if d.get('cnpj') == 'nao':
+        return 0, 'Fora do perfil: não aceita PJ'
+
+    nota = 0
+    for chave, tabela in _CARREIRA_PESOS.items():
+        nota += tabela.get(d.get(chave) or '', 0)
+    nota += _CARREIRA_INICIO_BONUS.get(d.get('inicio') or '', 0)
+
+    # quem escreve sobre a propria venda com algum detalhe costuma vender melhor
+    texto = (d.get('melhor_venda') or '').strip()
+    if len(texto) >= 300:
+        nota += 8
+    elif len(texto) >= 150:
+        nota += 4
+
+    nota = max(0, min(100, nota))
+    if nota >= 75:
+        return nota, 'Chamar para conversa'
+    if nota >= 55:
+        return nota, 'Vale uma conversa'
+    return nota, 'Guardar para a próxima abertura'
+
+
+@app.route('/carreira/candidatura', methods=['GET', 'POST'])
+def carreira_candidatura():
+    """Formulario publico de candidatura a vaga de corretor."""
+    if request.method == 'GET':
+        return render_template('carreira_candidatura.html')
+
+    f = request.form
+    if (f.get('site') or '').strip():        # armadilha para robo de formulario
+        return redirect('/carreira')
+
+    nome = (f.get('nome') or '').strip()[:120]
+    whats = (f.get('whatsapp') or '').strip()[:20]
+    digitos = re.sub(r'\D', '', whats)
+    if len(nome) < 2 or len(digitos) < 10:
+        return render_template('carreira_candidatura.html'), 400
+
+    dados = {k: (f.get(k) or '').strip() for k in
+             ('presencial', 'cnpj', 'janela', 'experiencia', 'venda_geral', 'inicio')}
+    dados['melhor_venda'] = (f.get('melhor_venda') or '').strip()[:1200]
+    encaixe, veredito = _carreira_avaliar(dados)
+
+    try:
+        conn = db()
+        conn.execute(
+            "INSERT INTO carreira_candidato (nome, whatsapp, whatsapp_norm, email, cidade,"
+            " presencial, cnpj, janela, experiencia, venda_geral, melhor_venda, inicio,"
+            " observacao, encaixe, veredito) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (nome, whats, _normalizar_telefone(whats) or digitos,
+             (f.get('email') or '').strip()[:120], (f.get('cidade') or '').strip()[:80],
+             dados['presencial'], dados['cnpj'], dados['janela'], dados['experiencia'],
+             dados['venda_geral'], dados['melhor_venda'], dados['inicio'],
+             (f.get('observacao') or '').strip()[:800], encaixe, veredito))
+        conn.commit()
+        close_db(conn)
+    except Exception as e:
+        app.logger.error(f'[CARREIRA] falha ao gravar candidatura: {e}')
+        return render_template('carreira_candidatura.html'), 500
+
+    try:
+        cidade = (f.get('cidade') or '').strip() or 'cidade não informada'
+        _notificar_admins('carreira', 'Candidatura de corretor',
+                          f'{nome}, de {cidade}. Encaixe {encaixe}. {veredito}.',
+                          '/carreira/candidatos')
+    except Exception:
+        pass
+
+    # Confirma para o candidato que a candidatura chegou. Silencio depois de
+    # enviar formulario e a forma mais rapida de a pessoa achar que quebrou.
+    email_cand = (f.get('email') or '').strip()
+    if email_cand:
+        try:
+            _carreira_email('recebido', nome, email_cand)
+        except Exception as e:
+            app.logger.warning(f'[CARREIRA] e-mail de recebimento falhou: {e}')
+
+    mascarado = ('(' + digitos[:2] + ') ' + digitos[2:-4].replace(digitos[2:-4], '*' * len(digitos[2:-4]))
+                 + digitos[-4:]) if len(digitos) >= 10 else whats
+    return render_template('carreira_recibo.html',
+                           primeiro_nome=nome.split()[0],
+                           whatsapp_mascarado=mascarado)
+
+
+@app.route('/carreira/candidato/<int:cid>/email', methods=['POST'])
+@login_required
+def carreira_candidato_email(cid):
+    """Manda o convite ou a recusa para um candidato da lista."""
+    if session.get('perfil') != 'admin':
+        abort(404)
+    tipo = (request.form.get('tipo') or '').strip()
+    inicio = (request.form.get('inicio') or '').strip()[:20]
+    if tipo not in ('convite', 'recusa', 'recebido'):
+        flash('Tipo de e-mail inválido.', 'erro')
+        return redirect('/carreira/candidatos')
+
+    conn = db()
+    c = conn.execute("SELECT * FROM carreira_candidato WHERE id=?", (cid,)).fetchone()
+    if not c:
+        close_db(conn)
+        abort(404)
+    c = dict(c)
+    ok, msg = _carreira_email(tipo, c.get('nome'), c.get('email'), inicio)
+    if ok:
+        conn.execute("UPDATE carreira_candidato SET status=? WHERE id=?",
+                     ({'convite': 'convidado', 'recusa': 'recusado'}.get(tipo, c.get('status')), cid))
+        conn.commit()
+    close_db(conn)
+    flash(msg, 'sucesso' if ok else 'erro')
+    return redirect('/carreira/candidatos')
+
+
+@app.route('/carreira/convite/enviar', methods=['POST'])
+@login_required
+def carreira_convite_enviar():
+    """Manda a carta convite para um e-mail digitado na hora, sem depender de
+    o candidato ter vindo pelo formulario."""
+    if session.get('perfil') != 'admin':
+        abort(404)
+    nome = (request.form.get('nome') or '').strip()[:60]
+    email = (request.form.get('email') or '').strip()[:120]
+    inicio = (request.form.get('inicio') or '').strip()[:20]
+    ok, msg = _carreira_email('convite', nome, email, inicio)
+    flash(msg, 'sucesso' if ok else 'erro')
+    return redirect('/carreira/convite/montar')
+
+
+@app.route('/carreira/candidatos')
+@login_required
+def carreira_candidatos():
+    """Lista das candidaturas recebidas. Sem esta tela o formulario grava no
+    escuro e ninguem fica sabendo que alguem se candidatou."""
+    if session.get('perfil') != 'admin':
+        abort(404)
+    conn = db()
+    linhas = [dict(r) for r in conn.execute(
+        "SELECT * FROM carreira_candidato ORDER BY encaixe DESC, id DESC LIMIT 300").fetchall()]
+    close_db(conn)
+    return render_template('carreira_candidatos.html', candidatos=linhas)
+
+
+# ── E-mails da carreira (Brevo) ─────────────────────────────────────────────
+# Um lugar so monta os tres e-mails do processo: recebemos seu interesse,
+# convite depois da entrevista e a recusa. Assim eles falam a mesma lingua e
+# ninguem precisa reescrever HTML de e-mail toda vez.
+
+def _carreira_link_convite(nome, inicio=''):
+    import urllib.parse
+    p = {'nome': nome}
+    if inicio:
+        p['inicio'] = inicio
+    return _SITE_BASE_URL + '/carreira/convite?' + urllib.parse.urlencode(p)
+
+
+def _carreira_email(tipo, nome, email, inicio=''):
+    """Envia um dos e-mails do processo. Devolve (ok, mensagem para a tela)."""
+    if not email or '@' not in email:
+        return False, 'Esse candidato não deixou e-mail.'
+
+    primeiro = (nome or '').strip().split(' ')[0] or 'tudo bem'
+    numero = os.environ.get('WHATSAPP_CARREIRA') or NUMERO_WHATSAPP_SERENUS
+
+    if tipo == 'recebido':
+        ctx = dict(
+            etiqueta='Candidatura recebida',
+            titulo=f'Recebemos sua candidatura, {primeiro}.',
+            paragrafos=[
+                'Sua candidatura à vaga de corretor de planos de saúde entrou na nossa lista. '
+                'A gente lê uma por uma, não é robô que responde.',
+                '<b>O que acontece agora:</b> se o seu perfil encaixar, alguém do time chama no '
+                'seu WhatsApp em até 3 dias úteis para marcar uma conversa. Se não encaixar desta '
+                'vez, guardamos seu contato para a próxima abertura.',
+            ],
+            blocos=None,
+            cta_texto='Reler a vaga',
+            cta_link=_SITE_BASE_URL + '/carreira',
+            rodape_extra='Se você não se candidatou a nada na Serenus, pode ignorar este e-mail.',
+        )
+        assunto = 'Recebemos sua candidatura na Serenus'
+
+    elif tipo == 'convite':
+        quando = inicio or 'a data que combinarmos'
+        ctx = dict(
+            etiqueta='Convite para entrar no time',
+            titulo=f'A vaga é sua, {primeiro}.',
+            paragrafos=[
+                'Conversamos, você entendeu a operação e a gente gostou do que ouviu. '
+                'Este e-mail existe para que nada do que foi combinado dependa de memória.',
+                f'Início previsto: <b>{quando}</b>, às 9h, na Rua Joaquim Guilherme da Costa, 370, '
+                'em Hortolândia.',
+            ],
+            blocos=[('Regime', 'PJ'), ('Fixo mensal', 'R$ 1.000'),
+                    ('Ajuda de custo, 3 meses', 'R$ 500'),
+                    ('Comissão, meses 1 a 3', '50% da 1ª mensalidade'),
+                    ('Janela de trabalho', '9h às 17h'),
+                    ('Presencial', '3 meses')],
+            cta_texto='Abrir a carta completa',
+            cta_link=_carreira_link_convite(nome, inicio),
+            rodape_extra='A carta traz o que trazer no primeiro dia, como vai ser a primeira '
+                         'semana e os prêmios de operadora. Qualquer ponto que você queira rever, '
+                         'fale com a gente antes de confirmar.',
+        )
+        assunto = f'{primeiro}, a vaga na Serenus é sua'
+
+    elif tipo == 'recusa':
+        ctx = dict(
+            etiqueta='Sobre a sua candidatura',
+            titulo=f'Desta vez não vai dar, {primeiro}.',
+            paragrafos=[
+                'Obrigado por ter dedicado tempo à nossa vaga de corretor. Nesta abertura '
+                'seguimos com outro perfil.',
+                'Isso não é um não definitivo: guardamos seu contato e chamamos quando abrir a '
+                'próxima vaga. Se quiser saber o que pesou na decisão, é só responder este '
+                'e-mail que a gente conta com franqueza.',
+            ],
+            blocos=None,
+            cta_texto='', cta_link='',
+            rodape_extra='Boa sorte de verdade. O mercado de saúde é pequeno e a gente se '
+                         'encontra de novo.',
+        )
+        assunto = 'Sobre a sua candidatura na Serenus'
+
+    else:
+        return False, 'Tipo de e-mail desconhecido.'
+
+    corpo = render_template('email_carreira.html', base_url=_SITE_BASE_URL, **ctx)
+    ok = _enviar_email(email, assunto, corpo,
+                       remetente_nome='Serenus Corretora', sincrono=True)
+    if ok:
+        return True, f'E-mail enviado para {email}.'
+    erro = getattr(_enviar_email, 'ultimo_erro', None) or 'Confira a BREVO_API_KEY no Railway.'
+    return False, f'Não consegui enviar. {erro}'
+
+
+def _carreira_faixa_por_corretor(dias=30, piso=1.5):
+    """Quantos clientes de anuncio cada corretor recebe por dia, hoje.
+
+    A pagina promete uma faixa ('de 4 a 6 por dia'). Se essa faixa ficar escrita
+    a mao, ela envelhece no dia em que entrar mais gente no time: o mesmo volume
+    dividido em mais partes da menos por pessoa, e a pagina passa a prometer o
+    que a operacao nao entrega. Entao ela e medida.
+
+    Conta so quem esta de fato na distribuicao (acima de `piso` leads por dia):
+    quem entrou semana passada ou trabalha parcial puxaria o piso para baixo e
+    faria a vaga parecer pior do que e.
+
+    Devolve (min, max) ja arredondados, ou (None, None) quando nao da para medir.
+    """
+    try:
+        conn = db()
+        corte = ("NOW() - INTERVAL '%d days'" % dias) if DB_MODE == 'postgres' \
+                else ("datetime('now','-%d days')" % dias)
+        linhas = conn.execute(
+            "SELECT responsavel_id, COUNT(*) AS n FROM crm_leads WHERE responsavel_id IS NOT NULL"
+            " AND (LOWER(COALESCE(origem,'')) LIKE '%facebook%'"
+            "      OR LOWER(COALESCE(origem,'')) LIKE '%google%'"
+            "      OR LOWER(COALESCE(origem,'')) LIKE '%instagram%')"
+            " AND criado_em >= " + corte + " GROUP BY responsavel_id"
+        ).fetchall()
+        close_db(conn)
+    except Exception as e:
+        app.logger.warning(f'[CARREIRA] faixa por corretor indisponivel: {e}')
+        return None, None
+
+    por_dia = sorted(int(dict(r)['n']) / float(dias) for r in linhas)
+    ativos = [v for v in por_dia if v >= piso]
+    if len(ativos) < 3:
+        return None, None
+
+    # Quartis, nao minimo e maximo: um corretor de ferias e outro em semana
+    # excepcional esticariam a faixa para algo que ninguem vive no dia a dia.
+    def _quartil(vals, q):
+        pos = q * (len(vals) - 1)
+        baixo_i = int(pos)
+        resto = pos - baixo_i
+        if baixo_i + 1 >= len(vals):
+            return vals[baixo_i]
+        return vals[baixo_i] + resto * (vals[baixo_i + 1] - vals[baixo_i])
+
+    baixo, alto = round(_quartil(ativos, .25)), round(_quartil(ativos, .75))
+    if alto <= baixo:                      # time todo no mesmo ritmo
+        alto = baixo + 1
+    return baixo, alto
+
+
+@app.route('/carreira')
+def carreira():
+    """Página pública de recrutamento de corretores."""
+    import urllib.parse
+    numero = os.environ.get('WHATSAPP_CARREIRA') or NUMERO_WHATSAPP_SERENUS
+    msg = urllib.parse.quote('Olá! Vi a página de carreira da Serenus e quero me candidatar à vaga de corretor.')
+    # Quantos clientes a corretora entregou nos ultimos 30 dias. E o argumento
+    # central da pagina, entao sai do banco e nao de um numero digitado a mao.
+    #
+    # Conta SO o que veio de anuncio. A tabela de leads tambem guarda conversa
+    # capturada pela extensao do WhatsApp, cadastro manual e indicacao: somar
+    # tudo dava 1.257 em 30 dias (42 por dia) quando o que a campanha entrega
+    # de fato e a metade disso. Numero inflado numa pagina de vaga e promessa
+    # que o corretor descobre ser falsa na primeira semana.
+    leads_30d = None
+    try:
+        conn = db()
+        r = conn.execute(
+            "SELECT COUNT(*) AS n FROM crm_leads WHERE ("
+            " LOWER(COALESCE(origem,'')) LIKE '%facebook%'"
+            " OR LOWER(COALESCE(origem,'')) LIKE '%google%'"
+            " OR LOWER(COALESCE(origem,'')) LIKE '%instagram%') AND criado_em >= "
+            + ("NOW() - INTERVAL '30 days'" if DB_MODE == 'postgres'
+               else "datetime('now','-30 days')")
+        ).fetchone()
+        close_db(conn)
+        n = int(dict(r).get('n') or 0)
+        if n >= 50:                      # abaixo disso o numero nao ajuda ninguem
+            leads_30d = n
+    except Exception as e:
+        app.logger.warning(f'[CARREIRA] contagem de leads indisponivel: {e}')
+
+    faixa_min, faixa_max = _carreira_faixa_por_corretor()
+    if not faixa_min:                    # sem dado suficiente, nao inventa faixa nova
+        faixa_min, faixa_max = 4, 6
+
+    return render_template(
+        'carreira.html',
+        link_zap=f'https://wa.me/{numero}?text={msg}',
+        link_maps='https://www.google.com/maps/search/?api=1&query='
+                  + urllib.parse.quote(ENDERECO_SERENUS),
+        leads_30d=leads_30d,
+        leads_dia=(round(leads_30d / 30) if leads_30d else None),
+        faixa_min=faixa_min, faixa_max=faixa_max,
+    )
 
 
 @app.route('/c/<token>')

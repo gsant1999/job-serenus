@@ -1,0 +1,58 @@
+{# E-mail da Serenus para candidatos. Layout em tabela e estilo embutido:
+   cliente de e-mail nao entende folha externa nem CSS moderno. #}
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F2F2F5;margin:0;padding:28px 12px;font-family:Helvetica,Arial,sans-serif">
+  <tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background:#FFFFFF;border-radius:16px;overflow:hidden;border:1px solid #E4E4E9">
+
+      <tr><td style="height:5px;background:#FF459D;background-image:linear-gradient(96deg,#FF459D,#FF8636,#FFB11A,#10A8DD,#747DFA);font-size:0;line-height:5px">&nbsp;</td></tr>
+
+      <tr><td style="padding:28px 32px 0 32px">
+        <img src="{{ base_url }}/static/brand/serenus-logo-black-640.png" alt="Serenus Corretora de Saúde" width="150" style="display:block;border:0;width:150px;height:auto">
+      </td></tr>
+
+      <tr><td style="padding:26px 32px 0 32px">
+        <div style="font-family:'Courier New',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#8C8C97">{{ etiqueta }}</div>
+        <h1 style="margin:10px 0 0 0;font-size:28px;line-height:1.15;color:#0B0B0F;font-weight:bold;letter-spacing:-.5px">{{ titulo }}</h1>
+      </td></tr>
+
+      <tr><td style="padding:18px 32px 0 32px">
+        {% for p in paragrafos %}
+        <p style="margin:0 0 14px 0;font-size:16px;line-height:1.6;color:#55555F">{{ p|safe }}</p>
+        {% endfor %}
+      </td></tr>
+
+      {% if blocos %}
+      <tr><td style="padding:10px 32px 0 32px">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #E4E4E9;border-radius:12px">
+          {% for b in blocos %}
+          <tr>
+            <td style="padding:14px 18px;border-bottom:{{ '0' if loop.last else '1px solid #E4E4E9' }};font-size:14px;color:#55555F">{{ b[0] }}</td>
+            <td align="right" style="padding:14px 18px;border-bottom:{{ '0' if loop.last else '1px solid #E4E4E9' }};font-size:18px;color:#0B0B0F;font-weight:bold;white-space:nowrap">{{ b[1] }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+      </td></tr>
+      {% endif %}
+
+      {% if cta_link %}
+      <tr><td style="padding:24px 32px 0 32px">
+        <a href="{{ cta_link }}" style="display:inline-block;padding:14px 26px;border-radius:999px;background:#0B0B0F;color:#FFFFFF;text-decoration:none;font-size:15px;font-weight:bold">{{ cta_texto }}</a>
+      </td></tr>
+      {% endif %}
+
+      {% if rodape_extra %}
+      <tr><td style="padding:22px 32px 0 32px">
+        <p style="margin:0;font-size:14px;line-height:1.55;color:#8C8C97">{{ rodape_extra|safe }}</p>
+      </td></tr>
+      {% endif %}
+
+      <tr><td style="padding:28px 32px 30px 32px">
+        <div style="border-top:1px solid #E4E4E9;padding-top:16px;font-size:12.5px;line-height:1.6;color:#8C8C97">
+          Serenus Corretora de Saúde<br>
+          Rua Joaquim Guilherme da Costa, 370, Hortolândia, SP
+        </div>
+      </td></tr>
+
+    </table>
+  </td></tr>
+</table>
