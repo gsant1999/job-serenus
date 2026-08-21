@@ -44242,10 +44242,25 @@ def _carreira_email(tipo, nome, email, inicio=''):
     corpo = render_template('email_carreira.html', base_url=_SITE_BASE_URL, **ctx)
     ok = _enviar_email(email, assunto, corpo,
                        remetente_nome='Serenus Corretora', sincrono=True)
-    if ok:
-        return True, f'E-mail enviado para {email}.'
-    erro = getattr(_enviar_email, 'ultimo_erro', None) or 'Confira a BREVO_API_KEY no Railway.'
-    return False, f'Não consegui enviar. {erro}'
+    if not ok:
+        erro = getattr(_enviar_email, 'ultimo_erro', None) or 'Confira a BREVO_API_KEY no Railway.'
+        return False, f'Não consegui enviar. {erro}'
+
+    # Copia interna, em mensagem separada e nao em CC: o candidato nao precisa
+    # ver o e-mail de dentro da corretora. Serve para o time ter registro do que
+    # saiu, principalmente enquanto o dominio nao esta autenticado no Brevo e o
+    # e-mail do candidato pode cair no spam dele sem ninguem ficar sabendo.
+    copia = os.environ.get('CARREIRA_COPIA') or os.environ.get('SMTP_USER', '')
+    if copia and copia.strip().lower() != email.strip().lower():
+        try:
+            _enviar_email(copia, f'[cópia] {assunto} — enviado para {nome} <{email}>',
+                          corpo, remetente_nome='Serenus Corretora', sincrono=False)
+        except Exception as e:
+            app.logger.warning(f'[CARREIRA] copia interna falhou: {e}')
+
+    if copia:
+        return True, f'E-mail enviado para {email}. Uma cópia foi para {copia}.'
+    return True, f'E-mail enviado para {email}.'
 
 
 def _carreira_faixa_por_corretor(dias=30, piso=1.5):
