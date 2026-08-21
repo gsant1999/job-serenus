@@ -44109,15 +44109,24 @@ def carreira():
     import urllib.parse
     numero = os.environ.get('WHATSAPP_CARREIRA') or NUMERO_WHATSAPP_SERENUS
     msg = urllib.parse.quote('Olá! Vi a página de carreira da Serenus e quero me candidatar à vaga de corretor.')
-    # Quantos leads a corretora entregou nos ultimos 30 dias. E o argumento
+    # Quantos clientes a corretora entregou nos ultimos 30 dias. E o argumento
     # central da pagina, entao sai do banco e nao de um numero digitado a mao.
+    #
+    # Conta SO o que veio de anuncio. A tabela de leads tambem guarda conversa
+    # capturada pela extensao do WhatsApp, cadastro manual e indicacao: somar
+    # tudo dava 1.257 em 30 dias (42 por dia) quando o que a campanha entrega
+    # de fato e a metade disso. Numero inflado numa pagina de vaga e promessa
+    # que o corretor descobre ser falsa na primeira semana.
     leads_30d = None
     try:
         conn = db()
         r = conn.execute(
-            "SELECT COUNT(*) AS n FROM crm_leads "
-            "WHERE criado_em >= " + ("NOW() - INTERVAL '30 days'" if DB_MODE == 'postgres'
-                                     else "datetime('now','-30 days')")
+            "SELECT COUNT(*) AS n FROM crm_leads WHERE ("
+            " LOWER(COALESCE(origem,'')) LIKE '%facebook%'"
+            " OR LOWER(COALESCE(origem,'')) LIKE '%google%'"
+            " OR LOWER(COALESCE(origem,'')) LIKE '%instagram%') AND criado_em >= "
+            + ("NOW() - INTERVAL '30 days'" if DB_MODE == 'postgres'
+               else "datetime('now','-30 days')")
         ).fetchone()
         close_db(conn)
         n = int(dict(r).get('n') or 0)
