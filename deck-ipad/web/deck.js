@@ -244,6 +244,23 @@ function abrirFolha({ titulo, texto, saida, confirmar, risco }) {
   tela.folhaTexto.textContent = texto || '';
   tela.folhaTexto.hidden = !texto;
   tela.folhaSaida.textContent = saida || '';
+  // A CÂMERA DEVOLVE IMAGEM, NÃO TEXTO.
+  //
+  // O deck só sabia mostrar texto. Quando a saída traz esta marca, o que
+  // interessa é a foto — dizer "foto salva" e não mostrar a foto seria o mesmo
+  // que não ter tirado. O carimbo de hora na URL evita o Safari servir a
+  // anterior de cache.
+  const jaTinha = el('folha-foto');
+  if (jaTinha) jaTinha.remove();
+  if (saida && saida.indexOf('[[foto]]') >= 0) {
+    tela.folhaSaida.textContent = saida.replace('[[foto]]', '').trim();
+    const img = document.createElement('img');
+    img.id = 'folha-foto';
+    img.className = 'folha-foto';
+    img.alt = 'O que a câmera do Mac está vendo agora';
+    img.src = '/api/foto?t=' + Date.now();
+    tela.folhaSaida.insertAdjacentElement('beforebegin', img);
+  }
   tela.folhaSaida.hidden = !saida;
   tela.folhaAcoes.hidden = !confirmar;
   if (confirmar) {

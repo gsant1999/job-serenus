@@ -400,6 +400,65 @@
           }
         }
       ]
+    },
+    {
+      "nome": "Câmera",
+      "botoes": [
+        {
+          "id": "cam_ver",
+          "rotulo": "Ver a sala agora",
+          "dica": "Tira uma foto e mostra aqui. A luz verde da câmera acende — sempre",
+          "icone": "camera",
+          "acao": {
+            "tipo": "shell",
+            "tempo_max": 20,
+            "comando": "/opt/homebrew/bin/ffmpeg -hide_banner -loglevel error -f avfoundation -pixel_format nv12 -framerate 30 -video_size 1280x720 -i \"0\" -frames:v 1 -y \"$DECK_RAIZ/.foto.jpg\" && echo \"[[foto]]\" && echo \"Foto de agora.\" || echo \"O macOS ainda nao autorizou a camera. Abra Ajustes, Privacidade e Seguranca, Camera, e ligue o programa que roda o deck.\""
+          }
+        },
+        {
+          "id": "cam_gravar",
+          "rotulo": "Gravar a sala",
+          "rotulo_ligado": "Gravando a sala — toque para parar",
+          "dica": "O vídeo fica na Área de Trabalho quando você parar",
+          "icone": "video",
+          "icone_ligado": "video",
+          "controle": "alternar",
+          "consulta": "pgrep -f 'ffmpeg.*avfoundation.*sala-' >/dev/null && echo 1 || echo 0",
+          "ligar": {
+            "tipo": "shell",
+            "tempo_max": 15,
+            "comando": "nohup /opt/homebrew/bin/ffmpeg -hide_banner -loglevel error -f avfoundation -pixel_format nv12 -framerate 30 -video_size 1280x720 -i \"0\" \"$HOME/Desktop/sala-$(date +%H%M%S).mov\" >/dev/null 2>&1 & sleep 2; pgrep -f \"ffmpeg.*avfoundation.*sala-\" >/dev/null && echo \"Gravando. Toque de novo para parar.\" || echo \"Nao comecou. Provavelmente falta autorizar a camera no Mac.\""
+          },
+          "desligar": {
+            "tipo": "shell",
+            "tempo_max": 15,
+            "comando": "pkill -INT -f 'ffmpeg.*avfoundation.*sala-'; sleep 2; echo \"Parei. O video esta na Area de Trabalho.\""
+          }
+        },
+        {
+          "id": "cam_apagar_gravar",
+          "rotulo": "Apagar a tela e gravar a sala",
+          "dica": "A tela apaga; o Mac fica acordado só enquanto estiver gravando",
+          "icone": "video",
+          "cuidado": "A câmera fica gravando com a tela apagada. A luz verde continua acesa.",
+          "confirmar": true,
+          "acao": {
+            "tipo": "sequencia",
+            "passos": [
+              {
+                "tipo": "shell",
+                "tempo_max": 15,
+                "comando": "nohup caffeinate -i /opt/homebrew/bin/ffmpeg -hide_banner -loglevel error -f avfoundation -pixel_format nv12 -framerate 30 -video_size 1280x720 -i \"0\" \"$HOME/Desktop/sala-$(date +%H%M%S).mov\" >/dev/null 2>&1 & sleep 2; pgrep -f \"ffmpeg.*avfoundation.*sala-\" >/dev/null && echo \"Gravando.\" || echo \"Nao comecou: autorize a camera no Mac.\""
+              },
+              {
+                "tipo": "shell",
+                "tempo_max": 10,
+                "comando": "pmset displaysleepnow"
+              }
+            ]
+          }
+        }
+      ]
     }
   ]
 }
