@@ -217,18 +217,43 @@ carregar();
    codigo morto sem dizer nada. Em 20/08/2026 foi exatamente assim que a gente
    perdeu uma hora. Por isso: sem laco, e cada codigo novo e um clique. */
 
+// TEMPO LIMITE OBRIGATORIO.
+//
+// Sem ele, JOB que nao responde deixava o cartao em "verificando..." e o botao
+// em "gerando..." para sempre, sem dizer nada a ninguem. Foi assim que este
+// mesmo cartao nasceu quebrado em 21/08/2026: a tela parecia estar pensando
+// quando na verdade a chamada tinha morrido. Toda chamada daqui volta em no
+// maximo 15s, com erro legivel.
 async function nuvemChamar(caminho, metodo) {
-  const { jobUrl, extKey } = await config();
-  const { extToken } = await chrome.storage.local.get(['extToken']);
-  if (!extKey && !extToken) return { ok: false, erro: 'sem login' };
+  let jobUrl = JOB_URL_PADRAO, extKey = '';
+  try { ({ jobUrl, extKey } = await config()); } catch (e) { /* usa o padrao */ }
+  let extToken = '';
+  try { ({ extToken } = await chrome.storage.local.get(['extToken'])); } catch (e) {}
+  if (!extKey && !extToken) {
+    return { ok: false, erro: 'Entre com seu e-mail e senha no popup antes.' };
+  }
   const cab = { 'Content-Type': 'application/json' };
   if (extKey) cab['X-Extension-Key'] = extKey;
   if (extToken) cab.Authorization = 'Bearer ' + extToken;
+  const ctrl = new AbortController();
+  const corta = setTimeout(() => ctrl.abort(), 15000);
   try {
-    const r = await fetch((jobUrl || JOB_URL_PADRAO) + caminho, { method: metodo || 'GET', headers: cab });
-    return await r.json();
+    const r = await fetch((jobUrl || JOB_URL_PADRAO) + caminho,
+      { method: metodo || 'GET', headers: cab, signal: ctrl.signal });
+    clearTimeout(corta);
+    const bruto = await r.text();
+    let d;
+    try { d = JSON.parse(bruto); } catch (e) {
+      return { ok: false, erro: 'O JOB respondeu ' + r.status + ' (resposta ilegivel).' };
+    }
+    if (!r.ok && !d.erro) d.erro = 'O JOB respondeu ' + r.status + '.';
+    return d;
   } catch (e) {
-    return { ok: false, erro: 'nao consegui falar com o JOB' };
+    clearTimeout(corta);
+    return { ok: false,
+             erro: e.name === 'AbortError'
+               ? 'O JOB nao respondeu em 15 segundos.'
+               : 'Nao consegui falar com o JOB: ' + (e.message || 'erro de rede') };
   }
 }
 
@@ -245,11 +270,24 @@ function nuvemPintar(estado, recado) {
   if (conectado) { $('nuvemQr').hidden = true; }
 }
 
+function nuvemMostrar(sim) {
+  // `hidden` sozinho nao basta: a regra .nuvem{display:flex} do CSS ganha dele.
+  // Sem esta linha o cartao aparecia mesmo quando devia estar escondido.
+  const c = $('nuvem');
+  c.hidden = !sim;
+  c.style.display = sim ? 'flex' : 'none';
+}
+
 async function nuvemEstado() {
   const d = await nuvemChamar('/api/whatsapp/extensao/nuvem/estado');
-  if (!d || d.ok === false) { $('nuvem').hidden = true; return; }
-  if (d.disponivel === false) { $('nuvem').hidden = true; return; }   // ainda nao ligado no sistema
-  $('nuvem').hidden = false;
+  if (d && d.disponivel === false) { nuvemMostrar(false); return; }  // nao ligado no sistema
+  if (!d || d.ok === false) {
+    // ERRO APARECE. Antes isto escondia o cartao e ninguem descobria por que.
+    nuvemMostrar(true);
+    nuvemPintar('caiu', d && d.erro ? d.erro : 'Nao consegui verificar.');
+    return;
+  }
+  nuvemMostrar(true);
   nuvemPintar(d.estado, d.recado);
 }
 
@@ -262,8 +300,11 @@ async function nuvemPedirQr(botao) {
   botao.textContent = antes;
   if (d && d.ja_conectado) { nuvemEstado(); return; }
   if (!d || !d.ok || !d.qr) {
-    // O erro fica na tela. Codigo que nao veio precisa dizer por que, senao o
-    // consultor fica apontando a camera para nada.
+    // O erro fica na tela, com o texto que o servidor mandou. Codigo que nao
+    // veio precisa dizer POR QUE, senao o consultor fica apontando a camera
+    // para nada — ou pior, olhando um botao escrito "gerando..." que nunca
+    // termina.
+    $('nuvemQr').hidden = true;
     nuvemPintar('caiu', (d && d.erro) || 'Nao consegui gerar o codigo. Tente de novo.');
     return;
   }
@@ -286,6 +327,7 @@ async function nuvemPedirQr(botao) {
 }
 
 function nuvemLigarBotoes() {
+  nuvemMostrar(false);   // some ate saber que tem o que mostrar
   const c = $('nuvemConectar'), o = $('nuvemOutro'), s = $('nuvemSair');
   if (c) c.addEventListener('click', () => nuvemPedirQr(c));
   if (o) o.addEventListener('click', () => nuvemPedirQr(o));
