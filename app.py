@@ -44417,6 +44417,29 @@ def carreira_convite_enviar():
     return redirect('/carreira/convite/montar')
 
 
+@app.route('/carreira/painel')
+@login_required
+def carreira_painel():
+    """Porta de entrada da carreira dentro do JOB: numeros, atalhos e o fluxo
+    com o que e automatico e o que depende de alguem agir."""
+    if session.get('perfil') != 'admin':
+        abort(404)
+    conn = db()
+    def _n(sql):
+        try:
+            return int(dict(conn.execute(sql).fetchone()).get('n') or 0)
+        except Exception:
+            return 0
+    dados = dict(
+        total=_n("SELECT COUNT(*) AS n FROM carreira_candidato"),
+        novos=_n("SELECT COUNT(*) AS n FROM carreira_candidato WHERE status='novo'"),
+        bons=_n("SELECT COUNT(*) AS n FROM carreira_candidato WHERE encaixe >= 55"),
+        convidados=_n("SELECT COUNT(*) AS n FROM carreira_candidato WHERE status='convidado'"),
+    )
+    close_db(conn)
+    return render_template('carreira_painel.html', **dados)
+
+
 @app.route('/carreira/candidatos')
 @login_required
 def carreira_candidatos():

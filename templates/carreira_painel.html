@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Carreira{% endblock %}
+{% block content %}
+<style>
+  .car-wrap{max-width:1100px;margin:0 auto;padding:24px 0;display:flex;flex-direction:column;gap:26px}
+  .car-num{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
+  .car-cel{border:1px solid var(--borda);border-radius:12px;padding:18px;background:var(--panel)}
+  .car-cel .v{font-size:30px;font-weight:700;letter-spacing:-.02em;line-height:1}
+  .car-cel .l{font-size:13.5px;color:var(--cinza);margin-top:6px;line-height:1.4}
+  .car-etapas{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+  .car-et{border:1px solid var(--borda);border-radius:12px;padding:20px;background:var(--panel);display:flex;flex-direction:column;gap:8px}
+  .car-et .n{font-family:ui-monospace,monospace;font-size:12px;letter-spacing:.1em;color:var(--cinza)}
+  .car-et h3{margin:0;font-size:17px}
+  .car-et p{margin:0;font-size:14px;color:var(--cinza);line-height:1.5}
+  .car-et .auto{font-size:13px;color:var(--cinza);border-top:1px solid var(--borda);padding-top:10px;margin-top:2px;line-height:1.5}
+  .car-et .auto b{color:var(--texto)}
+  .car-acoes{display:flex;flex-wrap:wrap;gap:10px}
+  .car-sec h2{margin:0 0 4px;font-size:20px}
+  .car-sec .sub{color:var(--cinza);font-size:14px;margin:0 0 14px;line-height:1.5;max-width:80ch}
+</style>
+
+<div class="car-wrap">
+
+  <div>
+    <h1 style="margin:0 0 6px">Carreira</h1>
+    <p style="color:var(--cinza);margin:0;max-width:80ch;line-height:1.55">
+      Tudo da captação de corretores num lugar só: a vaga que o candidato vê, as candidaturas que chegaram,
+      a carta de convite e a apresentação em PDF. Os números abaixo são lidos do sistema agora.
+    </p>
+  </div>
+
+  <div class="car-num">
+    <div class="car-cel"><div class="v">{{ total }}</div><div class="l">candidaturas recebidas</div></div>
+    <div class="car-cel"><div class="v">{{ novos }}</div><div class="l">ainda sem resposta</div></div>
+    <div class="car-cel"><div class="v">{{ bons }}</div><div class="l">com encaixe 55 ou mais</div></div>
+    <div class="car-cel"><div class="v">{{ convidados }}</div><div class="l">já convidados</div></div>
+  </div>
+
+  <div class="car-acoes">
+    <a class="btn" href="/carreira/candidatos">Ver candidaturas</a>
+    <a class="btn" href="/carreira/convite/montar">Montar carta de convite</a>
+    <a class="btn" href="/carreira/apresentacao.pdf" target="_blank" rel="noopener">Baixar apresentação em PDF</a>
+    <a class="btn" href="/carreira" target="_blank" rel="noopener">Abrir a página da vaga</a>
+    <a class="btn" href="/carreira/candidatura" target="_blank" rel="noopener">Ver o formulário</a>
+  </div>
+
+  <div class="car-sec">
+    <h2>O fluxo, e o que acontece sozinho em cada etapa</h2>
+    <p class="sub">
+      Vale saber o que é automático: o que está marcado como automático ninguém precisa lembrar de fazer,
+      e o que não está depende de alguém abrir a tela e agir.
+    </p>
+    <div class="car-etapas">
+
+      <div class="car-et">
+        <div class="n">01</div>
+        <h3>O candidato conhece a vaga</h3>
+        <p>Pela página pública ou pelo PDF que você manda no WhatsApp. A página mostra o que a corretora entrega por dia, lido do banco.</p>
+        <div class="auto"><b>Automático:</b> o volume de leads e a faixa de clientes por dia se atualizam sozinhos.</div>
+      </div>
+
+      <div class="car-et">
+        <div class="n">02</div>
+        <h3>Ele se candidata</h3>
+        <p>Oito perguntas em três etapas. Presencial, PJ e janela de horário são eliminatórias; o resto pontua.</p>
+        <div class="auto"><b>Automático:</b> grava a ficha, calcula o encaixe, avisa no sino e manda e-mail de confirmação com cópia para a corretora.</div>
+      </div>
+
+      <div class="car-et">
+        <div class="n">03</div>
+        <h3>Você tria</h3>
+        <p>A lista vem ordenada pelo encaixe, com o texto da melhor venda e o registro de como a pessoa preencheu.</p>
+        <div class="auto"><b>Depende de você:</b> abrir a lista e decidir quem vai para a entrevista.</div>
+      </div>
+
+      <div class="car-et">
+        <div class="n">04</div>
+        <h3>Entrevista por vídeo</h3>
+        <p>A conversa acontece fora do sistema. O que volta para cá é a decisão.</p>
+        <div class="auto"><b>Depende de você:</b> marcar e conduzir.</div>
+      </div>
+
+      <div class="car-et">
+        <div class="n">05</div>
+        <h3>Aprovado: a carta de convite</h3>
+        <p>Monte o link com o nome e a data de início. Ela existe em página e em PDF para imprimir e entregar em mãos.</p>
+        <div class="auto"><b>Automático:</b> o e-mail de convite sai com a apresentação da vaga anexada em PDF e cópia para a corretora.</div>
+      </div>
+
+      <div class="car-et">
+        <div class="n">06</div>
+        <h3>Recusado: a resposta que não fica sem</h3>
+        <p>Um e-mail curto dizendo que desta vez seguimos com outro perfil e que o contato fica guardado.</p>
+        <div class="auto"><b>Depende de você:</b> clicar em enviar recusa na lista de candidatos.</div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="car-sec">
+    <h2>Como o encaixe é calculado</h2>
+    <p class="sub">
+      Ele ordena a fila, não decide quem entra. Quem responde que não pode trabalhar presencial ou que não aceita
+      PJ fica com encaixe zero, porque essas duas condições a vaga não negocia. Fora isso, somam pontos: a janela de
+      horário disponível, experiência em plano de saúde, experiência em venda de qualquer coisa, desenvoltura no
+      computador, ferramentas que a pessoa já usou, quando pode começar e o cuidado na resposta aberta.
+    </p>
+    <p class="sub">
+      Os pesos ficam num único lugar do código. Se o critério estiver errado, é uma linha para mudar: me diga qual
+      peso não corresponde ao que vocês valorizam e eu ajusto.
+    </p>
+  </div>
+
+</div>
+{% endblock %}
