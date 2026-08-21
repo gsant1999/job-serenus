@@ -12,8 +12,13 @@ const tela = {
   folhaConfirmar: el('folha-confirmar'),
 };
 
-let zap = { consultado: false, ligada: false, chat: null, rascunho: [], conversas: [],
-            modelos: [], funis: [], comandos: [] };
+let zap = { consultado: false, modo: 'extensao', ligada: false, chat: null, rascunho: [],
+            conversas: [], modelos: [], funis: [], comandos: [] };
+// MODO NUVEM: computador desligado, WhatsApp conectado no servidor. A lista deixa
+// de ser "as conversas abertas" e passa a ser "os seus leads do CRM", e o envio
+// sai pela fila do JOB em vez de sair pela extensão. É outra promessa — mais
+// lenta, sem conversa na tela — e a tela precisa dizer isso com todas as letras.
+const naNuvem = () => zap.modo === 'nuvem';
 // Destino escolhido na lista. null = manda para a conversa que estiver aberta,
 // que é o caso comum de quem está sentado na frente do computador.
 let zapAlvo = null;
@@ -71,11 +76,15 @@ function pintar() {
       + '<p class="zap-rot">Sem conversa para enviar</p>'
       + '<p class="zap-motivo">' + escapar(parado) + '</p></div>' + trocar
     : '<span class="zap-pulso"></span><div style="flex:1;min-width:0">'
-      + '<p class="zap-rot">' + (alvo.escolhido
-          ? 'Vai abrir esta conversa no computador e enviar'
-          : 'Vai para a conversa aberta no computador') + '</p>'
+      + '<p class="zap-rot">' + (naNuvem()
+          ? 'Sai pelo servidor, com o computador desligado'
+          : (alvo.escolhido ? 'Vai abrir esta conversa no computador e enviar'
+                            : 'Vai para a conversa aberta no computador')) + '</p>'
       + '<h2 class="zap-nome">' + escapar(alvo.nome || 'Conversa sem nome salvo') + '</h2>'
-      + (alvo.escolhido ? '' : rascunhoHtml()) + '</div>' + trocar;
+      + (naNuvem()
+          ? '<p class="zap-motivo">Entra na fila e sai em alguns minutos. Aqui não dá '
+            + 'para ver a conversa — confira depois no WhatsApp.</p>'
+          : (alvo.escolhido ? '' : rascunhoHtml())) + '</div>' + trocar;
   const bt = el('zap-trocar');
   if (bt) bt.addEventListener('click', abrirEscolhaDeConversa);
   pintarLista();
@@ -101,6 +110,8 @@ function rascunhoHtml() {
 // pula para ela antes de enviar — e quem escolheu precisa ver isso escrito.
 function alvoAtual() {
   if (zapAlvo) return { chatId: zapAlvo.chatId, nome: zapAlvo.nome, escolhido: true };
+  if (naNuvem()) return null;   // sem extensão não existe "conversa aberta"
+
   if (zap.chat) return { chatId: zap.chat.chatId, nome: zap.chat.nome, escolhido: false };
   return null;
 }
@@ -108,6 +119,14 @@ function alvoAtual() {
 // A condição que governa a tela, dita com todas as letras — e com o que fazer.
 function motivoDeNaoEnviar() {
   if (!zap.consultado) return 'Ainda perguntando ao computador.';
+  if (naNuvem()) {
+    if (zapSecao === 'funis') {
+      return 'Funil só com o computador ligado. Pelo servidor dá para mandar as '
+           + 'mensagens da biblioteca, uma de cada vez.';
+    }
+    if (!alvoAtual()) return 'Escolha o cliente na lista para o servidor enviar.';
+    return '';
+  }
   if (!zap.ligada) {
     return 'A extensão do JOB não está falando com o deck. Abra o WhatsApp Web no '
          + 'Chrome do computador (e clique na aba uma vez).';
@@ -168,7 +187,7 @@ function textoDeListaVazia() {
   if (zapBusca) return 'Nada com esse nome na biblioteca.';
   if (zapPasta !== null) return 'Nenhuma mensagem nesta pasta.';
   if (!zap.consultado) return 'Carregando a biblioteca.';
-  if (!zap.ligada) return 'A biblioteca aparece quando a extensão se conectar.';
+  if (!zap.ligada && !naNuvem()) return 'A biblioteca aparece quando a extensão se conectar.';
   return zapSecao === 'funis'
     ? 'Nenhum funil cadastrado ainda. Monte um em Funis.'
     : 'Nenhuma mensagem na biblioteca ainda.';
@@ -358,7 +377,9 @@ function confirmarFunil(f, card) {
 /* ------------------------------------------------------- escolher conversa */
 
 function abrirEscolhaDeConversa() {
-  abrirFolha({ titulo: 'Para quem vai', texto: '', confirmar: null });
+  abrirFolha({ titulo: 'Para quem vai',
+               texto: naNuvem() ? 'Seus leads do CRM com telefone, os mais recentes primeiro.' : '',
+               confirmar: null });
   const corpo = document.createElement('div');
   corpo.id = 'zap-contatos';
   corpo.className = 'zap-contatos';
@@ -367,7 +388,7 @@ function abrirEscolhaDeConversa() {
   const busca = document.createElement('input');
   busca.className = 'zap-busca';
   busca.type = 'search';
-  busca.placeholder = 'Buscar pelo nome';
+  busca.placeholder = naNuvem() ? 'Buscar o cliente pelo nome' : 'Buscar pelo nome';
   busca.setAttribute('aria-label', 'Buscar conversa pelo nome');
   corpo.appendChild(busca);
 
@@ -379,13 +400,14 @@ function abrirEscolhaDeConversa() {
     const q = busca.value.trim().toLowerCase();
     const itens = zap.conversas.filter((c) => !q || (c.nome || '').toLowerCase().indexOf(q) >= 0);
     lista.innerHTML = '';
-    if (zap.chat) lista.appendChild(linhaConversa(
+    if (zap.chat && !naNuvem()) lista.appendChild(linhaConversa(
       { chatId: zap.chat.chatId, nome: zap.chat.nome }, true));
     if (!itens.length) {
       const p = document.createElement('p');
       p.className = 'zap-vazio';
-      p.textContent = q ? 'Nenhuma conversa com esse nome.'
-        : 'A lista aparece quando a extensão terminar de ler as conversas.';
+      p.textContent = q ? 'Nenhum nome assim na lista.'
+        : (naNuvem() ? 'Nenhum lead seu com telefone no CRM.'
+                     : 'A lista aparece quando a extensão terminar de ler as conversas.');
       lista.appendChild(p);
       return;
     }
@@ -429,6 +451,13 @@ async function disparar(pedido) {
                              chatId: (alvo && alvo.escolhido) ? alvo.chatId : '' }),
     });
     if (r.erro) { recado(r.erro, 'erro'); soltarCard(pedido.chave); return; }
+    // Pela nuvem não há o que esperar na tela: o envio é do servidor e leva
+    // minutos. Fingir "entregue" agora seria a mentira mais fácil de contar.
+    if (r.comando.estado === 'na_fila_nuvem') {
+      recado(r.comando.mensagem, 'ok');
+      soltarCard(pedido.chave);
+      return;
+    }
     zapEsperando = { id: r.comando.id, chave: pedido.chave, em: Date.now() };
     recado('Mandando para ' + r.para + '…', 'espera');
     bater(true);
@@ -472,10 +501,11 @@ async function bater(deVolta) {
   if (document.hidden && !deVolta) { setTimeout(bater, 3000); return; }
   try {
     const r = await chamar('/api/deck/whatsapp');
-    const antes = JSON.stringify([zap.consultado, zap.ligada, zap.chat, zap.rascunho,
+    const antes = JSON.stringify([zap.consultado, zap.modo, zap.ligada, zap.chat, zap.rascunho,
       zap.modelos.length, zap.funis.length]);
     zap = {
       consultado: true,
+      modo: r.modo || 'extensao',
       ligada: r.extensao.ligada,
       chat: r.extensao.chat,
       rascunho: r.extensao.rascunho || [],
@@ -492,7 +522,7 @@ async function bater(deVolta) {
     conferirComando();
     // Só repinta quando algo mudou: repintar a cada 2,5s mataria o toque em
     // curso e piscaria a tela na cara de quem está usando.
-    if (JSON.stringify([zap.consultado, zap.ligada, zap.chat, zap.rascunho,
+    if (JSON.stringify([zap.consultado, zap.modo, zap.ligada, zap.chat, zap.rascunho,
         zap.modelos.length, zap.funis.length]) !== antes) pintar();
     conexao(true);
   } catch (e) {
