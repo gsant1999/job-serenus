@@ -7,6 +7,10 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Deck">
 <meta name="theme-color" content="#0e0f12">
+{# O Safari transforma telefone em link azul sublinhado por conta própria —
+   e o deck fala de telefone o tempo todo. Some no meio do texto e vira
+   sujeira que ninguém escreveu. #}
+<meta name="format-detection" content="telephone=no">
 <title>Deck — JOB Serenus</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='deck.css', v=v) }}">
 </head>
