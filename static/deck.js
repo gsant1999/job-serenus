@@ -34,6 +34,33 @@ let naNuvemEsperando = [];
 let zapEsperando = null;   // { id, chave } do comando que este iPad disparou
 let confirmando = null;
 
+/* ------------------------------------------------------------- medição */
+
+// O DECK CONTA DE SI MESMO.
+//
+// Ele subiu inteiro sem nenhuma medição: ninguém sabe quantas teclas são
+// tocadas por dia, quais nunca são, nem quanto tempo leva do abrir até o
+// disparo. Sem isso, a próxima melhoria seria palpite meu — e a régua da casa
+// manda desenhar contra o erro que acontece, não contra o imaginado.
+//
+// Nunca atrapalha o trabalho: sai por fora do caminho do envio, não espera
+// resposta e engole o próprio erro. Medição que trava a tela é pior que
+// medição nenhuma.
+const abriuEm = Date.now();
+function medir(evento, extra) {
+  try {
+    fetch('/api/deck/uso', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      keepalive: true,          // sobrevive à tela sendo fechada no meio
+      body: JSON.stringify(Object.assign({
+        evento, modo: zap.modo, ms: Date.now() - abriuEm,
+      }, extra || {})),
+    }).catch(() => {});
+  } catch (e) { /* medir nunca derruba o deck */ }
+}
+
 /* ------------------------------------------------------------- servidor */
 
 async function chamar(rota, opcoes) {
@@ -514,6 +541,13 @@ function linhaConversa(c, ehAberta) {
 /* --------------------------------------------------------------- envio */
 
 async function disparar(pedido) {
+  const card0 = tela.lista.querySelector('[data-chave="' + pedido.chave + '"]');
+  medir('tocou', {
+    chave: pedido.chave,
+    rotulo: card0 ? (card0.querySelector('.rotulo') || {}).textContent : '',
+    secao: zapSecao, pasta: zapPasta === null ? 'todas' : (zapPasta || 'sem pasta'),
+    buscou: Boolean(zapBusca),
+  });
   const card = tela.lista.querySelector('[data-chave="' + pedido.chave + '"]');
   marcarCard(pedido.chave, 'indo');
   try {
@@ -622,9 +656,11 @@ function conferirFila(fila) {
       return true;
     }
     if (item.status === 'enviado') {
+      medir('desfecho', { chave: p.chave, desfecho: 'foi' });
       marcarCard(p.chave, 'foi', 8);
       recado('Chegou no WhatsApp de ' + p.para + '.', 'ok');
     } else {
+      medir('desfecho', { chave: p.chave, desfecho: 'falhou', motivo: item.erro || '' });
       marcarCard(p.chave, 'falhou');
       recado('Não saiu para ' + p.para + '. ' + (item.erro || 'Tente de novo.'), 'erro');
     }
@@ -700,6 +736,9 @@ function conferirComando() {
   recado(cmd.mensagem, tom);
   // Verde some em 6 segundos porque a tecla vai ser usada de novo; vermelho e
   // âmbar ficam até alguém tocar nela outra vez.
+  medir('desfecho', { chave: zapEsperando.chave,
+                      desfecho: ruim ? 'falhou' : 'foi',
+                      motivo: ruim ? (cmd.mensagem || '') : '' });
   marcarCard(zapEsperando.chave,
              ruim ? 'falhou' : (cmd.estado === 'esperando' ? 'espera' : 'foi'),
              ruim || cmd.estado === 'esperando' ? 0 : 6);
@@ -741,6 +780,7 @@ el('zap-tema').addEventListener('click', () => {
   aplicarTema(proximo.id);
 });
 aplicarTema(localStorage.getItem('deck_tema') || '');
+setTimeout(() => medir('abriu'), 1500);   // depois da primeira batida, para saber o modo
 
 /* -------------------------------------------------------------- partida */
 

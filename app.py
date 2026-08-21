@@ -1601,6 +1601,21 @@ def init_db():
                 encaixe INTEGER DEFAULT 0, veredito TEXT, status TEXT DEFAULT 'novo',
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS deck_uso (
+                id SERIAL PRIMARY KEY,
+                usuario_id INTEGER NOT NULL,
+                em TIMESTAMP,
+                evento TEXT NOT NULL,
+                modo TEXT,
+                chave TEXT,
+                rotulo TEXT,
+                secao TEXT,
+                pasta TEXT,
+                buscou INTEGER DEFAULT 0,
+                ms_desde_abrir INTEGER,
+                desfecho TEXT,
+                motivo TEXT
+            )""",
             """CREATE TABLE IF NOT EXISTS deck_conversa (
                 usuario_id INTEGER NOT NULL,
                 chat_id TEXT NOT NULL,
@@ -2895,6 +2910,21 @@ def init_db():
             melhor_venda TEXT, inicio TEXT, observacao TEXT,
             encaixe INTEGER DEFAULT 0, veredito TEXT, status TEXT DEFAULT 'novo',
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS deck_uso (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id INTEGER NOT NULL,
+            em TEXT,
+            evento TEXT NOT NULL,
+            modo TEXT,
+            chave TEXT,
+            rotulo TEXT,
+            secao TEXT,
+            pasta TEXT,
+            buscou INTEGER DEFAULT 0,
+            ms_desde_abrir INTEGER,
+            desfecho TEXT,
+            motivo TEXT
         );
         CREATE TABLE IF NOT EXISTS deck_conversa (
             usuario_id INTEGER NOT NULL,
@@ -33298,6 +33328,112 @@ def _deck_biblioteca_nuvem(conn, uid):
             "pasta": ' / '.join(caminho),
         })
     return out
+
+
+@app.route('/api/deck/uso', methods=['POST'])
+@login_required
+def api_deck_uso():
+    """O que o deck registra de si mesmo.
+
+    POR QUE ISTO EXISTE. O deck subiu inteiro sem nenhuma medição: não sabemos
+    quantas teclas são tocadas por dia, quais nunca são, nem quanto tempo leva do
+    abrir até o disparo. Sem isso, a próxima melhoria é palpite — e a régua da
+    casa manda desenhar contra o erro que acontece, não contra o imaginado.
+
+    O QUE NÃO ENTRA AQUI. Nome de cliente, telefone e texto de mensagem. O que
+    interessa é qual TECLA foi tocada e quanto custou chegar nela; quem recebeu
+    não é assunto de métrica de tela, e é dado de cliente de plano de saúde.
+    """
+    d = request.get_json(silent=True) or {}
+    evento = str(d.get('evento') or '')[:20]
+    if evento not in ('abriu', 'tocou', 'desfecho'):
+        return jsonify({"ok": False}), 400
+    conn = None
+    try:
+        conn = db()
+        conn.execute("""INSERT INTO deck_uso
+            (usuario_id, em, evento, modo, chave, rotulo, secao, pasta, buscou,
+             ms_desde_abrir, desfecho, motivo)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (session['user_id'], _agora_sp(), evento,
+             str(d.get('modo') or '')[:12], str(d.get('chave') or '')[:60],
+             str(d.get('rotulo') or '')[:80], str(d.get('secao') or '')[:20],
+             str(d.get('pasta') or '')[:60], 1 if d.get('buscou') else 0,
+             int(d.get('ms') or 0) or None,
+             str(d.get('desfecho') or '')[:20], str(d.get('motivo') or '')[:120]))
+        conn.commit()
+    except Exception as e:
+        # Medição nunca pode atrapalhar o trabalho: se falhar, falha sozinha.
+        app.logger.warning(f"[DECK] nao registrei o uso: {e}")
+    finally:
+        if conn is not None:
+            close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/api/deck/uso/resumo')
+@login_required
+def api_deck_uso_resumo():
+    """O que a medição já sabe. Mediana e p95, nunca só a média.
+
+    A média esconde o caso ruim: se nove disparos levam 8 segundos e um leva
+    dois minutos, a média diz 20 segundos e ninguém reconhece o problema. A
+    mediana diz como é o dia normal; o p95 diz como é o dia ruim.
+    """
+    if session.get('perfil') != 'admin':
+        return jsonify({"erro": "Só o admin vê o uso do deck."}), 403
+    dias = max(1, min(90, int(request.args.get('dias', 14))))
+    corte = (datetime.now(TZ_SP) - timedelta(days=dias)).strftime('%Y-%m-%d %H:%M:%S')
+    conn = db()
+    try:
+        linhas = [dict(r) for r in conn.execute("""SELECT usuario_id, evento, modo, chave,
+                rotulo, secao, buscou, ms_desde_abrir, desfecho, motivo
+                FROM deck_uso WHERE CAST(em AS TEXT) >= ?""", (corte,)).fetchall()]
+        nomes = {int(dict(r)['id']): dict(r)['nome']
+                 for r in conn.execute("SELECT id, nome FROM usuarios").fetchall()}
+    finally:
+        close_db(conn)
+
+    def percentil(valores, p):
+        vs = sorted(v for v in valores if v)
+        if not vs:
+            return None
+        i = min(len(vs) - 1, int(round((p / 100.0) * (len(vs) - 1))))
+        return vs[i]
+
+    toques = [l for l in linhas if l['evento'] == 'tocou']
+    desfechos = [l for l in linhas if l['evento'] == 'desfecho']
+    tempos = [l['ms_desde_abrir'] for l in toques]
+    por_tecla = {}
+    for l in toques:
+        chave = l.get('rotulo') or l.get('chave') or '(sem nome)'
+        por_tecla[chave] = por_tecla.get(chave, 0) + 1
+    ruins = [l for l in desfechos if l.get('desfecho') in ('falhou', 'expirado')]
+    motivos = {}
+    for l in ruins:
+        m = (l.get('motivo') or 'sem motivo registrado')[:80]
+        motivos[m] = motivos.get(m, 0) + 1
+
+    return jsonify({
+        "dias": dias,
+        "aberturas": sum(1 for l in linhas if l['evento'] == 'abriu'),
+        "toques": len(toques),
+        "por_consultor": {nomes.get(u, f"usuário {u}"): sum(1 for l in toques if l['usuario_id'] == u)
+                          for u in {l['usuario_id'] for l in toques}},
+        "por_modo": {m: sum(1 for l in toques if (l.get('modo') or '?') == m)
+                     for m in {(l.get('modo') or '?') for l in toques}},
+        "achar_a_tecla_segundos": {
+            "mediana": round((percentil(tempos, 50) or 0) / 1000.0, 1),
+            "p95": round((percentil(tempos, 95) or 0) / 1000.0, 1),
+        },
+        "usou_busca_pct": (round(100.0 * sum(1 for l in toques if l.get('buscou')) / len(toques))
+                           if toques else 0),
+        "teclas_mais_tocadas": sorted(por_tecla.items(), key=lambda x: -x[1])[:12],
+        "teclas_diferentes": len(por_tecla),
+        "falhas": len(ruins),
+        "falha_pct": round(100.0 * len(ruins) / len(desfechos)) if desfechos else 0,
+        "motivos_de_falha": sorted(motivos.items(), key=lambda x: -x[1])[:8],
+    })
 
 
 @app.route('/api/deck/whatsapp')
