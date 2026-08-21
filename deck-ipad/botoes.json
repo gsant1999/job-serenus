@@ -114,6 +114,65 @@
       ]
     },
     {
+      "nome": "Mesa",
+      "botoes": [
+        {
+          "id": "mesa_manha",
+          "rotulo": "Abrir a mesa da manhã",
+          "dica": "JOB, WhatsApp Web e as duas planilhas de anúncio, numa janela só",
+          "icone": "janela",
+          "acao": {
+            "tipo": "shell",
+            "tempo_max": 40,
+            "comando": "open -na \"Google Chrome\" --args --new-window \"https://job-serenus-production.up.railway.app\" \"https://web.whatsapp.com\" \"https://docs.google.com/spreadsheets/d/1VOChFfTkuVO4eO0FCAkBjrP9qDFnvWZnk5rLdUrNm64/edit\" \"https://docs.google.com/spreadsheets/d/1QT8y8rfbMaHb5POrYFZKjdccpgMLLY3WRjBjxFmold8/edit\""
+          }
+        },
+        {
+          "id": "mesa_planilhas",
+          "rotulo": "Abrir só as planilhas de anúncio",
+          "dica": "Meta e Google, lado a lado nas abas",
+          "icone": "link",
+          "acao": {
+            "tipo": "shell",
+            "tempo_max": 30,
+            "comando": "open -na \"Google Chrome\" --args --new-window \"https://docs.google.com/spreadsheets/d/1VOChFfTkuVO4eO0FCAkBjrP9qDFnvWZnk5rLdUrNm64/edit\" \"https://docs.google.com/spreadsheets/d/1QT8y8rfbMaHb5POrYFZKjdccpgMLLY3WRjBjxFmold8/edit\""
+          }
+        },
+        {
+          "id": "mesa_zap_janela",
+          "rotulo": "Abrir o WhatsApp numa janela só dele",
+          "dica": "Sem barra de abas, para ficar de lado na tela",
+          "icone": "whatsapp",
+          "acao": {
+            "tipo": "shell",
+            "tempo_max": 30,
+            "comando": "open -na \"Google Chrome\" --args --app=\"https://web.whatsapp.com\""
+          }
+        },
+        {
+          "id": "mesa_esconder",
+          "rotulo": "Esconder o Chrome",
+          "dica": "Tira da frente sem fechar nada; um toque devolve",
+          "icone": "olho",
+          "acao": {
+            "tipo": "applescript",
+            "script": "tell application \"System Events\" to set visible of process \"Google Chrome\" to false"
+          }
+        },
+        {
+          "id": "texto_pix",
+          "rotulo": "Colar a chave PIX da Serenus",
+          "dica": "Cola onde o cursor estiver e mostra o fim da chave para conferir",
+          "icone": "texto",
+          "acao": {
+            "tipo": "texto",
+            "arquivo": "pix.txt",
+            "colar": true
+          }
+        }
+      ]
+    },
+    {
       "id": "mac",
       "nome": "MacBook",
       "botoes": [
@@ -163,23 +222,34 @@
           }
         },
         {
-          "id": "captura_area",
-          "rotulo": "Capturar um pedaço da tela",
-          "dica": "Abre a mira; o recorte vai para a área de transferência",
+          "id": "print_recorte",
+          "rotulo": "Recortar um pedaço da tela",
+          "dica": "Abre a mira; o recorte vira arquivo na Área de Trabalho",
           "icone": "camera",
           "acao": {
-            "tipo": "teclas",
-            "combinacao": "cmd+shift+ctrl+4"
+            "tipo": "shell",
+            "tempo_max": 120,
+            "comando": "screencapture -i \"$HOME/Desktop/recorte-$(date +%H%M%S).png\" && echo \"Recorte salvo na Área de Trabalho.\""
           }
         },
         {
           "id": "gravar_tela",
-          "rotulo": "Abrir a gravação de tela",
-          "dica": "Painel de captura do macOS",
-          "icone": "camera",
-          "acao": {
-            "tipo": "teclas",
-            "combinacao": "cmd+shift+5"
+          "rotulo": "Gravar a tela",
+          "rotulo_ligado": "Gravando — toque para parar",
+          "dica": "O vídeo fica na Área de Trabalho quando você parar",
+          "icone": "video",
+          "icone_ligado": "video",
+          "controle": "alternar",
+          "consulta": "pgrep -f 'screencapture -v' >/dev/null && echo 1 || echo 0",
+          "ligar": {
+            "tipo": "shell",
+            "tempo_max": 15,
+            "comando": "nohup screencapture -v \"$HOME/Desktop/tela-$(date +%H%M%S).mov\" >/dev/null 2>&1 & echo \"Gravando. Toque de novo para parar.\""
+          },
+          "desligar": {
+            "tipo": "shell",
+            "tempo_max": 15,
+            "comando": "pkill -INT -f 'screencapture -v'; sleep 1; echo \"Parei. O vídeo está na Área de Trabalho.\""
           }
         },
         {

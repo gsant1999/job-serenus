@@ -387,13 +387,34 @@ def rodar_acao(acao: dict, exe: Execucao, valor: float | None = None) -> bool:
         return ok
 
     if tipo == "texto":
-        conteudo = substituir_valor(acao.get("texto", ""), valor)
+        # O TEXTO PODE MORAR FORA DO REPOSITÓRIO.
+        #
+        # Chave PIX, assinatura e endereço são dados do dono, não do projeto:
+        # com `arquivo`, o botão lê de um arquivo local que o git ignora. Assim
+        # a chave de recebimento não vai parar num commit — e trocar o texto não
+        # exige mexer em código.
+        if acao.get("arquivo"):
+            caminho = RAIZ / "textos" / str(acao["arquivo"])
+            try:
+                conteudo = caminho.read_text(encoding="utf-8").strip()
+            except OSError:
+                exe.escrever(
+                    f"Falta o arquivo com o texto ({acao['arquivo']}). "
+                    f"Crie ele em deck-ipad/textos/ e toque de novo.\n"
+                )
+                return False
+            if not conteudo:
+                exe.escrever(f"O arquivo {acao['arquivo']} está vazio.\n")
+                return False
+        else:
+            conteudo = substituir_valor(acao.get("texto", ""), valor)
         try:
             subprocess.run(["/usr/bin/pbcopy"], input=conteudo.encode("utf-8"), timeout=10)
         except (subprocess.SubprocessError, OSError) as e:
             exe.escrever(f"Não consegui copiar: {e}\n")
             return False
-        exe.escrever(f"Copiado: {len(conteudo)} caracteres.\n")
+        fim = conteudo[-6:] if len(conteudo) > 6 else conteudo
+        exe.escrever(f"Copiado: {len(conteudo)} caracteres, terminando em {fim}\n")
         if acao.get("colar", True):
             script = 'tell application "System Events" to keystroke "v" using {command down}'
             if not rodar_processo(["/usr/bin/osascript", "-"], exe, acao, entrada=script):
