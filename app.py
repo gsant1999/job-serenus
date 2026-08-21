@@ -3838,6 +3838,7 @@ def init_db():
         ("usuarios", "waspeed_token", "TEXT"),
         ("usuarios", "som_notificacao", "TEXT"),  # NULL = padrao do sistema (thriller)
         ("crm_leads", "telefone_norm", "TEXT"),
+        ("deck_conversa", "fonte", "TEXT"),
         # Fila de análise obrigatória das vendas fechadas: ela precisa passar na
         # frente da varredura exploratória, senão fica atrás de centenas de itens
         # antigos e a venda — que é o dado caro — nunca é lida.
@@ -33078,6 +33079,97 @@ def api_nuvem_desconectar():
 _DECK_CONVERSAS_GUARDADAS = 40
 
 
+_EVO_CONVERSAS_CACHE = {}       # uid -> (visto_em, [conversas])
+_EVO_CONVERSAS_TTL_S = 60
+_EVO_CONVERSAS_TETO = 60
+
+
+def _evolution_conversas(uid, conn):
+    """Com quem este consultor falou, perguntado ao próprio WhatsApp do servidor.
+
+    É a versão que não depende de ninguém: a extensão pode nunca ter rodado, o
+    computador pode estar desligado há dias, e a lista continua existindo.
+
+    Duas coisas que o Evolution NÃO entrega bem, e que são resolvidas aqui:
+
+    - **nome**: das centenas de conversas, pouquíssimas têm nome salvo. Quem
+      sabe o nome é o CRM, então o telefone é cruzado com os leads do consultor.
+    - **telefone**: boa parte das conversas vem só com o identificador interno do
+      WhatsApp, sem número. Pelo servidor o envio é por número — essas ficam de
+      fora, porque oferecer um nome que não dá para enviar é botão que não
+      cumpre. Com o computador ligado elas continuam funcionando.
+    """
+    agora = time.time()
+    visto = _EVO_CONVERSAS_CACHE.get(int(uid))
+    if visto and agora - visto[0] < _EVO_CONVERSAS_TTL_S:
+        return visto[1]
+
+    ok, dados = _evolution_chamar('POST', f"/chat/findChats/{_evolution_instancia(uid)}",
+                                  corpo={}, tempo=20)
+    if not ok:
+        return (visto[1] if visto else [])
+    brutos = dados if isinstance(dados, list) else ((dados or {}).get('chats') or [])
+
+    crus = []
+    for c in brutos:
+        if not isinstance(c, dict):
+            continue
+        jid = str(c.get('remoteJid') or c.get('id') or '')
+        # A REGRA É O SUFIXO, NÃO OS DÍGITOS.
+        #
+        # O identificador interno do WhatsApp (@lid) também é só número — e é
+        # longo o bastante para passar por telefone. Filtrar por "parece número"
+        # deixava ele entrar e virar um destino que nunca sairia. Só telefone de
+        # verdade tem @s.whatsapp.net ou @c.us.
+        if not jid.endswith('@s.whatsapp.net') and not jid.endswith('@c.us'):
+            continue
+        numero = jid.split('@', 1)[0]
+        if not numero.isdigit() or len(numero) < 10:
+            continue
+        crus.append({"jid": jid, "fone": _waspeed_normaliza_fone(numero),
+                     "nome": (c.get('pushName') or '').strip(),
+                     "em": str(c.get('updatedAt') or '')})
+    crus.sort(key=lambda x: x['em'], reverse=True)
+    crus = crus[:_EVO_CONVERSAS_TETO]
+
+    # QUEM SABE O NOME É O CRM. Uma consulta para todos, não uma por conversa.
+    nomes = {}
+    fones = [c['fone'] for c in crus if c['fone']]
+    if fones:
+        try:
+            marcas = ','.join(['?'] * len(fones))
+            for r in conn.execute(f"""SELECT nome, telefone, telefone_norm FROM crm_leads
+                    WHERE responsavel_id=?
+                      AND (telefone_norm IN ({marcas}) OR telefone IN ({marcas}))""",
+                    [uid] + fones + fones).fetchall():
+                d_ = dict(r)
+                for chave in (d_.get('telefone_norm'), d_.get('telefone')):
+                    if chave:
+                        nomes.setdefault(_waspeed_normaliza_fone(chave), d_.get('nome') or '')
+        except Exception as e:
+            app.logger.warning(f"[DECK] nomes do CRM para a lista da nuvem: {e}")
+
+    out = []
+    for c in crus:
+        nome = nomes.get(c['fone']) or c['nome'] or _telefone_bonito(c['fone'])
+        out.append({"chatId": c['jid'], "nome": nome, "telefone": c['fone'],
+                    "em": 0, "de": "conversa"})
+    _EVO_CONVERSAS_CACHE[int(uid)] = (agora, out)
+    return out
+
+
+def _telefone_bonito(fone):
+    """Sem nome em lugar nenhum, ao menos o número legível — não o cru."""
+    d = ''.join(ch for ch in str(fone or '') if ch.isdigit())
+    if len(d) >= 12 and d.startswith('55'):
+        d = d[2:]
+    if len(d) == 11:
+        return f"({d[:2]}) {d[2:7]}-{d[7:]}"
+    if len(d) == 10:
+        return f"({d[:2]}) {d[2:6]}-{d[6:]}"
+    return d or 'Sem nome salvo'
+
+
 def _deck_guardar_conversas(uid, conversas):
     """Guarda com quem o consultor anda conversando, para o deck servir na rua.
 
@@ -33445,45 +33537,55 @@ def api_deck_whatsapp():
     # trava do deck é de todo mundo. Aqui só se lê o estado — o dicionário de
     # presença é do próprio consultor.
     nuvem_pronta = (not _deck_ligada(_deck_presenca(uid))) and _deck_nuvem_pronta(uid)
+
+    # MODO NUVEM: o deck deixa de depender da extensão.
+    #
+    # Com a extensão parada (consultor na rua, computador desligado), o deck não
+    # fica inútil: a lista de destinos passa a vir do próprio WhatsApp no
+    # servidor, a biblioteca vem do banco, e o envio entra na fila.
+    #
+    # Tudo isto acontece FORA da trava: perguntar ao Evolution leva segundos, e a
+    # trava do deck é de todos os consultores. Um iPad esperando o WhatsApp de
+    # outra pessoa seria a tela travando sem motivo aparente.
+    leads_nuvem, biblioteca_nuvem = [], []
+    if nuvem_pronta:
+        conn_l = None
+        try:
+            conn_l = db()
+            biblioteca_nuvem = _deck_biblioteca_nuvem(conn_l, uid)
+            # PRIMEIRO as conversas de verdade: com o computador desligado, o que
+            # o consultor procura é o nome de quem ele estava atendendo, não a
+            # lista do CRM. O que a extensão gravou entra como reforço, para o
+            # caso de o servidor não responder. O CRM vem por último, para quem
+            # ainda não foi abordado.
+            leads_nuvem = _evolution_conversas(uid, conn_l)
+            if not leads_nuvem:
+                leads_nuvem = _deck_conversas_guardadas(conn_l, uid)
+            ja = {_waspeed_normaliza_fone(c['telefone']) for c in leads_nuvem}
+            for r in conn_l.execute("""SELECT id, nome, telefone
+                    FROM crm_leads
+                   WHERE responsavel_id=?
+                     AND telefone IS NOT NULL AND telefone <> ''
+                ORDER BY COALESCE(atualizado_em, criado_em) DESC LIMIT 40""",
+                    (uid,)).fetchall():
+                d_ = dict(r)
+                if _waspeed_normaliza_fone(d_.get('telefone') or '') in ja:
+                    continue        # já está na lista como conversa
+                leads_nuvem.append({"chatId": f"lead:{d_['id']}",
+                                    "nome": d_.get('nome') or 'Sem nome',
+                                    "telefone": d_.get('telefone') or '',
+                                    "em": 0, "de": "lead"})
+        except Exception as e:
+            app.logger.warning(f"[DECK] lista do modo nuvem: {e}")
+        finally:
+            if conn_l is not None:
+                close_db(conn_l)
+
     with _deck_trava:
         pres = _deck_presenca(uid)
         pres['ipad_em'] = time.time()   # é isto que acelera a batida da extensão
         _deck_vencer(uid)
-        # MODO NUVEM: o deck deixa de depender da extensao.
-        #
-        # Com a extensao parada (consultor na rua, computador desligado), o deck
-        # nao fica inutil: ele passa a listar os LEADS do CRM em vez das conversas
-        # abertas, e o envio vai para a fila, que escolhe o transporte. E a mesma
-        # tela — o que muda e de onde vem o contato e por onde sai a mensagem.
         nuvem_pronta = nuvem_pronta and not _deck_ligada(pres)
-
-        leads_nuvem, biblioteca_nuvem = [], []
-        if nuvem_pronta:
-            try:
-                conn_l = db()
-                biblioteca_nuvem = _deck_biblioteca_nuvem(conn_l, uid)
-                # PRIMEIRO as conversas de verdade. Com o computador desligado, o
-                # que o consultor procura é o nome de quem ele estava atendendo —
-                # não a lista do CRM. O CRM entra depois, para quem ainda não foi
-                # abordado.
-                leads_nuvem = _deck_conversas_guardadas(conn_l, uid)
-                ja = {_waspeed_normaliza_fone(c['telefone']) for c in leads_nuvem}
-                for r in conn_l.execute("""SELECT id, nome, telefone
-                        FROM crm_leads
-                       WHERE responsavel_id=?
-                         AND telefone IS NOT NULL AND telefone <> ''
-                    ORDER BY COALESCE(atualizado_em, criado_em) DESC LIMIT 40""",
-                        (uid,)).fetchall():
-                    d_ = dict(r)
-                    if _waspeed_normaliza_fone(d_.get('telefone') or '') in ja:
-                        continue        # já está na lista como conversa
-                    leads_nuvem.append({"chatId": f"lead:{d_['id']}",
-                                        "nome": d_.get('nome') or 'Sem nome',
-                                        "telefone": d_.get('telefone') or '',
-                                        "em": 0, "de": "lead"})
-                close_db(conn_l)
-            except Exception as e:
-                app.logger.warning(f"[DECK] leads para o modo nuvem: {e}")
 
         dados = {
             "modo": "nuvem" if nuvem_pronta else "extensao",
@@ -33556,14 +33658,23 @@ def _deck_comando_pela_nuvem(uid, alvo, tipo, d):
                 return jsonify({"erro": "Esse lead não é seu ou não existe mais."}), 404
             ld = dict(lead)
         else:
+            # A conversa pode ter vindo de dois lugares: da extensão (guardada no
+            # banco) ou do próprio WhatsApp do servidor. Nos dois casos, só sai
+            # daqui um destino que ESTÁ na lista que o consultor viu — o id não é
+            # aceito na palavra.
             conversa = conn.execute(
                 "SELECT nome, telefone FROM deck_conversa WHERE usuario_id=? AND chat_id=?",
                 (uid, alvo)).fetchone()
-            if not conversa:
-                return jsonify({"erro": "Não reconheço essa conversa. Abra o WhatsApp Web "
-                                        "uma vez para o JOB atualizar a sua lista."}), 404
-            cd = dict(conversa)
-            ld = {"id": None, "nome": cd.get('nome') or '', "telefone": cd.get('telefone') or ''}
+            if conversa:
+                cd = dict(conversa)
+                ld = {"id": None, "nome": cd.get('nome') or '', "telefone": cd.get('telefone') or ''}
+            else:
+                da_nuvem = next((c for c in _evolution_conversas(uid, conn)
+                                 if c['chatId'] == alvo), None)
+                if not da_nuvem:
+                    return jsonify({"erro": "Não reconheço essa conversa. Atualize a tela do "
+                                            "deck e escolha o cliente de novo."}), 404
+                ld = {"id": None, "nome": da_nuvem['nome'], "telefone": da_nuvem['telefone']}
         fone = _waspeed_normaliza_fone(ld.get('telefone') or '')
         if not fone:
             return jsonify({"erro": "Esse contato não tem telefone utilizável pelo servidor. "
