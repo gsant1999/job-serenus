@@ -6948,6 +6948,7 @@ def _inject_pode_modulo():
 
 # ─── INTEGRAÇÃO ASAAS (pagamentos PIX para consultores) ──────────────────────────
 import requests as _requests
+import urllib.request as _urlrequest
 
 # CORREÇÃO 21.06.2026: o cifrão ($) FAZ PARTE da chave do Asaas (formato $aact_prod_...).
 # Removê-lo invalida a chave (erro invalid_access_token / 401). Confirmado via teste ao vivo:
@@ -32560,6 +32561,154 @@ def _deck_vencer(uid):
 
 def _deck_publico(c):
     return {k: v for k, v in c.items() if k != 'dados'}
+
+
+# ═══════════════════════ WhatsApp na nuvem (Evolution) ═══════════════════════
+#
+# O segundo caminho de envio. A extensão continua sendo o primeiro: ela manda
+# pela conversa aberta do consultor. Este aqui manda pelo servidor, e por isso
+# funciona com o computador desligado.
+#
+# Cada consultor tem a SUA conexão, com o SEU número — o cliente continua vendo
+# quem sempre falou com ele. A conexão nasce escaneando um QR no popup da
+# extensão, uma vez por pessoa.
+#
+# O QR tem duas regras que a tela precisa respeitar, e as duas custaram caro
+# para descobrir em 20/08/2026:
+#   1. ele vale ~40 segundos, então só se pede quando alguém está olhando;
+#   2. o servidor tem teto de códigos por conexão — renovar em laço queima o
+#      teto e passa a exibir um QR morto sem avisar ninguém.
+# Por isso aqui o QR é pedido SOB DEMANDA, nunca em laço de fundo.
+
+_EVOLUTION_URL = (os.environ.get('EVOLUTION_URL') or '').rstrip('/')
+_EVOLUTION_API_KEY = (os.environ.get('EVOLUTION_API_KEY') or '').strip()
+
+
+def _evolution_ligada():
+    return bool(_EVOLUTION_URL and _EVOLUTION_API_KEY)
+
+
+def _evolution_instancia(uid):
+    """Um nome de conexão por consultor, estável no tempo."""
+    return f"consultor-{int(uid)}"
+
+
+def _evolution_chamar(metodo, caminho, corpo=None, tempo=25):
+    """Fala com o servidor de WhatsApp. Devolve (ok, dados_ou_erro).
+
+    Nunca levanta: quem chama são telas, e tela que quebra por servidor fora do
+    ar é pior que tela que diz 'não consegui falar com o servidor'.
+    """
+    if not _evolution_ligada():
+        return False, 'O envio pela nuvem ainda não foi configurado neste sistema.'
+    url = f"{_EVOLUTION_URL}{caminho}"
+    dados = json.dumps(corpo).encode() if corpo is not None else None
+    req = _urlrequest.Request(url, data=dados, method=metodo)
+    req.add_header('apikey', _EVOLUTION_API_KEY)
+    if dados:
+        req.add_header('Content-Type', 'application/json')
+    try:
+        with _urlrequest.urlopen(req, timeout=tempo) as r:
+            bruto = r.read().decode('utf-8', 'replace')
+            try:
+                return True, json.loads(bruto)
+            except ValueError:
+                return True, {}
+    except Exception as e:
+        corpo_erro = ''
+        try:
+            corpo_erro = e.read().decode('utf-8', 'replace')[:200]
+        except Exception:
+            corpo_erro = str(e)[:200]
+        app.logger.warning('[EVOLUTION] %s %s falhou: %s', metodo, caminho, corpo_erro)
+        return False, 'O servidor de WhatsApp não respondeu.'
+
+
+@app.route('/api/whatsapp/extensao/nuvem/estado', methods=['GET', 'OPTIONS'])
+@requer('whatsapp:enviar')
+def api_nuvem_estado():
+    """A conexão de nuvem deste consultor está de pé?"""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    uid = getattr(g, 'usuario_id', None)
+    if not uid:
+        return _wa_cors(jsonify({"ok": False, "erro": "Entre no JOB pelo popup da extensão"})), 401
+    if not _evolution_ligada():
+        return _wa_cors(jsonify({"ok": True, "disponivel": False,
+                                 "estado": "desligado",
+                                 "recado": "O envio pela nuvem ainda não está ligado neste sistema."}))
+    ok, d = _evolution_chamar('GET', f"/instance/connectionState/{_evolution_instancia(uid)}")
+    if not ok:
+        # Instancia que ainda nao existe devolve erro; isso nao e falha, e o
+        # estado normal de quem nunca conectou.
+        return _wa_cors(jsonify({"ok": True, "disponivel": True, "estado": "nunca_conectado",
+                                 "recado": "Você ainda não conectou seu WhatsApp ao servidor."}))
+    estado = ((d or {}).get('instance') or {}).get('state') or 'desconhecido'
+    mapa = {
+        'open': ("conectado", "Seu WhatsApp está conectado ao servidor. Mensagem sai mesmo com o computador desligado."),
+        'connecting': ("conectando", "Esperando você escanear o código."),
+        'close': ("caiu", "A conexão caiu. Escaneie de novo para voltar."),
+    }
+    nome, recado = mapa.get(estado, (estado, "Estado desconhecido."))
+    return _wa_cors(jsonify({"ok": True, "disponivel": True, "estado": nome, "recado": recado}))
+
+
+@app.route('/api/whatsapp/extensao/nuvem/qr', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
+def api_nuvem_qr():
+    """Devolve um QR NOVO para este consultor escanear.
+
+    Só é chamado quando alguém clicou pedindo — nunca em laço. Ver o comentário
+    do topo: laço de renovação queima o teto de códigos do servidor e a tela
+    passa a mostrar um código morto.
+    """
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    uid = getattr(g, 'usuario_id', None)
+    if not uid:
+        return _wa_cors(jsonify({"ok": False, "erro": "Entre no JOB pelo popup da extensão"})), 401
+    if not _evolution_ligada():
+        return _wa_cors(jsonify({"ok": False, "erro": "O envio pela nuvem ainda não está ligado neste sistema."})), 503
+
+    nome = _evolution_instancia(uid)
+    ok, estado = _evolution_chamar('GET', f"/instance/connectionState/{nome}")
+    existe = bool(ok and ((estado or {}).get('instance') or {}).get('state'))
+
+    if existe and ((estado or {}).get('instance') or {}).get('state') == 'open':
+        return _wa_cors(jsonify({"ok": True, "ja_conectado": True,
+                                 "recado": "Seu WhatsApp já está conectado."}))
+
+    if not existe:
+        ok, d = _evolution_chamar('POST', '/instance/create', {
+            "instanceName": nome, "integration": "WHATSAPP-BAILEYS", "qrcode": True,
+        })
+        if not ok:
+            return _wa_cors(jsonify({"ok": False, "erro": d})), 502
+        base64_qr = ((d or {}).get('qrcode') or {}).get('base64') or ''
+        if base64_qr:
+            return _wa_cors(jsonify({"ok": True, "qr": base64_qr}))
+
+    ok, d = _evolution_chamar('GET', f"/instance/connect/{nome}")
+    if not ok:
+        return _wa_cors(jsonify({"ok": False, "erro": d})), 502
+    base64_qr = (d or {}).get('base64') or ((d or {}).get('qrcode') or {}).get('base64') or ''
+    if not base64_qr:
+        return _wa_cors(jsonify({"ok": False,
+                                 "erro": "O servidor não devolveu um código. Tente de novo em alguns segundos."})), 502
+    return _wa_cors(jsonify({"ok": True, "qr": base64_qr}))
+
+
+@app.route('/api/whatsapp/extensao/nuvem/desconectar', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
+def api_nuvem_desconectar():
+    """Desliga o WhatsApp deste consultor do servidor."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    uid = getattr(g, 'usuario_id', None)
+    if not uid:
+        return _wa_cors(jsonify({"ok": False, "erro": "sem usuário"})), 401
+    _evolution_chamar('DELETE', f"/instance/logout/{_evolution_instancia(uid)}")
+    return _wa_cors(jsonify({"ok": True, "recado": "Desconectado do servidor."}))
 
 
 @app.route('/api/whatsapp/extensao/deck/sincronizar', methods=['POST', 'OPTIONS'])

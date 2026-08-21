@@ -208,3 +208,94 @@ $('railSide').addEventListener('change', salvar);
 $('tema').addEventListener('change', salvar);
 $('extensaoAtiva').addEventListener('change', salvar);
 carregar();
+
+/* ═══════════════ WhatsApp na nuvem ═══════════════
+   Ligado, o consultor manda mensagem e funil com o computador desligado.
+
+   O QR SO E PEDIDO NO CLIQUE. Ele vale ~40s e o servidor tem teto de codigos
+   por conexao; um laco de renovacao queima o teto e a tela passa a exibir um
+   codigo morto sem dizer nada. Em 20/08/2026 foi exatamente assim que a gente
+   perdeu uma hora. Por isso: sem laco, e cada codigo novo e um clique. */
+
+async function nuvemChamar(caminho, metodo) {
+  const { jobUrl, extKey } = await config();
+  const { extToken } = await chrome.storage.local.get(['extToken']);
+  if (!extKey && !extToken) return { ok: false, erro: 'sem login' };
+  const cab = { 'Content-Type': 'application/json' };
+  if (extKey) cab['X-Extension-Key'] = extKey;
+  if (extToken) cab.Authorization = 'Bearer ' + extToken;
+  try {
+    const r = await fetch((jobUrl || JOB_URL_PADRAO) + caminho, { method: metodo || 'GET', headers: cab });
+    return await r.json();
+  } catch (e) {
+    return { ok: false, erro: 'nao consegui falar com o JOB' };
+  }
+}
+
+function nuvemPintar(estado, recado) {
+  const luz = $('nuvemLuz');
+  if (luz) luz.dataset.e = estado || '';
+  const r = $('nuvemRecado');
+  if (r) r.textContent = recado || '';
+  const conectado = estado === 'conectado';
+  const mostrandoQr = !$('nuvemQr').hidden;
+  $('nuvemConectar').hidden = conectado || mostrandoQr;
+  $('nuvemOutro').hidden = conectado || !mostrandoQr;
+  $('nuvemSair').hidden = !conectado;
+  if (conectado) { $('nuvemQr').hidden = true; }
+}
+
+async function nuvemEstado() {
+  const d = await nuvemChamar('/api/whatsapp/extensao/nuvem/estado');
+  if (!d || d.ok === false) { $('nuvem').hidden = true; return; }
+  if (d.disponivel === false) { $('nuvem').hidden = true; return; }   // ainda nao ligado no sistema
+  $('nuvem').hidden = false;
+  nuvemPintar(d.estado, d.recado);
+}
+
+async function nuvemPedirQr(botao) {
+  const antes = botao.textContent;
+  botao.disabled = true;
+  botao.textContent = 'gerando…';
+  const d = await nuvemChamar('/api/whatsapp/extensao/nuvem/qr', 'POST');
+  botao.disabled = false;
+  botao.textContent = antes;
+  if (d && d.ja_conectado) { nuvemEstado(); return; }
+  if (!d || !d.ok || !d.qr) {
+    // O erro fica na tela. Codigo que nao veio precisa dizer por que, senao o
+    // consultor fica apontando a camera para nada.
+    nuvemPintar('caiu', (d && d.erro) || 'Nao consegui gerar o codigo. Tente de novo.');
+    return;
+  }
+  $('nuvemQrImg').src = d.qr;
+  $('nuvemQr').hidden = false;
+  nuvemPintar('conectando', 'Escaneie agora — o codigo vale cerca de 40 segundos.');
+  // Confere sozinho por pouco tempo, so para trocar a tela quando conectar.
+  // Isto NAO gera codigo novo: so pergunta o estado.
+  let voltas = 0;
+  const tique = setInterval(async () => {
+    voltas++;
+    const e = await nuvemChamar('/api/whatsapp/extensao/nuvem/estado');
+    if (e && e.estado === 'conectado') { clearInterval(tique); nuvemPintar('conectado', e.recado); }
+    else if (voltas >= 20) {
+      clearInterval(tique);
+      $('nuvemQr').hidden = true;
+      nuvemPintar('caiu', 'O codigo venceu. Toque em conectar para gerar outro.');
+    }
+  }, 3000);
+}
+
+function nuvemLigarBotoes() {
+  const c = $('nuvemConectar'), o = $('nuvemOutro'), s = $('nuvemSair');
+  if (c) c.addEventListener('click', () => nuvemPedirQr(c));
+  if (o) o.addEventListener('click', () => nuvemPedirQr(o));
+  if (s) s.addEventListener('click', async () => {
+    if (!confirm('Desconectar seu WhatsApp do servidor? Mensagem agendada deixa de sair.')) return;
+    await nuvemChamar('/api/whatsapp/extensao/nuvem/desconectar', 'POST');
+    $('nuvemQr').hidden = true;
+    nuvemEstado();
+  });
+  nuvemEstado();
+}
+
+document.addEventListener('DOMContentLoaded', nuvemLigarBotoes);
