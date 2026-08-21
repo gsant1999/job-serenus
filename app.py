@@ -43953,11 +43953,30 @@ def carreira():
     import urllib.parse
     numero = os.environ.get('WHATSAPP_CARREIRA') or NUMERO_WHATSAPP_SERENUS
     msg = urllib.parse.quote('Olá! Vi a página de carreira da Serenus e quero me candidatar à vaga de corretor.')
+    # Quantos leads a corretora entregou nos ultimos 30 dias. E o argumento
+    # central da pagina, entao sai do banco e nao de um numero digitado a mao.
+    leads_30d = None
+    try:
+        conn = db()
+        r = conn.execute(
+            "SELECT COUNT(*) AS n FROM crm_leads "
+            "WHERE criado_em >= " + ("NOW() - INTERVAL '30 days'" if DB_MODE == 'postgres'
+                                     else "datetime('now','-30 days')")
+        ).fetchone()
+        close_db(conn)
+        n = int(dict(r).get('n') or 0)
+        if n >= 50:                      # abaixo disso o numero nao ajuda ninguem
+            leads_30d = n
+    except Exception as e:
+        app.logger.warning(f'[CARREIRA] contagem de leads indisponivel: {e}')
+
     return render_template(
         'carreira.html',
         link_zap=f'https://wa.me/{numero}?text={msg}',
         link_maps='https://www.google.com/maps/search/?api=1&query='
                   + urllib.parse.quote(ENDERECO_SERENUS),
+        leads_30d=leads_30d,
+        leads_dia=(round(leads_30d / 30) if leads_30d else None),
     )
 
 
