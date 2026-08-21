@@ -424,7 +424,28 @@ def main() -> None:
         port = int(os.environ.get("PORT", os.environ.get("MCP_PORT", "8000")))
     except ValueError as exc:
         raise RuntimeError("PORT ou MCP_PORT deve ser inteiro.") from exc
-    mcp.run(transport="http", host=host, port=port)
+    # SEM SESSÃO, DE PROPÓSITO.
+    #
+    # No modo padrão o servidor guarda a sessão em memória: o cliente faz
+    # initialize, recebe um mcp-session-id e usa esse id em toda chamada
+    # seguinte. Só que este serviço reinicia a cada deploy — e todo deploy do
+    # repositório reinicia os dois serviços, não só o JOB. Quando ele volta, a
+    # memória está limpa e o id que o cliente guardou não existe mais: toda
+    # ferramenta passa a responder "Session not found" até alguém mexer na
+    # conexão do outro lado.
+    #
+    # Pior, isso se disfarça de saúde: o "discover" do cliente abre sessão nova
+    # e funciona, então o painel dele mostra a conexão verde enquanto o agente
+    # não consegue chamar nada. Foi exatamente o que travou o teste ponta a
+    # ponta do integrador em 20/08/2026, no meio de um deploy nosso.
+    #
+    # Em modo stateless cada requisição se basta, não há sessão para expirar e
+    # cache do outro lado vira inofensivo. A autenticação NÃO muda: continua
+    # sendo o Bearer conferido a cada chamada pelo FixedApiKeyVerifier.
+    #
+    # Nesta versão do FastMCP a opção não vai no construtor (lá ela é recusada
+    # com um aviso de migração) — vai no transporte, por aqui.
+    mcp.run(transport="http", host=host, port=port, stateless_http=True)
 
 
 if __name__ == "__main__":
