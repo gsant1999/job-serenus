@@ -371,3 +371,29 @@ h2{font-size:clamp(30px,4.4vw,46px)}
 .checklist li b{color:var(--ink);font-weight:600}
 .assinatura{display:flex;flex-direction:column;gap:4px;font-size:16px;color:var(--ink-soft)}
 .assinatura b{color:var(--ink);font-size:17px}
+
+/* ═══════════ IMPRESSAO / SALVAR EM PDF ═══════════
+   A carta convite e mandada por e-mail, mas tambem e impressa e entregue em
+   maos depois da entrevista. Na folha nao existe tema escuro nem botao. */
+@media print{
+  :root{
+    --bg:#FFFFFF; --bg-2:#FFFFFF; --surface:#FFFFFF; --surface-2:#F6F6F8;
+    --ink:#000000; --ink-soft:#333333; --ink-faint:#666666;
+    --line:#CCCCCC; --line-forte:#999999;
+  }
+  body{background:#FFFFFF;color:#000000;font-size:12pt}
+  .topo,.nao-imprime,.hero-acoes,.fecho .acoes{display:none !important}
+  .wrap{max-width:100% !important;padding:0 !important}
+  a{color:#000000;text-decoration:none}
+  section{padding-top:20pt;break-inside:avoid}
+  .sec-topo{border-top:1pt solid #CCCCCC}
+  h1{font-size:26pt}
+  h2{font-size:17pt}
+  .combinado,.trilha,.blocos,.aviso,.exemplo,.form-cartao{break-inside:avoid}
+  .combinado .item .v{font-size:16pt}
+  .convite-topo{padding-top:0}
+  .fecho{border:1pt solid #CCCCCC;break-inside:avoid}
+  .arco-txt{-webkit-text-fill-color:#000000;color:#000000}
+  .fio{background:#000000;height:2pt}
+  @page{margin:14mm}
+}

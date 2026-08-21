@@ -19,7 +19,10 @@
       <img class="marca marca-light" src="{{ url_for('static', filename='brand/serenus-logo-black.png') }}" alt="Serenus Corretora de Saúde">
       <img class="marca marca-dark" src="{{ url_for('static', filename='brand/serenus-logo-light.png') }}" alt="Serenus Corretora de Saúde">
     </span>
-    <a class="btn btn-sm btn-arco" href="{{ link_aceite }}" target="_blank" rel="noopener">Aceitar e confirmar</a>
+    <span style="display:flex;gap:8px">
+      <button class="btn btn-sm btn-linha nao-imprime" type="button" onclick="window.print()">Salvar em PDF</button>
+      <a class="btn btn-sm btn-arco" href="{{ link_aceite }}" target="_blank" rel="noopener">Aceitar e confirmar</a>
+    </span>
   </div>
 </div>
 

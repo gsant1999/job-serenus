@@ -46,16 +46,38 @@
             Começa: {{ c.inicio }}
           </td>
           <td style="padding:12px 14px">{{ c.veredito }}</td>
-          <td style="padding:12px 14px;font-size:13px;color:var(--cinza)">{{ c.criado_em }}</td>
-        </tr>
-        {% if c.melhor_venda %}
-        <tr>
-          <td colspan="6" style="padding:0 14px 14px 14px;color:var(--cinza);font-size:14px;line-height:1.55">
-            <b style="color:var(--texto)">Melhor venda que já fez:</b> {{ c.melhor_venda }}
-            {% if c.observacao %}<br><b style="color:var(--texto)">Observação:</b> {{ c.observacao }}{% endif %}
+          <td style="padding:12px 14px;font-size:13px;color:var(--cinza)">
+            {{ c.criado_em }}
+            {% if c.status and c.status != 'novo' %}<br><b style="color:var(--texto)">{{ c.status }}</b>{% endif %}
           </td>
         </tr>
-        {% endif %}
+        <tr>
+          <td colspan="6" style="padding:0 14px 16px 14px;color:var(--cinza);font-size:14px;line-height:1.55">
+            {% if c.melhor_venda %}
+              <b style="color:var(--texto)">Melhor venda que já fez:</b> {{ c.melhor_venda }}<br>
+            {% endif %}
+            {% if c.observacao %}<b style="color:var(--texto)">Observação:</b> {{ c.observacao }}<br>{% endif %}
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
+              {% if c.email %}
+                <form method="post" action="/carreira/candidato/{{ c.id }}/email" style="display:flex;gap:6px;align-items:center;margin:0">
+                  <input type="hidden" name="tipo" value="convite">
+                  <input type="date" name="inicio_data" style="padding:7px 9px;border-radius:8px;border:1px solid var(--borda);background:var(--input-bg);color:var(--texto);font-size:13px"
+                         onchange="this.form.inicio.value=this.value?this.value.split('-').reverse().join('/'):''">
+                  <input type="hidden" name="inicio" value="">
+                  <button class="btn" type="submit">Enviar convite por e-mail</button>
+                </form>
+                <form method="post" action="/carreira/candidato/{{ c.id }}/email" style="margin:0"
+                      onsubmit="return confirm('Enviar a recusa para {{ c.nome }}? O e-mail sai na hora.')">
+                  <input type="hidden" name="tipo" value="recusa">
+                  <button class="btn" type="submit">Enviar recusa</button>
+                </form>
+              {% else %}
+                <span style="color:var(--cinza)">Sem e-mail: o contato tem que ser pelo WhatsApp.</span>
+              {% endif %}
+              <a class="btn" href="/carreira/convite?nome={{ c.nome|urlencode }}" target="_blank" rel="noopener">Abrir a carta</a>
+            </div>
+          </td>
+        </tr>
         {% endfor %}
       </tbody>
     </table>

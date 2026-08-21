@@ -25,6 +25,19 @@
       <a id="verCarta" class="btn" style="display:none" target="_blank" rel="noopener">Abrir a carta</a>
     </div>
 
+    <label style="display:flex;flex-direction:column;gap:6px">
+      <span style="font-weight:600">E-mail do candidato <span style="font-weight:400;color:var(--cinza)">(para enviar a carta pelo e-mail)</span></span>
+      <input id="cEmail" type="email" placeholder="nome@email.com" style="padding:11px 13px;border-radius:9px;border:1px solid var(--borda);background:var(--input-bg);color:var(--texto)">
+    </label>
+
+    <form method="post" action="/carreira/convite/enviar" id="formEnvio" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0">
+      <input type="hidden" name="nome" id="hNome">
+      <input type="hidden" name="inicio" id="hInicio">
+      <input type="hidden" name="email" id="hEmail">
+      <button class="btn" type="submit">Enviar a carta por e-mail</button>
+      <span style="font-size:13px;color:var(--cinza)">Sai pelo e-mail da corretora, com o assunto "a vaga na Serenus é sua".</span>
+    </form>
+
     <div id="saida" style="display:none;flex-direction:column;gap:8px">
       <span style="font-weight:600">Link para mandar no WhatsApp</span>
       <input id="linkSaida" readonly style="padding:11px 13px;border-radius:9px;border:1px solid var(--borda);background:var(--input-bg);color:var(--texto);font-family:ui-monospace,monospace;font-size:13px">
@@ -55,6 +68,16 @@
     ver.href = url;
     saida.style.display = 'flex';
     ver.style.display = 'inline-flex';
+  });
+
+  document.getElementById('formEnvio').addEventListener('submit', ev => {
+    const n = nome.value.trim();
+    const e = document.getElementById('cEmail').value.trim();
+    if (!n || !e.includes('@')) { ev.preventDefault(); alert('Preencha o nome e o e-mail do candidato.'); return; }
+    document.getElementById('hNome').value = n;
+    document.getElementById('hEmail').value = e;
+    document.getElementById('hInicio').value = inicio.value
+      ? inicio.value.split('-').reverse().join('/') : '';
   });
 
   document.getElementById('btnCopiar').addEventListener('click', async (ev) => {

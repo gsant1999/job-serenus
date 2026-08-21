@@ -95,7 +95,7 @@
   {% if leads_30d %}
   <div class="prova">
     <div>
-      <div class="rot">De onde saem os seus 4 a 6 por dia</div>
+      <div class="rot">De onde saem os seus {{ faixa_min }} a {{ faixa_max }} por dia</div>
       <div class="grande arco-txt">{{ '{:,}'.format(leads_30d).replace(',', '.') }}</div>
       <p class="sub">pessoas vieram dos nossos anúncios nos últimos 30 dias pedindo cotação de plano de saúde. Número lido do nosso sistema agora, contando só quem chegou por campanha paga.</p>
     </div>
