@@ -8,6 +8,11 @@
     bate com o que a vaga exige (presencial em Hortolândia, PJ, janela de 9h às 17h e experiência).
     Quem respondeu que não pode presencial ou não aceita PJ fica com encaixe zero.
   </p>
+  <p style="color:var(--cinza);margin:-14px 0 22px;font-size:14px">
+    A linha cinza embaixo de cada candidato mostra como ele preencheu: aparelho, tempo e se colou o texto.
+    Não é nota, é contexto: quem levou 20 minutos no celular provavelmente escreveu com esforço, e isso
+    diz mais sobre desenvoltura do que qualquer resposta de autoavaliação. O candidato é avisado disso na tela.
+  </p>
 
   {% if not candidatos %}
     <div style="padding:28px;border:1px solid var(--borda);border-radius:12px;color:var(--cinza)">
@@ -38,12 +43,24 @@
               {% if c.email %} · {{ c.email }}{% endif %}
             </div>
           </td>
-          <td style="padding:12px 14px">{{ c.cidade or '-' }}</td>
+          <td style="padding:12px 14px">
+            {{ c.cidade or '-' }}
+            {% if c.bairro %}<div style="font-size:13px;color:var(--cinza)">{{ c.bairro }}</div>{% endif %}
+          </td>
           <td style="padding:12px 14px;font-size:13px;color:var(--cinza);line-height:1.5">
             Presencial: {{ c.presencial }}<br>
             CNPJ: {{ c.cnpj }} · Janela: {{ c.janela }}<br>
             Saúde: {{ c.experiencia }} · Venda: {{ c.venda_geral }}<br>
+            Computador: {{ c.informatica or '-' }}<br>
+            {% if c.ferramentas %}Já usou: {{ c.ferramentas.replace(',', ', ') }}<br>{% endif %}
             Começa: {{ c.inicio }}
+            {% if c.sinal_dispositivo %}
+            <div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--borda)">
+              Preencheu no {{ c.sinal_dispositivo }}{% if c.sinal_segundos %},
+              em {{ (c.sinal_segundos // 60) }} min {{ c.sinal_segundos % 60 }} s{% endif %}{% if c.sinal_colou %},
+              colando o texto{% endif %}.
+            </div>
+            {% endif %}
           </td>
           <td style="padding:12px 14px">{{ c.veredito }}</td>
           <td style="padding:12px 14px;font-size:13px;color:var(--cinza)">

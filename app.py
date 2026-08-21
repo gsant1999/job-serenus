@@ -1598,6 +1598,8 @@ def init_db():
                 nome TEXT NOT NULL, whatsapp TEXT, whatsapp_norm TEXT, email TEXT, cidade TEXT,
                 presencial TEXT, cnpj TEXT, janela TEXT, experiencia TEXT, venda_geral TEXT,
                 melhor_venda TEXT, inicio TEXT, observacao TEXT,
+                bairro TEXT, informatica TEXT, ferramentas TEXT,
+                sinal_dispositivo TEXT, sinal_segundos INTEGER, sinal_colou INTEGER DEFAULT 0,
                 encaixe INTEGER DEFAULT 0, veredito TEXT, status TEXT DEFAULT 'novo',
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
@@ -2908,6 +2910,8 @@ def init_db():
             nome TEXT NOT NULL, whatsapp TEXT, whatsapp_norm TEXT, email TEXT, cidade TEXT,
             presencial TEXT, cnpj TEXT, janela TEXT, experiencia TEXT, venda_geral TEXT,
             melhor_venda TEXT, inicio TEXT, observacao TEXT,
+            bairro TEXT, informatica TEXT, ferramentas TEXT,
+            sinal_dispositivo TEXT, sinal_segundos INTEGER, sinal_colou INTEGER DEFAULT 0,
             encaixe INTEGER DEFAULT 0, veredito TEXT, status TEXT DEFAULT 'novo',
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -44208,6 +44212,10 @@ def _build_cot(conn, c):
 # para mandar o link direto ao candidato.
 
 ENDERECO_SERENUS = 'Rua Joaquim Guilherme da Costa, 370 - Hortolândia - SP'
+# O endereco exato so aparece depois da entrevista, na carta de convite. Em
+# pagina publica e e-mail de quem ainda nao foi aprovado vai a referencia de
+# bairro: e o suficiente para a pessoa medir a distancia antes de se candidatar.
+ENDERECO_REFERENCIA = 'Parque Ortolândia, Hortolândia, perto da faculdade Unasp'
 
 
 @app.route('/carreira/convite')
@@ -44251,6 +44259,9 @@ _CARREIRA_PESOS = {
     'janela':      {'total': 20, 'parcial': 12, 'pouca': 4},
     'experiencia': {'mais3': 20, '1a3': 16, 'ate1': 10, 'nunca': 5},
     'venda_geral': {'externa': 20, 'telefone': 16, 'loja': 12, 'nunca': 2},
+    # Desenvoltura no computador nao elimina ninguem, mas muda o tamanho do
+    # treinamento: aqui o dia inteiro passa por sistema e WhatsApp Web.
+    'informatica': {'autonomo': 10, 'basico': 7, 'celular': 3, 'pouco': 0},
 }
 _CARREIRA_INICIO_BONUS = {'imediato': 0, '15dias': 0, '30dias': -3, 'depois': -8}
 
@@ -44275,6 +44286,11 @@ def _carreira_avaliar(d):
     elif len(texto) >= 150:
         nota += 4
 
+    # ferramenta que a pessoa ja usou vale ponto, com teto: quem marcou tudo
+    # nao vale o dobro de quem marcou o que interessa.
+    ferramentas = [f for f in (d.get('ferramentas') or '').split(',') if f and f != 'nenhuma']
+    nota += min(len(ferramentas) * 2, 6)
+
     nota = max(0, min(100, nota))
     if nota >= 75:
         return nota, 'Chamar para conversa'
@@ -44287,7 +44303,9 @@ def _carreira_avaliar(d):
 def carreira_candidatura():
     """Formulario publico de candidatura a vaga de corretor."""
     if request.method == 'GET':
-        return render_template('carreira_candidatura.html')
+        numero_zap = os.environ.get('WHATSAPP_CARREIRA') or NUMERO_WHATSAPP_SERENUS
+        return render_template('carreira_candidatura.html',
+                               link_zap_audio=f'https://wa.me/{numero_zap}?text=')
 
     f = request.form
     if (f.get('site') or '').strip():        # armadilha para robo de formulario
@@ -44300,7 +44318,11 @@ def carreira_candidatura():
         return render_template('carreira_candidatura.html'), 400
 
     dados = {k: (f.get(k) or '').strip() for k in
-             ('presencial', 'cnpj', 'janela', 'experiencia', 'venda_geral', 'inicio')}
+             ('presencial', 'cnpj', 'janela', 'experiencia', 'venda_geral', 'inicio', 'informatica')}
+    dados['ferramentas'] = ','.join(f.getlist('ferramentas'))[:120]
+    cidade = (f.get('cidade') or '').strip()
+    if cidade == 'outra':
+        cidade = (f.get('cidade_outra') or '').strip() or 'Outra cidade'
     dados['melhor_venda'] = (f.get('melhor_venda') or '').strip()[:1200]
     encaixe, veredito = _carreira_avaliar(dados)
 
@@ -44309,12 +44331,19 @@ def carreira_candidatura():
         conn.execute(
             "INSERT INTO carreira_candidato (nome, whatsapp, whatsapp_norm, email, cidade,"
             " presencial, cnpj, janela, experiencia, venda_geral, melhor_venda, inicio,"
-            " observacao, encaixe, veredito) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " observacao, bairro, informatica, ferramentas, sinal_dispositivo,"
+            " sinal_segundos, sinal_colou, encaixe, veredito)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (nome, whats, _normalizar_telefone(whats) or digitos,
-             (f.get('email') or '').strip()[:120], (f.get('cidade') or '').strip()[:80],
+             (f.get('email') or '').strip()[:120], cidade[:80],
              dados['presencial'], dados['cnpj'], dados['janela'], dados['experiencia'],
              dados['venda_geral'], dados['melhor_venda'], dados['inicio'],
-             (f.get('observacao') or '').strip()[:800], encaixe, veredito))
+             (f.get('observacao') or '').strip()[:800],
+             (f.get('bairro') or '').strip()[:80], dados['informatica'], dados['ferramentas'],
+             (f.get('sinal_dispositivo') or '')[:20],
+             int((f.get('sinal_segundos') or 0) or 0) if (f.get('sinal_segundos') or '').isdigit() else None,
+             1 if f.get('sinal_colou') == '1' else 0,
+             encaixe, veredito))
         conn.commit()
         close_db(conn)
     except Exception as e:
@@ -44459,9 +44488,10 @@ def _carreira_email(tipo, nome, email, inicio=''):
                     ('Presencial', '3 meses')],
             cta_texto='Abrir a carta completa',
             cta_link=_carreira_link_convite(nome, inicio),
-            rodape_extra='A carta traz o que trazer no primeiro dia, como vai ser a primeira '
-                         'semana e os prêmios de operadora. Qualquer ponto que você queira rever, '
-                         'fale com a gente antes de confirmar.',
+            rodape_extra='Vai em anexo a apresentação completa da vaga em PDF, com o combinado, '
+                         'os prêmios de operadora e como é a entrada mês a mês. A carta no link '
+                         'traz também o que trazer no primeiro dia. Qualquer ponto que você queira '
+                         'rever, fale com a gente antes de confirmar.',
         )
         assunto = f'{primeiro}, a vaga na Serenus é sua'
 
@@ -44486,8 +44516,26 @@ def _carreira_email(tipo, nome, email, inicio=''):
     else:
         return False, 'Tipo de e-mail desconhecido.'
 
+    ctx['endereco_rodape'] = (ENDERECO_SERENUS.replace(' - ', ', ')
+                              if tipo == 'convite' else ENDERECO_REFERENCIA)
     corpo = render_template('email_carreira.html', base_url=_SITE_BASE_URL, **ctx)
-    ok = _enviar_email(email, assunto, corpo,
+
+    # Depois da entrevista, o candidato leva a apresentacao junto. Ele vai
+    # reler o combinado no sofa, mostrar em casa e decidir: pedir para ele
+    # voltar num site para isso e perder a conversa.
+    anexos = []
+    if tipo == 'convite':
+        try:
+            fmin, fmax = _carreira_faixa_por_corretor()
+            nome_pdf = 'Serenus-vaga-corretor.pdf'
+            caminho = os.path.join(UPLOAD_FOLDER, nome_pdf)
+            with open(caminho, 'wb') as fh:
+                fh.write(_pdf_apresentacao_vaga(fmin or 4, fmax or 6))
+            anexos = [nome_pdf]
+        except Exception as e:
+            app.logger.warning(f'[CARREIRA] PDF nao anexado: {e}')
+
+    ok = _enviar_email(email, assunto, corpo, anexos=anexos or None,
                        remetente_nome='Serenus Corretora', sincrono=True)
     if not ok:
         erro = getattr(_enviar_email, 'ultimo_erro', None) or 'Confira a BREVO_API_KEY no Railway.'
@@ -44501,7 +44549,8 @@ def _carreira_email(tipo, nome, email, inicio=''):
     if copia and copia.strip().lower() != email.strip().lower():
         try:
             _enviar_email(copia, f'[cópia] {assunto} — enviado para {nome} <{email}>',
-                          corpo, remetente_nome='Serenus Corretora', sincrono=False)
+                          corpo, anexos=anexos or None,
+                          remetente_nome='Serenus Corretora', sincrono=False)
         except Exception as e:
             app.logger.warning(f'[CARREIRA] copia interna falhou: {e}')
 
@@ -44561,6 +44610,240 @@ def _carreira_faixa_por_corretor(dias=30, piso=1.5):
     return baixo, alto
 
 
+# ── PDF de apresentacao da vaga ─────────────────────────────────────────────
+# O corretor manda esta apresentacao pelo WhatsApp e ela vai anexada no e-mail
+# depois da entrevista. Por isso e um arquivo de verdade, gerado no servidor,
+# e nao a impressao do navegador: PDF que sai do navegador varia por maquina,
+# corta bloco no meio e sai com cabecalho de URL.
+
+_VAGA_MAGENTA = (1.0, 0.27, 0.62)
+_VAGA_LARANJA = (1.0, 0.53, 0.21)
+_VAGA_AMBAR   = (1.0, 0.69, 0.10)
+_VAGA_CIANO   = (0.06, 0.66, 0.87)
+_VAGA_AZUL    = (0.04, 0.59, 0.96)
+_VAGA_INDIGO  = (0.45, 0.49, 0.98)
+_VAGA_TINTA   = (0.04, 0.04, 0.06)
+_VAGA_CINZA   = (0.33, 0.33, 0.37)
+_VAGA_LINHA   = (0.89, 0.89, 0.91)
+
+
+def _vaga_arco(c, x, y, larg):
+    """Desenha a faixa do arco da marca como uma regua de cor."""
+    passos = 120
+    cores = [_VAGA_MAGENTA, _VAGA_LARANJA, _VAGA_AMBAR, _VAGA_CIANO, _VAGA_AZUL, _VAGA_INDIGO]
+    for i in range(passos):
+        t = i / (passos - 1.0)
+        pos = t * (len(cores) - 1)
+        a = cores[int(pos)]
+        b = cores[min(int(pos) + 1, len(cores) - 1)]
+        f = pos - int(pos)
+        c.setFillColorRGB(*(a[k] + (b[k] - a[k]) * f for k in range(3)))
+        c.rect(x + larg * t, y, larg / passos + 0.6, 3.2, stroke=0, fill=1)
+
+
+def _pdf_apresentacao_vaga(faixa_min=4, faixa_max=6):
+    """Apresentacao da vaga de corretor em PDF. Devolve os bytes."""
+    import io
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas as _canvas
+
+    buf = io.BytesIO()
+    c = _canvas.Canvas(buf, pagesize=A4)
+    LARG, ALT = A4
+    L, R = 18 * mm, LARG - 18 * mm
+    util = R - L
+
+    def texto(txt, x, y, tam=10.5, cor=_VAGA_CINZA, fonte='Helvetica', entrelinha=14, maxlarg=None):
+        c.setFont(fonte, tam); c.setFillColorRGB(*cor)
+        if maxlarg is None:
+            c.drawString(x, y, txt); return y - entrelinha
+        linha = ''
+        for palavra in txt.split(' '):
+            teste = (linha + ' ' + palavra).strip()
+            if c.stringWidth(teste, fonte, tam) <= maxlarg:
+                linha = teste
+            else:
+                c.drawString(x, y, linha); y -= entrelinha; linha = palavra
+        if linha:
+            c.drawString(x, y, linha); y -= entrelinha
+        return y
+
+    def caixa(x, y, w, h):
+        c.setStrokeColorRGB(*_VAGA_LINHA); c.setLineWidth(0.8)
+        c.roundRect(x, y, w, h, 8, stroke=1, fill=0)
+
+    # ══ PAGINA 1 ══
+    y = ALT - 20 * mm
+    try:
+        logo = os.path.join(app.root_path, 'static', 'brand', 'serenus-logo-black-640.png')
+        if os.path.exists(logo):
+            img = ImageReader(logo); iw, ih = img.getSize()
+            w = 46 * mm
+            c.drawImage(img, L, y - w * ih / iw, width=w, height=w * ih / iw, mask='auto')
+            y -= w * ih / iw + 12 * mm
+    except Exception:
+        y -= 10 * mm
+
+    _vaga_arco(c, L, y + 4, 34 * mm)
+    y -= 8 * mm
+    c.setFont('Helvetica-Bold', 9); c.setFillColorRGB(*_VAGA_CINZA)
+    c.drawString(L, y, 'VAGA ABERTA   /   CORRETOR DE PLANOS DE SAÚDE   /   HORTOLÂNDIA, SP')
+    y -= 16 * mm
+
+    c.setFont('Helvetica-Bold', 30); c.setFillColorRGB(*_VAGA_TINTA)
+    c.drawString(L, y, 'Você vende.')
+    y -= 34
+    c.setFillColorRGB(*_VAGA_MAGENTA)
+    c.drawString(L, y, 'O lead é por nossa conta.')
+    y -= 22
+
+    y = texto('Aqui ninguém começa o dia procurando com quem falar. A Serenus paga o anúncio, '
+              'o contato cai no seu sistema e você faz o que sabe: vender plano de saúde.',
+              L, y - 6, 11.5, _VAGA_CINZA, 'Helvetica', 16, util)
+    y -= 6 * mm
+
+    # o que cai todo mes / o que cada venda paga
+    alt_c = 44 * mm
+    meio = L + util / 2 - 3 * mm
+    caixa(L, y - alt_c, util / 2 - 3 * mm, alt_c)
+    caixa(meio + 6 * mm, y - alt_c, util / 2 - 3 * mm, alt_c)
+
+    yy = y - 10 * mm
+    c.setFont('Helvetica-Bold', 8); c.setFillColorRGB(*_VAGA_CINZA)
+    c.drawString(L + 7 * mm, yy, 'TODO MÊS, VENDA OU NÃO VENDA')
+    c.setFont('Helvetica-Bold', 26); c.setFillColorRGB(*_VAGA_MAGENTA)
+    c.drawString(L + 7 * mm, yy - 12 * mm, 'R$ 1.500')
+    texto('R$ 1.000 de fixo mais R$ 500 de ajuda de custo, nos 3 primeiros meses. '
+          'Lead, sistema e treinamento são pagos pela corretora.',
+          L + 7 * mm, yy - 19 * mm, 9.5, _VAGA_CINZA, 'Helvetica', 12, util / 2 - 16 * mm)
+
+    xx = meio + 13 * mm
+    c.setFont('Helvetica-Bold', 8); c.setFillColorRGB(*_VAGA_CINZA)
+    c.drawString(xx, yy, 'A CADA CLIENTE QUE VOCÊ FECHA')
+    c.setFont('Helvetica-Bold', 26); c.setFillColorRGB(*_VAGA_LARANJA)
+    c.drawString(xx, yy - 12 * mm, '50%')
+    c.setFillColorRGB(*_VAGA_CINZA); c.setFont('Helvetica-Bold', 18)
+    c.drawString(xx + 26 * mm, yy - 12 * mm, '+')
+    c.setFont('Helvetica-Bold', 26); c.setFillColorRGB(*_VAGA_AMBAR)
+    c.drawString(xx + 34 * mm, yy - 12 * mm, 'R$ 300')
+    texto('50% da primeira mensalidade é a sua comissão. Os R$ 300 por vida são prêmio '
+          'da MedSênior, pagos pela operadora por fora. Um não desconta o outro.',
+          xx, yy - 19 * mm, 9.5, _VAGA_CINZA, 'Helvetica', 12, util / 2 - 16 * mm)
+    y -= alt_c + 8 * mm
+
+    # o combinado
+    c.setFont('Helvetica-Bold', 15); c.setFillColorRGB(*_VAGA_TINTA)
+    c.drawString(L, y, 'O combinado, sem letra miúda')
+    y -= 8 * mm
+    itens = [
+        ('Regime', 'PJ, sem vínculo celetista. Se ainda não tem CNPJ, dá para abrir.'),
+        ('Janela de trabalho', 'Das 9h às 17h, que é quando o cliente atende. Fora dela, o horário é seu.'),
+        ('Presencial', '3 meses, de segunda a sexta, em Hortolândia. Depois, home office é possível.'),
+        ('A partir do 4º mês', 'Comissionamento estratégico: percentual que cresce conforme a produção.'),
+        ('Lead', f'De {faixa_min} a {faixa_max} clientes novos por dia entregues para você atender, sem custo.'),
+    ]
+    for titulo, desc in itens:
+        c.setFont('Helvetica-Bold', 10.5); c.setFillColorRGB(*_VAGA_TINTA)
+        c.drawString(L, y, titulo)
+        y = texto(desc, L + 42 * mm, y, 10, _VAGA_CINZA, 'Helvetica', 13, util - 42 * mm)
+        y -= 3
+
+    y -= 4 * mm
+    c.setFont('Helvetica-Bold', 15); c.setFillColorRGB(*_VAGA_TINTA)
+    c.drawString(L, y, 'Prêmios de operadora, por fora da comissão')
+    y -= 8 * mm
+    premios = [
+        ('MedSênior', 'R$ 300 por vida vendida'),
+        ('Porto Saúde', 'R$ 200 por vida vendida'),
+        ('Amil (PME e adesão)', '50% de bônus de comissão na 4ª parcela do cliente'),
+        ('Vera Cruz Adesão', '50% de bônus sobre a primeira mensalidade'),
+    ]
+    for op, val in premios:
+        c.setFont('Helvetica-Bold', 10.5); c.setFillColorRGB(*_VAGA_TINTA)
+        c.drawString(L, y, op)
+        c.setFont('Helvetica', 10); c.setFillColorRGB(*_VAGA_CINZA)
+        c.drawString(L + 42 * mm, y, val)
+        y -= 13
+    y -= 2 * mm
+    y = texto('Quem define esses valores é a operadora, não a corretora: eles podem ser alterados, '
+              'suspensos ou encerrados a qualquer momento, sem aviso prévio. O fixo, a ajuda de custo '
+              'e a comissão da corretora não mudam.',
+              L, y, 9, _VAGA_CINZA, 'Helvetica-Oblique', 12, util)
+
+    c.setFont('Helvetica', 8.5); c.setFillColorRGB(*_VAGA_CINZA)
+    c.drawString(L, 14 * mm, 'Serenus Corretora de Saúde  /  ' + ENDERECO_REFERENCIA)
+    c.drawRightString(R, 14 * mm, '1 de 2')
+    c.showPage()
+
+    # ══ PAGINA 2 ══
+    y = ALT - 22 * mm
+    _vaga_arco(c, L, y + 6, 34 * mm)
+    y -= 6 * mm
+    c.setFont('Helvetica-Bold', 20); c.setFillColorRGB(*_VAGA_TINTA)
+    c.drawString(L, y, 'Como é a entrada')
+    y -= 12 * mm
+
+    etapas = [
+        ('MÊS 1', 'Aprender o produto', 'Presencial, segunda a sexta. Operadora, regra, carência e o sistema '
+                                        'de proposta e cotação. Você já recebe lead e já atende acompanhado.'),
+        ('MÊS 2', 'Vender acompanhado', 'Atendimento seu, com apoio na objeção e no fechamento. Fixo, ajuda de '
+                                        'custo, 50% da primeira mensalidade e prêmios.'),
+        ('MÊS 3', 'Andar sozinho', 'Ritmo próprio de venda. Ao fim do mês abre a possibilidade de home office '
+                                   'e a entrada no comissionamento estratégico.'),
+        ('MÊS 4+', 'Comissionamento estratégico', 'Regime de comissão por produção, home office possível e os '
+                                                  'prêmios de operadora seguem valendo integralmente.'),
+    ]
+    for etq, tit, desc in etapas:
+        c.setFont('Helvetica-Bold', 9); c.setFillColorRGB(*_VAGA_LARANJA)
+        c.drawString(L, y, etq)
+        c.setFont('Helvetica-Bold', 12.5); c.setFillColorRGB(*_VAGA_TINTA)
+        c.drawString(L + 22 * mm, y, tit)
+        y = texto(desc, L + 22 * mm, y - 13, 10, _VAGA_CINZA, 'Helvetica', 13, util - 22 * mm)
+        y -= 5 * mm
+
+    y -= 2 * mm
+    c.setFont('Helvetica-Bold', 15); c.setFillColorRGB(*_VAGA_TINTA)
+    c.drawString(L, y, 'O que já está pronto quando você chega')
+    y -= 8 * mm
+    for linha in [
+        'Lead entregue, vindo de campanha nossa, com contato e interesse registrados.',
+        'Sistema próprio de vendas: proposta, cotação, documento, comissão e histórico num lugar só.',
+        'Cotação em minutos, com comparativo entre operadoras pronto para mandar ao cliente.',
+        'Portfólio completo: pessoa física, adesão, PME e empresarial nas principais operadoras.',
+        'Treinamento presencial de produto, objeção e fechamento com quem já vende.',
+        'Retaguarda de cadastro, implantação e pós-venda, para você ficar na venda.',
+    ]:
+        c.setFillColorRGB(*_VAGA_MAGENTA); c.circle(L + 1.6 * mm, y + 3.2, 1.5, stroke=0, fill=1)
+        y = texto(linha, L + 6 * mm, y, 10, _VAGA_CINZA, 'Helvetica', 13, util - 6 * mm)
+        y -= 2
+
+    y -= 6 * mm
+    caixa(L, y - 26 * mm, util, 26 * mm)
+    c.setFont('Helvetica-Bold', 13); c.setFillColorRGB(*_VAGA_TINTA)
+    c.drawString(L + 7 * mm, y - 9 * mm, 'Quer conversar?')
+    texto('Fale com a gente pelo WhatsApp ou se candidate pela página da vaga: '
+          + _SITE_BASE_URL + '/carreira',
+          L + 7 * mm, y - 15 * mm, 10, _VAGA_CINZA, 'Helvetica', 12, util - 14 * mm)
+
+    c.setFont('Helvetica', 8.5); c.setFillColorRGB(*_VAGA_CINZA)
+    c.drawString(L, 14 * mm, 'Serenus Corretora de Saúde  /  ' + ENDERECO_REFERENCIA)
+    c.drawRightString(R, 14 * mm, '2 de 2')
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+@app.route('/carreira/apresentacao.pdf')
+def carreira_apresentacao_pdf():
+    """Apresentacao da vaga em PDF, para mandar no WhatsApp ou anexar no e-mail."""
+    fmin, fmax = _carreira_faixa_por_corretor()
+    pdf = _pdf_apresentacao_vaga(fmin or 4, fmax or 6)
+    return Response(pdf, mimetype='application/pdf', headers={
+        'Content-Disposition': 'inline; filename="Serenus-vaga-corretor.pdf"'})
+
+
 @app.route('/carreira')
 def carreira():
     """Página pública de recrutamento de corretores."""
@@ -44601,7 +44884,7 @@ def carreira():
         'carreira.html',
         link_zap=f'https://wa.me/{numero}?text={msg}',
         link_maps='https://www.google.com/maps/search/?api=1&query='
-                  + urllib.parse.quote(ENDERECO_SERENUS),
+                  + urllib.parse.quote('Parque Ortolândia, Hortolândia - SP'),
         leads_30d=leads_30d,
         leads_dia=(round(leads_30d / 30) if leads_30d else None),
         faixa_min=faixa_min, faixa_max=faixa_max,

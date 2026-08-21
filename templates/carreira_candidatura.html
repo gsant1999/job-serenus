@@ -66,9 +66,27 @@
     </div>
 
     <div class="campo" data-obrig>
-      <label for="cidade">Em que cidade você mora hoje</label>
-      <input type="text" id="cidade" name="cidade" autocomplete="address-level2" placeholder="Hortolândia, Sumaré, Campinas..." maxlength="80">
-      <div class="msg-erro">Diga a cidade onde você mora.</div>
+      <label>Em que cidade você mora hoje</label>
+      <div class="dica">Perguntamos porque os 3 primeiros meses são presenciais em Hortolândia, e o trajeto conta.</div>
+      <div class="opcoes duas" data-nome="cidade">
+        <label class="opcao"><input type="radio" name="cidade" value="Hortolândia"><span class="marca-op"></span><span class="txt"><b>Hortolândia</b></span></label>
+        <label class="opcao"><input type="radio" name="cidade" value="Sumaré"><span class="marca-op"></span><span class="txt"><b>Sumaré</b></span></label>
+        <label class="opcao"><input type="radio" name="cidade" value="Campinas"><span class="marca-op"></span><span class="txt"><b>Campinas</b></span></label>
+        <label class="opcao"><input type="radio" name="cidade" value="outra" id="cidadeOutra"><span class="marca-op"></span><span class="txt"><b>Outra cidade</b></span></label>
+      </div>
+      <div class="msg-erro">Escolha uma opção.</div>
+    </div>
+
+    <div class="campo" id="campoCidadeTexto" hidden>
+      <label for="cidade_outra">Qual cidade</label>
+      <input type="text" id="cidade_outra" name="cidade_outra" autocomplete="address-level2" maxlength="80" placeholder="Escreva o nome da cidade">
+      <div class="msg-erro">Escreva o nome da cidade.</div>
+    </div>
+
+    <div class="campo" data-obrig>
+      <label for="bairro">Em que bairro</label>
+      <input type="text" id="bairro" name="bairro" maxlength="80" placeholder="Parque Ortolândia, Jardim Amanda, Nova Veneza...">
+      <div class="msg-erro">Escreva o bairro onde você mora.</div>
     </div>
 
     <div class="form-acoes">
@@ -86,7 +104,7 @@
 
     <div class="campo" data-obrig>
       <label>Você consegue trabalhar presencial em Hortolândia, de segunda a sexta, nos 3 primeiros meses?</label>
-      <div class="dica">Rua Joaquim Guilherme da Costa, 370. Depois desse período abre a possibilidade de home office.</div>
+      <div class="dica">O escritório fica no Parque Ortolândia, Hortolândia, perto da faculdade Unasp. Depois desse período abre a possibilidade de home office.</div>
       <div class="opcoes" data-nome="presencial">
         <label class="opcao"><input type="radio" name="presencial" value="sim"><span class="marca-op"></span><span class="txt"><b>Consigo, sem problema</b></span></label>
         <label class="opcao"><input type="radio" name="presencial" value="ajustar"><span class="marca-op"></span><span class="txt"><b>Consigo, mas preciso ajustar alguma coisa</b><span>Transporte, horário de escola, outro compromisso</span></span></label>
@@ -154,10 +172,49 @@
     </div>
 
     <div class="campo" data-obrig>
-      <label for="melhor_venda">Conte a melhor venda que você já fez</label>
-      <div class="dica">Não precisa ser plano de saúde e não precisa ser grande. Queremos ver como você conduz: o que a pessoa queria, o que travou e como você resolveu.</div>
-      <textarea id="melhor_venda" name="melhor_venda" maxlength="1200" placeholder="Escreva do seu jeito, em 3 ou 4 linhas."></textarea>
-      <div class="msg-erro">Escreva pelo menos umas duas linhas. É a parte que mais pesa aqui.</div>
+      <label for="melhor_venda" id="rotuloHistoria">Conte uma vez em que você convenceu alguém</label>
+      <div class="dica" id="dicaHistoria">Não precisa ser venda de plano de saúde, nem venda grande. Queremos ver como você conduz: o que a pessoa queria, o que travou e como você resolveu.</div>
+
+      <div class="apoios">
+        <span class="apoio-rot">Sem saber por onde começar? Toque para montar:</span>
+        <div class="apoio-chips">
+          <button type="button" class="chip" data-frase="A pessoa queria ">A pessoa queria...</button>
+          <button type="button" class="chip" data-frase="O que travou foi ">O que travou foi...</button>
+          <button type="button" class="chip" data-frase="Eu resolvi assim: ">Eu resolvi assim...</button>
+          <button type="button" class="chip" data-frase="No fim, ">No fim...</button>
+        </div>
+      </div>
+
+      <textarea id="melhor_venda" name="melhor_venda" maxlength="1200" placeholder="Escreva do seu jeito. Duas ou três linhas já bastam, e erro de digitação aqui não conta contra você."></textarea>
+      <div class="ajuda-linha">
+        <span class="contador" id="contadorHistoria">Escreva algumas linhas</span>
+        <button type="button" class="link-audio" id="botaoAudio">Prefiro contar por áudio no WhatsApp</button>
+      </div>
+      <div class="msg-erro">Escreva um pouco mais, ou toque em "prefiro contar por áudio" para mandar em voz.</div>
+    </div>
+
+    <div class="campo" data-obrig>
+      <label>Como você se vira no computador?</label>
+      <div class="dica">Não tem resposta certa. Aqui o dia inteiro passa por sistema e WhatsApp Web, então a gente precisa saber de onde começar o treinamento.</div>
+      <div class="opcoes" data-nome="informatica">
+        <label class="opcao"><input type="radio" name="informatica" value="autonomo"><span class="marca-op"></span><span class="txt"><b>Me viro sozinho</b><span>Planilha, e-mail e sistema novo eu aprendo mexendo</span></span></label>
+        <label class="opcao"><input type="radio" name="informatica" value="basico"><span class="marca-op"></span><span class="txt"><b>Uso o básico e pergunto o resto</b><span>Navegador, WhatsApp Web, e-mail; sistema novo eu aprendo com alguém mostrando</span></span></label>
+        <label class="opcao"><input type="radio" name="informatica" value="celular"><span class="marca-op"></span><span class="txt"><b>No celular sou rápido, no computador travo</b></span></label>
+        <label class="opcao"><input type="radio" name="informatica" value="pouco"><span class="marca-op"></span><span class="txt"><b>Quase não uso computador</b><span>Vou precisar aprender do começo</span></span></label>
+      </div>
+      <div class="msg-erro">Escolha uma opção.</div>
+    </div>
+
+    <div class="campo">
+      <label>O que você já usou no trabalho <span style="font-weight:400;color:var(--ink-faint)">(pode marcar várias)</span></label>
+      <div class="opcoes duas" data-nome="ferramentas">
+        <label class="opcao"><input type="checkbox" name="ferramentas" value="planilha"><span class="marca-op"></span><span class="txt"><b>Excel ou Google Planilhas</b></span></label>
+        <label class="opcao"><input type="checkbox" name="ferramentas" value="crm"><span class="marca-op"></span><span class="txt"><b>Algum CRM ou sistema de vendas</b></span></label>
+        <label class="opcao"><input type="checkbox" name="ferramentas" value="wpp_web"><span class="marca-op"></span><span class="txt"><b>WhatsApp Web no computador</b></span></label>
+        <label class="opcao"><input type="checkbox" name="ferramentas" value="email"><span class="marca-op"></span><span class="txt"><b>E-mail de trabalho</b></span></label>
+        <label class="opcao"><input type="checkbox" name="ferramentas" value="canva"><span class="marca-op"></span><span class="txt"><b>Canva ou edição de imagem</b></span></label>
+        <label class="opcao"><input type="checkbox" name="ferramentas" value="nenhuma"><span class="marca-op"></span><span class="txt"><b>Nenhuma dessas ainda</b></span></label>
+      </div>
     </div>
 
     <div class="campo" data-obrig>
@@ -177,17 +234,20 @@
     </div>
 
     <input type="text" name="site" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px" aria-hidden="true">
+    <input type="hidden" name="sinal_dispositivo" id="sinalDispositivo">
+    <input type="hidden" name="sinal_segundos" id="sinalSegundos">
+    <input type="hidden" name="sinal_colou" id="sinalColou" value="0">
 
     <div class="form-acoes">
       <div class="esq"><button type="button" class="btn btn-linha" data-ir="2">Voltar</button></div>
       <button type="submit" class="btn btn-arco" id="btnEnviar">Enviar candidatura</button>
     </div>
-    <p class="nota-form">Ao enviar, você autoriza a Serenus a entrar em contato pelo WhatsApp informado sobre esta vaga.</p>
+    <p class="nota-form">Ao enviar, você autoriza a Serenus a entrar em contato pelo WhatsApp informado sobre esta vaga. Junto com as respostas guardamos também se você preencheu no celular ou no computador e quanto tempo levou. Não é teste nem cronômetro: serve para sabermos de onde partir no treinamento.</p>
   </section>
 </form>
 
 <div class="rodape">
-  Serenus Corretora de Saúde &nbsp;/&nbsp; Rua Joaquim Guilherme da Costa, 370, Hortolândia, SP
+  Serenus Corretora de Saúde &nbsp;/&nbsp; Parque Ortolândia, Hortolândia, perto da faculdade Unasp
 </div>
 
 </div>
@@ -209,6 +269,7 @@
   function validar(etapa){
     let ok = true;
     etapa.querySelectorAll('.campo[data-obrig]').forEach(campo => {
+      if (campo.hidden) return;
       const input = campo.querySelector('input[type=text],input[type=tel],textarea');
       const grupo = campo.querySelector('.opcoes');
       let vale = true;
@@ -217,7 +278,7 @@
       } else if (input) {
         const v = input.value.trim();
         if (input.id === 'whatsapp') vale = v.replace(/\D/g,'').length >= 10;
-        else if (input.id === 'melhor_venda') vale = v.length >= 40;
+        else if (input.id === 'melhor_venda') vale = v.length >= 25;
         else vale = v.length >= 2;
       }
       campo.classList.toggle('erro', !vale);
@@ -238,6 +299,13 @@
   // avisos que aparecem conforme a resposta: o candidato sabe onde está pisando
   form.addEventListener('change', ev => {
     const el = ev.target;
+    if (el.name === 'cidade') {
+      const extra = document.getElementById('campoCidadeTexto');
+      extra.hidden = (el.value !== 'outra');
+      extra.dataset.obrig = '';
+      if (el.value !== 'outra') { extra.removeAttribute('data-obrig'); extra.classList.remove('erro'); }
+      else { extra.setAttribute('data-obrig', ''); document.getElementById('cidade_outra').focus(); }
+    }
     if (el.name === 'presencial' || el.name === 'cnpj') {
       const alerta = form.querySelector('[data-alerta="'+el.name+'-nao"]');
       if (alerta) alerta.hidden = (el.value !== 'nao');
@@ -248,6 +316,66 @@
 
   form.querySelectorAll('input,textarea').forEach(i => {
     i.addEventListener('input', () => i.closest('.campo')?.classList.remove('erro'));
+  });
+
+  // A pergunta aberta e obrigatoria, mas nao pode ser muro. Ela se adapta a
+  // quem nunca vendeu, oferece comeco de frase e aceita audio no WhatsApp:
+  // corretor bom que escreve pouco nao pode ser barrado por um textarea.
+  const historia = document.getElementById('melhor_venda');
+  const contador = document.getElementById('contadorHistoria');
+  const MINIMO = 25;
+
+  form.addEventListener('change', ev => {
+    if (ev.target.name !== 'venda_geral' && ev.target.name !== 'experiencia') return;
+    const nuncaVendeu = form.querySelector('input[name=venda_geral]:checked')?.value === 'nunca';
+    document.getElementById('rotuloHistoria').textContent = nuncaVendeu
+      ? 'Conte uma vez em que você resolveu o problema de alguém'
+      : 'Conte uma venda que você já fez';
+    document.getElementById('dicaHistoria').textContent = nuncaVendeu
+      ? 'Vale qualquer situação: no trabalho, na família, com um amigo. Queremos ver como você conduz quando alguém precisa de ajuda para decidir.'
+      : 'Não precisa ser venda de plano de saúde, nem venda grande. Queremos ver como você conduz: o que a pessoa queria, o que travou e como você resolveu.';
+  });
+
+  form.querySelectorAll('.chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      let atual = historia.value.trimEnd();
+      // Se o ultimo chip ainda esta sem resposta, troca em vez de empilhar:
+      // "A pessoa queria. Eu resolvi assim:" nao e frase de ninguem.
+      form.querySelectorAll('.chip').forEach(outro => {
+        const f = outro.dataset.frase.trim();
+        if (atual.endsWith(f)) atual = atual.slice(0, -f.length).trimEnd();
+      });
+      historia.value = (atual ? atual + (/[.!?,:]$/.test(atual) ? ' ' : '. ') : '') + chip.dataset.frase;
+      historia.focus();
+      historia.setSelectionRange(historia.value.length, historia.value.length);
+      historia.dispatchEvent(new Event('input'));
+    });
+  });
+
+  historia.addEventListener('input', () => {
+    const n = historia.value.trim().length;
+    contador.textContent = n >= MINIMO ? 'Pode seguir' : 'Escreva algumas linhas';
+    contador.classList.toggle('ok', n >= MINIMO);
+  });
+
+  document.getElementById('botaoAudio').addEventListener('click', () => {
+    const quem = document.getElementById('nome').value.trim();
+    historia.value = 'Prefiro contar por áudio. Vou mandar no WhatsApp da Serenus.';
+    historia.dispatchEvent(new Event('input'));
+    historia.closest('.campo').classList.remove('erro');
+    const msg = encodeURIComponent(
+      (quem ? 'Aqui é ' + quem + '. ' : '') +
+      'Estou me candidatando à vaga de corretor e vou contar por áudio a venda que vocês perguntaram no formulário.');
+    window.open('{{ link_zap_audio }}' + msg, '_blank', 'noopener');
+  });
+
+  // Sinais de desenvoltura. Nada de conteudo, so a forma: aparelho, tempo total
+  // e se a resposta aberta foi colada. Esta escrito na tela que isso e guardado.
+  const inicio = Date.now();
+  document.getElementById('sinalDispositivo').value =
+    matchMedia('(pointer: coarse)').matches ? 'celular' : 'computador';
+  document.getElementById('melhor_venda').addEventListener('paste', () => {
+    document.getElementById('sinalColou').value = '1';
   });
 
   // telefone formatado enquanto digita
@@ -263,6 +391,7 @@
   form.addEventListener('submit', ev => {
     const ultima = etapas[etapas.length-1];
     if (!validar(ultima)) { ev.preventDefault(); return; }
+    document.getElementById('sinalSegundos').value = Math.round((Date.now() - inicio) / 1000);
     const btn = document.getElementById('btnEnviar');
     btn.disabled = true;
     btn.textContent = 'Enviando...';

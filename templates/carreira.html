@@ -24,7 +24,10 @@
       <img class="marca marca-light" src="{{ url_for('static', filename='brand/serenus-logo-black.png') }}" alt="Serenus Corretora de Saúde">
       <img class="marca marca-dark" src="{{ url_for('static', filename='brand/serenus-logo-light.png') }}" alt="Serenus Corretora de Saúde">
     </a>
-    <a class="btn btn-sm btn-arco" href="/carreira/candidatura">Quero me candidatar</a>
+    <span style="display:flex;gap:8px;align-items:center">
+      <a class="btn btn-sm btn-linha" href="/carreira/apresentacao.pdf" target="_blank" rel="noopener">Baixar em PDF</a>
+      <a class="btn btn-sm btn-arco" href="/carreira/candidatura">Quero me candidatar</a>
+    </span>
   </div>
 </div>
 
@@ -142,9 +145,9 @@
     {% include 'carreira_mapa.svg' %}
     <div class="mapa-cartao">
       <div class="cid">Serenus Corretora</div>
-      <div class="end">Rua Joaquim Guilherme da Costa, 370<br>Hortolândia, São Paulo</div>
-      <div class="cep">CEP 13184-213</div>
-      <a class="btn btn-sm" href="{{ link_maps }}" target="_blank" rel="noopener">Traçar rota até aqui</a>
+      <div class="end">Parque Ortolândia, Hortolândia<br>a poucos minutos da faculdade Unasp</div>
+      
+      <a class="btn btn-sm" href="{{ link_maps }}" target="_blank" rel="noopener">Ver a região no mapa</a>
     </div>
   </div>
   <p class="mapa-nota">O ponto marca o escritório. Nos 3 primeiros meses o trabalho é aqui, de segunda a sexta, então vale medir a distância antes de se candidatar.</p>
@@ -389,12 +392,13 @@
   </div>
   <div class="acoes">
     <a class="btn btn-arco" href="/carreira/candidatura">Quero me candidatar</a>
+    <a class="btn btn-linha" href="/carreira/apresentacao.pdf" target="_blank" rel="noopener">Baixar a apresentação em PDF</a>
     <a class="btn btn-linha" href="{{ link_zap }}" target="_blank" rel="noopener">Prefiro falar no WhatsApp</a>
   </div>
 </div>
 
 <div class="rodape">
-  Serenus Corretora de Saúde &nbsp;/&nbsp; Rua Joaquim Guilherme da Costa, 370, Hortolândia, SP<br>
+  Serenus Corretora de Saúde &nbsp;/&nbsp; Parque Ortolândia, Hortolândia, perto da faculdade Unasp<br>
   Página informativa. Valores e condições comerciais vigentes na data de publicação. Prêmios de operadora podem ser alterados pelas operadoras a qualquer momento.
 </div>
 
