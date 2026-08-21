@@ -43940,6 +43940,27 @@ def _build_cot(conn, c):
     return cot
 
 
+# ═══════════════ PÁGINA PÚBLICA DE CARREIRA (/carreira) ═══════════════
+# Carta de apresentação para captação de corretores. Pública (sem login),
+# para mandar o link direto ao candidato.
+
+ENDERECO_SERENUS = 'Rua Joaquim Guilherme da Costa, 370 - Hortolândia - SP'
+
+
+@app.route('/carreira')
+def carreira():
+    """Página pública de recrutamento de corretores."""
+    import urllib.parse
+    numero = os.environ.get('WHATSAPP_CARREIRA') or NUMERO_WHATSAPP_SERENUS
+    msg = urllib.parse.quote('Olá! Vi a página de carreira da Serenus e quero me candidatar à vaga de corretor.')
+    return render_template(
+        'carreira.html',
+        link_zap=f'https://wa.me/{numero}?text={msg}',
+        link_maps='https://www.google.com/maps/search/?api=1&query='
+                  + urllib.parse.quote(ENDERECO_SERENUS),
+    )
+
+
 @app.route('/c/<token>')
 def cotacao_publica(token):
     """Página pública e imutável da cotação (para enviar link ao cliente)."""
