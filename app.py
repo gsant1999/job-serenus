@@ -27496,6 +27496,129 @@ _WA_FILA_GATE_MESMO_MAX = int(os.environ.get('WA_FILA_GATE_MESMO_MAX', '8'))
 # 'cancelado_atraso' em silencio — o consultor nunca sabia que o cliente dele
 # nao recebeu nada. Falha silenciosa e o inimigo; o teto sozinho era mais uma.
 _WA_FILA_VALIDADE_HORAS = 1                       # padrao, e o que a tela mostra
+# ═══════════════════════ Travas de envio ═══════════════════════
+#
+# O QUE ESTAS TRAVAS PROTEGEM: o número de WhatsApp de uma pessoa de verdade.
+#
+# Bloqueio de número não vem da tecnologia usada — vem do COMPORTAMENTO: volume
+# alto, cadência de robô, falar com quem não pediu, e gente denunciando. O
+# intervalo aleatório entre envios (_wa_gate_atual) já cuida da cadência. Estas
+# aqui cuidam do resto, e vivem no único lugar por onde todo envio passa, para
+# valerem igual pela extensão e pelo servidor na nuvem.
+#
+# REGRA QUE DIFERENCIA TUDO: mensagem que um humano acabou de mandar sair não
+# entra aqui. Se o consultor clicou, ele decidiu — a trava é para o que o
+# sistema faz sozinho, sem ninguém olhando. É aí que o estrago acontece.
+
+_TRAVA_TETO_DIARIO = 120          # envios automáticos por consultor por dia
+_TRAVA_TETO_FRIO = 30             # destes, quantos podem ir para quem nunca conversou
+_TRAVA_HORA_INICIO = 8            # janela de horário (America/Sao_Paulo)
+_TRAVA_HORA_FIM = 20
+_TRAVA_FALHAS_SEGUIDAS = 5        # falhas em sequência que param o consultor
+
+# Origens que o sistema dispara sozinho. O resto é clique de gente.
+_TRAVA_ORIGENS_AUTOMATICAS = {'disparo_base', 'campanha', 'funil_agendado', 'lead_pago'}
+# Quem acabou de te procurar pode receber a qualquer hora: ele levantou a mão
+# agora e está esperando. Campanha para quem não pediu, não.
+_TRAVA_ORIGENS_SEM_JANELA = {'lead_pago'}
+
+
+def _trava_e_automatica(origem):
+    return str(origem or '').strip() in _TRAVA_ORIGENS_AUTOMATICAS
+
+
+def _trava_ja_conversou(conn, chat_id):
+    """Esse contato já trocou mensagem com a gente alguma vez?
+
+    Serve para separar 'continuar uma conversa' de 'abordar um desconhecido' —
+    são riscos muito diferentes aos olhos do WhatsApp.
+    """
+    if not chat_id:
+        return False
+    try:
+        r = conn.execute("SELECT 1 FROM wa_conversa_estado WHERE chat_id=? LIMIT 1",
+                         (chat_id,)).fetchone()
+        if r:
+            return True
+        r = conn.execute("SELECT 1 FROM wa_chat_lead WHERE chat_id=? LIMIT 1",
+                         (chat_id,)).fetchone()
+        return bool(r)
+    except Exception:
+        # Sem conseguir saber, trata como frio: errar para o lado seguro.
+        return False
+
+
+def _trava_verificar(conn, usuario_id, item, agora):
+    """Este envio automático pode sair agora? Devolve (pode, motivo).
+
+    `motivo` é escrito para o consultor ler, não para log — ele vai aparecer na
+    tela e no sino quando alguma coisa segurar a mensagem.
+    """
+    origem = str((item or {}).get('origem') or '').strip()
+    if not _trava_e_automatica(origem):
+        return True, ''      # clique de gente não passa por aqui
+
+    # 1. JANELA DE HORÁRIO
+    if origem not in _TRAVA_ORIGENS_SEM_JANELA:
+        hora = agora.hour
+        if hora < _TRAVA_HORA_INICIO or hora >= _TRAVA_HORA_FIM:
+            return False, (f"Fora da janela de envio ({_TRAVA_HORA_INICIO}h às "
+                           f"{_TRAVA_HORA_FIM}h). Mensagem automática de madrugada "
+                           "gera denúncia, e denúncia é o que bloqueia número.")
+
+    hoje = agora.strftime('%Y-%m-%d')
+
+    # 2. FREIO POR FALHA EM SEQUÊNCIA
+    # Cinco falhas seguidas não é azar, é sintoma: número caiu, sessão morreu ou
+    # o WhatsApp começou a recusar. Continuar tentando é o caminho do bloqueio.
+    try:
+        ultimas = conn.execute("""SELECT status FROM whatsapp_extensao_fila
+            WHERE responsavel_id=? AND status IN ('enviado','falhou')
+            ORDER BY id DESC LIMIT ?""",
+            (usuario_id, _TRAVA_FALHAS_SEGUIDAS)).fetchall()
+        if (len(ultimas) >= _TRAVA_FALHAS_SEGUIDAS
+                and all((dict(u).get('status') == 'falhou') for u in ultimas)):
+            return False, (f"{_TRAVA_FALHAS_SEGUIDAS} envios falharam em sequência. "
+                           "Parei sozinho até alguém olhar — insistir depois de "
+                           "falha repetida é o que costuma virar bloqueio.")
+    except Exception:
+        pass
+
+    # 3. TETO DIÁRIO
+    try:
+        n = conn.execute("""SELECT COUNT(*) AS n FROM whatsapp_extensao_fila
+            WHERE responsavel_id=? AND status='enviado'
+              AND CAST(enviado_em AS TEXT) LIKE ?""",
+            (usuario_id, hoje + '%')).fetchone()
+        enviados = int(dict(n or {}).get('n') or 0)
+        if enviados >= _TRAVA_TETO_DIARIO:
+            return False, (f"Teto de {_TRAVA_TETO_DIARIO} envios automáticos por dia "
+                           "atingido. O resto sai amanhã.")
+    except Exception:
+        enviados = 0
+
+    # 4. TETO DE CONTATO FRIO
+    # Não proíbe abordar quem nunca falou — limita. Campanha continua existindo;
+    # o que não pode é o número passar o dia falando só com desconhecido, que é
+    # o padrão que o WhatsApp pune.
+    if not _trava_ja_conversou(conn, (item or {}).get('chat_id')):
+        try:
+            f = conn.execute("""SELECT COUNT(*) AS n FROM whatsapp_extensao_fila q
+                WHERE q.responsavel_id=? AND q.status='enviado'
+                  AND CAST(q.enviado_em AS TEXT) LIKE ?
+                  AND NOT EXISTS (SELECT 1 FROM wa_conversa_estado e WHERE e.chat_id=q.chat_id)""",
+                (usuario_id, hoje + '%')).fetchone()
+            frios = int(dict(f or {}).get('n') or 0)
+        except Exception:
+            frios = 0
+        if frios >= _TRAVA_TETO_FRIO:
+            return False, (f"Teto de {_TRAVA_TETO_FRIO} mensagens por dia para quem "
+                           "nunca conversou com você. Falar com desconhecido em "
+                           "volume é o que mais bloqueia número.")
+
+    return True, ''
+
+
 _WA_FILA_VALIDADE_MIN_POR_ORIGEM = {
     'lead_pago': 20,        # abertura de lead pago: a pressa e o produto
     # Funil disparado NA MAO, com a conversa aberta: o consultor esta ali, ao
@@ -27808,6 +27931,22 @@ def api_whatsapp_fila_proximo():
     if not candidato:
         close_db(conn)
         return _wa_cors(jsonify({"ok": True, "item": None}))
+    # AS TRAVAS DECIDEM ANTES DE ENTREGAR.
+    #
+    # Ficam aqui, e nao no momento de criar a mensagem, porque o que importa e a
+    # condicao no instante do ENVIO: e madrugada AGORA? o teto de hoje ja
+    # estourou? os ultimos cinco falharam? Item segurado continua pendente e sai
+    # quando a condicao passar — ou vence sozinho, com pendencia no sino, pelo
+    # caminho de vencimento que ja existe logo acima.
+    _cand = conn.execute("SELECT origem, chat_id FROM whatsapp_extensao_fila WHERE id=?",
+                         (candidato['id'],)).fetchone()
+    _pode, _motivo = _trava_verificar(conn, usuario_id, dict(_cand or {}), agora)
+    if not _pode:
+        close_db(conn)
+        app.logger.info(f"[WA_TRAVA] consultor {usuario_id}: {_motivo}")
+        return _wa_cors(jsonify({"ok": True, "item": None, "travado": True,
+                                 "motivo": _motivo, "espera_s": 300}))
+
     claim = conn.execute("""UPDATE whatsapp_extensao_fila SET status='enviando', claim_em=?
         WHERE id=? AND status IN ('pendente','enviando')""",
         (agora.strftime('%Y-%m-%d %H:%M:%S'), candidato['id']))
