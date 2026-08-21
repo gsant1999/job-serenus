@@ -124,11 +124,30 @@ h1 .l2{display:block}
 
 /* ── arco da marca no fundo do topo ── */
 .hero{position:relative}
-.arco-fundo{
-  position:absolute;top:-90px;right:-140px;width:min(620px,72vw);height:auto;
-  pointer-events:none;z-index:-1;opacity:.9;
+.hero-grade{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:48px;align-items:center}
+.hero-col{display:flex;flex-direction:column;gap:30px;min-width:0}
+
+/* o arco da marca deixa de ser enfeite: ele guarda o numero do dia */
+.medalhao{position:relative;width:380px;max-width:100%;aspect-ratio:1;justify-self:end}
+.medalhao svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.medalhao .dentro{
+  position:absolute;inset:16%;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;text-align:center;gap:6px;
 }
-@media (max-width:900px){ .arco-fundo{top:-30px;right:-45%;width:420px;opacity:.30} }
+.medalhao .rot{color:var(--ink-faint)}
+.medalhao .n{
+  font-family:Archivo,"Helvetica Neue",Arial,sans-serif;font-stretch:118%;font-weight:700;
+  font-size:clamp(52px,7.4vw,76px);letter-spacing:-.045em;line-height:.95;
+}
+.medalhao .l{font-size:16px;line-height:1.35;color:var(--ink-soft);max-width:19ch}
+.medalhao .p{
+  font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:11.5px;
+  letter-spacing:.06em;color:var(--ink-faint);margin-top:8px;max-width:22ch;line-height:1.45;
+}
+@media (max-width:980px){
+  .hero-grade{grid-template-columns:1fr;gap:36px}
+  .medalhao{justify-self:center;width:330px}
+}
 
 /* ── prova (leads entregues) ── */
 .prova{
@@ -294,27 +313,40 @@ h2{font-size:clamp(30px,4.4vw,46px)}
 <div class="wrap" id="topo">
 
 <header class="hero">
-  <svg class="arco-fundo" viewBox="0 0 600 600" aria-hidden="true" focusable="false">
-    <defs>
-      <linearGradient id="arcoEsq" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#FF459D"/><stop offset="55%" stop-color="#FF7444"/><stop offset="100%" stop-color="#FFB11A"/>
-      </linearGradient>
-      <linearGradient id="arcoDir" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#10A8DD"/><stop offset="55%" stop-color="#4286F5"/><stop offset="100%" stop-color="#747DFA"/>
-      </linearGradient>
-    </defs>
-    <path d="M232 44 A 268 268 0 0 0 232 556" fill="none" stroke="url(#arcoEsq)" stroke-width="26" stroke-linecap="round"/>
-    <path d="M368 556 A 268 268 0 0 0 368 44" fill="none" stroke="url(#arcoDir)" stroke-width="26" stroke-linecap="round"/>
-  </svg>
-  <div class="fio"></div>
-  <div class="rot">Vaga aberta &nbsp;/&nbsp; Corretor de planos de saúde &nbsp;/&nbsp; Hortolândia, SP</div>
-  <h1>Você vende.<span class="l2 arco-txt">O lead é por nossa conta.</span></h1>
-  <p class="lede">Aqui ninguém começa o dia procurando com quem falar. A Serenus paga o anúncio, o contato cai no seu sistema e você faz o que sabe: vender plano de saúde.</p>
-  <div class="hero-acoes">
-    <a class="btn btn-arco" href="{{ link_zap }}" target="_blank" rel="noopener">Quero me candidatar</a>
-    <a class="btn btn-linha" href="#dinheiro">Ver quanto se ganha</a>
+  <div class="hero-grade">
+    <div class="hero-col">
+      <div class="fio"></div>
+      <div class="rot">Vaga aberta &nbsp;/&nbsp; Corretor de planos de saúde &nbsp;/&nbsp; Hortolândia, SP</div>
+      <h1>Você vende.<span class="l2 arco-txt">O lead é por nossa conta.</span></h1>
+      <p class="lede">Aqui ninguém começa o dia procurando com quem falar. A Serenus paga o anúncio, o contato cai no seu sistema e você faz o que sabe: vender plano de saúde.</p>
+      <div class="hero-acoes">
+        <a class="btn btn-arco" href="{{ link_zap }}" target="_blank" rel="noopener">Quero me candidatar</a>
+        <a class="btn btn-linha" href="#dinheiro">Ver quanto se ganha</a>
+      </div>
+      <p class="hero-nota">Trabalho presencial em Hortolândia nos 3 primeiros meses.</p>
+    </div>
+
+    <div class="medalhao">
+      <svg viewBox="0 0 400 400" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="arcoEsq" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#FF459D"/><stop offset="55%" stop-color="#FF7444"/><stop offset="100%" stop-color="#FFB11A"/>
+          </linearGradient>
+          <linearGradient id="arcoDir" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#10A8DD"/><stop offset="55%" stop-color="#4286F5"/><stop offset="100%" stop-color="#747DFA"/>
+          </linearGradient>
+        </defs>
+        <path d="M148 26 A 182 182 0 0 0 148 374" fill="none" stroke="url(#arcoEsq)" stroke-width="15" stroke-linecap="round"/>
+        <path d="M252 374 A 182 182 0 0 0 252 26" fill="none" stroke="url(#arcoDir)" stroke-width="15" stroke-linecap="round"/>
+      </svg>
+      <div class="dentro">
+        <div class="rot">Todo dia</div>
+        <div class="n arco-txt">4 a 6</div>
+        <div class="l">clientes novos caem na sua mão</div>
+        {% if leads_30d %}<div class="p">{{ '{:,}'.format(leads_30d).replace(',', '.') }} entraram nos últimos 30 dias</div>{% endif %}
+      </div>
+    </div>
   </div>
-  <p class="hero-nota">Trabalho presencial em Hortolândia nos 3 primeiros meses.</p>
 
   <div class="faixa">
     <div class="cel">
@@ -330,8 +362,8 @@ h2{font-size:clamp(30px,4.4vw,46px)}
       <div class="leg">de prêmio por vida na MedSênior, pago por fora da comissão</div>
     </div>
     <div class="cel">
-      <div class="num n-azul">4 a 6</div>
-      <div class="leg">clientes novos por dia entregues para você atender</div>
+      <div class="num n-azul">R$ 0</div>
+      <div class="leg">é o que você paga por esses clientes, hoje e sempre</div>
     </div>
   </div>
 </header>
@@ -347,19 +379,19 @@ h2{font-size:clamp(30px,4.4vw,46px)}
     <p>Quem entra aqui entra para vender, não para prospectar do zero.</p>
   </div>
 
+  {% if leads_30d %}
   <div class="prova">
     <div>
-      <div class="rot">O que cai na sua mão, por dia</div>
-      <div class="grande arco-txt">4 a 6</div>
-      <p class="sub">clientes novos por dia para você atender. Gente que pediu cotação de plano de saúde hoje, não lista fria comprada.</p>
+      <div class="rot">De onde saem os seus 4 a 6 por dia</div>
+      <div class="grande arco-txt">{{ '{:,}'.format(leads_30d).replace(',', '.') }}</div>
+      <p class="sub">pessoas pediram cotação de plano de saúde com a gente nos últimos 30 dias. Número lido do nosso sistema agora, não é estimativa.</p>
     </div>
     <div class="lado">
-      <div class="mini"><div class="n n-azul">R$ 0</div><div class="l">é o que você paga por esses contatos</div></div>
-      {% if leads_30d %}
-      <div class="mini"><div class="n n-laranja">{{ '{:,}'.format(leads_30d).replace(',', '.') }}</div><div class="l">foi o total que entrou na corretora nos últimos 30 dias, lido do sistema agora</div></div>
-      {% endif %}
+      <div class="mini"><div class="n n-laranja">{{ leads_dia }}</div><div class="l">contatos novos por dia, em média, divididos entre o time</div></div>
+      <div class="mini"><div class="n n-azul">R$ 0</div><div class="l">é o que você paga por eles. A conta do anúncio é nossa</div></div>
     </div>
   </div>
+  {% endif %}
 
   <div class="operadoras">
     <div class="op-chip"><img src="{{ url_for('static', filename='operadoras/medsenior.svg') }}" alt="MedSênior" loading="lazy"></div>
