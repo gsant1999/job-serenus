@@ -43,3 +43,8 @@ tabelas-operadoras/
 # Deck do iPad: segredo do pareamento e registro local, nao versionar
 deck-ipad/.token
 deck-ipad/registro.log
+
+# Textos pessoais dos botoes do deck (chave PIX, assinatura, endereco). Sao
+# dados do dono, nao do projeto — e chave de recebimento nao vai para commit.
+deck-ipad/textos/*
+!deck-ipad/textos/LEIA-ME.md
