@@ -27591,6 +27591,20 @@ def _wa_drenar_pela_nuvem():
              ORDER BY q.criado_em ASC LIMIT 60
         """, (agora.strftime('%Y-%m-%d %H:%M:%S'), corte)).fetchall()
 
+        # Carimbo do futuro = alguém gravou em UTC. Some da consulta de cima (que
+        # filtra por carência) e ficaria pendente para sempre em silêncio. Não
+        # envio por conta própria: aviso, que é o que falta quando isso acontece.
+        try:
+            futuros = conn.execute("""SELECT COUNT(*) AS n FROM whatsapp_extensao_fila
+                WHERE status='pendente' AND CAST(criado_em AS TEXT) > ?""",
+                ((agora + timedelta(minutes=5)).strftime('%Y-%m-%d %H:%M:%S'),)).fetchone()
+            n_fut = int(dict(futuros or {}).get('n') or 0)
+            if n_fut:
+                app.logger.warning(f"[NUVEM] {n_fut} mensagem(ns) pendente(s) com hora "
+                                   "no futuro — carimbo gravado em UTC, não vão drenar")
+        except Exception:
+            pass
+
         for linha in pendentes:
             if enviados >= _NUVEM_POR_RODADA:
                 break
@@ -33281,12 +33295,17 @@ def _deck_comando_pela_nuvem(uid, alvo, tipo, d):
             return jsonify({"erro": "Funil pela nuvem ainda não. Com o computador "
                                     "ligado ele funciona normalmente."}), 400
 
+        # criado_em na mão, sempre. O padrão da coluna é a hora do BANCO, que é
+        # UTC — três horas à frente de São Paulo. Quem grava assim nasce com
+        # carimbo do futuro, e o dreno (que compara com a hora de SP) nunca vê a
+        # mensagem chegar a vez dela: fica pendente para sempre, sem erro nenhum
+        # no log. Foi exatamente o que segurou a mensagem de prova de 20/08.
         conn.execute("""INSERT INTO whatsapp_extensao_fila
             (lead_id, responsavel_id, telefone, chat_id, tipo, texto, midia_arquivo,
-             origem, status, criado_por)
-            VALUES (?,?,?,?,?,?,?,?,'pendente',?)""",
+             origem, status, criado_por, criado_em)
+            VALUES (?,?,?,?,?,?,?,?,'pendente',?,?)""",
             (ld['id'], uid, fone, _wa_chat_id(fone), (midia_tipo or 'texto'),
-             texto, midia, 'deck_nuvem', uid))
+             texto, midia, 'deck_nuvem', uid, _agora_sp()))
         conn.commit()
     finally:
         close_db(conn)
