@@ -57,6 +57,25 @@ def registrar(linha: str) -> None:
         pass
 
 
+def nome_na_rede() -> str:
+    """O ENDEREÇO QUE NÃO MUDA.
+
+    O roteador troca o IP do Mac sozinho — em um único dia isto aconteceu três
+    vezes, e a cada troca o atalho salvo no iPad quebra sem avisar ninguém. O
+    macOS já publica um nome estável na rede local (Bonjour), e o Safari do iPad
+    resolve esse nome. Então o endereço bom é o nome, não o número.
+
+    Devolve vazio se o nome não estiver publicado; nesse caso vale o IP, que é
+    ruim mas funciona.
+    """
+    try:
+        nome = subprocess.run(["/usr/sbin/scutil", "--get", "LocalHostName"],
+                              capture_output=True, text=True, timeout=5).stdout.strip()
+        return f"{nome}.local" if nome else ""
+    except (subprocess.SubprocessError, OSError):
+        return ""
+
+
 def ip_da_rede() -> str:
     """O IP que o iPad enxerga. Nao abre conexao de verdade."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -687,6 +706,22 @@ class Deck(BaseHTTPRequestHandler):
         self.json_ok({"erro": "rota que nao existe"}, 404)
 
     def api_get(self, caminho: str) -> None:
+        if caminho == "/api/aqui":
+            # ONDE ESTÁ O DECK E QUAL É O PIN — só para quem está NA máquina.
+            #
+            # Serve para a extensão do JOB mostrar o endereço e o PIN sem ele ter
+            # que ir até a janela do deck procurar. Responde apenas em 127.0.0.1:
+            # quem está na própria máquina já tem acesso a tudo de qualquer jeito,
+            # mas entregar o PIN para a rede inteira apagaria a razão de o PIN
+            # existir.
+            if self.client_address[0] not in ("127.0.0.1", "::1"):
+                self.json_ok({"erro": "so na propria maquina"}, 403)
+                return
+            self.json_ok({"endereco": f"http://{nome_na_rede() or ip_da_rede()}:{PORTA}",
+                          "fixo": bool(nome_na_rede()),
+                          "pin": PAREAMENTO.pin,
+                          "botoes": len(CONFIG.botoes), "paginas": len(CONFIG.paginas)})
+            return
         if caminho == "/api/ola":                       # usado antes de parear
             self.json_ok({"deck": "JOB", "pareado": self.autorizado()})
             return
@@ -790,13 +825,20 @@ def main() -> None:
     if sys.platform != "darwin":
         print("Este deck foi feito para o macOS.")
     ip = ip_da_rede()
+    nome = nome_na_rede()
     servidor = ThreadingHTTPServer(("0.0.0.0", PORTA), Deck)
     largura = 52
     print()
     print("  " + "-" * largura)
     print("   DECK DO JOB — ligado neste MacBook")
     print("  " + "-" * largura)
-    print(f"   No iPad, abra o Safari em:   http://{ip}:{PORTA}")
+    if nome:
+        print(f"   No iPad, abra o Safari em:   http://{nome}:{PORTA}")
+        print(f"   Este endereço não muda. O número de hoje é {ip}.")
+    else:
+        print(f"   No iPad, abra o Safari em:   http://{ip}:{PORTA}")
+        print("   ATENÇÃO: este número muda quando o roteador quiser, e aí o")
+        print("   atalho do iPad para de funcionar sem avisar.")
     print(f"   Quando ele pedir, digite o PIN:   {PAREAMENTO.pin}")
     print()
     print("   Depois toque em Compartilhar > Adicionar à Tela de Início")
