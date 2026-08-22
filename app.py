@@ -44417,6 +44417,13 @@ def carreira_convite_enviar():
     return redirect('/carreira/convite/montar')
 
 
+@app.route('/robots.txt')
+def robots_txt():
+    """Mantem as paginas de carreira fora de busca. A meta tag noindex ja resolve
+    para quem respeita HTML; isto evita que o rastreador chegue a pedir a pagina."""
+    return Response("User-agent: *\nDisallow: /carreira\n", mimetype='text/plain')
+
+
 @app.route('/carreira/painel')
 @login_required
 def carreira_painel():
