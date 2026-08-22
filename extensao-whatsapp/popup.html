@@ -133,6 +133,22 @@
        O QR e pedido SOB DEMANDA, no clique: o codigo vale ~40s e o servidor tem
        teto de codigos por conexao. Renovar em laco queima o teto e passa a
        mostrar um codigo morto sem avisar — foi o que aconteceu em 20/08/2026. -->
+  <!-- O DECK, SEMPRE À MÃO.
+       O endereço e o PIN ficavam só na janela do deck, no Mac — e o endereço
+       mudava sozinho quando o roteador quisesse. Aqui eles aparecem onde ele já
+       olha todo dia. A extensão pergunta à própria máquina; ninguém de fora
+       consegue essa resposta. -->
+  <div class="nuvem" id="deckCartao" hidden>
+    <div class="nuvem-topo">
+      <span class="nuvem-luz" id="deckLuz"></span>
+      <div style="flex:1 1 auto; min-width:0;">
+        <div class="nuvem-t">Deck no iPad</div>
+        <div class="nuvem-s" id="deckRecado">procurando…</div>
+      </div>
+    </div>
+    <button id="deckCopiar" class="bt-fraco" hidden>Copiar o endereço</button>
+  </div>
+
   <div class="nuvem" id="nuvem" hidden>
     <div class="nuvem-topo">
       <span class="nuvem-luz" id="nuvemLuz"></span>

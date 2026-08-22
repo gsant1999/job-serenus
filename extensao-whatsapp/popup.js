@@ -341,3 +341,41 @@ function nuvemLigarBotoes() {
 }
 
 document.addEventListener('DOMContentLoaded', nuvemLigarBotoes);
+
+/* ─────────────── O DECK, SEMPRE À MÃO ───────────────
+   O endereço do deck e o PIN moravam só na janela do Mac, e o endereço mudava
+   sozinho quando o roteador quisesse — o atalho do iPad quebrava sem avisar.
+   Aqui eles aparecem onde ele já olha. A pergunta vai para a PRÓPRIA máquina
+   (127.0.0.1): de fora, ninguém consegue essa resposta. */
+async function deckMostrar() {
+  const cartao = document.getElementById('deckCartao');
+  const luz = document.getElementById('deckLuz');
+  const recado = document.getElementById('deckRecado');
+  const copiar = document.getElementById('deckCopiar');
+  if (!cartao) return;
+  cartao.hidden = false;
+  try {
+    const ctrl = new AbortController();
+    const corta = setTimeout(() => ctrl.abort(), 2500);
+    const r = await fetch('http://127.0.0.1:8765/api/aqui', { signal: ctrl.signal });
+    clearTimeout(corta);
+    const d = await r.json();
+    if (!d || !d.endereco) throw new Error('sem resposta');
+    luz.dataset.e = 'conectado';
+    recado.textContent = d.endereco + ' — PIN ' + d.pin
+      + (d.fixo ? '' : ' (este endereço muda; ligue o deck de novo para corrigir)');
+    copiar.hidden = false;
+    copiar.onclick = () => {
+      navigator.clipboard.writeText(d.endereco).then(() => {
+        copiar.textContent = 'Endereço copiado';
+        setTimeout(() => { copiar.textContent = 'Copiar o endereço'; }, 2000);
+      });
+    };
+  } catch (e) {
+    // Deck desligado é estado normal, não erro: ele só roda quando ele liga.
+    luz.dataset.e = '';
+    recado.textContent = 'Desligado no Mac. Abra "Ligar deck" na pasta do JOB.';
+    copiar.hidden = true;
+  }
+}
+deckMostrar();
