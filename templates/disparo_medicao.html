@@ -141,5 +141,42 @@ select.campo:focus { outline:none; border-color:var(--verde); }
       {% else %}<div class="dm-vazio">Nada enviado ainda.</div>{% endfor %}
     </div>
   </div>
+
+  {# SAÚDE DO NÚMERO.
+     Nasceu de um número recém-comprado que caiu ao ser conectado, em 21/08/2026.
+     A régua aqui é a mesma das travas de cadência, para o número ser comparável
+     ao freio que já existe — e para ficar visível quando o envio manual passa
+     por fora dele. #}
+  <div class="dm-bloco">
+    <h2>SAÚDE DO NÚMERO
+      <span class="dm-i" title="Não dá para medir a regra do WhatsApp: ninguém fora de lá a conhece. Dá para medir o nosso comportamento e cruzar com o que acontece. O que mais pesa não é quanto se manda, e sim quanto vai para quem nunca falou com você — e quantos desses ficaram em silêncio.">i</span>
+    </h2>
+    <p class="dm-nota">Últimos {{ saude.dias }} dias. O silêncio de quem nunca falou com você é
+      o aviso que costuma vir dias antes do bloqueio. As travas de cadência freiam
+      só o envio automático — a coluna Manual é o que passa por fora delas.</p>
+
+    <div class="dm-linha dm-head">
+      <div>Consultor</div><div>Por dia</div><div>Frios por dia</div>
+      <div>Silêncio</div><div>Manual</div><div>Risco</div>
+    </div>
+    {% for c in saude.consultores %}
+    <div class="dm-linha">
+      <div>{{ c.nome }}</div>
+      <div{% if c.perto_do_teto %} style="color:var(--laranja,#a9640a);font-weight:600;"{% endif %}>
+        {{ c.por_dia }}<span style="color:var(--cinza);font-size:12px;"> de {{ saude.teto_dia }}</span></div>
+      <div{% if c.frio_demais %} style="color:var(--laranja,#a9640a);font-weight:600;"{% endif %}>
+        {{ c.frios_por_dia }}<span style="color:var(--cinza);font-size:12px;"> de {{ saude.teto_frio }}</span></div>
+      <div style="font-weight:600;">{{ c.silencio_pct }}%<span style="color:var(--cinza);font-weight:400;font-size:12px;"> de {{ c.frios }}</span></div>
+      <div>{{ c.manuais }}<span style="color:var(--cinza);font-size:12px;"> de {{ c.enviados }}</span></div>
+      <div style="font-weight:700;color:{{ 'var(--vermelho,#c53434)' if c.risco=='alto' else ('var(--laranja,#a9640a)' if c.risco=='medio' else 'var(--verde)') }};">
+        {{ c.risco }}</div>
+    </div>
+    {% if c.motivos %}
+    <div class="dm-linha" style="grid-column:1/-1;color:var(--cinza);font-size:13px;padding-top:0;">
+      {{ c.falhas }} não saíram — {% for m, n in c.motivos %}{{ m }} ({{ n }}){% if not loop.last %}; {% endif %}{% endfor %}
+    </div>
+    {% endif %}
+    {% else %}<div class="dm-vazio">Nenhum envio nos últimos {{ saude.dias }} dias.</div>{% endfor %}
+  </div>
 </div>
 {% endblock %}
