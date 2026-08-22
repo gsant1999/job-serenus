@@ -269,6 +269,14 @@ function textoDeListaVazia() {
   if (zapPasta !== null) return 'Nenhuma mensagem nesta pasta.';
   if (!zap.consultado) return 'Carregando a biblioteca.';
   if (!zap.ligada && !naNuvem()) return 'A biblioteca aparece quando a extensão se conectar.';
+  // MENTIRA QUE A TELA CONTAVA. Ela dizia "nenhum funil cadastrado" para quem
+  // tem seis — porque a memória do servidor recomeça vazia a cada deploy e a
+  // extensão só reenvia a biblioteca de dois em dois minutos. Vazio por falta
+  // de cadastro e vazio por falta de resposta são coisas diferentes, e a
+  // segunda se resolve sozinha em instantes: dizer qual é das duas é o mínimo.
+  if (!zap.catalogoChegou) {
+    return 'Ainda recebendo a sua biblioteca do computador. Isso leva até dois minutos.';
+  }
   return zapSecao === 'funis'
     ? 'Nenhum funil cadastrado ainda. Monte um em Funis.'
     : 'Nenhuma mensagem na biblioteca ainda.';
@@ -687,6 +695,7 @@ async function bater(deVolta) {
       conversas: r.extensao.conversas || [],
       modelos: r.extensao.modelos || [],
       funis: r.extensao.funis || [],
+      catalogoChegou: Boolean(r.catalogo_chegou),
       comandos: r.comandos || [],
     };
     if (zapAlvo && zap.conversas.length

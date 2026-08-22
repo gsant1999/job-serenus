@@ -32997,7 +32997,11 @@ _deck_seq = 0
 
 def _deck_presenca(uid):
     return _DECK_PRESENCA.setdefault(int(uid), {
-        'visto_em': 0.0, 'chat': None, 'modelos': [], 'funis': [],
+        # `catalogo_em` diz se a biblioteca JÁ CHEGOU alguma vez nesta memória.
+        # Sem isso a tela não sabe distinguir "não existe nada cadastrado" de
+        # "ainda não recebi do computador" — e passa a mentir depois de todo
+        # deploy, porque a memória do servidor recomeça vazia.
+        'visto_em': 0.0, 'catalogo_em': 0.0, 'chat': None, 'modelos': [], 'funis': [],
         'ipad_em': 0.0, 'intervalo': 2, 'rascunho': [], 'conversas': [],
     })
 
@@ -33389,6 +33393,7 @@ def api_deck_sincronizar():
         cat = d.get('catalogo') or {}
         if isinstance(cat.get('modelos'), list):
             pres['modelos'] = cat['modelos'][:400]
+            pres['catalogo_em'] = time.time()
         if isinstance(cat.get('funis'), list):
             pres['funis'] = cat['funis'][:100]
 
@@ -33698,6 +33703,10 @@ def api_deck_whatsapp():
                 "modelos": biblioteca_nuvem if nuvem_pronta else pres['modelos'],
                 "funis": [] if nuvem_pronta else pres['funis'],
             },
+            # A tela precisa saber se a lista vazia é por falta de cadastro ou
+            # por falta de resposta do computador. São coisas diferentes, e uma
+            # delas se resolve sozinha em instantes.
+            "catalogo_chegou": bool(nuvem_pronta or pres['catalogo_em']),
             "comandos": [_deck_publico(c) for c in
                          sorted(_DECK_COMANDOS.get(int(uid), []),
                                 key=lambda c: c['id'], reverse=True)[:12]],
