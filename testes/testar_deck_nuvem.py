@@ -72,5 +72,21 @@ est2 = cli.get('/api/deck/whatsapp').get_json()
 linha2 = next((f for f in est2.get('fila', []) if f['id'] == fila_id), None)
 checar(linha2 is not None and linha2['status'] == 'enviado', 'a tela ve que chegou')
 
+# ── A TELA NAO PODE MENTIR SOBRE LISTA VAZIA ─────────────────────────────────
+# Depois de um deploy a memoria do servidor recomeca vazia, e a tela dizia
+# "nenhum funil cadastrado" para quem tem seis.
+A._deck_nuvem_pronta = lambda uid: False       # modo extensao
+with A._deck_trava:
+    pres = A._deck_presenca(7)
+    pres['visto_em'] = A.time.time()           # extensao viva, catalogo ainda nao
+r5 = cli.get('/api/deck/whatsapp').get_json()
+checar(r5.get('catalogo_chegou') is False,
+       'com a extensao viva e sem biblioteca, a tela sabe que ainda nao chegou')
+
+with A._deck_trava:
+    A._deck_presenca(7)['catalogo_em'] = A.time.time()
+r6 = cli.get('/api/deck/whatsapp').get_json()
+checar(r6.get('catalogo_chegou') is True, 'depois que a biblioteca chega, a tela sabe')
+
 print('\n' + ('TUDO CERTO' if not falhas else 'FALHOU: ' + '; '.join(falhas)))
 sys.exit(1 if falhas else 0)
